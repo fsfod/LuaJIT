@@ -1,17 +1,35 @@
-local prefix = _OPTIONS["prefix"] or "./dist/pthreads"
 
-function BuildvmCommand(cmd, outputfile)
+liblist = {
+    "lib_base.c",
+    "lib_math.c",
+    "lib_bit.c",
+    "lib_string.c", 
+    "lib_table.c",
+    "lib_io.c",
+    "lib_os.c",
+    "lib_package.c",
+    "lib_debug.c",
+    "lib_jit.c",
+    "lib_ffi.c",
+}
+
+liblistString = "%{sln.location}src/"..table.concat(liblist, " %{sln.location}src/")
+
+--local libs = os.matchfiles("src/lib_*.c")
+
+function BuildVmCommand(cmd, outputfile, addLibList)
     
-    filter('files:**'..outputfile)
-        buildmessage('buildvm '.. "-o ".. outputfile)   
-        buildcommands {
-          '"../obj/buildvm/%{cfg.buildcfg}/%{cfg.platform}/buildvm.exe" '..cmd..' -o "$(IntDir)'..outputfile..'"'
-        }
+    local result =  '"../obj/buildvm/%{cfg.buildcfg}/%{cfg.platform}/buildvm.exe" '..cmd..' -o "$(IntDir)'..outputfile..'" '
+    
+    if addLibList then
+        result = result..liblistString
+    end
+    
+    return result
 end
 
-function premake.fileconfig.hasCustomBuildRule(fcfg)
-    return fcfg and (#fcfg.buildcommands > 0) --and (#fcfg.buildoutputs > 0)
-end
+
+
 
 -- A solution contains projects, and defines the available configurations
 solution "LuaJit"
@@ -62,17 +80,15 @@ solution "LuaJit"
       filter 'files:src/vm_x86.dasc'
         buildmessage 'Compiling %{file.relpath}'
         buildcommands {
-           'start /B /d"../src" "" "../obj/minilua/%{cfg.buildcfg}/%{cfg.platform}/minilua.exe" %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+           '"../obj/minilua/%{cfg.buildcfg}/%{cfg.platform}/minilua.exe" %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
         }
         buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
 
 
       configuration  { "debug", "x32" }
-         defines { "DEBUG" }
          optimize"Speed"
  
       configuration { "release", "x32" }
-         defines { "NDEBUG"}
          optimize"Speed"
  
    -- A project defines one build target
@@ -87,6 +103,10 @@ solution "LuaJit"
       location "build"
       vpaths { ["libs"] = "src/lib_*.h" }
       vpaths { ["libs"] = "src/lib_*.c" }
+      
+      includedirs{
+        "%{cfg.objdir}",
+      }
       
       files {
         "src/lj_*.h",
@@ -111,10 +131,16 @@ solution "LuaJit"
       
       linkoptions {'"$(IntDir)lj_vm.obj"'}
       
-      prebuildcommands {
-        '"../obj/buildvm/%{cfg.buildcfg}/%{cfg.platform}/buildvm.exe" -m peobj -o "$(IntDir)lj_vm.obj"'
-      }
-      prebuildmessage"Running pre build commands"
+     prebuildcommands {
+       '"../obj/buildvm/%{cfg.buildcfg}/%{cfg.platform}/buildvm.exe" -m peobj -o "$(IntDir)lj_vm.obj"',
+        BuildVmCommand("-m bcdef","lj_bcdef.h", true),
+        BuildVmCommand("-m ffdef", "lj_ffdef.h", true),
+        BuildVmCommand("-m libdef", "lj_libdef.h", true),
+        BuildVmCommand("-m recdef", "lj_recdef.h", true),
+        BuildVmCommand("-m folddef", "lj_folddef.h", false).. '"%{sln.location}src/lj_opt_fold.c"',
+        BuildVmCommand("-m vmdef", "vmdef.lua", true),
+     }
+     prebuildmessage"Running pre build commands"
 
       configuration  { "debug", "x32" }
          defines { "DEBUG" }
