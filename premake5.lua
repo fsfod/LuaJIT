@@ -76,19 +76,27 @@ solution "LuaJit"
         "%{cfg.objdir}",
         "src"
       }
-      
-      filter 'files:src/vm_x86.dasc'
+
+      filter{'architecture:x32', 'files:src/vm_x86.dasc'}
         buildmessage 'Compiling %{file.relpath}'
         buildcommands {
            '"../obj/minilua/%{cfg.buildcfg}/%{cfg.platform}/minilua.exe" %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
         }
         buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
+        
+      --needed for adding -D P64 for 64 bit builds
+      filter{'architecture:x64', 'files:src/vm_x86.dasc'}
+        buildmessage 'Compiling %{file.relpath}'
+        buildcommands {
+           '"../obj/minilua/%{cfg.buildcfg}/%{cfg.platform}/minilua.exe" %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -D P64 -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+        }
+        buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
 
 
-      configuration  { "debug", "x32" }
+      configuration  { "debug"}
          optimize"Speed"
  
-      configuration { "release", "x32" }
+      configuration { "release"}
          optimize"Speed"
  
    -- A project defines one build target
@@ -131,34 +139,25 @@ solution "LuaJit"
       
       linkoptions {'"$(IntDir)lj_vm.obj"'}
       
-     prebuildcommands {
-       '"../obj/buildvm/%{cfg.buildcfg}/%{cfg.platform}/buildvm.exe" -m peobj -o "$(IntDir)lj_vm.obj"',
-        BuildVmCommand("-m bcdef","lj_bcdef.h", true),
-        BuildVmCommand("-m ffdef", "lj_ffdef.h", true),
-        BuildVmCommand("-m libdef", "lj_libdef.h", true),
-        BuildVmCommand("-m recdef", "lj_recdef.h", true),
-        BuildVmCommand("-m folddef", "lj_folddef.h", false).. '"%{sln.location}src/lj_opt_fold.c"',
-        BuildVmCommand("-m vmdef", "vmdef.lua", true),
-     }
-     prebuildmessage"Running pre build commands"
-
-      configuration  { "debug", "x32" }
+      prebuildcommands {
+        '"../obj/buildvm/%{cfg.buildcfg}/%{cfg.platform}/buildvm.exe" -m peobj -o "$(IntDir)lj_vm.obj"',
+         BuildVmCommand("-m bcdef","lj_bcdef.h", true),
+         BuildVmCommand("-m ffdef", "lj_ffdef.h", true),
+         BuildVmCommand("-m libdef", "lj_libdef.h", true),
+         BuildVmCommand("-m recdef", "lj_recdef.h", true),
+         BuildVmCommand("-m folddef", "lj_folddef.h", false).. '"%{sln.location}src/lj_opt_fold.c"',
+         BuildVmCommand("-m vmdef", "vmdef.lua", true),
+      }
+      prebuildmessage"Running pre build commands"
+     
+      configuration  { "debug"}
          defines { "DEBUG" }
          flags { "Symbols" }
  
-      configuration { "release", "x32" }
+      configuration { "release" }
          defines { "NDEBUG"}
          flags { "Symbols" }
          optimize"Speed"
-         
-      
-   --[[      
-      filter 'files:**lj_vm.obj'
-        buildmessage 'buildvm -m peobj lj_vm.obj'      
-        buildcommands {
-           '"../obj/buildvm/%{cfg.buildcfg}/%{cfg.platform}/buildvm.exe" -m peobj -o "$(IntDir)lj_vm.obj"'
-        }
-]]
 
     project "luajit"
         links { "lua"} 
@@ -174,12 +173,11 @@ solution "LuaJit"
             "src/luajit.c"
         }
         
-      configuration  { "debug", "x32" }
-         
+      configuration{"Debug"}        
          defines { "DEBUG" }
          flags { "Symbols" }
  
-      configuration { "release", "x32" }
+      configuration{"Release"}
          defines { "NDEBUG"}
          flags { "Symbols" }
          optimize"Speed"
