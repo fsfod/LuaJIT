@@ -37,7 +37,7 @@ solution "LuaJit"
    platforms { "x32", "x64" }
    defines {"_CRT_SECURE_NO_DEPRECATE" }
    objdir "obj/%{prj.name}/%{cfg.buildcfg}/%{cfg.platform}/"
-   targetdir "bin/%{cfg.buildcfg}"
+   targetdir "bin/%{cfg.buildcfg}/%{cfg.platform}"
    startproject"lua"
    
    project "MiniLua"
@@ -93,10 +93,10 @@ solution "LuaJit"
         buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
 
 
-      configuration  { "debug"}
+      configuration  { "Debug"}
          optimize"Speed"
  
-      configuration { "release"}
+      configuration { "Release"}
          optimize"Speed"
  
    -- A project defines one build target
@@ -181,18 +181,4 @@ solution "LuaJit"
          defines { "NDEBUG"}
          flags { "Symbols" }
          optimize"Speed"
-        
-        --BuildvmCommand("-m bcdef", "lj_bcdef.h")
-        
-        
-
---[[        
-buildvm -m bcdef -o lj_bcdef.h %ALL_LIB%
-BuildvmCommand("-m ffdef"m "lj_ffdef.h %ALL_LIB%
-BuildvmCommand("-m libdef -o lj_libdef.h %ALL_LIB%
-BuildvmCommand("-m recdef -o lj_recdef.h %ALL_LIB%
-BuildvmCommand("-m vmdef -o jit\vmdef.lua %ALL_LIB%
-BuildvmCommand("-m folddef -o lj_folddef.h lj_opt_fold.c
-]]
-         
       
