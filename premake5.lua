@@ -111,6 +111,7 @@ solution "LuaJit"
       location "build"
       vpaths { ["libs"] = "src/lib_*.h" }
       vpaths { ["libs"] = "src/lib_*.c" }
+      vpaths { [""] = "lua.natvis" }
       
       includedirs{
         "%{cfg.objdir}",
@@ -121,6 +122,7 @@ solution "LuaJit"
         "src/lj_*.c",
         "src/lib_*.h",
         "src/lib_*.c",
+        "lua.natvis",
         
         --'$(IntDir)lj_vm.obj',--obj/lua/%{cfg.buildcfg}/%{cfg.platform}/
         
