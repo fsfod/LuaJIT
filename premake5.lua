@@ -17,9 +17,11 @@ liblistString = "%{sln.location}src/"..table.concat(liblist, " %{sln.location}sr
 
 --local libs = os.matchfiles("src/lib_*.c")
 
-function BuildVmCommand(cmd, outputfile, addLibList)
+function BuildVmCommand(cmd, outputfile, addLibList, outputDir)
     
-    local result =  '"../obj/buildvm/%{cfg.buildcfg}/%{cfg.platform}/buildvm.exe" '..cmd..' -o "$(IntDir)'..outputfile..'" '
+    outputDir = outputDir or "$(IntDir)"
+    
+    local result =  '"../obj/buildvm/%{cfg.buildcfg}/%{cfg.platform}/buildvm.exe" '..cmd..' -o "'..outputDir..outputfile..'" '
     
     if addLibList then
         result = result..liblistString
@@ -148,7 +150,7 @@ solution "LuaJit"
          BuildVmCommand("-m libdef", "lj_libdef.h", true),
          BuildVmCommand("-m recdef", "lj_recdef.h", true),
          BuildVmCommand("-m folddef", "lj_folddef.h", false).. '"%{sln.location}src/lj_opt_fold.c"',
-         BuildVmCommand("-m vmdef", "vmdef.lua", true),
+         BuildVmCommand("-m vmdef", "vmdef.lua", true, '%{cfg.targetdir}/jit/'),
       }
       prebuildmessage"Running pre build commands"
      
