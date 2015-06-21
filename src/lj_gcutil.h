@@ -14,7 +14,7 @@ void gcobj_tablestats(GCtab* t, gcstat_table* result);
 
 struct ScanContext;
 
-typedef int (*obj_foundcb)(struct ScanContext* context, GCobj* holdingobj, GCRef* field_holding_object);
+typedef void (*obj_foundcb)(struct ScanContext* context, GCobj* holdingobj, GCRef* field_holding_object);
 
 typedef struct ScanContext {
     GCobj* obj;
@@ -35,5 +35,53 @@ void scan_userdata(GCudata *ud, ScanContext* state);
 int gcobj_finduses(lua_State* L, GCobj* obj, GCobj** foundholders);
 
 void gcobj_findusesinlist(GCobj* liststart, ScanContext* state);
+
+int validatedump(int count, snapshot_obj* objects, char* objectmem, size_t mem_size);
+
+typedef struct {
+    MSize count;
+    MSize capacity;
+    void* list;
+}LJList;
+
+int dump_gcobjects(lua_State *L, GCobj *liststart, LJList* list, SBuf* buf);
+
+typedef struct {
+    char id[4];
+    uint32_t length;
+}ChunkHeader;
+
+
+#define lj_list_init(L, l, c, t) \
+    (l)->capacity = (c); \
+    (l)->count = 0; \
+    (l)->list = lj_mem_newvec(L, (c), t);
+
+#define lj_list_increment(L, l, t) \
+    if (++(l).count >= (l).capacity) \
+    { \
+        lj_mem_growvec(L, (l).list, (l).capacity, MAXINT32, t);\
+    }\
+
+#define lj_list_current(L, l, t) (((t*)(l).list)+(l).count)
+
+int lj_buf_chunkstart(SBuf* sb, const char* id)
+{
+    ChunkHeader header = { 0 };
+    memcpy(header.id, id, 4);
+
+    lj_buf_putmem(sb, &header, sizeof(ChunkHeader));
+
+    return sbuflen(sb);
+}
+
+char* lj_buf_chunkend(SBuf* sb, int datastart)
+{
+    char* start = sbufB(sb) + datastart;
+
+    ((ChunkHeader*)(start - sizeof(ChunkHeader)))->length = sbuflen(sb) - datastart;
+
+    return start;
+}
 
 #endif

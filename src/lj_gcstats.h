@@ -26,7 +26,7 @@ typedef enum
     gcobj_trace,
     gcobj_thread,
     gcobj_upvalue,
-    gcobj_MAX = 14,
+    gcobj_MAX,
 }gcobj_type;
 
 typedef struct
@@ -51,6 +51,8 @@ LUA_API void gcstats_collect(lua_State *L, gcstats* result);
 
 LUA_API int findobjuses(lua_State *L);
 
+LUA_API int creategcdump(lua_State *L);
+
 typedef struct
 {
     uint64_t mark;
@@ -60,8 +62,7 @@ typedef struct
 
 typedef struct
 {
-    gcobj_type type;
-    uint8_t size;
+    uint32_t typeandsize;
     void* address;
 }snapshot_obj;
 

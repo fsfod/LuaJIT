@@ -159,6 +159,112 @@ void gcstats_walklist(global_State *g, GCobj *liststart, gcstat_obj* result)
     }
 }
 
+int dump_gcobjects(lua_State *L, GCobj *liststart)
+{
+    global_State *g = G(L);
+    GCobj *o = liststart;
+    SBuf buf = { 0 };
+    LJList list = { 0 };
+    snapshot_obj* entry;
+    int chunkheader;
+
+
+    if (liststart == NULL)
+    {
+        return 0;
+    }
+
+    lj_buf_init(L, &buf);
+    lj_list_init(L, &list, 32, snapshot_obj);
+
+    chunkheader = lj_buf_chunkstart(&buf, "GCDT");
+
+    while (o != NULL)
+    {
+        int gct = o->gch.gct;
+        size_t size = gcobj_size(o);
+
+        entry = lj_list_current(L, list, snapshot_obj);
+
+        if (size >= (1 << 28))
+        {
+            //TODO: Overflow side list of sizes
+            size = (1 << 28) - 1;
+        }
+
+        entry->typeandsize = ((uint32_t)size << 4) | typeconverter[gct];
+        entry->address = o;
+        
+        lj_list_increment(L, list, snapshot_obj);
+        
+        if (gct != ~LJ_TTAB && gct != ~LJ_TTHREAD)
+        {
+            lj_buf_putmem(&buf, o, (MSize)size);
+        }
+        else if(gct == ~LJ_TTAB)
+        {
+            lj_buf_putmem(&buf, o, sizeof(GCtab));
+
+            if (o->tab.asize != 0)
+            {
+                lj_buf_putmem(&buf, tvref(o->tab.array), o->tab.asize*sizeof(TValue));
+            }
+            
+            if(o->tab.hmask != 0)
+            {
+                lj_buf_putmem(&buf, noderef(o->tab.node), (o->tab.hmask+1)*sizeof(Node));
+            }
+            
+        }
+        else if(gct == ~LJ_TTHREAD)
+        {
+            lj_buf_putmem(&buf, o, sizeof(lua_State));
+            lj_buf_putmem(&buf, tvref(o->th.stack), o->th.stacksize*sizeof(TValue));
+        }
+
+        o = gcref(o->gch.nextgc);
+    }
+
+    for (MSize i = 0; i <= g->strmask; i++)
+    {
+        /* walk all the string hash chains. */
+        o = gcref(g->strhash[i]);
+
+        while (o != NULL)
+        {
+            size_t size = sizestring(&o->str);
+
+            if (size >= (1 << 28))
+            {
+                //TODO: Overflow side list of sizes
+                size = (1 << 28) - 1;
+            }
+
+            lj_buf_putmem(&buf, o, (MSize)size);
+
+            entry = lj_list_current(L, list, snapshot_obj);
+
+            entry->typeandsize = ((uint32_t)size << 4) | typeconverter[~LJ_TSTR];
+            entry->address = o;
+
+            lj_list_increment(L, list, snapshot_obj);
+
+            o = gcref(o->gch.nextgc);
+        }
+    }
+
+    lj_buf_chunkend(&buf, chunkheader);
+
+    
+
+    return list.count;
+}
+
+LUA_API int creategcdump(lua_State *L)
+{
+    return dump_gcobjects(L, gcref(G(L)->gc.root));
+}
+
 void tablestats(GCtab* t, gcstat_table* result)
 {
     TValue* array = tvref(t->array);
@@ -173,7 +279,7 @@ void tablestats(GCtab* t, gcstat_table* result)
         }
     }
 
-    for (uint32_t i = 0; i < t->hmask; i++)
+    for (uint32_t i = 0; i < t->hmask+1; i++)
     {
         if (!tvisnil(&node[i].val)) 
         {
@@ -190,7 +296,7 @@ void tablestats(GCtab* t, gcstat_table* result)
     result->arraysize = arrayCount;
 
     result->hashsize = hashcount;
-    result->hashcapacity = t->hmask;
+    result->hashcapacity = t->hmask+1;
     result->hashcollisions = hashcollsision;
 }
 
@@ -205,7 +311,10 @@ size_t gcobj_size(GCobj *o)
 
         case ~LJ_TTAB: {
             GCtab* t = &o->tab;
-            return sizeof(GCtab) + sizeof(TValue) * t->asize + sizeof(Node) * (t->hmask + 1);
+            size = sizeof(GCtab) + sizeof(TValue) * t->asize;
+            if(t->hmask != 0)size += sizeof(Node) * (t->hmask + 1);
+
+            return size;
         }
 
         case ~LJ_TUDATA:
@@ -246,18 +355,18 @@ size_t gcobj_size(GCobj *o)
 typedef struct{
     int count;
     int capacity;
-    GCobj** foundholders;
+    GCRef* foundholders;
 }resultvec;
 
 void findusescb(ScanContext* context, GCobj* holdingobj, GCRef* field_holding_object)
 {
     resultvec* result = (resultvec*)context->userstate;
 
-    result->foundholders[result->count++] = holdingobj;
+    setgcref(result->foundholders[result->count++], holdingobj);
 
     if (result->count >= result->capacity)
     {
-        lj_mem_growvec(context->L, result->foundholders, result->capacity, MAXINT32, GCobj*);
+        lj_mem_growvec(context->L, result->foundholders, result->capacity, MAXINT32, GCRef);
     }
 }
 
