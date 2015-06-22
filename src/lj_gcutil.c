@@ -81,6 +81,19 @@ const char typeconverter[~LJ_TNUMX] = {
     gcobj_udata,         // LJ_TUDATA	 (~12u)
 };
 
+const char invtypeconverter[gcobj_MAX] = {
+    gcobj_string,        // LJ_TSTR      (~4u)
+    gcobj_upvalue,       // LJ_TUPVAL	 (~5u) 
+    gcobj_thread,        // LJ_TTHREAD   (~6u)
+    gcobj_funcprototype, // LJ_TPROTO	 (~7u)
+    gcobj_function,      // LJ_TFUNC	 (~8u)
+    gcobj_trace,         // LJ_TTRACE    (~9u)
+    gcobj_cdata,         // LJ_TCDATA    (~10u)
+    gcobj_table,         // LJ_TTAB	     (~11u)
+    gcobj_udata,         // LJ_TUDATA	 (~12u)
+};
+
+//TODO: do counts of userdata based on grouping by hashtable pointer
 LUA_API void gcstats_collect(lua_State *L, gcstats* result)
 {
     global_State *g = G(L);
@@ -159,7 +172,43 @@ void gcstats_walklist(global_State *g, GCobj *liststart, gcstat_obj* result)
     }
 }
 
-int dump_gcobjects(lua_State *L, GCobj *liststart)
+LUA_API int gcsnapshot_validate(gcsnapshot* snapshot)
+{
+    return validatedump(snapshot->count, snapshot->objects, snapshot->gcmem, snapshot->gcmem_size);
+}
+
+int validatedump(int count, snapshot_obj* objects, char* objectmem, size_t mem_size) 
+{
+    
+    char* position = objectmem;
+    size_t size;
+    GCobj* o;
+    gcobj_type type;
+
+    for (int i = 0; i < count; i++)
+    {
+        o = (GCobj*)position;
+        size = objects[i].typeandsize >> 4;
+        type = (gcobj_type)(objects[i].typeandsize & 15);
+
+        //Check the type we have in the pointer array matchs the ones in the header of object we think our current position is meant tobe pointing at
+        if (o->gch.gct != ((~LJ_TSTR)+ type))
+        {
+            return -i;
+        }
+
+        position += size;
+
+        if ((size_t)(position - objectmem) > mem_size)
+        {
+            return -i;
+        }
+    }
+
+    return 0;
+}
+
+int dump_gcobjects(lua_State *L, GCobj *liststart, gcsnapshot* dump)
 {
     global_State *g = G(L);
     GCobj *o = liststart;
@@ -167,7 +216,6 @@ int dump_gcobjects(lua_State *L, GCobj *liststart)
     LJList list = { 0 };
     snapshot_obj* entry;
     int chunkheader;
-
 
     if (liststart == NULL)
     {
@@ -177,7 +225,7 @@ int dump_gcobjects(lua_State *L, GCobj *liststart)
     lj_buf_init(L, &buf);
     lj_list_init(L, &list, 32, snapshot_obj);
 
-    chunkheader = lj_buf_chunkstart(&buf, "GCDT");
+    //chunkheader = lj_buf_chunkstart(&buf, "OMEM");
 
     while (o != NULL)
     {
@@ -253,16 +301,22 @@ int dump_gcobjects(lua_State *L, GCobj *liststart)
         }
     }
 
-    lj_buf_chunkend(&buf, chunkheader);
-
+    lj_buf_putmem(&buf, L2GG(L), (MSize)sizeof(GG_State));
     
+
+    //lj_buf_chunkend(&buf, chunkheader);
+
+    dump->count = list.count;
+    dump->objects = (snapshot_obj*)list.list;
+    dump->gcmem = sbufB(&buf);
+    dump->gcmem_size = sbuflen(&buf);
 
     return list.count;
 }
 
-LUA_API int creategcdump(lua_State *L)
+LUA_API int gcsnapshot_create(lua_State *L, gcsnapshot* dump)
 {
-    return dump_gcobjects(L, gcref(G(L)->gc.root));
+    return dump_gcobjects(L, gcref(G(L)->gc.root), dump);
 }
 
 void tablestats(GCtab* t, gcstat_table* result)
@@ -353,8 +407,8 @@ size_t gcobj_size(GCobj *o)
 }
 
 typedef struct{
-    int count;
-    int capacity;
+    MSize count;
+    MSize capacity;
     GCRef* foundholders;
 }resultvec;
 
