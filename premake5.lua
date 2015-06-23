@@ -113,6 +113,7 @@ solution "LuaJit"
       location "build"
       vpaths { ["libs"] = "src/lib_*.h" }
       vpaths { ["libs"] = "src/lib_*.c" }
+      vpaths { ["headers"] = "src/lj_*.h" }
       vpaths { [""] = "lua.natvis" }
       
       includedirs{
@@ -144,6 +145,7 @@ solution "LuaJit"
       linkoptions {'"$(IntDir)lj_vm.obj"'}
       
       prebuildcommands {
+        '{MKDIR} %{cfg.targetdir}/jit/',
         '"../obj/buildvm/%{cfg.buildcfg}/%{cfg.platform}/buildvm.exe" -m peobj -o "$(IntDir)lj_vm.obj"',
          BuildVmCommand("-m bcdef","lj_bcdef.h", true),
          BuildVmCommand("-m ffdef", "lj_ffdef.h", true),
