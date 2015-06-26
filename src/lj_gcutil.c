@@ -629,3 +629,138 @@ void scan_userdata(GCudata *ud, ScanContext* search)
         search->callback(search, (GCobj*)ud, &ud->env);
     }
 }
+
+typedef struct dict {
+    void* buckets;
+}dict;
+
+GCRef fixupgcobj(dict* fixups , GCRef ref) {
+
+    if (gcref(ref) == NULL)
+    {
+        return ref;
+    }
+
+    int found = 0;
+
+    if (!found)
+    {
+        return ref;
+    }
+
+}
+
+void fixup_table(GCtab *t, dict* fixups)
+{
+    TValue* array = tvref(t->array);
+    Node *node = noderef(t->node);
+
+    t->metatable = fixupgcobj(fixups, t->metatable);
+
+    if (t->asize != 0)
+    {
+        setmref(t->array,(TValue*)(t+1));
+    }
+
+    for (size_t i = 0; i < t->asize; i++)
+    {
+        if (tvisgcv(&array[i]));
+        {
+            array[i].gcr = fixupgcobj(fixups, array[i].gcr);
+        }
+    }
+
+
+    if (t->hmask == 0)
+    {
+        //No hash table to fix up
+        return;
+    }
+    
+    setmref(t->node, (((char*)t)+sizeof(GCtab))+(sizeof(TValue)*t->asize));
+
+    for (uint32_t i = 0; i < t->hmask + 1; i++)
+    {
+        if (tvisgcv(&node[i].key))
+        {
+            node[i].key.gcr = fixupgcobj(fixups, node[i].key.gcr);
+        }
+
+        if (tvisgcv(&node[i].val))
+        {
+            node[i].val.gcr = fixupgcobj(fixups, node[i].val.gcr);
+        }
+    }
+}
+
+void fixup_userdata(GCudata *ud, dict* fixups)
+{
+    ud->metatable = fixupgcobj(fixups, ud->metatable);
+    ud->env = fixupgcobj(fixups, ud->env);
+}
+
+//See trace_save
+void fixup_trace(GCtrace *T, dict* fixups)
+{
+
+    IRRef ref;
+    size_t sztr = ((sizeof(GCtrace) + 7)&~7);
+    size_t szins = (T->nins - T->nk)*sizeof(IRIns);
+    size_t sz = sztr + szins +
+        T->nsnap*sizeof(SnapShot) +
+        T->nsnapmap*sizeof(SnapEntry);
+
+    char *p = (char *)T + sztr;
+    T->ir = (IRIns *)p - T->nk;
+    //memcpy(p, T->ir + T->nk, szins);
+    p += szins;
+
+    T->snap = (SnapShot*)p;
+    p += (T->nsnap*sizeof(SnapShot));
+
+    T->snapmap = (SnapEntry*)p;
+    p += (T->nsnapmap*sizeof(SnapEntry));
+    
+    //TRACE_APPENDVEC(snap, nsnap, SnapShot)
+    //    TRACE_APPENDVEC(snapmap, nsnapmap, SnapEntry)
+
+    for (ref = T->nk; ref < REF_TRUE; ref++) {
+        IRIns *ir = &T->ir[ref];
+
+        if (ir->o == IR_KGC)
+        {
+            ir->gcr = fixupgcobj(fixups, ir->gcr);
+        }
+    }
+}
+
+void fixup_function(GCfunc *fn, dict* fixups)
+{
+    fn->l.env = fixupgcobj(fixups, fn->l.env);
+
+    if (isluafunc(fn))
+    {
+        GCfuncL* func = &fn->l;     
+        GCRef proto;
+        //Bytecode is allocated after the function prototype
+        setgcrefp(proto, mref(func->pc, char) - sizeof(GCproto));
+
+        proto = fixupgcobj(fixups, proto);
+        setmref(func->pc, gcrefp(proto, char) + sizeof(GCproto));
+ 
+        for (size_t i = 0; i < fn->l.nupvalues; i++)
+        {
+            fn->l.uvptr[i] = fixupgcobj(fixups, fn->l.uvptr[i]);
+        }
+    }
+    else
+    {
+        for (size_t i = 0; i < fn->c.nupvalues; i++)
+        {
+            if (tvisgcv(&fn->c.upvalue[i]))
+            {
+                fn->c.upvalue[i].gcr = fixupgcobj(fixups, fn->c.upvalue[i].gcr);
+            }
+        }
+    }
+}
