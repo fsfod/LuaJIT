@@ -82,15 +82,15 @@ const char typeconverter[~LJ_TNUMX] = {
 };
 
 const char invtypeconverter[gcobj_MAX] = {
-    gcobj_string,        // LJ_TSTR      (~4u)
-    gcobj_upvalue,       // LJ_TUPVAL	 (~5u) 
-    gcobj_thread,        // LJ_TTHREAD   (~6u)
-    gcobj_funcprototype, // LJ_TPROTO	 (~7u)
-    gcobj_function,      // LJ_TFUNC	 (~8u)
-    gcobj_trace,         // LJ_TTRACE    (~9u)
-    gcobj_cdata,         // LJ_TCDATA    (~10u)
-    gcobj_table,         // LJ_TTAB	     (~11u)
-    gcobj_udata,         // LJ_TUDATA	 (~12u)
+     LJ_TSTR,    //  gcobj_string,       (~4u)
+     LJ_TUPVAL,	 //  gcobj_upvalue,      (~5u) 
+     LJ_TTHREAD, //  gcobj_thread,       (~6u)
+     LJ_TPROTO,	 //  gcobj_funcprototype,(~7u)
+     LJ_TFUNC,	 //  gcobj_function,     (~8u)
+     LJ_TTRACE,  //  gcobj_trace,        (~9u)
+     LJ_TCDATA,  //  gcobj_cdata,        (~10u)
+     LJ_TTAB,	 //  gcobj_table,        (~11u)
+     LJ_TUDATA,	 //  gcobj_udata,        (~12u)
 };
 
 //TODO: do counts of userdata based on grouping by hashtable pointer
@@ -107,8 +107,11 @@ LUA_API void gcstats_collect(lua_State *L, gcstats* result)
     tablestats(tabV(&g->registrytv), &result->registry);
     tablestats(tabref(L->env), &result->globals);
 
-    memcpy(&result->objstats, &objstats, sizeof(objstats));
-
+    //Adjust the object slot indexes for external consumption
+    for (size_t i = 0; i < gcobj_MAX; i++)
+    {
+        memcpy(&result->objstats[i], &objstats[invtypeconverter[i]], sizeof(gcstat_obj));
+    }
 }
 
 size_t gcstats_strings(lua_State *L, gcstat_obj* result)
