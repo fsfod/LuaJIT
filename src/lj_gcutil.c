@@ -211,12 +211,48 @@ int validatedump(int count, snapshot_obj* objects, char* objectmem, size_t mem_s
     return 0;
 }
 
-int dump_gcobjects(lua_State *L, GCobj *liststart, gcsnapshot* dump)
+typedef struct gcsnapshot_handle{
+    lua_State *L;
+    LJList list;
+    SBuf sb;
+}gcsnapshot_handle;
+
+LUA_API void gcsnapshot_free(gcsnapshot* snapshot)
+{
+    gcsnapshot_handle* handle = snapshot->handle;
+    global_State* g = G(handle->L);
+
+    lj_buf_free(g, &handle->sb);
+    lj_mem_freevec(g, handle->list.list, handle->list.capacity, snapshot_obj);
+
+    lj_mem_free(g, handle, sizeof(gcsnapshot_handle)+sizeof(gcsnapshot));
+}
+
+gcsnapshot* gcsnapshot_create(lua_State *L)
+{
+    gcsnapshot_handle* handle = lj_mem_newt(L, sizeof(gcsnapshot_handle)+ sizeof(gcsnapshot), gcsnapshot_handle);
+    gcsnapshot* snapshot = (gcsnapshot*)&handle[1];
+
+    handle->L = L;
+    lj_buf_init(L, &handle->sb);
+    lj_list_init(L, &handle->list, 32, snapshot_obj);
+
+    dump_gcobjects(L, gcref(G(L)->gc.root), &handle->list, &handle->sb);
+
+    snapshot->count = handle->list.count;
+    snapshot->objects = (snapshot_obj*)handle->list.list;
+    snapshot->gcmem = sbufB(&handle->sb);
+    snapshot->gcmem_size = sbuflen(&handle->sb);
+
+    snapshot->handle = handle;
+
+    return snapshot;
+}
+
+int dump_gcobjects(lua_State *L, GCobj *liststart, LJList* list, SBuf* buf)
 {
     global_State *g = G(L);
     GCobj *o = liststart;
-    SBuf buf = { 0 };
-    LJList list = { 0 };
     snapshot_obj* entry;
     int chunkheader;
 
@@ -225,9 +261,6 @@ int dump_gcobjects(lua_State *L, GCobj *liststart, gcsnapshot* dump)
         return 0;
     }
 
-    lj_buf_init(L, &buf);
-    lj_list_init(L, &list, 32, snapshot_obj);
-
     //chunkheader = lj_buf_chunkstart(&buf, "OMEM");
 
     while (o != NULL)
@@ -235,7 +268,7 @@ int dump_gcobjects(lua_State *L, GCobj *liststart, gcsnapshot* dump)
         int gct = o->gch.gct;
         size_t size = gcobj_size(o);
 
-        entry = lj_list_current(L, list, snapshot_obj);
+        entry = lj_list_current(L, *list, snapshot_obj);
 
         if (size >= (1 << 28))
         {
@@ -246,31 +279,31 @@ int dump_gcobjects(lua_State *L, GCobj *liststart, gcsnapshot* dump)
         entry->typeandsize = ((uint32_t)size << 4) | typeconverter[gct];
         entry->address = o;
         
-        lj_list_increment(L, list, snapshot_obj);
+        lj_list_increment(L, *list, snapshot_obj);
         
         if (gct != ~LJ_TTAB && gct != ~LJ_TTHREAD)
         {
-            lj_buf_putmem(&buf, o, (MSize)size);
+            lj_buf_putmem(buf, o, (MSize)size);
         }
         else if(gct == ~LJ_TTAB)
         {
-            lj_buf_putmem(&buf, o, sizeof(GCtab));
+            lj_buf_putmem(buf, o, sizeof(GCtab));
 
             if (o->tab.asize != 0)
             {
-                lj_buf_putmem(&buf, tvref(o->tab.array), o->tab.asize*sizeof(TValue));
+                lj_buf_putmem(buf, tvref(o->tab.array), o->tab.asize*sizeof(TValue));
             }
             
             if(o->tab.hmask != 0)
             {
-                lj_buf_putmem(&buf, noderef(o->tab.node), (o->tab.hmask+1)*sizeof(Node));
+                lj_buf_putmem(buf, noderef(o->tab.node), (o->tab.hmask+1)*sizeof(Node));
             }
             
         }
         else if(gct == ~LJ_TTHREAD)
         {
-            lj_buf_putmem(&buf, o, sizeof(lua_State));
-            lj_buf_putmem(&buf, tvref(o->th.stack), o->th.stacksize*sizeof(TValue));
+            lj_buf_putmem(buf, o, sizeof(lua_State));
+            lj_buf_putmem(buf, tvref(o->th.stack), o->th.stacksize*sizeof(TValue));
         }
 
         o = gcref(o->gch.nextgc);
@@ -291,35 +324,25 @@ int dump_gcobjects(lua_State *L, GCobj *liststart, gcsnapshot* dump)
                 size = (1 << 28) - 1;
             }
 
-            lj_buf_putmem(&buf, o, (MSize)size);
+            lj_buf_putmem(buf, o, (MSize)size);
 
-            entry = lj_list_current(L, list, snapshot_obj);
+            entry = lj_list_current(L, *list, snapshot_obj);
 
             entry->typeandsize = ((uint32_t)size << 4) | typeconverter[~LJ_TSTR];
             entry->address = o;
 
-            lj_list_increment(L, list, snapshot_obj);
+            lj_list_increment(L, *list, snapshot_obj);
 
             o = gcref(o->gch.nextgc);
         }
     }
 
-    lj_buf_putmem(&buf, L2GG(L), (MSize)sizeof(GG_State));
+    lj_buf_putmem(buf, L2GG(L), (MSize)sizeof(GG_State));
     
 
     //lj_buf_chunkend(&buf, chunkheader);
 
-    dump->count = list.count;
-    dump->objects = (snapshot_obj*)list.list;
-    dump->gcmem = sbufB(&buf);
-    dump->gcmem_size = sbuflen(&buf);
-
-    return list.count;
-}
-
-LUA_API int gcsnapshot_create(lua_State *L, gcsnapshot* dump)
-{
-    return dump_gcobjects(L, gcref(G(L)->gc.root), dump);
+    return list->count;
 }
 
 void tablestats(GCtab* t, gcstat_table* result)

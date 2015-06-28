@@ -66,15 +66,20 @@ typedef struct
     void* address;
 }snapshot_obj;
 
+typedef struct gcsnapshot_handle gcsnapshot_handle;
+
 typedef struct
 {
     uint32_t count;
     snapshot_obj* objects;
     char* gcmem;
     size_t gcmem_size;
+    gcsnapshot_handle* handle;
 }gcsnapshot;
 
-LUA_API int gcsnapshot_create(lua_State *L, gcsnapshot* dump);
+LUA_API gcsnapshot* gcsnapshot_create(lua_State *L);
+LUA_API void gcsnapshot_free(gcsnapshot* snapshot);
+
 LUA_API int gcsnapshot_validate(gcsnapshot* dump);
 
 
