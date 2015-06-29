@@ -25,6 +25,7 @@
 
 #include "lj_gcutil.h"
 #include "lj_gcstats.h"
+#include <stdio.h>
 
 
 static void gcstats_walklist(global_State *g, GCobj *liststart, gcstat_obj* stats_result);
@@ -81,17 +82,17 @@ const char typeconverter[~LJ_TNUMX] = {
     gcobj_udata,         // LJ_TUDATA	 (~12u)
 };
 
-const char invtypeconverter[gcobj_MAX] = {
-     LJ_TSTR,    //  gcobj_string,       (~4u)
-     LJ_TUPVAL,	 //  gcobj_upvalue,      (~5u) 
-     LJ_TTHREAD, //  gcobj_thread,       (~6u)
-     LJ_TPROTO,	 //  gcobj_funcprototype,(~7u)
-     LJ_TFUNC,	 //  gcobj_function,     (~8u)
-     LJ_TTRACE,  //  gcobj_trace,        (~9u)
-     LJ_TCDATA,  //  gcobj_cdata,        (~10u)
-     LJ_TTAB,	 //  gcobj_table,        (~11u)
-     LJ_TUDATA,	 //  gcobj_udata,        (~12u)
-};
+const int8_t invtypeconverter[gcobj_MAX] = {
+     (int8_t)~LJ_TSTR,    //  gcobj_string,       (~4u)
+     (int8_t)~LJ_TUPVAL,	 //  gcobj_upvalue,      (~5u) 
+     (int8_t)~LJ_TTHREAD, //  gcobj_thread,       (~6u)
+     (int8_t)~LJ_TPROTO,	 //  gcobj_funcprototype,(~7u)
+     (int8_t)~LJ_TFUNC,	 //  gcobj_function,     (~8u)
+     (int8_t)~LJ_TTRACE,  //  gcobj_trace,        (~9u)
+     (int8_t)~LJ_TCDATA,  //  gcobj_cdata,        (~10u)
+     (int8_t)~LJ_TTAB,	 //  gcobj_table,        (~11u)
+     (int8_t)~LJ_TUDATA,	 //  gcobj_udata,        (~12u)
+};            
 
 //TODO: do counts of userdata based on grouping by hashtable pointer
 LUA_API void gcstats_collect(lua_State *L, gcstats* result)
@@ -226,6 +227,44 @@ LUA_API void gcsnapshot_free(gcsnapshot* snapshot)
     lj_mem_freevec(g, handle->list.list, handle->list.capacity, snapshot_obj);
 
     lj_mem_free(g, handle, sizeof(gcsnapshot_handle)+sizeof(gcsnapshot));
+}
+
+size_t writeheader(FILE* f, const char* name, size_t size)
+{
+   ChunkHeader header = { 0 };
+   memcpy(&header.id, name, 4);
+   header.length = size;
+
+   return fwrite(&header, sizeof(header), 1, f);
+}
+
+size_t writeint(FILE* f, int32_t i)
+{
+    return fwrite(&i, 4, 1, f);
+}
+
+LUA_API void gcsnapshot_save(gcsnapshot* snapshot, FILE* f)
+{
+
+    //Save object array
+    writeheader(f, "GCOB", (snapshot->count*sizeof(snapshot_obj))+4);
+    writeint(f, snapshot->count);
+    fwrite(snapshot->objects, sizeof(snapshot_obj)*snapshot->count, 1, f);
+
+    //Save objects memory
+    writeheader(f, "OMEM", snapshot->gcmem_size);
+
+    if (snapshot->gcmem_size != 0)
+    {
+        fwrite(snapshot->gcmem, snapshot->gcmem_size, 1, f);
+    }
+}
+
+LUA_API void gcsnapshot_savetofile(gcsnapshot* snapshot, const char* path)
+{
+    FILE* f = fopen(path, "wb");
+    gcsnapshot_save(snapshot, f);
+    fclose(f);
 }
 
 gcsnapshot* gcsnapshot_create(lua_State *L)

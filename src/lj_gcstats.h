@@ -80,6 +80,11 @@ typedef struct
 LUA_API gcsnapshot* gcsnapshot_create(lua_State *L);
 LUA_API void gcsnapshot_free(gcsnapshot* snapshot);
 
+struct FILE;
+
+LUA_API void gcsnapshot_savetofile(gcsnapshot* snapshot, const char* path);
+LUA_API void gcsnapshot_save(gcsnapshot* snapshot, struct FILE* f);
+
 LUA_API int gcsnapshot_validate(gcsnapshot* dump);
 
 
