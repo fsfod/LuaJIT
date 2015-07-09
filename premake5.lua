@@ -43,10 +43,11 @@ solution "LuaJit"
    startproject"lua"
    
    project "MiniLua"
-      configurations { "Release" }
-      location "build"
+      uuid "74FBF227-E0DA-71C3-E9F2-FC995551D824"
       kind "ConsoleApp"
-      language "C++"
+      configurations { "Release" }
+      language "C"
+      location "build"
       targetdir "obj/%{prj.name}/%{cfg.buildcfg}/%{cfg.platform}/"
       vpaths { ["Sources"] = "src/host" }
       files {
@@ -54,21 +55,22 @@ solution "LuaJit"
       }
 
       configuration "Debug"
-         defines { "NDEBUG"}
+         defines { "NDEBUG" }
          optimize"Speed"
  
       configuration "Release"
-         defines { "NDEBUG"}
+         defines { "NDEBUG" }
          optimize"Speed" 
     
 
    -- A project defines one build target
    project "buildvm"
+      uuid "B86F1F94-244F-9E2F-2D67-290699C50491"
       kind "ConsoleApp"
-      dependson { "miniLua"} 
+      dependson { "miniLua" } 
       vectorextensions "SSE2"
       location "build"
-      language "C++"
+      language "C"
       targetdir "obj/%{prj.name}/%{cfg.buildcfg}/%{cfg.platform}/"
       files {
         "src/vm_x86.dasc",
@@ -95,14 +97,15 @@ solution "LuaJit"
         buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
 
 
-      configuration  { "Debug"}
+      configuration  {"Debug"}
          optimize"Speed"
  
-      configuration { "Release"}
+      configuration {"Release"}
          optimize"Speed"
  
    -- A project defines one build target
    project "lua"
+      uuid "C78D880B-3397-887C-BC12-9F7C281B947C"
       kind "SharedLib"
       buildoptions "/c"
       dependson { "buildvm", "miniLua"} 
@@ -166,6 +169,7 @@ solution "LuaJit"
          optimize"Speed"
 
     project "luajit"
+        uuid "4E5D480C-3AFF-72E2-23BA-86360FFBF932"
         links { "lua"} 
         kind "ConsoleApp"
         vectorextensions "SSE2"
