@@ -118,6 +118,18 @@ LJLIB_ASM(ipairs)		LJLIB_REC(.)
   return ffh_pairs(L, MM_ipairs);
 }
 
+LJLIB_CF(nextjit)		LJLIB_REC(.)
+{
+  GCtab* tab = lj_lib_checktab(L, 1);
+  GCstr* str = lj_lib_checkstr(L, 2);
+
+  if(tab->asize != 0 && (!tvisnil(tvref(tab->array)) || !tvisnil(tvref(tab->array)+1)) ){
+    
+  }
+
+  return 1;
+}
+
 /* -- Base library: getters and setters ----------------------------------- */
 
 LJLIB_ASM_(getmetatable)	LJLIB_REC(.)

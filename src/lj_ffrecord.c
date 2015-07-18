@@ -377,6 +377,57 @@ static void LJ_FASTCALL recff_ipairs(jit_State *J, RecordFFData *rd)
   }
 }
 
+static void LJ_FASTCALL recff_nextjit(jit_State *J, RecordFFData *rd){
+
+  GCtab* t;
+
+  TRef tab = J->base[0];
+  TRef key = J->base[1];
+
+  if(!tref_istab(tab) || (!tref_isstr(key) && !tref_isnil(key))) {
+    lj_trace_err(J, LJ_TRERR_NYIFFU);
+  }
+
+  t = tabV(&rd->argv[0]);
+
+  if(t->asize != 0){
+    //only supporting tables that have an empty array part
+    lj_trace_err(J, LJ_TRERR_NYIFFU);
+  }
+
+  if(!tref_isnil(key)){
+
+    int keyIndex = lj_tab_next(J->L, tabV(&rd->argv[0]), &rd->argv[1]);
+
+  }else{
+
+    Node* first = NULL;
+    uint32_t i;
+
+    for(i = 0; i <= t->hmask; i++){
+      Node *n = &noderef(t->node)[i];
+      
+      if (!tvisnil(&n->val))  {
+        first = n;
+        break;
+      }
+    } 
+    
+    if(first == NULL){
+      J->base[0] = TREF_NIL;
+      J->base[1] = TREF_NIL;
+    }
+
+    if(!tvisstr(&first->key)){
+      lj_trace_err(J, LJ_TRERR_NYIFFU);
+    }
+  }
+  
+
+
+  rd->nres = tref_isnil(key) ? 0 : 2;
+}
+
 static void LJ_FASTCALL recff_pcall(jit_State *J, RecordFFData *rd)
 {
   if (J->maxslot >= 1) {

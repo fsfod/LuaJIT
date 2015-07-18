@@ -581,6 +581,88 @@ int lj_tab_next(lua_State *L, GCtab *t, TValue *key)
   return 0;  /* End of traversal. */
 }
 
+Node* LJ_FASTCALL lj_tab_firstnode(GCtab *t){
+  
+  int i;
+  TValue* first = tvref(t->array)+1;
+
+  //check the array part stays empty 
+  if(t->asize != 0 && (!tvisnil(tvref(t->array)) || !tvisnil(tvref(t->array)+1)) ){
+    return NULL;
+  }
+
+  if(t->hmask == 0){
+    //nothing to find since this table has no hashtable part return null to signify an abort
+    return NULL;
+  }
+
+  for(i = 0; i <= t->hmask; i++){
+    Node *n = &noderef(t->node)[i];
+    if (!tvisnil(&n->val)) {
+      return n;
+    }
+  }
+
+  return NULL;
+}
+
+/* 
+  Advance to the next step in a table traversal specialized for string keys
+  if a key is found thats not a string OR the array part becomes non empty the 
+  function return null to signal an abort to the jitted code
+*/
+Node* lj_tab_next_jit(GCtab *t, GCstr *key){
+
+  Node *n = hashstr(t, key);
+  
+  uint32_t i = 0;
+
+  //check the array part stays empty 
+  if(t->asize != 0 && (!tvisnil(tvref(t->array)) || !tvisnil(tvref(t->array)+1)) ){
+    return NULL;
+  }
+
+  do{
+    if(!tvisnil(&n->key) && !tvisstr(&n->key)){
+      //found a non string key return null to signal an abort
+      return NULL;
+    }
+
+    if(strV(&n->key) == key){
+      i = (uint32_t)(n - noderef(t->node));
+      break;
+    }
+    /* Hash key indexes: [t->asize..t->asize+t->nmask] */
+  }while ((n = nextnode(n)));
+
+  //goto the next node in the hash collision linked list if there is one
+  if(strV(&n->key) == key && nextnode(n) != NULL){
+    n = nextnode(n);
+
+    //trigger trace exit if the key is not a string
+    if(!tvisstr(&n->key)){
+      return NULL;
+    }
+
+    return n;
+  }
+
+  for (i -= t->asize; i <= t->hmask; i++) {  /* Then traverse the hash keys. */
+    Node *n = &noderef(t->node)[i];
+
+    if (!tvisnil(&n->val)) {
+      
+      if(tvisstr(&n->key)){
+        return n;
+      }else{
+        return NULL;
+      }
+    }
+  }
+
+  return 0;  /* End of traversal. */
+}
+
 /* -- Table length calculation -------------------------------------------- */
 
 static MSize unbound_search(GCtab *t, MSize j)
