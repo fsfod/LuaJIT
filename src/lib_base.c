@@ -118,16 +118,39 @@ LJLIB_ASM(ipairs)		LJLIB_REC(.)
   return ffh_pairs(L, MM_ipairs);
 }
 
-LJLIB_CF(nextjit)		LJLIB_REC(.)
+LJLIB_CF(nextjit)	LJLIB_REC(.)
 {
   GCtab* tab = lj_lib_checktab(L, 1);
-  GCstr* str = lj_lib_checkstr(L, 2);
+  GCstr* str = NULL;
+  Node* node;
 
-  if(tab->asize != 0 && (!tvisnil(tvref(tab->array)) || !tvisnil(tvref(tab->array)+1)) ){
-    
+  if(L->base+2 <= L->top && !tvisnil(L->base+1)){
+    str = lj_lib_checkstr(L, 2);
   }
 
-  return 1;
+  if(str == NULL){
+    node = lj_tab_firstnode(tab);
+  }else{
+    node = lj_tab_next_jit(tab, str);
+  }
+
+  if(node == NULL){
+    if(tab->asize != 0 && (!tvisnil(tvref(tab->array)) || !tvisnil(tvref(tab->array)+1)) ){
+      lj_err_callermsg(L, "can't traverse a table with a non empty array");
+    }else{
+      lj_err_callermsg(L, "can't traverse a table with non string keys");
+    }
+  }
+
+  if(node == (Node*)tab){
+    setnilV(L->top++);
+    setnilV(L->top++);
+  }else{
+    copyTV(L, L->top++, &node->key);
+    copyTV(L, L->top++, &node->val);
+  }
+
+  return 2;
 }
 
 /* -- Base library: getters and setters ----------------------------------- */

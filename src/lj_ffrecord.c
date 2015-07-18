@@ -383,8 +383,11 @@ static void LJ_FASTCALL recff_nextjit(jit_State *J, RecordFFData *rd){
 
   TRef tab = J->base[0];
   TRef key = J->base[1];
+  TRef node;
+  Node* nodeVal;
 
-  if(!tref_istab(tab) || (!tref_isstr(key) && !tref_isnil(key))) {
+  //Only handle tables with the starting key either being nil or a string
+  if(!tref_istab(tab) || !(tref_isstr(key) || tref_isnil(key))) {
     lj_trace_err(J, LJ_TRERR_NYIFFU);
   }
 
@@ -394,38 +397,48 @@ static void LJ_FASTCALL recff_nextjit(jit_State *J, RecordFFData *rd){
     //only supporting tables that have an empty array part
     lj_trace_err(J, LJ_TRERR_NYIFFU);
   }
-
-  if(!tref_isnil(key)){
-
-    int keyIndex = lj_tab_next(J->L, tabV(&rd->argv[0]), &rd->argv[1]);
-
+  
+  if(tref_isnil(key)){
+    nodeVal = lj_tab_firstnode(t);
+    node = lj_ir_call(J, IRCALL_lj_tab_firstnode, tab);
   }else{
+    nodeVal = lj_tab_next_jit(t, strV(&rd->argv[1]));
+    node = lj_ir_call(J, IRCALL_lj_tab_next_jit, tab, key);
+  }
 
-    Node* first = NULL;
-    uint32_t i;
+  //a NULL return value always means condition we need for the table is not satisfied
+  if(nodeVal == NULL){
+    lj_trace_err(J, LJ_TRERR_NYIFFU);
+  }
 
-    for(i = 0; i <= t->hmask; i++){
-      Node *n = &noderef(t->node)[i];
-      
-      if (!tvisnil(&n->val))  {
-        first = n;
-        break;
-      }
-    } 
+  if(nodeVal == (Node*)t){
+    //The passed in table pointer is returned to single the end of the table has been reached
+    emitir(IRTG(IR_EQ, IRT_P32), node, tab);
+    J->base[0] = TREF_NIL;
+    J->base[1] = TREF_NIL;
+  }else{
+    TRef valueType;
+
+    emitir(IRTG(IR_NE, IRT_P32), node, tab);
+    emitir(IRTG(IR_NE, IRT_P32), node, lj_ir_kint(J, 0));
     
-    if(first == NULL){
-      J->base[0] = TREF_NIL;
-      J->base[1] = TREF_NIL;
-    }
+    J->base[0] = emitir(IRT(IR_FLOAD, IRT_STR), node, IRFL_NODE_KEY);
 
-    if(!tvisstr(&first->key)){
-      lj_trace_err(J, LJ_TRERR_NYIFFU);
+    //Guard the type of the value stays the same
+    if(!tvisnum(&nodeVal->val)){
+      valueType = emitir(IRT(IR_FLOAD, IRT_I8), node, IRFL_NODE_VALTYPE);
+      emitir(IRTGI(IR_EQ), valueType, lj_ir_kint(J, nodeVal->val.it));
+      
+      J->base[1] = emitir(IRT(IR_FLOAD, itype2irt(&nodeVal->val)), node, IRFL_NODE_VAL);
+    }else{
+      valueType = emitir(IRT(IR_FLOAD, IRT_U32), node, IRFL_NODE_VALTYPE);
+      emitir(IRTGI(IR_ULT), valueType, lj_ir_kint(J, LJ_TISNUM));
+
+      J->base[1] = emitir(IRT(IR_FLOAD, IRT_NUM), node, IRFL_NODE_VALNUM);
     }
   }
   
-
-
-  rd->nres = tref_isnil(key) ? 0 : 2;
+  rd->nres = 2;
 }
 
 static void LJ_FASTCALL recff_pcall(jit_State *J, RecordFFData *rd)

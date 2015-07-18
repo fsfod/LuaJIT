@@ -192,6 +192,11 @@ IRFPMDEF(FPMENUM)
   _(TAB_ASIZE,	offsetof(GCtab, asize)) \
   _(TAB_HMASK,	offsetof(GCtab, hmask)) \
   _(TAB_NOMM,	offsetof(GCtab, nomm)) \
+  _(NODE_KEYTYPE, offsetof(Node, key.it)) \
+  _(NODE_KEY,	  offsetof(Node, key.gcr)) \
+  _(NODE_VALTYPE, offsetof(Node, val.it)) \
+  _(NODE_VAL,	  offsetof(Node, val.gcr)) \
+  _(NODE_VALNUM,  offsetof(Node, val)) \
   _(UDATA_META,	offsetof(GCudata, metatable)) \
   _(UDATA_UDTYPE, offsetof(GCudata, udtype)) \
   _(UDATA_FILE,	sizeof(GCudata)) \

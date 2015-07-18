@@ -606,12 +606,13 @@ Node* LJ_FASTCALL lj_tab_firstnode(GCtab *t){
   return NULL;
 }
 
-/* 
+
+/*
   Advance to the next step in a table traversal specialized for string keys
   if a key is found thats not a string OR the array part becomes non empty the 
   function return null to signal an abort to the jitted code
 */
-Node* lj_tab_next_jit(GCtab *t, GCstr *key){
+Node* LJ_FASTCALL lj_tab_next_jit(GCtab *t, GCstr *key){
 
   Node *n = hashstr(t, key);
   
@@ -621,6 +622,8 @@ Node* lj_tab_next_jit(GCtab *t, GCstr *key){
   if(t->asize != 0 && (!tvisnil(tvref(t->array)) || !tvisnil(tvref(t->array)+1)) ){
     return NULL;
   }
+  
+  i = (n-noderef(t->node))+1;
 
   do{
     if(!tvisnil(&n->key) && !tvisstr(&n->key)){
@@ -628,8 +631,7 @@ Node* lj_tab_next_jit(GCtab *t, GCstr *key){
       return NULL;
     }
 
-    if(strV(&n->key) == key){
-      i = (uint32_t)(n - noderef(t->node));
+    if(strV(&n->key) == key){    
       break;
     }
     /* Hash key indexes: [t->asize..t->asize+t->nmask] */
@@ -647,10 +649,12 @@ Node* lj_tab_next_jit(GCtab *t, GCstr *key){
     return n;
   }
 
-  for (i -= t->asize; i <= t->hmask; i++) {  /* Then traverse the hash keys. */
+  assert(i <= t->hmask+1);
+
+  for (; i <= t->hmask; i++) {  /* Then traverse the hash keys. */
     Node *n = &noderef(t->node)[i];
 
-    if (!tvisnil(&n->val)) {
+    if(!tvisnil(&n->val)) {
       
       if(tvisstr(&n->key)){
         return n;
@@ -660,7 +664,7 @@ Node* lj_tab_next_jit(GCtab *t, GCstr *key){
     }
   }
 
-  return 0;  /* End of traversal. */
+  return (Node*)t;  /* End of traversal. */
 }
 
 /* -- Table length calculation -------------------------------------------- */

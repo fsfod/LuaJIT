@@ -67,5 +67,6 @@ LJ_FUNC TValue *lj_tab_set(lua_State *L, GCtab *t, cTValue *key);
 LJ_FUNCA int lj_tab_next(lua_State *L, GCtab *t, TValue *key);
 LJ_FUNCA MSize LJ_FASTCALL lj_tab_len(GCtab *t);
 Node* LJ_FASTCALL lj_tab_firstnode(GCtab *t);
+Node* LJ_FASTCALL lj_tab_next_jit(GCtab *t, GCstr *key);
 
 #endif
