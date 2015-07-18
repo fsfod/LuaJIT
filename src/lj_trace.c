@@ -392,6 +392,7 @@ static void trace_start(jit_State *J)
   J->needsnap = 0;
   J->bcskip = 0;
   J->guardemit.irt = 0;
+  J->pairsSlot = -1;
   J->postproc = LJ_POST_NONE;
   lj_resetsplit(J);
   setgcref(J->cur.startpt, obj2gco(J->pt));

@@ -607,6 +607,31 @@ Node* LJ_FASTCALL lj_tab_firstnode(GCtab *t){
 }
 
 
+int LJ_FASTCALL lj_tab_nextindex(GCtab *t, int index){
+
+  uint32_t i = index;
+
+  //check the array part stays empty 
+  if(t->asize != 0 && (!tvisnil(tvref(t->array)) || !tvisnil(tvref(t->array)+1)) ){
+    return -1;
+  }
+ 
+  for (; i <= t->hmask; i++) {  /* Then traverse the hash keys. */
+    Node *n = &noderef(t->node)[i];
+
+    if(!tvisnil(&n->val)) {
+      
+      if(tvisstr(&n->key)){
+        return i;
+      }else{
+        return -1;
+      }
+    }
+  }
+
+  return 0;
+}
+
 /*
   Advance to the next step in a table traversal specialized for string keys
   if a key is found thats not a string OR the array part becomes non empty the 

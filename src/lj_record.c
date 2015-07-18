@@ -93,6 +93,12 @@ static void rec_check_slots(jit_State *J)
       lua_assert(ref >= J->cur.nk && ref < J->cur.nins);
       ir = IR(ref);
       lua_assert(irt_t(ir->t) == tref_t(tr));
+
+      if(J->pairsSlot != -1 && J->pairsSlot+1 == s){
+        lua_assert(tv->it == 0xfffe7fff);
+        continue;
+      }
+
       if (s == 0) {
 	lua_assert(tref_isfunc(tr));
       } else if ((tr & TREF_FRAME)) {
@@ -501,7 +507,11 @@ static LoopEvent rec_iterl(jit_State *J, const BCIns iterins)
   BCReg ra = bc_a(iterins);
   lua_assert(J->base[ra] != 0);
   if (!tref_isnil(J->base[ra])) {  /* Looping back? */
-    J->base[ra-1] = J->base[ra];  /* Copy result of ITERC to control var. */
+    if(J->pairsSlot == -1){
+      J->base[ra-1] = J->base[ra];  /* Copy result of ITERC to control var. */
+    }else{
+      J->base[ra-1] = J->base[ra];  /* Copy result of ITERC to control var. */
+    }
     J->maxslot = ra-1+bc_b(J->pc[-1]);
     J->pc += bc_j(iterins)+1;
     return LOOPEV_ENTER;
@@ -511,6 +521,8 @@ static LoopEvent rec_iterl(jit_State *J, const BCIns iterins)
     return LOOPEV_LEAVE;
   }
 }
+
+
 
 /* Record LOOP/JLOOP. Now, that was easy. */
 static LoopEvent rec_loop(jit_State *J, BCReg ra)
@@ -578,6 +590,95 @@ static void rec_loop_jit(jit_State *J, TraceNo lnk, LoopEvent ev)
     else
       rec_stop(J, LJ_TRLINK_ROOT, lnk);  /* Link to the loop. */
   }  /* Side trace continues across a loop that's left or not entered. */
+}
+
+static void rec_isnext(jit_State *J, int baseSlot, int loop)
+{
+
+  TValue* base = J->L->base+baseSlot;
+
+  if(!tvisfunc(base-3) || !tvisnil(base-1) || !tvistab(base-2)){
+    lj_trace_err(J, LJ_TRERR_NYIFFU);
+  }else{
+    TRef nextFunc = sload(J, baseSlot-3);
+    emitir(IRTG(IR_EQ, IRT_FUNC), nextFunc, lj_ir_kfunc(J, funcV(base-3)));
+  }
+
+  J->base[baseSlot-1] = lj_ir_kint(J, 0);
+
+  //if (baseSlot >= J->maxslot) J->maxslot = baseSlot+1;
+
+  J->pairsSlot = baseSlot-1;
+
+  if(0){
+    setintV(&J->errinfo, BC_ISNEXT);
+    lj_trace_err_info(J, LJ_TRERR_NYIBC);
+  }
+}
+
+static LoopEvent rec_itern(jit_State *J, int ra)
+{
+  TValue* base = J->L->base+J->pairsSlot;
+  GCtab* t = tabV(base-1);
+  Node* nodeVal = lj_tab_firstnode(t);
+  int i = base->i;
+  TRef nodePtr, hmask;
+  TRef tab = getslot(J, ra-2);
+  TRef index = getslot(J, ra-1);
+  
+  lua_assert(J->pairsSlot != -1);
+
+  if(t->asize != 0){
+    lj_trace_err(J, LJ_TRERR_NYIFFU);
+  }else{
+    TRef asize = emitir(IRT(IR_FLOAD, IRT_U32), tab, IRFL_TAB_ASIZE);
+    emitir(IRTGI(IR_EQ), asize, lj_ir_kint(J, 0));
+
+    hmask = emitir(IRT(IR_FLOAD, IRT_U32), tab, IRFL_TAB_HMASK);
+    emitir(IRTGI(IR_NE), hmask, lj_ir_kint(J, 0));
+  }
+
+  index = lj_ir_call(J, IRCALL_lj_tab_nextindex, tab, index);
+
+  emitir(IRTGI(IR_NE), index, lj_ir_kint(J, 0));
+  emitir(IRTGI(IR_NE), index, lj_ir_kint(J, -1));
+
+  emitir(IRTGI(IR_LT), index, hmask);
+
+  J->base[ra-1] = index;
+
+  nodePtr = emitir(IRT(IR_FLOAD, IRT_P32), tab, IRFL_TAB_NODE);
+  index = emitir(IRT(IR_MUL, IRT_INT), lj_ir_kint(J, sizeof(Node)), index);
+  nodePtr = emitir(IRT(IR_ADD, IRT_INT), nodePtr, index);
+
+  if (ra >= J->maxslot) J->maxslot = ra+2;
+
+  J->base[ra] = emitir(IRT(IR_FLOAD, IRT_STR), nodePtr, IRFL_NODE_KEY);
+
+  //Guard the type of the value stays the same
+  if(!tvisnum(&nodeVal->val)){
+    TRef valueType = emitir(IRT(IR_FLOAD, IRT_I8), nodePtr, IRFL_NODE_VALTYPE);
+    emitir(IRTGI(IR_EQ), valueType, lj_ir_kint(J, nodeVal->val.it));
+    
+    J->base[ra+1] = emitir(IRT(IR_FLOAD, itype2irt(&nodeVal->val)), nodePtr, IRFL_NODE_VAL);
+  }else{
+    TRef valueType = emitir(IRT(IR_FLOAD, IRT_U32), nodePtr, IRFL_NODE_VALTYPE);
+    emitir(IRTGI(IR_ULT), valueType, lj_ir_kint(J, LJ_TISNUM));
+
+    J->base[ra+1] = emitir(IRT(IR_FLOAD, IRT_NUM), nodePtr, IRFL_NODE_VALNUM);
+  }
+
+  if(i <= t->hmask){
+    return LOOPEV_ENTER;
+  }else{
+    return LOOPEV_LEAVE;
+  }
+
+  if(0){
+    setintV(&J->errinfo, BC_ITERN);
+    lj_trace_err_info(J, LJ_TRERR_NYIBC);
+  }
+
 }
 
 /* -- Record calls and returns -------------------------------------------- */
@@ -2061,6 +2162,13 @@ void lj_record_ins(jit_State *J)
   case BC_FUNCCW:
     lj_ffrecord_func(J);
     break;
+  
+  case BC_ISNEXT:
+    rec_isnext(J, ra, rc);
+  break;
+  case BC_ITERN:
+    rec_loop_interp(J, pc, rec_itern(J, ra));
+  break;
 
   default:
     if (op >= BC__MAX) {
@@ -2068,8 +2176,6 @@ void lj_record_ins(jit_State *J)
       break;
     }
     /* fallthrough */
-  case BC_ITERN:
-  case BC_ISNEXT:
   case BC_CAT:
   case BC_UCLO:
   case BC_FNEW:
@@ -2117,6 +2223,14 @@ static const BCIns *rec_setup_root(jit_State *J)
     lua_assert(bc_op(pc[-1]) == BC_JMP);
     J->bc_min = pc;
     break;
+  case BC_ITERN:
+    lua_assert(bc_op(pc[1]) == BC_ITERL);
+    J->maxslot = ra + bc_b(pc[-1]) - 1;
+    J->bc_extent = (MSize)(-bc_j(ins))*sizeof(BCIns);
+    pc += 1+bc_j(ins);
+    lua_assert(bc_op(pc[-1]) == BC_JMP);
+    J->bc_min = pc;
+  break;
   case BC_LOOP:
     /* Only check BC range for real loops, but not for "repeat until true". */
     pcj = pc + bc_j(ins);

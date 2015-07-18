@@ -220,6 +220,7 @@ IRFLDEF(FLENUM)
 #define IRSLOAD_CONVERT		0x08	/* Number to integer conversion. */
 #define IRSLOAD_READONLY	0x10	/* Read-only, omit slot store. */
 #define IRSLOAD_INHERIT		0x20	/* Inherited by exits/side traces. */
+#define IRSLOAD_PAIRSCONTROL    0x40
 
 /* XLOAD mode, stored in op2. */
 #define IRXLOAD_READONLY	1	/* Load from read-only data. */

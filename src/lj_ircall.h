@@ -117,6 +117,7 @@ typedef struct CCallInfo {
   _(ANY,	lj_tab_len,		1,  FL, INT, 0) \
   _(ANY,	lj_tab_firstnode,       1,  FL, P32, 0) \
   _(ANY,	lj_tab_next_jit,        2,  FL, P32, 0) \
+  _(ANY,	lj_tab_nextindex,      2,  FL, INT, 0) \
   _(ANY,	lj_gc_step_jit,		2,  FS, NIL, CCI_L) \
   _(ANY,	lj_gc_barrieruv,	2,  FS, NIL, 0) \
   _(ANY,	lj_mem_newgco,		2,  FS, P32, CCI_L) \

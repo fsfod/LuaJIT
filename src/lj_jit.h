@@ -328,7 +328,7 @@ typedef struct jit_State {
   uint32_t flags;	/* JIT engine flags. */
   BCReg maxslot;	/* Relative to baseslot. */
   BCReg baseslot;	/* Current frame base, offset into J->slots. */
-
+  int pairsSlot;
   uint8_t mergesnap;	/* Allowed to merge with next snapshot. */
   uint8_t needsnap;	/* Need snapshot before recording next bytecode. */
   IRType1 guardemit;	/* Accumulated IRT_GUARD for emitted instructions. */
