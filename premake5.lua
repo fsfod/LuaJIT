@@ -1,4 +1,41 @@
 
+local flaglist = {
+    --"LUA_USE_ASSERT",
+    --"LUA_USE_APICHECK",
+    "LUA_BUILD_AS_DLL",
+    --"LUAJIT_NUMMODE", --1 all number are stored doubles, 2 dual number mode
+    --"LUAJIT_ENABLE_LUA52COMPAT",
+    --"LUAJIT_ENABLE_CHECKHOOK", -- check if any Lua hook is set while in jitted code
+    --"LUAJIT_USE_SYSMALLOC", 
+    
+    --"LUAJIT_ENABLE_TABLE_BUMP",
+    --"LUAJIT_TRACE_STITCHING",
+    
+    --"LUAJIT_DISABLE_JIT",
+    --"LUAJIT_DISABLE_FFI",
+    --"LUAJIT_DISABLE_VMEVENT",
+    --"LUAJIT_DISABLE_DEBUGINFO",
+    
+    --"LUAJIT_DEBUG_RA",
+    --"LUAJIT_CTYPE_CHECK_ANCHOR",
+    --"LUAJIT_USE_GDBJIT",
+    --"LUAJIT_USE_PERFTOOLS",
+}
+
+function BuildDynasmFlags(buildflags)
+    
+    local flags = ""
+    
+    if buildflags["LUAJIT_ENABLE_LUA52COMPAT"] then
+        flags = flags.." -D LJ_52"
+    end
+    
+    
+    if buildflags["LUAJIT_NUMMODE"] == 2 then
+        flags = flags.." -D DUALNUM"
+    end
+end
+
 liblist = {
     "lib_base.c",
     "lib_math.c",
@@ -111,7 +148,7 @@ solution "LuaJit"
       dependson { "buildvm", "miniLua"} 
       targetname "lua51"
       vectorextensions "SSE2"
-      defines { "LUA_BUILD_AS_DLL" }
+      defines(flaglist)
       language "C++"
       location "build"
       vpaths { ["libs"] = "src/lib_*.h" }
@@ -173,7 +210,7 @@ solution "LuaJit"
         links { "lua"} 
         kind "ConsoleApp"
         vectorextensions "SSE2"
-        defines { "LUA_BUILD_AS_DLL" }
+        defines(flaglist)
         language "C++"
         location "build"
         vpaths { ["libs"] = "src/lib_*.h" }
