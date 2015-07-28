@@ -158,6 +158,7 @@ solution "LuaJit"
       
       includedirs{
         "%{cfg.objdir}",
+        "src"
       }
       
       files {
