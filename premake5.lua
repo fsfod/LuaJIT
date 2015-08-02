@@ -79,7 +79,7 @@ solution "LuaJit"
    targetdir "bin/%{cfg.buildcfg}/%{cfg.platform}"
    startproject"lua"
    
-   project "MiniLua"
+   project "minilua"
       uuid "74FBF227-E0DA-71C3-E9F2-FC995551D824"
       kind "ConsoleApp"
       configurations { "Release" }
@@ -104,7 +104,7 @@ solution "LuaJit"
    project "buildvm"
       uuid "B86F1F94-244F-9E2F-2D67-290699C50491"
       kind "ConsoleApp"
-      dependson { "miniLua" } 
+      dependson { "minilua" } 
       vectorextensions "SSE2"
       location "build"
       language "C"
@@ -145,7 +145,7 @@ solution "LuaJit"
       uuid "C78D880B-3397-887C-BC12-9F7C281B947C"
       kind "SharedLib"
       buildoptions "/c"
-      dependson { "buildvm", "miniLua"} 
+      dependson { "buildvm", "minilua"}
       targetname "lua51"
       vectorextensions "SSE2"
       defines(flaglist)
