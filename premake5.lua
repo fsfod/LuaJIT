@@ -22,6 +22,13 @@ local flaglist = {
     --"LUAJIT_USE_PERFTOOLS",
 }
 
+newoption {
+    trigger = "builddir",
+    description = "override the build directory"
+}
+
+BuildDir = _OPTIONS["builddir"] or "build"
+
 function BuildDynasmFlags(buildflags)
     
     local flags = ""
@@ -58,7 +65,7 @@ function BuildVmCommand(cmd, outputfile, addLibList, outputDir)
     
     outputDir = outputDir or "$(IntDir)"
     
-    local result =  '"../obj/buildvm/%{cfg.buildcfg}/%{cfg.platform}/buildvm.exe" '..cmd..' -o "'..outputDir..outputfile..'" '
+    local result = '"obj/buildvm/%{cfg.buildcfg}/%{cfg.platform}/buildvm.exe" '..cmd..' -o "'..outputDir..outputfile..'" '
     
     if addLibList then
         result = result..liblistString
@@ -68,15 +75,13 @@ function BuildVmCommand(cmd, outputfile, addLibList, outputDir)
 end
 
 
-
-
 -- A solution contains projects, and defines the available configurations
 solution "LuaJit"
    configurations { "Debug", "Release" }
    platforms { "x32", "x64" }
    defines {"_CRT_SECURE_NO_DEPRECATE" }
-   objdir "obj/%{prj.name}/%{cfg.buildcfg}/%{cfg.platform}/"
-   targetdir "bin/%{cfg.buildcfg}/%{cfg.platform}"
+   objdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}/%{cfg.platform}/"
+   targetdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}/%{cfg.platform}/"
    startproject"lua"
    
    project "minilua"
@@ -84,8 +89,7 @@ solution "LuaJit"
       kind "ConsoleApp"
       configurations { "Release" }
       language "C"
-      location "build"
-      targetdir "obj/%{prj.name}/%{cfg.buildcfg}/%{cfg.platform}/"
+      location(BuildDir)
       vpaths { ["Sources"] = "src/host" }
       files {
         "src/host/minilua.c", 
@@ -100,15 +104,14 @@ solution "LuaJit"
          optimize"Speed" 
     
 
-   -- A project defines one build target
    project "buildvm"
       uuid "B86F1F94-244F-9E2F-2D67-290699C50491"
       kind "ConsoleApp"
       dependson { "minilua" } 
       vectorextensions "SSE2"
-      location "build"
+      location(BuildDir)
       language "C"
-      targetdir "obj/%{prj.name}/%{cfg.buildcfg}/%{cfg.platform}/"
+      
       files {
         "src/vm_x86.dasc",
         "src/host/buildvm*.c",
@@ -121,7 +124,7 @@ solution "LuaJit"
       filter{'architecture:x32', 'files:src/vm_x86.dasc'}
         buildmessage 'Compiling %{file.relpath}'
         buildcommands {
-           '"../obj/minilua/%{cfg.buildcfg}/%{cfg.platform}/minilua.exe" %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+           '"obj/minilua/%{cfg.buildcfg}/%{cfg.platform}/minilua.exe" %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
         }
         buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
         
@@ -129,7 +132,7 @@ solution "LuaJit"
       filter{'architecture:x64', 'files:src/vm_x86.dasc'}
         buildmessage 'Compiling %{file.relpath}'
         buildcommands {
-           '"../obj/minilua/%{cfg.buildcfg}/%{cfg.platform}/minilua.exe" %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -D P64 -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+           '"obj/minilua/%{cfg.buildcfg}/%{cfg.platform}/minilua.exe" %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -D P64 -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
         }
         buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
 
@@ -140,17 +143,18 @@ solution "LuaJit"
       configuration {"Release"}
          optimize"Speed"
  
-   -- A project defines one build target
+
    project "lua"
       uuid "C78D880B-3397-887C-BC12-9F7C281B947C"
       kind "SharedLib"
       buildoptions "/c"
       dependson { "buildvm", "minilua"}
+      targetdir "bin/%{cfg.buildcfg}/%{cfg.platform}"
       targetname "lua51"
       vectorextensions "SSE2"
       defines(flaglist)
       language "C++"
-      location "build"
+      location(BuildDir)
       vpaths { ["libs"] = "src/lib_*.h" }
       vpaths { ["libs"] = "src/lib_*.c" }
       vpaths { ["headers"] = "src/lj_*.h" }
@@ -187,7 +191,7 @@ solution "LuaJit"
       
       prebuildcommands {
         '{MKDIR} %{cfg.targetdir}/jit/',
-        '"../obj/buildvm/%{cfg.buildcfg}/%{cfg.platform}/buildvm.exe" -m peobj -o "$(IntDir)lj_vm.obj"',
+        '"obj/buildvm/%{cfg.buildcfg}/%{cfg.platform}/buildvm.exe" -m peobj -o "$(IntDir)lj_vm.obj"',
          BuildVmCommand("-m bcdef","lj_bcdef.h", true),
          BuildVmCommand("-m ffdef", "lj_ffdef.h", true),
          BuildVmCommand("-m libdef", "lj_libdef.h", true),
@@ -204,16 +208,17 @@ solution "LuaJit"
       configuration { "release" }
          defines { "NDEBUG"}
          flags { "Symbols" }
-         optimize"Speed"
+         optimize "Speed"
 
     project "luajit"
         uuid "4E5D480C-3AFF-72E2-23BA-86360FFBF932"
         links { "lua"} 
         kind "ConsoleApp"
+        targetdir "bin/%{cfg.buildcfg}/%{cfg.platform}"
         vectorextensions "SSE2"
         defines(flaglist)
         language "C++"
-        location "build"
+        location(BuildDir)
         vpaths { ["libs"] = "src/lib_*.h" }
         vpaths { ["libs"] = "src/lib_*.c" }
       
@@ -228,5 +233,12 @@ solution "LuaJit"
       configuration{"Release"}
          defines { "NDEBUG"}
          flags { "Symbols" }
-         optimize"Speed"
+         optimize "Speed"
+
+
+--Write .gitignore to directorys that contain just contain generated files
+os.writefile_ifnotequal("*.*", path.join(os.realpath(BuildDir), ".gitignore"))
+os.writefile_ifnotequal("*.*", path.join(os.realpath("bin"), ".gitignore"))
+         
+         
       
