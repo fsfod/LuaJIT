@@ -167,9 +167,9 @@
 </Type>
 
 <Type Name="IRType1">
-  <DisplayString Condition="(irt&amp;0xc0) == 0xc0">GUARD,PHI:{(IRType)(irt&amp;31)}</DisplayString>
-  <DisplayString Condition="(irt&amp;0x80) != 0">GUARD:{(IRType)(irt&amp;31)}</DisplayString>
-  <DisplayString Condition="(irt&amp;0x40) != 0">PHI:{(IRType)(irt&amp;31)}</DisplayString>
+  <DisplayString Condition="(irt&amp;0xc0) == 0xc0">{(IRType)(irt&amp;31)} GUARD,PHI</DisplayString>
+  <DisplayString Condition="(irt&amp;0x80) != 0">{(IRType)(irt&amp;31)} GUARD</DisplayString>
+  <DisplayString Condition="(irt&amp;0x40) != 0">{(IRType)(irt&amp;31)} PHI</DisplayString>
   <DisplayString>{(IRType)(irt&amp;31)}</DisplayString>
   
   <Expand>
@@ -178,11 +178,13 @@
 </Type>
 
 <Type Name="IRIns">
-  <DisplayString Condition="o == 22">{(IROp)o} {t} {gcr}</DisplayString><!--IR_KGC-->
-  <DisplayString Condition="o == 23">{(IROp)o} {t} {i,i}</DisplayString><!--IR_KINT-->   
-  <DisplayString Condition="o == 24">{(IROp)o} {t} {ptr.ptr32,x}</DisplayString><!--IR_KPTR-->
-  <DisplayString Condition="o == 27">{(IROp)o} {t} {*((double*)ptr.ptr32)}</DisplayString><!--IR_KNUM-->
-  <DisplayString>{(IROp)o} {t} op1:{op1,i} op2:{op2,i}</DisplayString>
+  <DisplayString Condition="o == IR_KGC">{(IROp)o,en} {t,en} {gcr}</DisplayString>
+  <DisplayString Condition="o == IR_KINT">{(IROp)o,en} {i}</DisplayString>
+  <DisplayString Condition="o == IR_KPTR">{(IROp)o,en}({t,en}) {ptr.ptr32,x}</DisplayString>
+  <DisplayString Condition="o == IR_KNUM">{(IROp)o,en} {*((double*)ptr.ptr32)}</DisplayString>
+  <DisplayString Condition="o == IR_KPRI">{(IROp)o,en}({t,en})</DisplayString>
+  <DisplayString Condition="o == IR_SLOAD || o == IR_BASE || o == IR_LOOP">{(IROp)o,en}({t,en}) op1:{op1,i} op2:{op2,i}</DisplayString>
+  <DisplayString>{(IROp)o,en}({t,en}) op1:{op1-REF_BIAS,i} op2:{op2-REF_BIAS,i}</DisplayString>
   
   <Expand>
     <Item Name="op">(IROp)o</Item>
@@ -224,6 +226,7 @@
     <Item Name="Trace Number">traceno,i</Item>
     <Item Name="Root Trace" Condition="root != 0">root,i</Item>
     <Item Name="Starting Function">startpt</Item>
+    <Item Name="Start Bytecode">(BCOp)(startins&amp;0xff)</Item>
     <Item Name="Link Type">(TraceLink)linktype</Item>     
     
     <Synthetic Name="IR Byte Code">
@@ -236,7 +239,7 @@
       </Expand>
     </Synthetic>
     <Synthetic Name="IR Constants">
-      <DisplayString>size = {(0x8000-nk)+1,i}</DisplayString>
+      <DisplayString>[size] = {(0x8000-nk)+1,i}</DisplayString>
       <Expand>
         <IndexListItems>
           <Size>(0x8000-nk)+1</Size>
@@ -246,7 +249,7 @@
     </Synthetic>
   
     <Synthetic Name="Snapshots">
-     <DisplayString>count = {nsnap,i}</DisplayString>
+     <DisplayString>[size] = {nsnap,i}</DisplayString>
       <Expand>
         <ArrayItems>
           <Size>nsnap</Size>
@@ -254,11 +257,21 @@
         </ArrayItems>
       </Expand>
     </Synthetic> 
+      
+    <Synthetic Name="Snapshot Map">
+     <DisplayString>[size] = {nsnapmap,i}</DisplayString>
+      <Expand>
+        <IndexListItems>
+          <Size>nsnapmap</Size>
+          <ValueNode>(int)(snapmap[$i] &gt;&gt; 24)</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
   </Expand>
 </Type>
 
 <Type Name="SnapShot">
-  <DisplayString>Exit Count {count,i}</DisplayString>
+  <DisplayString>IR: {ref-0x8000} , Exits {count,i}</DisplayString>
 </Type>
 
 <Type Name="jit_State">
