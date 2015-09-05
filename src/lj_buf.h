@@ -19,6 +19,7 @@
 #define sbuflen(sb)	((MSize)(sbufP((sb)) - sbufB((sb))))
 #define sbufleft(sb)	((MSize)(sbufE((sb)) - sbufP((sb))))
 #define setsbufP(sb, q)	(setmref((sb)->p, (q)))
+#define setsbufofs(sb, ofs) (setmref((sb)->p, (sbufB(sb)+ofs)))
 #define setsbufL(sb, l)	(setmref((sb)->L, (l)))
 
 /* Buffer management */
