@@ -180,6 +180,10 @@ const char *lj_strfmt_wstrnum(char *buf, cTValue *o, MSize *lenp)
   } else if (tvisnum(o)) {
     *lenp = (MSize)(lj_strfmt_wnum(buf, o) - buf);
     return buf;
+  } else if (tvisudata(o) && udataV(o)->udtype == UDTYPE_STRING_BUF) {
+    SBuf *sb = (SBuf*)uddata(udataV(o));
+    *lenp = sbuflen(sb);
+    return sbufB(sb);
   } else {
     return NULL;
   }

@@ -49,6 +49,9 @@ assert(testformat("") == "")
 assert(testformat("%s", "bar") == "bar")
 assert(testformat("%s %s", "foo", tostringobj) == "foo tostring_result")
 
+print(buf)
+io.write("write buf test:",buf)
+
 buf:clear()
 buf:rep("a", 3)
 assert(buf:tostring() == "aaa")
