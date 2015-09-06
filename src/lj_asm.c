@@ -1044,7 +1044,7 @@ static void asm_bufhdr(ASMState *as, IRIns *ir)
   if ((ir->op2 & IRBUFHDR_APPEND)) {
     /* Rematerialize const buffer pointer instead of likely spill. */
     IRIns *irp = IR(ir->op1);
-    if (!(ra_hasreg(irp->r) || irp == ir-1 ||
+    if (!(ir->op2 & IRBUFHDR_STRBUF) && !(ra_hasreg(irp->r) || irp == ir-1 ||
 	  (irp == ir-2 && !ra_used(ir-1)))) {
       while (!(irp->o == IR_BUFHDR && !(irp->op2 & IRBUFHDR_APPEND)))
 	irp = IR(irp->op1);
@@ -1117,10 +1117,21 @@ static void asm_bufstr(ASMState *as, IRIns *ir)
 {
   const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_buf_tostr];
   IRRef args[1];
-  args[0] = ir->op1;  /* SBuf *sb */
+
+  if (ir->op1 != REF_NIL) {
+    args[0] = ir->op1;  /* SBuf *sb */
+  } else {
+    args[0] = ir->op2;  /* use the header directly since theres no chain SBuf *sb */
+  }
+
   as->gcsteps++;
   asm_setupresult(as, ir, ci);  /* GCstr * */
   asm_gencall(as, ci, args);
+}
+
+static void asm_buftail(ASMState *as, IRIns *ir)
+{
+  ra_alloc1(as, ir->op1, RSET_SCRATCH);
 }
 
 /* -- Type conversions ---------------------------------------------------- */
@@ -1657,6 +1668,7 @@ static void asm_ir(ASMState *as, IRIns *ir)
   case IR_BUFHDR: asm_bufhdr(as, ir); break;
   case IR_BUFPUT: asm_bufput(as, ir); break;
   case IR_BUFSTR: asm_bufstr(as, ir); break;
+  case IR_BUFTAIL: asm_buftail(as, ir); break;
 
   /* Write barriers. */
   case IR_TBAR: asm_tbar(as, ir); break;
@@ -1675,6 +1687,7 @@ static void asm_ir(ASMState *as, IRIns *ir)
   case IR_CALLN: case IR_CALLL: case IR_CALLS: asm_call(as, ir); break;
   case IR_CALLXS: asm_callx(as, ir); break;
   case IR_CARG: break;
+  
 
   default:
     setintV(&as->J->errinfo, ir->o);

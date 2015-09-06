@@ -750,7 +750,7 @@ static GCstr *string_fmt_tostring(lua_State *L, int arg, int retry)
   return lj_strfmt_obj(L, o);
 }
 
-static int string_format_aux(lua_State *L, int isstrbuf)
+static int string_format(lua_State *L, int isstrbuf)
 {
   int arg, top = (int)(L->top - L->base);
   GCstr *fmt;
@@ -763,7 +763,7 @@ again:
   if (isstrbuf) {
     arg = 2;
     sb = check_bufarg(L);
-    savedbufpos = sbuflen(sb); /* save the position so we can reset to it if theres an err*/  
+    savedbufpos = sbuflen(sb); /* save the position so we can reset to it if theres an error */  
     retry = -1;/* were not writing to temp buffer so can ignore it being used by tostring metacalls */
   } else {
     arg = 1;
@@ -776,12 +776,12 @@ again:
       lj_buf_putmem(sb, fs.str, fs.len);
     } else if (sf == STRFMT_ERR) {
       if (isstrbuf)
-        setsbufP(sb, sbufB(sb)+ savedbufpos);
+        setsbufofs(sb, savedbufpos);
       lj_err_callerv(L, LJ_ERR_STRFMT, strdata(lj_str_new(L, fs.str, fs.len)));
     } else {
       if (++arg > top) {
         if (isstrbuf)
-          setsbufP(sb, sbufB(sb) + savedbufpos);
+          setsbufofs(sb, savedbufpos);
         luaL_argerror(L, arg, lj_obj_typename[0]);
       }
       switch (STRFMT_TYPE(sf)) {
@@ -814,6 +814,11 @@ again:
           setsbufofs(sb, savedbufpos);
           str = string_fmt_tostring(L, arg, retry);
           setsbufofs(sb, bufpos);
+
+          if (str == NULL) {
+            /* use the default tostring if tostring metamethod didn't return us a string*/
+            str = string_fmt_tostring(L, arg, 2);
+          }
         } else {
           str = string_fmt_tostring(L, arg, retry);
         }
@@ -848,9 +853,9 @@ again:
   return 1;
 }
 
-LJLIB_CF(string_format)		LJLIB_REC(.)
+LJLIB_CF(string_format)	LJLIB_REC(string_format 0)
 {
-  return string_format_aux(L, 0);
+  return string_format(L, 0);
 }
 
 LJLIB_PUSH(top-2) LJLIB_SET(!)  /* Set environment. */
@@ -874,12 +879,12 @@ LJLIB_CF(string_createbuffer)
 
 #define LJLIB_MODULE_stringbuf
 
-LJLIB_CF(stringbuf_format)
+LJLIB_CF(stringbuf_format) LJLIB_REC(string_format 1)
 {
-  return string_format_aux(L, 1);
+  return string_format(L, 1);
 }
 
-LJLIB_CF(stringbuf_write)
+static SBuf *stringbuf_write(lua_State *L)
 {
   SBuf *sb = check_bufarg(L);
   MSize savedpos = sbuflen(sb);
@@ -893,14 +898,27 @@ LJLIB_CF(stringbuf_write)
     if (mo) {
       MSize curpos = sbuflen(sb);
       setsbufofs(sb, savedpos);
-      /* call could invalidate our stack pointer */
+      /* call could invalidate our stack pointer so switch to the one returned to us */
       tv = stringbuf_putobj_hastostring(sb, mo, (tv - L->base) + 1);
       setsbufofs(sb, curpos);
       stringbuf_tryputobj(sb, tv, 0);
     }
-
   }
 
+  return sb;
+}
+
+LJLIB_CF(stringbuf_write) LJLIB_REC(stringbuf_write 0)
+{
+  stringbuf_write(L);
+  return 0;
+}
+
+LJLIB_PUSH("\n")
+LJLIB_CF(stringbuf_writeln) LJLIB_REC(stringbuf_write 1)
+{
+  SBuf *sb = stringbuf_write(L);
+  lj_buf_putb(sb, '\n');
   return 0;
 }
 
@@ -927,7 +945,7 @@ LJLIB_CF(stringbuf_byte)
   return 1;
 }
 
-LJLIB_CF(stringbuf_tostring)
+LJLIB_CF(stringbuf_tostring) LJLIB_REC(.)
 {
   SBuf *sb = check_bufarg(L);
   setstrV(L, L->top - 1, lj_buf_str(L, sb));
@@ -977,7 +995,7 @@ LJLIB_CF(stringbuf_equals)
   return 1;
 }
 
-LJLIB_CF(stringbuf_clear)
+LJLIB_CF(stringbuf_clear) LJLIB_REC(.)
 {
   SBuf *sb = check_bufarg(L);
   lj_buf_reset(sb);
@@ -994,7 +1012,7 @@ LJLIB_CF(stringbuf___gc)
   return 0;
 }
 
-LJLIB_CF(stringbuf___tostring)
+LJLIB_CF(stringbuf___tostring) LJLIB_REC(stringbuf_tostring)
 {
   SBuf *sb = check_bufarg(L);
   setstrV(L, L->top - 1, lj_buf_str(L, sb));

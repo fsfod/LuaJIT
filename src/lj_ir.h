@@ -124,6 +124,7 @@
   \
   /* Buffer operations. */ \
   _(BUFHDR,	L , ref, lit) \
+  _(BUFTAIL,    S , ref, ref) \
   _(BUFPUT,	L , ref, ref) \
   _(BUFSTR,	A , ref, ref) \
   \
@@ -234,6 +235,7 @@ IRFLDEF(FLENUM)
 /* BUFHDR mode, stored in op2. */
 #define IRBUFHDR_RESET		0	/* Reset buffer. */
 #define IRBUFHDR_APPEND		1	/* Append to buffer. */
+#define IRBUFHDR_STRBUF         2       /* buffer is a string buffer. */
 
 /* CONV mode, stored in op2. */
 #define IRCONV_SRCMASK		0x001f	/* Source IRType. */

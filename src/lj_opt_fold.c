@@ -581,7 +581,7 @@ LJFOLD(BUFSTR any any)
 LJFOLDF(bufstr_kfold_cse)
 {
   lua_assert(fleft->o == IR_BUFHDR || fleft->o == IR_BUFPUT ||
-	     fleft->o == IR_CALLL);
+	     fleft->o == IR_CALLL || fins->op1 == REF_NIL);
   if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD)) {
     if (fleft->o == IR_BUFHDR) {  /* No put operations? */
       if (!(fleft->op2 & IRBUFHDR_APPEND))  /* Empty buffer? */
@@ -593,6 +593,8 @@ LJFOLDF(bufstr_kfold_cse)
       IRIns *irb = IR(fleft->op1);
       if (irb->o == IR_BUFHDR && !(irb->op2 & IRBUFHDR_APPEND))
 	return fleft->op2;  /* Shortcut for a single put operation. */
+    } else if (fins->op1 == REF_NIL) {
+      return EMITFOLD; /* tostring called on string buffer */
     }
   }
   /* Try to CSE the whole chain. */

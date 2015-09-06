@@ -1,16 +1,39 @@
+local jit = require("jit")
+local jit_util = require("jit.util")
+local vmdef = require("jit.vmdef")
 
 local buf = string.createbuffer()
 local buf2 = string.createbuffer()
 
-function testwrite(...)
+function testwrite(a1, a2, a3, a4)
     buf:clear()
-    buf:write(...)
+    
+    if(a2 == nil) then
+      buf:write(a1)
+    elseif(a3 == nil) then
+      buf:write(a1, a2)
+    elseif(a4 == nil) then
+      buf:write(a1, a2, a3)
+    else 
+      buf:write(a1, a2, a3, a4)
+    end
+    
     return (buf:tostring())
 end
 
-function testformat(...)
+function testformat(a1, a2, a3, a4)
     buf:clear()
-    buf:format(...)
+    
+    if(a2 == nil) then
+      buf:format(a1)
+    elseif(a3 == nil) then
+      buf:format(a1, a2)
+    elseif(a4 == nil) then
+      buf:format(a1, a2, a3)
+    else
+      buf:format(a1, a2, a3, a4)
+    end
+    
     return (buf:tostring())
 end
 
@@ -32,25 +55,58 @@ local tostring_turtle = setmetatable({}, {
     end
 })
 
+function testjit(expected, func, ...)
+
+  jit.flush()
+
+  for i=1, 30 do
+  
+    local result = func(...)
+
+    assert(result == expected, string.format("expected %s got %s", expected, result)) 
+  end
+
+  --we assume the function doesn't call any lua functions that could throw this off
+  assert(jit_util.traceinfo(1), "no traced was compiled for "..expected)
+
+  jit.flush()  
+end
+
+jit.off(testjit)
+require("jit.opt").start("hotloop=10")
+
 
 assert(testwrite("a") == "a")
 assert(buf:byte(1) == string.byte("a"))
 assert(#buf == 1)
 assert(testwrite("") == "")
 assert(#buf == 0)
+assert(testwrite("") == "")
+
+buf:clear()
+buf:writeln()
+assert(buf:tostring() == "\n")
+
+buf:clear()
+buf:writeln("a")
+assert(buf:tostring() == "a\n")
 
 assert(testwrite("bar") == "bar")
 assert(testwrite(1234567890) == "1234567890")
+testjit("1234567890", testwrite, "1234567890")
 assert(testwrite(tostringobj) == "tostring_result")
+
 assert(testwrite("foo", 2, "bar") == "foo2bar")
+testjit("foo2bar", testwrite, "foo", 2, "bar")
 
 assert(testformat("foo") == "foo")
 assert(testformat("") == "")
 assert(testformat("%s", "bar") == "bar")
+testjit("bar", testformat, "%s", "bar")
 assert(testformat("%s %s", "foo", tostringobj) == "foo tostring_result")
 
 print(buf)
-io.write("write buf test:",buf)
+io.write("\nwrite buf test:",buf)
 
 buf:clear()
 buf:rep("a", 3)

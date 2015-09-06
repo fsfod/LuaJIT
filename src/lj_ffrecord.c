@@ -182,6 +182,28 @@ static TRef recff_bufhdr(jit_State *J)
   return emitir(IRT(IR_BUFHDR, IRT_P32),
 		lj_ir_kptr(J, &J2G(J)->tmpbuf), IRBUFHDR_RESET);
 }
+static TRef recff_stringbuf(jit_State *J, RecordFFData *rd, int slot)
+{
+  TValue* o = &rd->argv[slot];
+  TRef tr = J->base[slot];
+
+  if (!tvisudata(o) || !udataV(o)->udtype == UDTYPE_STRING_BUF) {
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
+  }
+
+  tr = emitir(IRT(IR_FLOAD, IRT_U8), J->base[slot], IRFL_UDATA_UDTYPE);
+  emitir(IRTGI(IR_EQ), tr, lj_ir_kint(J, UDTYPE_STRING_BUF));
+
+  tr = emitir(IRT(IR_ADD, IRT_PTR), J->base[slot], lj_ir_kint(J, sizeof(GCudata)));
+
+  return tr;
+}
+
+static TRef recff_stringbufhdr(jit_State *J, RecordFFData *rd, int slot, int reset)
+{
+  TRef tr = recff_stringbuf(J, rd, slot);
+  return emitir(IRT(IR_BUFHDR, IRT_P32), tr, IRBUFHDR_STRBUF | (reset ? IRBUFHDR_RESET : IRBUFHDR_APPEND));
+}
 
 /* -- Base library fast functions ----------------------------------------- */
 
@@ -960,15 +982,22 @@ static void LJ_FASTCALL recff_string_find(jit_State *J, RecordFFData *rd)
 
 static void LJ_FASTCALL recff_string_format(jit_State *J, RecordFFData *rd)
 {
-  TRef trfmt = lj_ir_tostr(J, J->base[0]);
-  GCstr *fmt = argv2str(J, &rd->argv[0]);
-  int arg = 1;
+  int isstrbuf = rd->data == 1;
+  int arg = isstrbuf ? 2 : 1;
+  TRef trfmt = lj_ir_tostr(J, J->base[arg - 1]);
+  GCstr *fmt = argv2str(J, &rd->argv[arg - 1]);
   TRef hdr, tr;
   FormatState fs;
   SFormat sf;
   /* Specialize to the format string. */
   emitir(IRTG(IR_EQ, IRT_STR), trfmt, lj_ir_kstr(J, fmt));
-  tr = hdr = recff_bufhdr(J);
+
+  if (isstrbuf) {
+    tr = hdr = recff_stringbufhdr(J, rd, 0, 0);
+  } else {
+    tr = hdr = recff_bufhdr(J);
+  }
+
   lj_strfmt_init(&fs, strdata(fmt), fmt->len);
   while ((sf = lj_strfmt_parse(&fs)) != STRFMT_EOF) {  /* Parse format. */
     TRef tra = sf == STRFMT_LIT ? 0 : J->base[arg++];
@@ -1036,7 +1065,59 @@ static void LJ_FASTCALL recff_string_format(jit_State *J, RecordFFData *rd)
       return;
     }
   }
-  J->base[0] = emitir(IRT(IR_BUFSTR, IRT_STR), tr, hdr);
+
+  if (!isstrbuf){
+    J->base[0] = emitir(IRT(IR_BUFSTR, IRT_STR), tr, hdr);
+  } else {
+    emitir(IRT(IR_BUFTAIL, IRT_STR), tr, hdr); 
+  }
+}
+
+static void LJ_FASTCALL recff_stringbuf_write(jit_State *J, RecordFFData *rd)
+{
+  TRef tr, hdr;
+  int i = 1;
+  tr = hdr = recff_stringbufhdr(J, rd, 0, 0);
+
+  for (; J->base[i]; i++) {
+    TRef arg = J->base[i];
+
+    if (tref_isstr(arg)) {
+      tr = emitir(IRT(IR_BUFPUT, IRT_P32), tr, arg);
+    } else if (tref_isnumber(arg)) {
+      arg = emitir(IRT(IR_TOSTR, IRT_STR), arg, tref_isnum(arg) ? IRTOSTR_NUM : IRTOSTR_INT);
+      tr = emitir(IRT(IR_BUFPUT, IRT_P32), tr, arg);
+    } else {
+      /*TODO: appending other string buffers */
+      lj_trace_err(J, LJ_TRERR_BADTYPE);
+    }
+  }
+
+  /* append a newline when recording for writeln */
+  if (rd->data == 1) {
+    TRef newline = lj_ir_kstr(J, strV(&J->fn->c.upvalue[0]));
+    tr = emitir(IRT(IR_BUFPUT, IRT_P32), tr, newline);
+  }
+
+  emitir(IRT(IR_BUFTAIL, IRT_STR), tr, hdr);
+}
+
+static void LJ_FASTCALL recff_stringbuf_clear(jit_State *J, RecordFFData *rd)
+{
+  TRef hdr = recff_stringbufhdr(J, rd, 0, 1);
+  emitir(IRT(IR_USE, IRT_NIL), hdr, 0);
+}
+
+static void LJ_FASTCALL recff_stringbuf_tostring(jit_State *J, RecordFFData *rd)
+{
+  TRef hdr = recff_stringbufhdr(J, rd, 0, 0);
+  J->base[0] = emitir(IRT(IR_BUFSTR, IRT_STR), TREF_NIL, hdr);
+}
+
+static void LJ_FASTCALL recff_stringbuf_size(jit_State *J, RecordFFData *rd)
+{
+  TRef buf = recff_stringbuf(J, rd, 0);
+  J->base[0] = emitir(IRT(IR_BUFINFO, IRT_U32), buf, 1);
 }
 
 /* -- Table library fast functions ---------------------------------------- */
