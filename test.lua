@@ -81,7 +81,6 @@ assert(buf:byte(1) == string.byte("a"))
 assert(#buf == 1)
 assert(testwrite("") == "")
 assert(#buf == 0)
-assert(testwrite("") == "")
 
 buf:clear()
 buf:writeln()
@@ -135,6 +134,13 @@ assert(buf:equals(buf2))
 
 print("tests past")
 
+buf:clear()
+buf:write("return function(a) return a+1 end")
+local f, err = loadstring(buf)
+assert(f()(1) == 2)
+
+f, err = loadstring("return function(a) return a+1 end")
+assert(f()(1) == 2)
 
 
 
