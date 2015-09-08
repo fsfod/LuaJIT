@@ -182,7 +182,7 @@ static TRef recff_bufhdr(jit_State *J)
   return emitir(IRT(IR_BUFHDR, IRT_P32),
 		lj_ir_kptr(J, &J2G(J)->tmpbuf), IRBUFHDR_RESET);
 }
-static TRef recff_stringbuf(jit_State *J, RecordFFData *rd, int slot)
+static TRef loadstringbuf(jit_State *J, RecordFFData *rd, int slot)
 {
   TValue* o = &rd->argv[slot];
   TRef tr = J->base[slot];
@@ -201,7 +201,7 @@ static TRef recff_stringbuf(jit_State *J, RecordFFData *rd, int slot)
 
 static TRef recff_stringbufhdr(jit_State *J, RecordFFData *rd, int slot, int reset)
 {
-  TRef tr = recff_stringbuf(J, rd, slot);
+  TRef tr = loadstringbuf(J, rd, slot);
   return emitir(IRT(IR_BUFHDR, IRT_P32), tr, IRBUFHDR_STRBUF | (reset ? IRBUFHDR_RESET : IRBUFHDR_APPEND));
 }
 
@@ -982,7 +982,7 @@ static void LJ_FASTCALL recff_string_find(jit_State *J, RecordFFData *rd)
 
 static void LJ_FASTCALL recff_string_format(jit_State *J, RecordFFData *rd)
 {
-  int isstrbuf = rd->data == 1;
+  int isstrbuf = rd->data;
   int arg = isstrbuf ? 2 : 1;
   TRef trfmt = lj_ir_tostr(J, J->base[arg - 1]);
   GCstr *fmt = argv2str(J, &rd->argv[arg - 1]);
@@ -1003,6 +1003,7 @@ static void LJ_FASTCALL recff_string_format(jit_State *J, RecordFFData *rd)
     TRef tra = sf == STRFMT_LIT ? 0 : J->base[arg++];
     TRef trsf = lj_ir_kint(J, (int32_t)sf);
     IRCallID id;
+    int bufarg = 0;
     switch (STRFMT_TYPE(sf)) {
     case STRFMT_LIT:
       tr = emitir(IRT(IR_BUFPUT, IRT_P32), tr,
@@ -1039,16 +1040,24 @@ static void LJ_FASTCALL recff_string_format(jit_State *J, RecordFFData *rd)
       if (LJ_SOFTFP) lj_needsplit(J);
       break;
     case STRFMT_STR:
-      if (!tref_isstr(tra)) {
+      if (tref_isudata(tra) && udataV(&rd->argv[arg-1])->udtype == UDTYPE_STRING_BUF) {
+        tra = loadstringbuf(J, rd, arg - 1);
+        bufarg = 1;
+      }else if (!tref_isstr(tra) ) {
 	recff_nyiu(J, rd);  /* NYI: __tostring and non-string types for %s. */
 	return;
       }
-      if (sf == STRFMT_STR)  /* Shortcut for plain %s. */
-	tr = emitir(IRT(IR_BUFPUT, IRT_P32), tr, tra);
-      else if ((sf & STRFMT_T_QUOTED))
-	tr = lj_ir_call(J, IRCALL_lj_strfmt_putquoted, tr, tra);
+
+      if (sf == STRFMT_STR) {  /* Shortcut for plain %s. */
+        if (bufarg) {
+          tr = lj_ir_call(J, IRCALL_lj_buf_putbuf, tr, tra);
+        } else {
+          tr = emitir(IRT(IR_BUFPUT, IRT_P32), tr, tra);
+        }
+      } else if ((sf & STRFMT_T_QUOTED))
+	tr = lj_ir_call(J, IRCALL_lj_strfmt_putquotedstr + bufarg, tr, tra);
       else
-	tr = lj_ir_call(J, IRCALL_lj_strfmt_putfstr, tr, trsf, tra);
+	tr = lj_ir_call(J, IRCALL_lj_strfmt_putfstr + bufarg, tr, trsf, tra);
       break;
     case STRFMT_CHAR:
       tra = lj_opt_narrow_toint(J, tra);

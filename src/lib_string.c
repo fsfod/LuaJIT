@@ -29,12 +29,14 @@
 
 #define tvisstrbuf(o) (tvisudata(o) && udataV(o)->udtype == UDTYPE_STRING_BUF)
 
+#define udstrbufV(o) ((SBuf *)uddata(udataV(o)))
+
 static SBuf *check_bufarg(lua_State *L)
 {
   if (!(L->base < L->top && tvisstrbuf(L->base)))
     lj_err_argtype(L, 1, "string buffer");
 
-  return (SBuf *)uddata(udataV(L->base));
+  return udstrbufV(L->base);
 }
 
 SBuf *stringbuf_putobj_default(SBuf *sb, cTValue *o)
@@ -742,11 +744,15 @@ static GCstr *string_fmt_tostring(lua_State *L, int arg, int retry)
     lua_call(L, 1, 1);
     copyTV(L, L->base+arg-1, --L->top);
     o = L->base + arg - 1;
-    if (retry == -1 && tvisstr(o))
-      return strV(o); /* Caller is not using the temp buffer */
-    else
+    
+    if (retry != -1)
       return NULL;  /* Buffer may be overwritten, retry. */
+
+    /* Caller is not using the temp buffer so we can keep going */
+    if (tvisstr(o))
+      return strV(o);
   }
+
   return lj_strfmt_obj(L, o);
 }
 
@@ -806,29 +812,38 @@ again:
 	lj_strfmt_putfnum(sb, sf, lj_lib_checknum(L, arg));
 	break;
       case STRFMT_STR: {
-	GCstr *str;
+        const char *s;
+        MSize len;
 
-        if (isstrbuf) {
-          MSize bufpos = sbuflen(sb);
-          /* tostring metamethod could throw so restore our buffer its original length so theres not our half written string */
-          setsbufofs(sb, savedbufpos);
-          str = string_fmt_tostring(L, arg, retry);
-          setsbufofs(sb, bufpos);
+        if (!tvisstrbuf(L->base + arg - 1)) {
+          GCstr *str;
 
-          if (str == NULL) {
-            /* use the default tostring if tostring metamethod didn't return us a string*/
-            str = string_fmt_tostring(L, arg, 2);
+          if (isstrbuf) {
+            MSize bufpos = sbuflen(sb);
+            /* tostring metamethod could throw so restore our buffer its original length so theres not our half written string */
+            setsbufofs(sb, savedbufpos);
+            str = string_fmt_tostring(L, arg, retry);
+            setsbufofs(sb, bufpos);
+
+          } else {
+            str = string_fmt_tostring(L, arg, retry);
+            if (str == NULL) {
+              retry = 1;
+              break;
+            }
           }
+          s = strdata(str);
+          len = str->len;
         } else {
-          str = string_fmt_tostring(L, arg, retry);
+          SBuf *sbsrc = udstrbufV(L->base + arg - 1);
+          s = sbufB(sbsrc);
+          len = sbuflen(sbsrc);
         }
 
-	if (str == NULL)
-	  retry = 1;
-	else if ((sf & STRFMT_T_QUOTED))
-	  lj_strfmt_putquoted(sb, str);  /* No formatting. */
+	if ((sf & STRFMT_T_QUOTED))
+	  lj_strfmt_putquoted(sb, s, len);  /* No formatting. */
 	else
-	  lj_strfmt_putfstr(sb, sf, str);
+	  lj_strfmt_putf(sb, sf, s, len);
 	break;
 	}
       case STRFMT_CHAR:

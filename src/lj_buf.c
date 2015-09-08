@@ -96,6 +96,15 @@ SBuf * LJ_FASTCALL lj_buf_putstr(SBuf *sb, GCstr *s)
   return sb;
 }
 
+SBuf * LJ_FASTCALL lj_buf_putbuf(SBuf *sb, SBuf *sb2)
+{
+  MSize len = sbuflen(sb2);
+  char *p = lj_buf_more(sb, len);
+  p = lj_buf_wmem(p, sbufB(sb2), len);
+  setsbufP(sb, p);
+  return sb;
+}
+
 /* -- High-level buffer put operations ------------------------------------ */
 
 SBuf * LJ_FASTCALL lj_buf_putstr_reverse(SBuf *sb, GCstr *s)
