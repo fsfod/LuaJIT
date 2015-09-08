@@ -914,7 +914,6 @@ LJLIB_CF(stringbuf_write) LJLIB_REC(stringbuf_write 0)
   return 0;
 }
 
-LJLIB_PUSH("\n")
 LJLIB_CF(stringbuf_writeln) LJLIB_REC(stringbuf_write 1)
 {
   SBuf *sb = stringbuf_write(L);

@@ -1095,8 +1095,7 @@ static void LJ_FASTCALL recff_stringbuf_write(jit_State *J, RecordFFData *rd)
 
   /* append a newline when recording for writeln */
   if (rd->data == 1) {
-    TRef newline = lj_ir_kstr(J, strV(&J->fn->c.upvalue[0]));
-    tr = emitir(IRT(IR_BUFPUT, IRT_P32), tr, newline);
+    tr = lj_ir_call(J, IRCALL_lj_buf_putchar, tr, lj_ir_kint(J, (int)'\n'));
   }
 
   emitir(IRT(IR_BUFTAIL, IRT_STR), tr, hdr);
