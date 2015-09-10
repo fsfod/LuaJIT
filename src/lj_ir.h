@@ -235,7 +235,8 @@ IRFLDEF(FLENUM)
 /* BUFHDR mode, stored in op2. */
 #define IRBUFHDR_RESET		0	/* Reset buffer. */
 #define IRBUFHDR_APPEND		1	/* Append to buffer. */
-#define IRBUFHDR_STRBUF         2       /* buffer is a string buffer. */
+#define IRBUFHDR_MODEMASK       3 
+#define IRBUFHDR_STRBUF         4       /* buffer is a userdata string buffer. */
 
 /* CONV mode, stored in op2. */
 #define IRCONV_SRCMASK		0x001f	/* Source IRType. */

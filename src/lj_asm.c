@@ -1041,7 +1041,7 @@ static void asm_tvptr(ASMState *as, Reg dest, IRRef ref);
 static void asm_bufhdr(ASMState *as, IRIns *ir)
 {
   Reg sb = ra_dest(as, ir, RSET_GPR);
-  if ((ir->op2 & IRBUFHDR_APPEND)) {
+  if ((ir->op2 & IRBUFHDR_MODEMASK) == IRBUFHDR_APPEND) {
     /* Rematerialize const buffer pointer instead of likely spill. */
     IRIns *irp = IR(ir->op1);
     if (!(ir->op2 & IRBUFHDR_STRBUF) && !(ra_hasreg(irp->r) || irp == ir-1 ||

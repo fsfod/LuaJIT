@@ -175,6 +175,30 @@ buf2:clear()
 buf2:write("beginfoo2bar")
 assert(buf:equals(buf2))
 
+-- Test folding a BUFSTR with the target being the tmp buffer LJFOLD(BUFPUT any BUFSTR)
+function tmpstr_fold(base, a1, a2) 
+    local tempstr = a1.."_".. a2
+    buf:clear()
+    buf:write(base, tempstr)
+    
+    return (buf:tostring())
+end
+
+testjit("foo1234_5678", tmpstr_fold, "foo", "1234", "5678")
+
+function tmpstr_nofold(base, a1, a2)
+    local temp1 = a1.."_".. a2
+    temp2 = a2.."_"..a1
+    
+    buf:clear()
+    buf:write(base, temp1)
+    
+    return (buf:tostring())
+end
+
+testjit("foo123_456", tmpstr_nofold, "foo", "123", "456")
+asserteq(temp2,  "456_123")
+
 print("tests past")
 
 buf:clear()
