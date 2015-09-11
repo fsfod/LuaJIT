@@ -65,6 +65,19 @@ function testformat(a1, a2, a3, a4)
     return (buf:tostring())
 end
 
+function testwritesub(base, s, ofs, len)
+    buf:clear()
+    buf:write(base)
+    
+    if(len == nil) then
+      buf:writesub(s, ofs)
+    else
+      buf:writesub(s, ofs, len)
+    end
+    
+    return (buf:tostring())
+end
+
 local tostringobj = setmetatable({}, {
     __tostring = function(self) 
         return "tostring_result"
@@ -131,6 +144,13 @@ asserteq(testwrite(tostringobj), "tostring_result")
 asserteq(testwrite("foo", 2, "bar"), "foo2bar")
 testjit("foo2bar", testwrite, "foo", 2, "bar")
 
+asserteq(testwritesub("n", "01234567", 2), "n1234567")
+asserteq(testwritesub("n", "01234567", -2), "n67")
+asserteq(testwritesub("n", "01234567", 2, -3), "n12345")
+--check overflow clamping
+asserteq(testwritesub("n", "01234567", 2, 20), "n1234567")
+asserteq(testwritesub("n", "01234567", -20, 8), "n01234567")
+
 asserteq(testformat("foo"), "foo")
 asserteq(testformat(""), "")
 asserteq(testformat("%s", "bar"), "bar")
@@ -138,11 +158,14 @@ asserteq(testformat("%s", "bar"), "bar")
 asserteq(testformat("%.2s", "bar"), "ba")
 asserteq(testformat("%-4s_%5s", "foo", "bar"), "foo _  bar")
 testjit("bar", testformat, "%s", "bar")
+testjit("\"\\0bar\\0\"", testformat, "%q", "\0bar\0")
 
 clear_write(buf2, "foo")
 asserteq(testformat(" %s ", buf2), " foo ")
 asserteq(testformat("_%-5s", buf2), "_foo  ")
 testjit(" foo ", testformat, " %s ", buf2)
+clear_write(buf2, "\0bar\0")
+testjit("\"\\0bar\\0\"", testformat, "%q", buf2)
 
 testjit("bar,120, foo", testformat, "%s,%d, %s", "bar", 120, "foo")
 asserteq(testformat("%s %s", "foo", tostringobj), "foo tostring_result")

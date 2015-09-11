@@ -27,8 +27,6 @@
 #include "lj_strfmt.h"
 #include "lj_lib.h"
 
-#define tvisstrbuf(o) (tvisudata(o) && udataV(o)->udtype == UDTYPE_STRING_BUF)
-
 #define udstrbufV(o) ((SBuf *)uddata(udataV(o)))
 
 static SBuf *check_bufarg(lua_State *L)
@@ -936,6 +934,31 @@ LJLIB_CF(stringbuf_writeln) LJLIB_REC(stringbuf_write 1)
   return 0;
 }
 
+static int32_t posrelat(int32_t pos, MSize len)
+{
+  /* relative string position: negative means back from end */
+  if (pos < 0) pos += len + 1;
+  return (pos >= 0) ? pos : 0;
+}
+
+LJLIB_CF(stringbuf_writesub)
+{
+  MSize len;
+  SBuf *sb = check_bufarg(L);
+  const char *s = lj_lib_checkstrorbuf(L, 2, &len);
+  int32_t start = posrelat(lj_lib_checkint(L, 3), len);
+  int32_t end = posrelat(lj_lib_optint(L, 4, -1), len);
+
+  if (start < 1) start = 1;
+  if (end > (int32_t)len) end = (int32_t)len;
+
+  if (start <= end) {
+    lj_buf_putmem(sb, s+start-1, end-start+1);
+  }
+
+  return 0;
+}
+
 LJLIB_CF(stringbuf_rep)
 {
   return string_rep(L, 1);
@@ -959,17 +982,10 @@ LJLIB_CF(stringbuf_byte)
   return 1;
 }
 
-LJLIB_CF(stringbuf_tostring) LJLIB_REC(.)
-{
-  SBuf *sb = check_bufarg(L);
-  setstrV(L, L->top - 1, lj_buf_str(L, sb));
-  return 1;
-}
-
 LJLIB_CF(stringbuf_getcapacity)
 {
   SBuf *sb = check_bufarg(L);
-  setintptrV(L->top - 1, sbufsz(sb));
+  setintV(L->top - 1, sbufsz(sb));
   return 1;
 }
 
@@ -980,6 +996,11 @@ LJLIB_CF(stringbuf_setcapacity)
 
   if (capacity < 0) {
     lj_err_arg(L, 1, LJ_ERR_BADVAL);
+  }
+
+  if (capacity == 0) {
+    lj_buf_free(G(L), sb);
+    lj_buf_init(L, sb);
   }
 
   if ((MSize)capacity > sbufsz(sb)) {
@@ -993,19 +1014,13 @@ LJLIB_CF(stringbuf_setcapacity)
 
 LJLIB_CF(stringbuf_equals)
 {
+  MSize len;
   SBuf *sb = check_bufarg(L);
-  TValue *other = lj_lib_checkany(L, 2);
-  int result = 0;
-  
-  if (tvisstrbuf(other)) {
-    SBuf *sb2 = (SBuf *)uddata(udataV(other)); 
-    result = sbuflen(sb) == sbuflen(sb2) && strncmp(sbufB(sb), sbufB(sb2), sbuflen(sb)) == 0;
-  } else if (tvisstr(other)) {
-    GCstr *s = strV(other);
-    result = s->len == sbuflen(sb) && strncmp(strdata(s), sbufB(sb), s->len) == 0;
-  }
+  const char* s = lj_lib_checkstrorbuf(L, 2, &len);
 
-  setboolV(L->top - 1, result);
+  int eq = len == sbuflen(sb) && strncmp(s, sbufB(sb), len) == 0;
+  setboolV(L->top - 1, eq);
+
   return 1;
 }
 
@@ -1016,14 +1031,11 @@ LJLIB_CF(stringbuf_clear) LJLIB_REC(.)
   return 0;
 }
 
-LJLIB_CF(stringbuf___gc)
+LJLIB_CF(stringbuf_tostring) LJLIB_REC(.)
 {
   SBuf *sb = check_bufarg(L);
-  lj_buf_free(G(L), sb);
-  /* make sure */
-  setmref(sb->p, NULL); setmref(sb->e, NULL); setmref(sb->b, NULL);
-
-  return 0;
+  setstrV(L, L->top - 1, lj_buf_str(L, sb));
+  return 1;
 }
 
 LJLIB_CF(stringbuf___tostring) LJLIB_REC(stringbuf_tostring)
@@ -1038,6 +1050,16 @@ LJLIB_CF(stringbuf___len)
   SBuf *sb = check_bufarg(L);
   setintptrV(L->top - 1, sbuflen(sb));
   return 1;
+}
+
+LJLIB_CF(stringbuf___gc)
+{
+  SBuf *sb = check_bufarg(L);
+  lj_buf_free(G(L), sb);
+  /* make sure */
+  setmref(sb->p, NULL); setmref(sb->e, NULL); setmref(sb->b, NULL);
+
+  return 0;
 }
 
 

@@ -767,6 +767,7 @@ typedef union GCobj {
 #define tvispri(o)	(itype(o) >= LJ_TISPRI)
 #define tvistabud(o)	(itype(o) <= LJ_TISTABUD)  /* && !tvisnum() */
 #define tvisgcv(o)	((itype(o) - LJ_TISGCV) > (LJ_TNUMX - LJ_TISGCV))
+#define tvisstrbuf(o)   (tvisudata(o) && udataV(o)->udtype == UDTYPE_STRING_BUF)
 
 /* Special macros to test numbers for NaN, +0, -0, +1 and raw equality. */
 #define tvisnan(o)	((o)->n != (o)->n)
