@@ -295,8 +295,10 @@
     <Item Name="Exit or Parent Trace">((GCtrace**)trace)[parent]</Item>
     <Item Name="Exit Number">exitno,i</Item>
     <Item Name="Start Instruction">(BCOp)(cur.startins&amp;0xff)</Item>
-    
     <Item Name="Lua State">L</Item>
+    <Item Name="Fold Ins">fold.ins</Item>
+    <Item Name="Fold Left">fold.left</Item>
+    <Item Name="Fold Right">fold.right</Item>
     
     <Synthetic Name="IR Byte Code">
       <DisplayString>[size] = {cur.nins-0x8000,i}</DisplayString>
