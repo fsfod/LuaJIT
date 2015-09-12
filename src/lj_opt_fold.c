@@ -580,16 +580,93 @@ LJFOLDF(bufput_kgc)
 LJFOLD(BUFPUT any BUFSTR)
 LJFOLDF(bufput_fromtempbuf)
 {
-  IRRef ref, limit;
+  IRRef ref, limit, chainstart = 0;
+  IRIns *ir;
+  int chainsize = 0;
+  IRRef1 bufchain[12];
 
   /* Only try to fold the string allocation if its from the temp buffer */
   if ((IR(fright->op2)->op2&IRBUFHDR_STRBUF) || LJ_UNLIKELY((J->flags & JIT_F_OPT_FOLD) == 0)) {
     return EMITFOLD;
   }
 
+  ref = fins->op1;
+
+  while (IR(ref)->o != IR_BUFHDR) {
+    ref = IR(ref)->op1;
+  }
+
+  if ((IR(ref)->op2&IRBUFHDR_STRBUF) == 8) {
+    return EMITFOLD;
+  }
+
+  ref = fright->op1; /* buf chain end */
+
+  for (; ref > REF_BASE; ) {
+    IRIns *ir = IR(ref);
+
+    if (ir->o == IR_CALLL) {
+      switch (ir->op2) {
+        case IRCALL_lj_strfmt_putfxint:
+        case IRCALL_lj_strfmt_putfnum_int:
+        case IRCALL_lj_strfmt_putfnum_uint:
+        case IRCALL_lj_strfmt_putfnum:
+        case IRCALL_lj_strfmt_putfstr:
+        case IRCALL_lj_strfmt_putfchar:
+          break;
+
+        case IRCALL_lj_buf_putbuf:
+        case IRCALL_lj_buf_puttab:
+        default:
+          chainsize = -1;
+        break;
+      }
+    } else if (ir->o == IR_BUFPUT) {
+      IRIns *putval = IR(ir->op2);
+
+      switch (putval->o) {
+        case IR_TOSTR:
+          if (irref_isk(putval->op1) || IR(putval->op1)->op1)
+            break;
+
+        case IR_KGC:
+        case IR_SLOAD:
+          lua_assert(irt_type(putval->t) == IRT_STR);
+          break;
+
+        default:
+          break;
+      }
+    } else if (ir->o == IR_BUFHDR) {
+      break;
+    }
+
+    if (chainsize == -1) {
+        break;
+    }
+
+    bufchain[chainsize++] = ref;
+    ref = ir->op1;
+  }
+
+  if (chainsize > 0) {
+    TRef prev, tr = fins->op1;
+    int i;
+
+    for (i = chainsize-1; i >= 0 ; i--) {
+      IRIns *putval;
+      ir = IR(bufchain[i]);
+
+      tr = emitir(ir->ot, tr, ir->op2);
+    }
+
+    return tr;
+  }
+
+  /* fallback to just trying to copy the buffer */
   limit = fins->op2;
   ref = J->chain[IR_BUFHDR];
-
+ 
   /* Try to find another temp buffer use after the BUFSTR */
   while (ref > limit) {
     IRIns *ir = IR(ref);
