@@ -1078,7 +1078,7 @@ static void LJ_FASTCALL recff_string_format(jit_State *J, RecordFFData *rd)
   if (!isstrbuf){
     J->base[0] = emitir(IRT(IR_BUFSTR, IRT_STR), tr, hdr);
   } else {
-    emitir(IRT(IR_BUFTAIL, IRT_STR), tr, hdr); 
+    emitir(IRT(IR_BUFTAIL, IRT_P32), tr, hdr);
   }
 }
 
@@ -1107,7 +1107,7 @@ static void LJ_FASTCALL recff_stringbuf_write(jit_State *J, RecordFFData *rd)
     tr = lj_ir_call(J, IRCALL_lj_buf_putchar, tr, lj_ir_kint(J, (int)'\n'));
   }
 
-  emitir(IRT(IR_BUFTAIL, IRT_STR), tr, hdr);
+  emitir(IRT(IR_BUFTAIL, IRT_P32), tr, hdr);
 }
 
 static void LJ_FASTCALL recff_stringbuf_clear(jit_State *J, RecordFFData *rd)
