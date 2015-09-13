@@ -641,7 +641,8 @@ LJFOLDF(bufput_fromtempbuf)
       break;
     }
 
-    if (chainsize == -1) {
+    if (chainsize == -1 || chainsize == 12) {
+        chainsize = -1;
         break;
     }
 
@@ -677,7 +678,7 @@ LJFOLDF(bufput_fromtempbuf)
     ref = ir->prev;
   }
 
-  return lj_ir_call(J, IRCALL_lj_buf_putbuf, fins->op1, fright->op1); /* Clobbers fins! */
+  return lj_ir_call(J, IRCALL_lj_buf_putbuf, fins->op1, fright->op1); 
 }
 
 LJFOLD(BUFSTR any any)
