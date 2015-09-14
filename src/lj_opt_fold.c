@@ -651,11 +651,10 @@ LJFOLDF(bufput_fromtempbuf)
   }
 
   if (chainsize > 0) {
-    TRef prev, tr = fins->op1;
+    TRef tr = fins->op1;
     int i;
 
     for (i = chainsize-1; i >= 0 ; i--) {
-      IRIns *putval;
       ir = IR(bufchain[i]);
 
       tr = emitir(ir->ot, tr, ir->op2);

@@ -1163,8 +1163,8 @@ static void LJ_FASTCALL recff_stringbuf_tostring(jit_State *J, RecordFFData *rd)
 
 static void LJ_FASTCALL recff_stringbuf_size(jit_State *J, RecordFFData *rd)
 {
-  TRef buf = recff_stringbuf(J, rd, 0);
-  J->base[0] = emitir(IRT(IR_BUFINFO, IRT_U32), buf, 1);
+  TRef buf = loadstringbuf(J, rd, 0);
+ // J->base[0] = emitir(IRT(IR_BUFINFO, IRT_U32), buf, 1);
 }
 
 /* -- Table library fast functions ---------------------------------------- */
