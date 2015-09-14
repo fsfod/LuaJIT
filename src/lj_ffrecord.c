@@ -1110,6 +1110,31 @@ static void LJ_FASTCALL recff_stringbuf_write(jit_State *J, RecordFFData *rd)
   emitir(IRT(IR_BUFTAIL, IRT_P32), tr, hdr);
 }
 
+static void LJ_FASTCALL recff_stringbuf_writerange(jit_State *J, RecordFFData *rd)
+{
+  TRef hdr = recff_stringbufhdr(J, rd, 0, 0);
+  TRef str = J->base[1];
+  TRef trstart = lj_opt_narrow_toint(J, J->base[2]);
+  TRef trend = J->base[3];
+  TRef tr;
+
+  if (!tref_isnil(trend)) {
+    trend = lj_opt_narrow_toint(J, trend);
+  } else {
+    trend = lj_ir_kint(J, -1);
+  }
+
+  if (tref_isstr(str)) {
+    TRef sptr = emitir(IRT(IR_STRREF, IRT_P32), str, lj_ir_kint(J, 0));
+    tr = lj_ir_call(J, IRCALL_lj_buf_putstr_range, hdr, str, trstart, trend);
+  } else {
+    str = loadstringbuf(J, rd, 1);
+    tr = lj_ir_call(J, IRCALL_lj_buf_putbuf_range, hdr, str, trstart, trend);
+  }
+
+  emitir(IRT(IR_BUFTAIL, IRT_P32), tr, hdr);
+ }
+
 static void LJ_FASTCALL recff_stringbuf_clear(jit_State *J, RecordFFData *rd)
 {
   TRef hdr = recff_stringbufhdr(J, rd, 0, 1);

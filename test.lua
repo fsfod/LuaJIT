@@ -144,12 +144,21 @@ asserteq(testwrite(tostringobj), "tostring_result")
 asserteq(testwrite("foo", 2, "bar"), "foo2bar")
 testjit("foo2bar", testwrite, "foo", 2, "bar")
 
-asserteq(testwritesub("n", "01234567", 2), "n1234567")
-asserteq(testwritesub("n", "01234567", -2), "n67")
-asserteq(testwritesub("n", "01234567", 2, -3), "n12345")
---check overflow clamping
-asserteq(testwritesub("n", "01234567", 2, 20), "n1234567")
-asserteq(testwritesub("n", "01234567", -20, 8), "n01234567")
+--test writing a sub string
+testjit("n1234567", testwritesub, "n", "01234567", 2)
+testjit("n67",      testwritesub, "n", "01234567", -2)
+testjit("n12345",   testwritesub, "n", "01234567", 2, -3)
+
+--test writing a sub string where the source is another buffer
+clear_write(buf2, "01234567")
+
+testjit("n1234567", testwritesub, "n", buf2, 2)
+testjit("n67",      testwritesub, "n", buf2, -2)
+testjit("n12345",   testwritesub, "n", buf2, 2, -3)
+
+----check overflow clamping
+testjit("n1234567", testwritesub, "n", "01234567", 2, 20)
+testjit("n01234567", testwritesub, "n", "01234567", -20, 8)
 
 asserteq(testformat("foo"), "foo")
 asserteq(testformat(""), "")

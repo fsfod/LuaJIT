@@ -935,27 +935,15 @@ LJLIB_CF(stringbuf_writeln) LJLIB_REC(stringbuf_write 1)
   return 0;
 }
 
-static int32_t posrelat(int32_t pos, MSize len)
-{
-  /* relative string position: negative means back from end */
-  if (pos < 0) pos += len + 1;
-  return (pos >= 0) ? pos : 0;
-}
-
-LJLIB_CF(stringbuf_writesub)
+LJLIB_CF(stringbuf_writesub) LJLIB_REC(stringbuf_writerange)
 {
   MSize len;
   SBuf *sb = check_bufarg(L);
   const char *s = lj_lib_checkstrorbuf(L, 2, &len);
-  int32_t start = posrelat(lj_lib_checkint(L, 3), len);
-  int32_t end = posrelat(lj_lib_optint(L, 4, -1), len);
+  int32_t start = lj_lib_checkint(L, 3);
+  int32_t end = lj_lib_optint(L, 4, -1);
 
-  if (start < 1) start = 1;
-  if (end > (int32_t)len) end = (int32_t)len;
-
-  if (start <= end) {
-    lj_buf_putmem(sb, s+start-1, end-start+1);
-  }
+  lj_buf_putrang(sb, s, len, start, end);
 
   return 0;
 }

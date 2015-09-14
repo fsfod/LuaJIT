@@ -105,6 +105,40 @@ SBuf * LJ_FASTCALL lj_buf_putbuf(SBuf *sb, SBuf *sb2)
   return sb;
 }
 
+static LJ_AINLINE int32_t posrelat(int32_t pos, MSize len)
+{
+  /* relative string position: negative means back from end */
+  if (pos < 0) pos += len + 1;
+  return (pos >= 0) ? pos : 0;
+}
+
+SBuf *lj_buf_putrang(SBuf *sb, const char* s, MSize len, int32_t start, int32_t end)
+{
+  start = posrelat(start, len);
+  end = posrelat(end, len);
+
+  if (start < 1) start = 1;
+  if (end > (int32_t)len) end = (int32_t)len;
+
+  if (start <= end) {
+    lj_buf_putmem(sb, s + start - 1, end - start + 1);
+  }
+
+  return sb;
+}
+
+SBuf *lj_buf_putbuf_range(SBuf *sb, SBuf *sbsrc, int32_t start, int32_t end)
+{
+  lj_buf_putrang(sb, sbufB(sbsrc), sbuflen(sbsrc), start, end);
+  return sb;
+}
+
+SBuf *lj_buf_putstr_range(SBuf *sb, GCstr *s, int32_t start, int32_t end)
+{
+  lj_buf_putrang(sb, strdata(s), s->len, start, end);
+  return sb;
+}
+
 /* -- High-level buffer put operations ------------------------------------ */
 
 SBuf * LJ_FASTCALL lj_buf_putstr_reverse(SBuf *sb, GCstr *s)
