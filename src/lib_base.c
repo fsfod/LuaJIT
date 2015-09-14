@@ -401,7 +401,7 @@ LJLIB_CF(load)
 
     if (tvisudata(L->base) && udataV(L->base)->udtype == UDTYPE_STRING_BUF) {
       SBuf *sb = (SBuf*)uddata(udataV(L->base));
-      lj_buf_more(sb, 1)[1] = 0;/* set a null terminator in case were used for the name */
+      lj_buf_nullterm(sb);/* set a null terminator in case were used for the name */
       p = sbufB(sb);
       len = sbuflen(sb);
     } else {

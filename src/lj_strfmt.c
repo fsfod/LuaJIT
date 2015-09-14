@@ -249,6 +249,7 @@ SBuf * LJ_FASTCALL lj_strfmt_putquotedstr(SBuf *sb, GCstr *str)
 
 SBuf * LJ_FASTCALL lj_strfmt_putquotedbuf(SBuf *sb, SBuf *sb2)
 {
+  lj_buf_nullterm(sb2);
   return lj_strfmt_putquoted(sb, sbufB(sb2), sbuflen(sb2));
 }
 

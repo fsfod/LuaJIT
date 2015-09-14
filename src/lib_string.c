@@ -834,8 +834,9 @@ again:
           len = str->len;
         } else {
           SBuf *sbsrc = udstrbufV(L->base + arg - 1);
-          s = sbufB(sbsrc);
           len = sbuflen(sbsrc);
+          lj_buf_nullterm(sbsrc); /* add fake null terminator since lj_strfmt_putquoted relies on it */
+          s = sbufB(sbsrc);
         }
 
 	if ((sf & STRFMT_T_QUOTED))
