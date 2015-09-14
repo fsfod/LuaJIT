@@ -78,6 +78,18 @@ function testwritesub(base, s, ofs, len)
     return (buf:tostring())
 end
 
+function testrep(s, rep, sep)
+    buf:clear()
+    
+    if(sep == nil) then
+      buf:rep(s, rep)
+    else
+      buf:rep(s, rep, sep)
+    end
+    
+    return (buf:tostring())
+end
+
 local tostringobj = setmetatable({}, {
     __tostring = function(self) 
         return "tostring_result"
@@ -105,7 +117,7 @@ function testjit(expected, func, ...)
     local result = func(...)
 
     if (result ~= expected) then 
-      error("expected \""..expected.."\" but got \""..result.."\"", 2)
+      error("expected \""..expected.."\" but got \""..result.."\"".. ((jit_util.traceinfo(1) and " JITed") or " Interpreted"), 2)
     end
   end
 
@@ -144,6 +156,9 @@ asserteq(testwrite(tostringobj), "tostring_result")
 asserteq(testwrite("foo", 2, "bar"), "foo2bar")
 testjit("foo2bar", testwrite, "foo", 2, "bar")
 
+--testjit("aaa", testrep, "a", 3) 
+--testjit("a,a,a", testrep, "a", 3, ",")
+
 --test writing a sub string
 testjit("n1234567", testwritesub, "n", "01234567", 2)
 testjit("n67",      testwritesub, "n", "01234567", -2)
@@ -173,6 +188,7 @@ clear_write(buf2, "foo")
 asserteq(testformat(" %s ", buf2), " foo ")
 asserteq(testformat("_%-5s", buf2), "_foo  ")
 testjit(" foo ", testformat, " %s ", buf2)
+
 clear_write(buf2, "\0bar\0")
 testjit("\"\\0bar\\0\"", testformat, "%q", buf2)
 

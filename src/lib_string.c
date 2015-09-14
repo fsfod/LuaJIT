@@ -186,7 +186,7 @@ static int string_rep(lua_State *L, int isstrbuf)
   return 1;
 }
 
-LJLIB_CF(string_rep)		LJLIB_REC(.)
+LJLIB_CF(string_rep)		LJLIB_REC(string_rep 0)
 {
   return string_rep(L, 0);
 }
@@ -948,7 +948,7 @@ LJLIB_CF(stringbuf_writesub) LJLIB_REC(stringbuf_writerange)
   return 0;
 }
 
-LJLIB_CF(stringbuf_rep)
+LJLIB_CF(stringbuf_rep) LJLIB_REC(string_rep 1)
 {
   return string_rep(L, 1);
 }
