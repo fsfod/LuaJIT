@@ -127,6 +127,7 @@
   _(BUFTAIL,    S , ref, ref) \
   _(BUFPUT,	L , ref, ref) \
   _(BUFSTR,	A , ref, ref) \
+  _(BUFINFO,	L , ref, lit) \
   \
   /* Barriers. */ \
   _(TBAR,	S , ref, ___) \
@@ -206,6 +207,8 @@ IRFPMDEF(FPMENUM)
   _(UDATA_META,	offsetof(GCudata, metatable)) \
   _(UDATA_UDTYPE, offsetof(GCudata, udtype)) \
   _(UDATA_FILE,	sizeof(GCudata)) \
+  _(SBUF_B,     sizeof(GCcdata)+ offsetof(SBuf, b)) \
+  _(SBUF_P,     sizeof(GCcdata)+ offsetof(SBuf, p)) \
   _(CDATA_CTYPEID, offsetof(GCcdata, ctypeid)) \
   _(CDATA_PTR,	sizeof(GCcdata)) \
   _(CDATA_INT, sizeof(GCcdata)) \
@@ -235,8 +238,9 @@ IRFLDEF(FLENUM)
 /* BUFHDR mode, stored in op2. */
 #define IRBUFHDR_RESET		0	/* Reset buffer. */
 #define IRBUFHDR_APPEND		1	/* Append to buffer. */
-#define IRBUFHDR_MODEMASK       3 
-#define IRBUFHDR_STRBUF         4       /* buffer is a userdata string buffer. */
+#define IRBUFHDR_MODIFY         2       /* Direct modification to buffer. barrier to folding two separate chains for the same buffer */
+#define IRBUFHDR_MODEMASK       7 
+#define IRBUFHDR_STRBUF         8       /* buffer is a userdata string buffer. */
 
 /* CONV mode, stored in op2. */
 #define IRCONV_SRCMASK		0x001f	/* Source IRType. */

@@ -199,10 +199,10 @@ static TRef loadstringbuf(jit_State *J, RecordFFData *rd, int slot)
   return tr;
 }
 
-static TRef recff_stringbufhdr(jit_State *J, RecordFFData *rd, int slot, int reset)
+static TRef recff_stringbufhdr(jit_State *J, RecordFFData *rd, int slot, int mode)
 {
   TRef tr = loadstringbuf(J, rd, slot);
-  return emitir(IRT(IR_BUFHDR, IRT_P32), tr, IRBUFHDR_STRBUF | (reset ? IRBUFHDR_RESET : IRBUFHDR_APPEND));
+  return emitir(IRT(IR_BUFHDR, IRT_P32), tr, IRBUFHDR_STRBUF | mode);
 }
 
 /* -- Base library fast functions ----------------------------------------- */
@@ -895,7 +895,7 @@ static void LJ_FASTCALL recff_string_rep(jit_State *J, RecordFFData *rd)
   TRef hdr, tr, str2 = 0;
 
   if (rd->data) {
-    tr = hdr = recff_stringbufhdr(J, rd, 0, 0);
+    tr = hdr = recff_stringbufhdr(J, rd, 0, IRBUFHDR_APPEND);
   }
 
   if (!tref_isnil(J->base[arg+2])) {
@@ -1014,7 +1014,7 @@ static void LJ_FASTCALL recff_string_format(jit_State *J, RecordFFData *rd)
   emitir(IRTG(IR_EQ, IRT_STR), trfmt, lj_ir_kstr(J, fmt));
 
   if (isstrbuf) {
-    tr = hdr = recff_stringbufhdr(J, rd, 0, 0);
+    tr = hdr = recff_stringbufhdr(J, rd, 0, IRBUFHDR_APPEND);
   } else {
     tr = hdr = recff_bufhdr(J);
   }
@@ -1107,7 +1107,7 @@ static void LJ_FASTCALL recff_stringbuf_write(jit_State *J, RecordFFData *rd)
 {
   TRef tr, hdr;
   int i = 1;
-  tr = hdr = recff_stringbufhdr(J, rd, 0, 0);
+  tr = hdr = recff_stringbufhdr(J, rd, 0, IRBUFHDR_APPEND);
 
   for (; J->base[i]; i++) {
     TRef arg = J->base[i];
@@ -1133,7 +1133,7 @@ static void LJ_FASTCALL recff_stringbuf_write(jit_State *J, RecordFFData *rd)
 
 static void LJ_FASTCALL recff_stringbuf_writerange(jit_State *J, RecordFFData *rd)
 {
-  TRef hdr = recff_stringbufhdr(J, rd, 0, 0);
+  TRef hdr = recff_stringbufhdr(J, rd, 0, IRBUFHDR_APPEND);
   TRef str = J->base[1];
   TRef trstart = lj_opt_narrow_toint(J, J->base[2]);
   TRef trend = J->base[3];
@@ -1158,19 +1158,19 @@ static void LJ_FASTCALL recff_stringbuf_writerange(jit_State *J, RecordFFData *r
 
 static void LJ_FASTCALL recff_stringbuf_clear(jit_State *J, RecordFFData *rd)
 {
-  TRef hdr = recff_stringbufhdr(J, rd, 0, 1);
+  TRef hdr = recff_stringbufhdr(J, rd, 0, IRBUFHDR_RESET);
   emitir(IRT(IR_USE, IRT_NIL), hdr, 0);
 }
 
 static void LJ_FASTCALL recff_stringbuf_tostring(jit_State *J, RecordFFData *rd)
 {
-  TRef hdr = recff_stringbufhdr(J, rd, 0, 0);
+  TRef hdr = recff_stringbufhdr(J, rd, 0, IRBUFHDR_APPEND);
   J->base[0] = emitir(IRT(IR_BUFSTR, IRT_STR), TREF_NIL, hdr);
 }
 
 static void LJ_FASTCALL recff_stringbuf_size(jit_State *J, RecordFFData *rd)
 {
-  TRef buf = loadstringbuf(J, rd, 0);
+  TRef buf = loadstringbuf(J, rd, IRBUFHDR_MODIFY);
  // J->base[0] = emitir(IRT(IR_BUFINFO, IRT_U32), buf, 1);
 }
 

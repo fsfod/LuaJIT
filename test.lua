@@ -138,7 +138,6 @@ asserteq(testwrite(""), "")
 asserteq(#buf, 0)
 
 
-
 buf:clear()
 buf:writeln()
 asserteq(buf:tostring(), "\n")
@@ -268,6 +267,20 @@ end
 
 testjit("foo123_456", tmpstr_nofold, "foo", "123", "456")
 asserteq(temp2,  "456_123")
+
+function str_fold(a1, a2, tail) 
+    local tempstr = a1.."_".. a2
+    return tempstr.."_"..tail
+end
+
+--test the existing fold for temp buffer ownly 'bufput_append' LJFOLD(BUFPUT BUFHDR BUFSTR)
+testjit("123_456_foo", str_fold, "123", "456", "foo")
+
+
+function str_fold(a1, a2, tail) 
+    local tempstr = a1.."_".. a2
+    return tempstr.."_"..tail
+end
 
 print("tests past")
 

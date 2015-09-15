@@ -1041,19 +1041,19 @@ static void asm_tvptr(ASMState *as, Reg dest, IRRef ref);
 static void asm_bufhdr(ASMState *as, IRIns *ir)
 {
   Reg sb = ra_dest(as, ir, RSET_GPR);
-  if ((ir->op2 & IRBUFHDR_MODEMASK) == IRBUFHDR_APPEND) {
+  if ((ir->op2 & IRBUFHDR_MODEMASK) != IRBUFHDR_RESET) {
     /* Rematerialize const buffer pointer instead of likely spill. */
     IRIns *irp = IR(ir->op1);
     if (!(ir->op2 & IRBUFHDR_STRBUF) && !(ra_hasreg(irp->r) || irp == ir-1 ||
 	  (irp == ir-2 && !ra_used(ir-1)))) {
-      while (!(irp->o == IR_BUFHDR && !(irp->op2 & IRBUFHDR_APPEND)))
+      while (!(irp->o == IR_BUFHDR && (irp->op2 & IRBUFHDR_MODEMASK) == IRBUFHDR_RESET))
 	irp = IR(irp->op1);
       if (irref_isk(irp->op1)) {
 	ra_weak(as, ra_allocref(as, ir->op1, RSET_GPR));
 	ir = irp;
       }
     }
-  } else {
+  } else{
     Reg tmp = ra_scratch(as, rset_exclude(RSET_GPR, sb));
     /* Passing ir isn't strictly correct, but it's an IRT_P32, too. */
     emit_storeofs(as, ir, tmp, sb, offsetof(SBuf, p));

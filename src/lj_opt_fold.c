@@ -545,11 +545,12 @@ LJFOLDF(bufput_append)
 {
   /* New buffer, no other buffer op inbetween and same buffer? */
   if ((J->flags & JIT_F_OPT_FWD) &&
-      !(fleft->op2 & IRBUFHDR_APPEND) &&
+      !(fleft->op2 & IRBUFHDR_STRBUF) &&
+      (fleft->op2 & IRBUFHDR_MODEMASK) == IRBUFHDR_RESET &&
       fleft->prev == fright->op2 &&
       fleft->op1 == IR(fright->op2)->op1) {
     IRRef ref = fins->op1;
-    IR(ref)->op2 = (fleft->op2 | IRBUFHDR_APPEND);  /* Modify BUFHDR. */
+    IR(ref)->op2 = ((fleft->op2 & ~IRBUFHDR_MODEMASK) | IRBUFHDR_APPEND);  /* Modify BUFHDR. */
     IR(ref)->op1 = fright->op1;
     return ref;
   }
@@ -586,7 +587,7 @@ LJFOLDF(bufput_fromtempbuf)
   IRRef1 bufchain[12];
 
   /* Only try to fold the string allocation if its from the temp buffer */
-  if ((IR(fright->op2)->op2&IRBUFHDR_STRBUF) || LJ_UNLIKELY((J->flags & JIT_F_OPT_FOLD) == 0)) {
+  if ((IR(fright->op2)->op2&IRBUFHDR_STRBUF) || LJ_UNLIKELY((J->flags & JIT_F_OPT_FWD) == 0)) {
     return EMITFOLD;
   }
 
@@ -596,7 +597,8 @@ LJFOLDF(bufput_fromtempbuf)
     ref = IR(ref)->op1;
   }
 
-  if ((IR(ref)->op2&IRBUFHDR_STRBUF) == 8) {
+  /* destination buffer needs tobe a string buffer */
+  if (!(IR(ref)->op2&IRBUFHDR_STRBUF)) {
     return EMITFOLD;
   }
 
@@ -684,9 +686,9 @@ LJFOLD(BUFSTR any any)
 LJFOLDF(bufstr_kfold_cse)
 {
   lua_assert(fleft->o == IR_BUFHDR || fleft->o == IR_BUFPUT ||
-	     fleft->o == IR_CALLL || fins->op1 == REF_NIL);
+	     fleft->o == IR_CALLL || ((fright->op2&IRBUFHDR_STRBUF) && fins->op1 == REF_NIL));
 
-  if (fins->op1 == REF_NIL) {
+  if ((fright->op2&IRBUFHDR_STRBUF)) {
     return EMITFOLD; /* tostring called on string buffer */
   }
 
@@ -711,7 +713,7 @@ LJFOLDF(bufstr_kfold_cse)
       while (ira->o == irb->o && ira->op2 == irb->op2) {
 	lua_assert(ira->o == IR_BUFHDR || ira->o == IR_BUFPUT ||
 		   ira->o == IR_CALLL || ira->o == IR_CARG);
-	if (ira->o == IR_BUFHDR && (ira->op2 & IRBUFHDR_MODEMASK) == IRBUFHDR_RESET)
+	if (ira->o == IR_BUFHDR && (ira->op2 & IRBUFHDR_MODEMASK) == IRBUFHDR_RESET && !(ira->op2 & IRBUFHDR_STRBUF))
 	  return ref;  /* CSE succeeded. */
 	if (ira->o == IR_CALLL && ira->op2 == IRCALL_lj_buf_puttab)
 	  break;
