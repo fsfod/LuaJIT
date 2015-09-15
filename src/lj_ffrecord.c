@@ -935,6 +935,13 @@ static void LJ_FASTCALL recff_string_op(jit_State *J, RecordFFData *rd)
   J->base[0] = emitir(IRT(IR_BUFSTR, IRT_STR), tr, hdr);
 }
 
+static void LJ_FASTCALL recff_stringbuf_op(jit_State *J, RecordFFData *rd)
+{
+  TRef hdr = recff_stringbufhdr(J, rd, 0, IRBUFHDR_APPEND);
+  TRef tr = lj_ir_call(J, rd->data, hdr);
+  emitir(IRT(IR_BUFTAIL, IRT_P32), tr, hdr);
+}
+
 static void LJ_FASTCALL recff_string_find(jit_State *J, RecordFFData *rd)
 {
   TRef trstr = lj_ir_tostr(J, J->base[0]);

@@ -98,7 +98,7 @@ local tostringobj = setmetatable({}, {
 
 local tostringerr = setmetatable({}, {
     __tostring = function() 
-        return error("sneaky throwing tostring")
+        return error("throwing tostring")
     end
 })
 
@@ -137,6 +137,8 @@ asserteq(#buf, 1)
 asserteq(testwrite(""), "")
 asserteq(#buf, 0)
 
+
+
 buf:clear()
 buf:writeln()
 asserteq(buf:tostring(), "\n")
@@ -145,19 +147,24 @@ buf:clear()
 buf:writeln("a")
 asserteq(buf:tostring(), "a\n")
 
+testjit("bar", testwrite, "bar")
+testjit("1234567890", testwrite, 1234567890)
+testjit("foo2bar", testwrite, "foo", 2, "bar")
+
 testjit("\n", testwriteln)
 testjit("foo\n", testwriteln, "foo")
 
-asserteq(testwrite("bar"), "bar")
-asserteq(testwrite(1234567890), "1234567890")
-testjit("1234567890", testwrite, "1234567890")
 asserteq(testwrite(tostringobj), "tostring_result")
 
-asserteq(testwrite("foo", 2, "bar"), "foo2bar")
-testjit("foo2bar", testwrite, "foo", 2, "bar")
+--Make sure the buffer is unmodifed if an error is thrown
+clear_write(buf, "foo")
+local status, err = pcall(function(buff, s) buff:write(s) end, buf, tostringerr, "end")
+assert(not status and err == "throwing tostring")
+asserteq(buf:tostring() , "foo")
 
---testjit("aaa", testrep, "a", 3) 
---testjit("a,a,a", testrep, "a", 3, ",")
+testjit("aaa", testrep, "a", 3) 
+testjit("a,a,a", testrep, "a", 3, ",")
+testjit("a", testrep, "a", 1, ",")
 
 --test writing a sub string
 testjit("n1234567", testwritesub, "n", "01234567", 2)
@@ -210,8 +217,7 @@ asserteq(buf:tostring(), "a,a,a")
 clear_write(buf2, "buftobuf")
 assert(testwrite(buf2), "buftobuf")
 
-buf:clear()
-buf:write("begin")
+clear_write(buf, "begin")
 asserteq(buf:tostring(), "begin")
 buf:write("foo", 2, "bar")
 asserteq(buf:tostring(), "beginfoo2bar")
@@ -219,9 +225,25 @@ asserteq(buf:tostring(), "beginfoo2bar")
 assert(buf:equals("beginfoo2bar"))
 
 --compare buffer to buffer
-buf2:clear()
-buf2:write("beginfoo2bar")
+clear_write(buf2, "beginfoo2bar")
 assert(buf:equals(buf2))
+
+
+testjit("bar", function (buf, s)
+  buf:clear()
+  buf:write(s)
+  buf:lower()
+  
+  return (buf:tostring()) 
+end, buf, "BaR")
+
+testjit("BAR", function (buf, s)
+  buf:clear()
+  buf:write(s)
+  buf:upper()
+  
+  return (buf:tostring()) 
+end, buf, "bAr")
 
 -- Test folding a BUFSTR with the target being the tmp buffer LJFOLD(BUFPUT any BUFSTR)
 function tmpstr_fold(base, a1, a2) 

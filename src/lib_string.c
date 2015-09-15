@@ -922,6 +922,20 @@ static SBuf *stringbuf_write(lua_State *L)
   return sb;
 }
 
+LJLIB_CF(stringbuf_lower) LJLIB_REC(stringbuf_op IRCALL_lj_buf_lower)
+{
+  SBuf *sb = check_bufarg(L);
+  lj_buf_lower(sb);
+  return 0;
+}
+
+LJLIB_CF(stringbuf_upper) LJLIB_REC(stringbuf_op IRCALL_lj_buf_upper)
+{
+  SBuf *sb = check_bufarg(L);
+  lj_buf_upper(sb);
+  return 0;
+}
+
 LJLIB_CF(stringbuf_write) LJLIB_REC(stringbuf_write 0)
 {
   stringbuf_write(L);
