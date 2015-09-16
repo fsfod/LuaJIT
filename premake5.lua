@@ -236,9 +236,13 @@ solution "LuaJit"
          optimize "Speed"
 
 
+local bin = os.realpath(path.join(os.realpath(BuildDir), "..\bin"))
+--Create directorys first so writing the .gitignore doesn't fail
+os.mkdir(os.realpath(BuildDir))
+os.mkdir(bin)
 --Write .gitignore to directorys that contain just contain generated files
 os.writefile_ifnotequal("*.*", path.join(os.realpath(BuildDir), ".gitignore"))
-os.writefile_ifnotequal("*.*", path.join(os.realpath("bin"), ".gitignore"))
+os.writefile_ifnotequal("*.*", path.join(bin, ".gitignore"))
          
          
       
