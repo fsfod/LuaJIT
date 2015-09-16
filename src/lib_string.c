@@ -970,19 +970,53 @@ LJLIB_CF(stringbuf_rep) LJLIB_REC(string_rep 1)
 LJLIB_CF(stringbuf_byte)
 {
   SBuf *sb = check_bufarg(L);
-  int32_t index = lj_lib_checkint(L, 2);
+  int32_t pos = lj_lib_checkint(L, 2);
 
-  if (index < 0) {
-    index = sbuflen(sb)-index;
-  }else{
-    if ((MSize)index > sbuflen(sb))
-      lj_err_arg(L, 2, LJ_ERR_BADVAL);
-    index--;
+  if (pos < 0) {
+    pos += sbuflen(sb) + 1;
   }
 
-  setintV(L->top++, *(sbufB(sb) + index));
-  
+  pos--;
+
+  if (pos < 0 || pos > sbuflen(sb))
+      lj_err_arg(L, 2, LJ_ERR_IDXRNG);
+
+  setintV(L->top++, sbufB(sb)[pos]);
+
   return 1;
+}
+
+LJLIB_CF(stringbuf_setbyte)
+{
+  SBuf *sb = check_bufarg(L);
+  int32_t pos = lj_lib_checkint(L, 2);
+  TValue *bytev = lj_lib_checkany(L, 3);
+  int b;
+
+  if (pos < 0) {
+    pos += sbuflen(sb) + 1;
+  }
+
+  pos--;
+
+  if (pos < 0 || pos >= sbuflen(sb))
+    lj_err_arg(L, 2, LJ_ERR_IDXRNG);
+
+  if (tvisnumber(bytev)) {
+    b = lj_num2int(numV(bytev));
+  } else if(tvisstr(bytev)) {
+    b = *strdata(strV(bytev));
+  } else {
+    lj_err_argtype(L, 3, "string or number");
+  }
+
+  if (b < 0 || b > 255) {
+    lj_err_arg(L, 3, LJ_ERR_BADVAL);
+  }
+
+  sbufB(sb)[pos] = b;
+
+  return 0;
 }
 
 LJLIB_CF(stringbuf_getcapacity)

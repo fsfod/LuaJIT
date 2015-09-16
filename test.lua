@@ -8,10 +8,10 @@ local buf = string.createbuffer()
 local buf2 = string.createbuffer()
 
 function clear_write(buf, ...)
-    buf:clear()
-    buf:write(...)
+  buf:clear()
+  buf:write(...)
     
-    return buf
+  return buf
 end
 
 function asserteq(result, expected)
@@ -24,19 +24,20 @@ function asserteq(result, expected)
 end
 
 function testwrite(a1, a2, a3, a4)
-    buf:clear()
-    
-    if(a2 == nil) then
-      buf:write(a1)
-    elseif(a3 == nil) then
-      buf:write(a1, a2)
-    elseif(a4 == nil) then
-      buf:write(a1, a2, a3)
-    else 
-      buf:write(a1, a2, a3, a4)
-    end
-    
-    return (buf:tostring())
+  buf:clear()
+
+  if(a2 == nil) then
+    buf:write(a1)
+  elseif(a3 == nil) then
+    buf:write(a1, a2)
+  elseif(a4 == nil) then
+    buf:write(a1, a2, a3)
+  else 
+    buf:write(a1, a2, a3, a4)
+  end
+  --buf:byte(1)
+ 
+  return (buf:tostring())
 end
 
 function testwriteln(a1)
@@ -52,44 +53,44 @@ function testwriteln(a1)
 end
 
 function testformat(a1, a2, a3, a4)
-    buf:clear()
+  buf:clear()
+  
+  if(a2 == nil) then
+    buf:format(a1)
+  elseif(a3 == nil) then
+    buf:format(a1, a2)
+  elseif(a4 == nil) then
+    buf:format(a1, a2, a3)
+  else
+    buf:format(a1, a2, a3, a4)
+  end
     
-    if(a2 == nil) then
-      buf:format(a1)
-    elseif(a3 == nil) then
-      buf:format(a1, a2)
-    elseif(a4 == nil) then
-      buf:format(a1, a2, a3)
-    else
-      buf:format(a1, a2, a3, a4)
-    end
-    
-    return (buf:tostring())
+  return (buf:tostring())
 end
 
 function testwritesub(base, s, ofs, len)
-    buf:clear()
-    buf:write(base)
+  buf:clear()
+  buf:write(base)
     
-    if(len == nil) then
-      buf:writesub(s, ofs)
-    else
-      buf:writesub(s, ofs, len)
-    end
-    
-    return (buf:tostring())
+  if(len == nil) then
+    buf:writesub(s, ofs)
+  else
+    buf:writesub(s, ofs, len)
+  end
+
+  return (buf:tostring())
 end
 
 function testrep(s, rep, sep)
-    buf:clear()
-    
-    if(sep == nil) then
-      buf:rep(s, rep)
-    else
-      buf:rep(s, rep, sep)
-    end
-    
-    return (buf:tostring())
+  buf:clear()
+  
+  if(sep == nil) then
+    buf:rep(s, rep)
+  else
+    buf:rep(s, rep, sep)
+  end
+  
+  return (buf:tostring())
 end
 
 local tostringobj = setmetatable({}, {
@@ -255,11 +256,24 @@ end
 require("jit.opt").start("hotloop=10")
 
 asserteq(testwrite("a"), "a")
-asserteq(buf:byte(1), string.byte("a"))
 asserteq(#buf, 1)
+assert(buf:equals("a"))
+assert(not buf:equals("aa"))
+asserteq(buf:byte(1), string.byte("a"))
+
+buf:setbyte(1, "b")
+assert(buf:equals("b"))
+buf:setbyte(-1, "c")
+assert(buf:equals("c"))
+assert(not pcall(function() buf:setbyte(2, "a") end))
+assert(buf:equals("c"))
+assert(not pcall(function() buf:setbyte(-2, "a") end))
+assert(buf:equals("c"))
+
 asserteq(testwrite(""), "")
 asserteq(#buf, 0)
-
+assert(buf:equals(""))
+assert(not buf:equals("a"))
 
 buf:clear()
 buf:writeln()
