@@ -253,14 +253,43 @@ local tostring_turtle = setmetatable({}, {
     end
 })
 
+local function bufsize(buf)
+  return (buf:size())
+end
+
+local function bufcapacity(buf)
+  return (buf:capacity())
+end
+
 buf = string.createbuffer()
 buf2 = string.createbuffer()
 
+testjit(0, bufcapacity, buf)
+
 asserteq(testwrite("a"), "a")
 asserteq(#buf, 1)
+testjit(1, bufsize, buf)
 assert(buf:equals("a"))
 assert(not buf:equals("aa"))
 asserteq(buf:byte(1), string.byte("a"))
+
+local capacity = buf:capacity()
+testjit(capacity, bufcapacity, buf)
+
+local function bufleft(buf)
+  return buf:capacity()-buf:size()
+end
+testjit(capacity-1, bufleft, buf)
+
+local function bufsizechange(buf, s)
+  local size1 = buf:size()
+  buf:write(s)
+  return buf:size()-size1
+end
+--check buffer pointers are reloaded when getting the size before and after an append to the buffer
+testjit(3, bufsizechange, buf, "foo")
+
+clear_write(buf, "a")
 
 buf:setbyte(1, "b")
 assert(buf:equals("b"))
@@ -273,6 +302,7 @@ assert(buf:equals("c"))
 
 asserteq(testwrite(""), "")
 asserteq(#buf, 0)
+testjit(0, bufsize, buf)
 assert(buf:equals(""))
 assert(not buf:equals("a"))
 

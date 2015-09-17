@@ -1168,10 +1168,13 @@ static void LJ_FASTCALL recff_stringbuf_tostring(jit_State *J, RecordFFData *rd)
   J->base[0] = emitir(IRT(IR_BUFSTR, IRT_STR), TREF_NIL, hdr);
 }
 
-static void LJ_FASTCALL recff_stringbuf_size(jit_State *J, RecordFFData *rd)
+static void LJ_FASTCALL recff_stringbuf_info(jit_State *J, RecordFFData *rd)
 {
-  TRef buf = loadstringbuf(J, rd, IRBUFHDR_MODIFY);
- // J->base[0] = emitir(IRT(IR_BUFINFO, IRT_U32), buf, 1);
+  TRef buf = recff_stringbufhdr(J, rd, 0, IRBUFHDR_MODIFY);
+  TRef base = emitir(IRT(IR_FLOAD, IRT_P32), buf, IRFL_SBUF_B);
+  TRef pos = emitir(IRT(IR_FLOAD, IRT_P32), buf, rd->data == 0 ? IRFL_SBUF_P : IRFL_SBUF_E);
+
+  J->base[0] = emitir(IRT(IR_SUB, IRT_INT), pos, base);
 }
 
 /* -- Table library fast functions ---------------------------------------- */

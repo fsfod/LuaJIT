@@ -1019,7 +1019,14 @@ LJLIB_CF(stringbuf_setbyte)
   return 0;
 }
 
-LJLIB_CF(stringbuf_getcapacity)
+LJLIB_CF(stringbuf_size) LJLIB_REC(stringbuf_info 0)
+{
+  SBuf *sb = check_bufarg(L);
+  setintV(L->top - 1, sbuflen(sb));
+  return 1;
+}
+
+LJLIB_CF(stringbuf_capacity) LJLIB_REC(stringbuf_info 1)
 {
   SBuf *sb = check_bufarg(L);
   setintV(L->top - 1, sbufsz(sb));
@@ -1082,7 +1089,7 @@ LJLIB_CF(stringbuf___tostring) LJLIB_REC(stringbuf_tostring)
   return 1;
 }
 
-LJLIB_CF(stringbuf___len)
+LJLIB_CF(stringbuf___len) LJLIB_REC(stringbuf_info 0)
 {
   SBuf *sb = check_bufarg(L);
   setintptrV(L->top - 1, sbuflen(sb));

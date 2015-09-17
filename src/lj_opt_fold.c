@@ -538,8 +538,41 @@ LJFOLDF(kfold_strcmp)
 ** fragments left over from CSE are eliminated by DCE.
 */
 
-/* BUFHDR is emitted like a store, see below. */
+LJFOLD(BUFHDR any any)
+LJFOLDF(bufhdr_fold)
+{
+  /* Reuse the last header for this buffer if its also a IRBUFHDR_MODIFY */
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD) && fins->op2 == (IRBUFHDR_STRBUF | IRBUFHDR_MODIFY) && J->chain[IR_BUFHDR]) {
+    IRRef ref = J->chain[IR_BUFHDR];
+    IRIns *prev = IR(ref);
+    
+    /* Can safely ignore the temp buffer since it can never be used in IRBUFHDR_MODIFY mode */
+    while (ref && (!(IR(ref)->op2&IRBUFHDR_STRBUF) || (IR(ref)->op2&IRBUFHDR_MODEMASK) == IRBUFHDR_MODIFY)) {
+      if (IR(ref)->op1 == fins->op1) {
+        return ref;
+      }
+      ref = IR(ref)->prev;
+    }
+  }
+  
+  return EMITFOLD;
+}
 
+LJFOLD(FLOAD any IRFL_SBUF_B)
+LJFOLD(FLOAD any IRFL_SBUF_P)
+LJFOLD(FLOAD any IRFL_SBUF_E)
+LJFOLDF(buf_fload)
+{
+  lua_assert(fleft->o == IR_BUFHDR && (fleft->op2&IRBUFHDR_MODEMASK) == IRBUFHDR_MODIFY);
+
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_CSE)) { 
+    /* CSE limited up to our header for now */
+    return lj_opt_cselim(J, fins->op1);
+  }
+  return EMITFOLD;
+}
+
+/* BUFHDR is emitted like a store, see below. */
 LJFOLD(BUFPUT BUFHDR BUFSTR)
 LJFOLDF(bufput_append)
 {
@@ -669,7 +702,7 @@ LJFOLDF(bufput_fromtempbuf)
   limit = fins->op2;
   ref = J->chain[IR_BUFHDR];
  
-  /* Try to find another temp buffer use after the BUFSTR */
+  /* Try to find another interfering temp buffer use after the BUFSTR */
   while (ref > limit) {
     IRIns *ir = IR(ref);
 
@@ -2451,7 +2484,6 @@ LJFOLD(TNEW any any)
 LJFOLD(TDUP any)
 LJFOLD(CNEW any any)
 LJFOLD(XSNEW any any)
-LJFOLD(BUFHDR any any)
 LJFOLDX(lj_ir_emit)
 
 /* ------------------------------------------------------------------------ */
