@@ -1177,6 +1177,51 @@ static void LJ_FASTCALL recff_stringbuf_info(jit_State *J, RecordFFData *rd)
   J->base[0] = emitir(IRT(IR_SUB, IRT_INT), pos, base);
 }
 
+static void LJ_FASTCALL recff_stringbuf_byte(jit_State *J, RecordFFData *rd)
+{
+  TRef buf = recff_stringbufhdr(J, rd, 0, IRBUFHDR_MODIFY);
+  TRef trpos = lj_opt_narrow_toint(J, J->base[1]);
+  int32_t pos = argv2int(J, &rd->argv[1]);
+  TRef byte = J->base[2], base = emitir(IRT(IR_FLOAD, IRT_P32), buf, IRFL_SBUF_B);
+  TRef tr, end;
+  TRef zero = lj_ir_kint(J, 0);
+  
+  if (rd->data) {
+    if (tref_isnumber(byte)) {
+      byte = lj_opt_narrow_toint(J, byte);
+    } else if(tref_isstr(byte)){
+      tr = emitir(IRTI(IR_FLOAD), byte, IRFL_STR_LEN);
+      emitir(IRTGI(IR_GT), tr, zero);
+      byte = emitir(IRT(IR_STRREF, IRT_P32), byte, zero);
+      emitir(IRT(IR_XLOAD, IRT_U8), byte, IRXLOAD_READONLY);
+    }  
+  }
+
+  if (pos < 0) {
+    emitir(IRTGI(IR_LT), trpos, zero);
+    /* pos+(sb.p-sb.b)+1 */
+    end = emitir(IRT(IR_FLOAD, IRT_P32), buf, IRFL_SBUF_P);
+    tr = emitir(IRT(IR_SUB, IRT_INT), end, base);  
+    tr = emitir(IRT(IR_ADD, IRT_INT), trpos, tr);
+    tr = emitir(IRT(IR_ADD, IRT_INT), tr, lj_ir_kint(J, 1));
+  } else {
+    trpos = emitir(IRT(IR_ADD, IRT_INT), base, trpos);
+    tr = emitir(IRTI(IR_ADD), trpos, lj_ir_kint(J, -1));
+  }
+
+  emitir(IRTGI(IR_GE), tr, zero);
+  end = emitir(IRT(IR_FLOAD, IRT_P32), buf, IRFL_SBUF_P);
+  emitir(IRTGI(IR_LT), tr, end);
+
+  if (rd->data) {/* setbyte */
+   emitir(IRTGI(IR_GE), byte, zero);
+   emitir(IRTGI(IR_LE), byte, lj_ir_kint(J, 255));
+   emitir(IRT(IR_XSTORE, IRT_U8), tr, byte);
+  } else {
+    J->base[0] = emitir(IRT(IR_XLOAD, IRT_U8), tr, 0);
+  }
+}
+
 /* -- Table library fast functions ---------------------------------------- */
 
 static void LJ_FASTCALL recff_table_insert(jit_State *J, RecordFFData *rd)

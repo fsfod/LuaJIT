@@ -967,7 +967,7 @@ LJLIB_CF(stringbuf_rep) LJLIB_REC(string_rep 1)
   return string_rep(L, 1);
 }
 
-LJLIB_CF(stringbuf_byte)
+LJLIB_CF(stringbuf_byte) LJLIB_REC(stringbuf_byte 0)
 {
   SBuf *sb = check_bufarg(L);
   int32_t pos = lj_lib_checkint(L, 2);
@@ -986,7 +986,7 @@ LJLIB_CF(stringbuf_byte)
   return 1;
 }
 
-LJLIB_CF(stringbuf_setbyte)
+LJLIB_CF(stringbuf_setbyte) LJLIB_REC(stringbuf_byte 1)
 {
   SBuf *sb = check_bufarg(L);
   int32_t pos = lj_lib_checkint(L, 2);

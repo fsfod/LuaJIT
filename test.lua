@@ -261,6 +261,26 @@ local function bufcapacity(buf)
   return (buf:capacity())
 end
 
+local function getbyte(buf, i)
+  return (buf:byte(i))
+end
+
+local function fixslash(buf, path)
+
+  local slash = string.byte("\\")
+
+  buf:clear()
+  buf:write(path)
+  
+  for i=1,#buf do
+    if buf:byte(i) == slash then
+      buf:setbyte(i, "/")
+    end
+  end
+  
+  return (buf:tostring())
+end
+
 buf = string.createbuffer()
 buf2 = string.createbuffer()
 
@@ -271,7 +291,7 @@ asserteq(#buf, 1)
 testjit(1, bufsize, buf)
 assert(buf:equals("a"))
 assert(not buf:equals("aa"))
-asserteq(buf:byte(1), string.byte("a"))
+testjit(string.byte("a"), getbyte, buf, 1)
 
 local capacity = buf:capacity()
 testjit(capacity, bufcapacity, buf)
@@ -305,6 +325,9 @@ asserteq(#buf, 0)
 testjit(0, bufsize, buf)
 assert(buf:equals(""))
 assert(not buf:equals("a"))
+
+--TODO: refactor jittest for this
+testjit("a/bar/c/d/e/foo/a/b/c/d/e/f", fixslash, buf, "a\\bar\\c\\d\\e\\foo\\a\\b\\c\\d\\e\\f")
 
 buf:clear()
 buf:writeln()
