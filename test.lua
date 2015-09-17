@@ -3,9 +3,151 @@ local jutil = require("jit.util")
 local vmdef = require("jit.vmdef")
 local funcinfo, funcbc, traceinfo = jutil.funcinfo, jutil.funcbc, jutil.traceinfo
 local band = bit.band
+local buf, buf2
 
-local buf = string.createbuffer()
-local buf2 = string.createbuffer()
+local function fmtfunc(func, pc)
+  local fi = funcinfo(func, pc)
+  if fi.loc then
+    return fi.loc
+  elseif fi.ffid then
+    return vmdef.ffnames[fi.ffid]
+  elseif fi.addr then
+    return string.format("C:%x", fi.addr)
+  else
+    return "(?)"
+  end
+end
+
+-- Format trace error message.
+local function fmterr(err, info)
+  if type(err) == "number" then
+    if type(info) == "function" then info = fmtfunc(info) end
+    err = string.format(vmdef.traceerr[err], info)
+  end
+  return err
+end
+
+local bcnames = {}
+
+for i=1,#vmdef.bcnames/6 do
+  bcnames[i] = string.sub(vmdef.bcnames, i+1, i+6)
+end
+
+local traces = {}
+
+local printevents = false 
+
+local function trace_event(what, tr, func, pc, otr, oex)
+
+  local trace
+
+  if what == "flush" then
+    return
+  end
+  
+  if what == "start" then
+    trace = {
+      traceno = tr,
+      startfunc = func,
+      startpc = pc,
+    }
+    if(printevents) then 
+      print(string.format("\n[TRACE(%d) start at %s]", tr, fmtfunc(func, pc)))
+    end
+    traces[#traces+1] = trace
+  elseif what == "abort" or what == "stop" then
+    trace = traces[#traces]
+    assert(trace and trace.traceno == tr)
+    
+    trace.stopfunc = func
+    trace.stoppc = pc
+    
+    if what == "abort" then
+      trace.abort = fmterr(otr, oex)
+      
+      if(printevents) then 
+        print(string.format("[TRACE(%d) abort at %s, error = %s", tr, fmtfunc(func, pc), trace.abort))
+      end
+    else
+      if(printevents) then 
+        print(string.format("[TRACE(%d) stop at %s", tr, fmtfunc(func, pc)))
+      end
+    end
+  else
+    assert(false, what)
+  end
+end
+
+jit.attach(trace_event, "trace")
+
+local expectedlnk = "return"
+
+function testjit(expected, func, ...)
+
+  jit.flush()
+  traces = {}
+
+  for i=1, 30 do
+  
+    local result = func(...)
+
+    if (result ~= expected) then 
+      error("expected \""..expected.."\" but got \""..result.."\"".. ((#traces > 0 and " JITed") or " Interpreted"), 2)
+    end
+  end
+
+  if #traces == 0 then
+    error("no traces were started for test "..expected, 2)
+  end
+  
+  local tr = traces[1]
+  local info = traceinfo(tr.traceno)
+  
+  if tr.abort then
+    error(string.format("trace aborted with error %s at %s for test %s", abort, funcinfo(tr.stopfunc, tr.stoppc), expected), 2)
+  end
+  
+  if info.linktype == "stitch" and expectedlnk ~= "stitch"then
+    error(string.format("trace did not cover full function stitched at %s", funcinfo(tr.stopfunc, tr.stoppc)), 2)
+  end
+  
+  if #traces > 1 then
+    error("unexpect extra traces were started for test "..expected, 2)
+  end
+  
+  if tr.startfunc ~= func then
+    error(string.format("trace did not start in tested function. started in %s", funcinfo(tr.startfunc, tr.startpc)), 2)
+  end
+
+  if tr.stopfunc ~= func then
+    error(string.format("trace did not stop in tested function. stoped in %s", funcinfo(tr.stopfunc, tr.stoppc)), 2)
+  end
+  
+  if info.linktype ~= expectedlnk then
+    error(string.format("expect trace link '%s but got %s", expectedlnk, info.linktype), 2)
+  end
+  
+  --trace stop event doesn't provide a pc so would need to save the last pc traced
+  --[[
+  local stopbc = bcnames[band(funcbc(tr.stopfunc, tr.stoppc), 0xff)]
+  
+  if stopbc:find("RET") ~= 1 then
+    error(string.format("trace stoped at unexpected bytecode"), 2)
+  end
+  ]]
+  
+  jit.flush()  
+end
+
+jit.off(testjit)
+require("jit.opt").start("hotloop=2")
+--force the loop and function header in testjit to abort and be patched
+local dummyfunc = function() return "" end
+for i=1,30 do
+  pcall(testjit, "", dummyfunc, "")
+end
+
+require("jit.opt").start("hotloop=10")
 
 function clear_write(buf, ...)
   buf:clear()
@@ -111,149 +253,8 @@ local tostring_turtle = setmetatable({}, {
     end
 })
 
-
-local function fmtfunc(func, pc)
-  local fi = funcinfo(func, pc)
-  if fi.loc then
-    return fi.loc
-  elseif fi.ffid then
-    return vmdef.ffnames[fi.ffid]
-  elseif fi.addr then
-    return string.format("C:%x", fi.addr)
-  else
-    return "(?)"
-  end
-end
-
--- Format trace error message.
-local function fmterr(err, info)
-  if type(err) == "number" then
-    if type(info) == "function" then info = fmtfunc(info) end
-    err = string.format(vmdef.traceerr[err], info)
-  end
-  return err
-end
-
-local bcnames = {}
-
-for i=1,#vmdef.bcnames/6 do
-  bcnames[i] = string.sub(vmdef.bcnames, i+1, i+6)
-end
-
-local traces = {}
-
-local printevents = false 
-
-local function trace_event(what, tr, func, pc, otr, oex)
-
-  local trace
-
-  if what == "flush" then
-    return
-  end
-  
-  if what == "start" then
-    trace = {
-      traceno = tr,
-      startfunc = func,
-      startpc = pc,
-    }
-    if(printevents) then 
-      print(string.format("\n[TRACE(%d) start at %s]", tr, fmtfunc(func, pc)))
-    end
-    traces[#traces+1] = trace
-  elseif what == "abort" or what == "stop" then
-    trace = traces[#traces]
-    assert(trace and trace.traceno == tr)
-    
-    trace.stopfunc = func
-    trace.stoppc = pc
-    
-    if what == "abort" then
-      trace.abort = fmterr(otr, oex)
-      
-      if(printevents) then 
-        print(string.format("[TRACE(%d) abort at %s, error = %s", tr, fmtfunc(func, pc), trace.abort))
-      end
-    else
-      if(printevents) then 
-        print(string.format("[TRACE(%d) stop at %s", tr, fmtfunc(func, pc)))
-      end
-    end
-  else
-    assert(false, what)
-  end
-end
-
-jit.attach(trace_event, "trace")
-local expectedlnk = "return"
-
-function testjit(expected, func, ...)
-
-  jit.flush()
-  traces = {}
-
-  for i=1, 30 do
-  
-    local result = func(...)
-
-    if (result ~= expected) then 
-      error("expected \""..expected.."\" but got \""..result.."\"".. ((#traces > 0 and " JITed") or " Interpreted"), 2)
-    end
-  end
-
-  if #traces == 0 then
-    error("no traces were started for test "..expected, 2)
-  end
-  
-  local tr = traces[1]
-  local info = traceinfo(tr.traceno)
-  
-  if tr.abort then
-    error(string.format("trace aborted with error %s at %s for test %s", abort, funcinfo(tr.stopfunc, tr.stoppc), expected), 2)
-  end
-  
-  if info.linktype == "stitch" and expectedlnk ~= "stitch"then
-    error(string.format("trace did not cover full function stitched at %s", funcinfo(tr.stopfunc, tr.stoppc)), 2)
-  end
-  
-  if #traces > 1 then
-    error("unexpect extra traces were started for test "..expected, 2)
-  end
-  
-  if tr.startfunc ~= func then
-    error(string.format("trace did not start in tested function. started in %s", funcinfo(tr.startfunc, tr.startpc)), 2)
-  end
-
-  if tr.stopfunc ~= func then
-    error(string.format("trace did not stop in tested function. stoped in %s", funcinfo(tr.stopfunc, tr.stoppc)), 2)
-  end
-  
-  if info.linktype ~= expectedlnk then
-    error(string.format("expect trace link '%s but got %s", expectedlnk, info.linktype), 2)
-  end
-  
-  --trace stop event doesn't provide a pc so would need to save the last pc traced
-  --[[
-  local stopbc = bcnames[band(funcbc(tr.stopfunc, tr.stoppc), 0xff)]
-  
-  if stopbc:find("RET") ~= 1 then
-    error(string.format("trace stoped at unexpected bytecode"), 2)
-  end
-  ]]
-  
-  jit.flush()  
-end
-
-jit.off(testjit)
-require("jit.opt").start("hotloop=2")
---force the loop and function header in testjit to abort and be patched
-local dummyfunc = function() return "" end
-for i=1,30 do
-  pcall(testjit, "", dummyfunc, "")
-end
-
-require("jit.opt").start("hotloop=10")
+buf = string.createbuffer()
+buf2 = string.createbuffer()
 
 asserteq(testwrite("a"), "a")
 asserteq(#buf, 1)
