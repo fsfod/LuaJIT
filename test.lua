@@ -18,6 +18,8 @@ local function fmtfunc(func, pc)
   end
 end
 
+jit.off(fmtfunc)
+
 -- Format trace error message.
 local function fmterr(err, info)
   if type(err) == "number" then
@@ -26,6 +28,8 @@ local function fmterr(err, info)
   end
   return err
 end
+
+jit.off(fmterr)
 
 local bcnames = {}
 
@@ -82,6 +86,59 @@ jit.attach(trace_event, "trace")
 
 local expectedlnk = "return"
 
+function trerror(s, a1, ...)
+
+  if(a1) then
+    error(string.format(s, a1, ...), 4)
+  else
+    error(s, 4)
+  end
+
+end
+
+local function checktrace(tr, func)
+
+  if tr.abort then
+    trerror("trace aborted with error %s at %s", abort, fmtfunc(tr.stopfunc, tr.stoppc))
+  end
+  
+  local info = traceinfo(tr.traceno)
+  
+  if info.linktype == "stitch" and expectedlnk ~= "stitch" then
+    trerror("trace did not cover full function stitched at %s", fmtfunc(tr.stopfunc, tr.stoppc))
+  end
+  
+  if tr.startfunc ~= func then
+    trerror("trace did not start in tested function. started in %s", fmtfunc(tr.startfunc, tr.startpc))
+  end
+
+  if tr.stopfunc ~= func then
+    trerror("trace did not stop in tested function. stoped in %s", fmtfunc(tr.stopfunc, tr.stoppc))
+  end
+  
+  if info.linktype ~= expectedlnk then
+    trerror("expect trace link '%s but got %s", expectedlnk, info.linktype)
+  end
+end
+
+jit.off(checktrace)
+
+local function isjited(func)
+
+  local hasany = false
+
+  for tr in ipairs(traces) do  
+    if not tr.abort then
+      hasany = true
+      if tr.startfunc == func or tr.stopfunc == func then
+        return true, true
+      end
+    end
+  end
+  
+  return false,hasany
+end
+
 function testjit(expected, func, ...)
 
   jit.flush()
@@ -91,8 +148,9 @@ function testjit(expected, func, ...)
   
     local result = func(...)
 
-    if (result ~= expected) then 
-      error("expected \""..expected.."\" but got \""..result.."\"".. ((#traces > 0 and " JITed") or " Interpreted"), 2)
+    if (result ~= expected) then
+      local jitted, anyjited = isjited(func)
+      error(string.format("expected '%s' but got '%s' - %s", tostring(expected), tostring(result), (jitted and "JITed") or "Interpreted"), 2)
     end
   end
 
@@ -101,32 +159,12 @@ function testjit(expected, func, ...)
   end
   
   local tr = traces[1]
-  local info = traceinfo(tr.traceno)
-  
-  if tr.abort then
-    error(string.format("trace aborted with error %s at %s for test %s", abort, funcinfo(tr.stopfunc, tr.stoppc), expected), 2)
-  end
-  
-  if info.linktype == "stitch" and expectedlnk ~= "stitch"then
-    error(string.format("trace did not cover full function stitched at %s", funcinfo(tr.stopfunc, tr.stoppc)), 2)
-  end
+
+  checktrace(tr, func)
   
   if #traces > 1 then
-    error("unexpect extra traces were started for test "..expected, 2)
+    trerror("unexpect extra traces were started for test "..expected)
   end
-  
-  if tr.startfunc ~= func then
-    error(string.format("trace did not start in tested function. started in %s", funcinfo(tr.startfunc, tr.startpc)), 2)
-  end
-
-  if tr.stopfunc ~= func then
-    error(string.format("trace did not stop in tested function. stoped in %s", funcinfo(tr.stopfunc, tr.stoppc)), 2)
-  end
-  
-  if info.linktype ~= expectedlnk then
-    error(string.format("expect trace link '%s but got %s", expectedlnk, info.linktype), 2)
-  end
-  
   --trace stop event doesn't provide a pc so would need to save the last pc traced
   --[[
   local stopbc = bcnames[band(funcbc(tr.stopfunc, tr.stoppc), 0xff)]
@@ -165,75 +203,6 @@ function asserteq(result, expected)
   return result
 end
 
-function testwrite(a1, a2, a3, a4)
-  buf:clear()
-
-  if(a2 == nil) then
-    buf:write(a1)
-  elseif(a3 == nil) then
-    buf:write(a1, a2)
-  elseif(a4 == nil) then
-    buf:write(a1, a2, a3)
-  else 
-    buf:write(a1, a2, a3, a4)
-  end
-  --buf:byte(1)
- 
-  return (buf:tostring())
-end
-
-function testwriteln(a1)
-    buf:clear()
-    
-    if(a1 == nil) then
-      buf:writeln()
-    else
-      buf:writeln(a1)
-    end
-    
-    return (buf:tostring())
-end
-
-function testformat(a1, a2, a3, a4)
-  buf:clear()
-  
-  if(a2 == nil) then
-    buf:format(a1)
-  elseif(a3 == nil) then
-    buf:format(a1, a2)
-  elseif(a4 == nil) then
-    buf:format(a1, a2, a3)
-  else
-    buf:format(a1, a2, a3, a4)
-  end
-    
-  return (buf:tostring())
-end
-
-function testwritesub(base, s, ofs, len)
-  buf:clear()
-  buf:write(base)
-    
-  if(len == nil) then
-    buf:writesub(s, ofs)
-  else
-    buf:writesub(s, ofs, len)
-  end
-
-  return (buf:tostring())
-end
-
-function testrep(s, rep, sep)
-  buf:clear()
-  
-  if(sep == nil) then
-    buf:rep(s, rep)
-  else
-    buf:rep(s, rep, sep)
-  end
-  
-  return (buf:tostring())
-end
 
 local tostringobj = setmetatable({}, {
     __tostring = function(self) 
@@ -253,16 +222,84 @@ local tostring_turtle = setmetatable({}, {
     end
 })
 
-local function bufsize(buf)
-  return (buf:size())
-end
+
+local buf_empty = string.createbuffer()
+local buf_a = string.createbuffer()
+buf_a:write("a")
+
+buf = string.createbuffer()
+buf2 = string.createbuffer()
+
+
+tests = {}
 
 local function bufcapacity(buf)
   return (buf:capacity())
 end
 
+local function bufleft(buf)
+  return buf:capacity()-buf:size()
+end
+
+function tests.capacity()
+
+  local capacity = buf:capacity()
+  testjit(capacity, bufcapacity, buf)
+  
+  capacity = buf_a:capacity()
+  testjit(capacity-1, bufleft, buf_a)
+  
+  testjit(0, bufcapacity, buf_empty)
+end
+
+local function bufsize(buf)
+  return (buf:size())
+end
+
+local function bufsizechange(buf, s)
+  local size1 = buf:size()
+  buf:write(s)
+  return buf:size()-size1
+end
+
+function tests.size()
+
+  asserteq(#buf_empty, 0)
+  asserteq(#buf_a, 1)
+  
+  testjit(0, bufsize, buf_empty)
+  testjit(1, bufsize, buf_a)
+  
+  --check buffer pointers are reloaded when getting the size before and after an append to the buffer
+  testjit(3, bufsizechange, buf, "foo")
+end
+
+function tests.equals()
+
+  assert(buf_a:equals("a"))
+  assert(not buf_a:equals("b"))
+  assert(not buf_a:equals("aa"))
+  
+  assert(buf_empty:equals(""))
+  assert(not buf_empty:equals("a"))
+  
+  --compare buffer to buffer
+  clear_write(buf, "foo")
+  assert(buf:equals(buf))
+  assert(buf_empty:equals(buf_empty))
+  assert(not buf:equals(buf_empty))
+  
+  clear_write(buf2, "foo")
+  assert(buf:equals(buf2))
+end
+
 local function getbyte(buf, i)
   return (buf:byte(i))
+end
+
+function tests.byte()
+  testjit(string.byte("a"), getbyte, buf_a, 1)
+  --FIXME: testjit(string.byte("a"), getbyte, buf_a, -1)
 end
 
 local function fixslash(buf, path)
@@ -281,159 +318,211 @@ local function fixslash(buf, path)
   return (buf:tostring())
 end
 
-buf = string.createbuffer()
-buf2 = string.createbuffer()
+function tests.setbyte()
+  clear_write(buf, "a")
 
-testjit(0, bufcapacity, buf)
-
-asserteq(testwrite("a"), "a")
-asserteq(#buf, 1)
-testjit(1, bufsize, buf)
-assert(buf:equals("a"))
-assert(not buf:equals("aa"))
-testjit(string.byte("a"), getbyte, buf, 1)
-
-local capacity = buf:capacity()
-testjit(capacity, bufcapacity, buf)
-
-local function bufleft(buf)
-  return buf:capacity()-buf:size()
+  buf:setbyte(1, "b")
+  assert(buf:equals("b"))
+  
+  buf:setbyte(-1, "c")
+  assert(buf:equals("c"))
+  
+  clear_write(buf, "a")
+  --check error for postive index out of range
+  assert(not pcall(function() buf:setbyte(2, "b") end))
+  assert(buf:equals("a"))
+  
+  assert(not pcall(function() buf:setbyte(-2, "b") end))
+  assert(buf:equals("a"))
+  
+  --TODO: refactor jittest for this
+  --testjit("a/bar/c/d/e/foo/a/b/c/d/e/f", fixslash, buf, "a\\bar\\c\\d\\e\\foo\\a\\b\\c\\d\\e\\f")
+  asserteq("a/bar/c/d/e/foo/a/b/c/d/e/f", fixslash(buf, "a\\bar\\c\\d\\e\\foo\\a\\b\\c\\d\\e\\f"))
 end
-testjit(capacity-1, bufleft, buf)
 
-local function bufsizechange(buf, s)
-  local size1 = buf:size()
-  buf:write(s)
-  return buf:size()-size1
+function testwrite(a1, a2, a3, a4)
+  buf:clear()
+
+  if(a2 == nil) then
+    buf:write(a1)
+  elseif(a3 == nil) then
+    buf:write(a1, a2)
+  elseif(a4 == nil) then
+    buf:write(a1, a2, a3)
+  else 
+    buf:write(a1, a2, a3, a4)
+  end
+ 
+  return (buf:tostring())
 end
---check buffer pointers are reloaded when getting the size before and after an append to the buffer
-testjit(3, bufsizechange, buf, "foo")
 
-clear_write(buf, "a")
+function tests.write()
+  asserteq(testwrite("a"), "a")
+  asserteq(testwrite(""), "")
+  
+  testjit("bar", testwrite, "bar")
+  testjit("1234567890", testwrite, 1234567890)
+  testjit("foo2bar", testwrite, "foo", 2, "bar")
+  
+  asserteq(testwrite(tostringobj), "tostring_result")
+  
+  --Make sure the buffer is unmodifed if an error is thrown
+  clear_write(buf, "foo")
+  local status, err = pcall(function(buff, s) buff:write(s) end, buf, tostringerr, "end")
+  assert(not status and err == "throwing tostring")
+  asserteq(buf:tostring() , "foo")
+  
+  --appending one buff to another
+  clear_write(buf2, "buftobuf")
+  assert(testwrite(buf2), "buftobuf")
+end
 
-buf:setbyte(1, "b")
-assert(buf:equals("b"))
-buf:setbyte(-1, "c")
-assert(buf:equals("c"))
-assert(not pcall(function() buf:setbyte(2, "a") end))
-assert(buf:equals("c"))
-assert(not pcall(function() buf:setbyte(-2, "a") end))
-assert(buf:equals("c"))
+local function testwriteln(a1)
+    buf:clear()
+    
+    if(a1 == nil) then
+      buf:writeln()
+    else
+      buf:writeln(a1)
+    end
+    
+    return (buf:tostring())
+end
 
-asserteq(testwrite(""), "")
-asserteq(#buf, 0)
-testjit(0, bufsize, buf)
-assert(buf:equals(""))
-assert(not buf:equals("a"))
+function tests.writeln()
+  testjit("\n", testwriteln)
+  testjit("foo\n", testwriteln, "foo")
+end
 
---TODO: refactor jittest for this
-testjit("a/bar/c/d/e/foo/a/b/c/d/e/f", fixslash, buf, "a\\bar\\c\\d\\e\\foo\\a\\b\\c\\d\\e\\f")
+local function testwritesub(base, s, ofs, len)
+  buf:clear()
+  buf:write(base)
+    
+  if(len == nil) then
+    buf:writesub(s, ofs)
+  else
+    buf:writesub(s, ofs, len)
+  end
 
-buf:clear()
-buf:writeln()
-asserteq(buf:tostring(), "\n")
+  return (buf:tostring())
+end
 
-buf:clear()
-buf:writeln("a")
-asserteq(buf:tostring(), "a\n")
+function tests.writesub()
+  --test writing a sub string
+  testjit("n1234567", testwritesub, "n", "01234567",  2)
+  testjit("n67",      testwritesub, "n", "01234567", -2)
+  testjit("n12345",   testwritesub, "n", "01234567",  2, -3) 
 
-testjit("bar", testwrite, "bar")
-testjit("1234567890", testwrite, 1234567890)
-testjit("foo2bar", testwrite, "foo", 2, "bar")
+  ----check overflow clamping
+  testjit("n1234567",  testwritesub, "n", "01234567",   2, 20)
+  testjit("n01234567", testwritesub, "n", "01234567", -20, 8)
+  
+  --test writing a sub string where the source is another buffer
+  clear_write(buf2, "01234567")
+  testjit("n1234567", testwritesub, "n", buf2,  2)
+  testjit("n67",      testwritesub, "n", buf2, -2)
+  testjit("n12345",   testwritesub, "n", buf2,  2, -3)
+end
 
-testjit("\n", testwriteln)
-testjit("foo\n", testwriteln, "foo")
+function testformat(a1, a2, a3, a4)
+  buf:clear()
+  
+  if(a2 == nil) then
+    buf:format(a1)
+  elseif(a3 == nil) then
+    buf:format(a1, a2)
+  elseif(a4 == nil) then
+    buf:format(a1, a2, a3)
+  else
+    buf:format(a1, a2, a3, a4)
+  end
+    
+  return (buf:tostring())
+end
 
-asserteq(testwrite(tostringobj), "tostring_result")
+function tests.format()
+  asserteq(testformat("foo"), "foo")
+  asserteq(testformat(""), "")
+  asserteq(testformat("%s", "bar"), "bar")
+  testjit("bar,120, foo", testformat, "%s,%d, %s", "bar", 120, "foo")
+  
+  --check __tostring is called on objects
+  asserteq(testformat("%s %s", "foo", tostringobj), "foo tostring_result")
 
---Make sure the buffer is unmodifed if an error is thrown
-clear_write(buf, "foo")
-local status, err = pcall(function(buff, s) buff:write(s) end, buf, tostringerr, "end")
-assert(not status and err == "throwing tostring")
-asserteq(buf:tostring() , "foo")
+  asserteq(testformat("%.2s", "bar"), "ba")
+  asserteq(testformat("%-4s_%5s", "foo", "bar"), "foo _  bar")
+  testjit("bar", testformat, "%s", "bar")
+  testjit("\"\\0bar\\0\"", testformat, "%q", "\0bar\0")
 
-testjit("aaa", testrep, "a", 3) 
-testjit("a,a,a", testrep, "a", 3, ",")
-testjit("a", testrep, "a", 1, ",")
+  --test using a buff in place of string for a string format entry
+  clear_write(buf2, "foo")
+  asserteq(testformat(" %s ", buf2), " foo ")
+  asserteq(testformat("_%-5s", buf2), "_foo  ")
+  testjit(" foo ", testformat, " %s ", buf2)
+  
+  clear_write(buf2, "\0bar\0")
+  testjit("\"\\0bar\\0\"", testformat, "%q", buf2)
+end
 
---test writing a sub string
-testjit("n1234567", testwritesub, "n", "01234567", 2)
-testjit("n67",      testwritesub, "n", "01234567", -2)
-testjit("n12345",   testwritesub, "n", "01234567", 2, -3)
+local function testrep(s, rep, sep)
+  buf:clear()
+  
+  if(sep == nil) then
+    buf:rep(s, rep)
+  else
+    buf:rep(s, rep, sep)
+  end
+  
+  return (buf:tostring())
+end
 
---test writing a sub string where the source is another buffer
-clear_write(buf2, "01234567")
+function tests.rep()
+  testjit("aaa", testrep, "a", 3)
+  testjit("a,a,a", testrep, "a", 3, ",")
+  testjit("a", testrep, "a", 1, ",")
+end
 
-testjit("n1234567", testwritesub, "n", buf2, 2)
-testjit("n67",      testwritesub, "n", buf2, -2)
-testjit("n12345",   testwritesub, "n", buf2, 2, -3)
-
-----check overflow clamping
-testjit("n1234567", testwritesub, "n", "01234567", 2, 20)
-testjit("n01234567", testwritesub, "n", "01234567", -20, 8)
-
-asserteq(testformat("foo"), "foo")
-asserteq(testformat(""), "")
-asserteq(testformat("%s", "bar"), "bar")
-
-asserteq(testformat("%.2s", "bar"), "ba")
-asserteq(testformat("%-4s_%5s", "foo", "bar"), "foo _  bar")
-testjit("bar", testformat, "%s", "bar")
-testjit("\"\\0bar\\0\"", testformat, "%q", "\0bar\0")
-
-clear_write(buf2, "foo")
-asserteq(testformat(" %s ", buf2), " foo ")
-asserteq(testformat("_%-5s", buf2), "_foo  ")
-testjit(" foo ", testformat, " %s ", buf2)
-
-clear_write(buf2, "\0bar\0")
-testjit("\"\\0bar\\0\"", testformat, "%q", buf2)
-
-testjit("bar,120, foo", testformat, "%s,%d, %s", "bar", 120, "foo")
-asserteq(testformat("%s %s", "foo", tostringobj), "foo tostring_result")
-
-print(buf)
-io.write("\nwrite buf test:",buf)
-
-buf:clear()
-buf:rep("a", 3)
-asserteq(buf:tostring(), "aaa")
-
-buf:clear()
-buf:rep("a", 3, ",")
-asserteq(buf:tostring(), "a,a,a")
-
---appending one buff to another
-clear_write(buf2, "buftobuf")
-assert(testwrite(buf2), "buftobuf")
-
-clear_write(buf, "begin")
-asserteq(buf:tostring(), "begin")
-buf:write("foo", 2, "bar")
-asserteq(buf:tostring(), "beginfoo2bar")
---check without converting to a string
-assert(buf:equals("beginfoo2bar"))
-
---compare buffer to buffer
-clear_write(buf2, "beginfoo2bar")
-assert(buf:equals(buf2))
-
-
-testjit("bar", function (buf, s)
+local function lower(buf, s)
   buf:clear()
   buf:write(s)
   buf:lower()
   
   return (buf:tostring()) 
-end, buf, "BaR")
+end
 
-testjit("BAR", function (buf, s)
+function tests.lower()
+  testjit("bar", lower, buf, "BaR")
+  testjit(" ", lower, buf, " ")
+  testjit("", lower, buf, "")
+end
+
+local function upper(buf, s)
   buf:clear()
   buf:write(s)
   buf:upper()
   
   return (buf:tostring()) 
-end, buf, "bAr")
+end
+
+function tests.upper()
+  testjit("BAR", upper, buf, "bAr")
+  testjit(" ", upper, buf, " ")
+  testjit("", upper, buf, "")
+end
+
+function tests.other()
+  print(buf)
+  io.write("\nwrite buf test:",buf)
+  
+  --test buffer support added to loadstring
+  buf:clear()
+  buf:write("return function(a) return a+1 end")
+  local f, err = loadstring(buf)
+  asserteq(f()(1), 2)
+
+  f, err = loadstring("return function(a) return a+1 end")
+  asserteq(f()(1), 2)
+end
 
 -- Test folding a BUFSTR with the target being the tmp buffer LJFOLD(BUFPUT any BUFSTR)
 function tmpstr_fold(base, a1, a2) 
@@ -444,10 +533,9 @@ function tmpstr_fold(base, a1, a2)
     return (buf:tostring())
 end
 
-testjit("foo1234_5678", tmpstr_fold, "foo", "1234", "5678")
-
 function tmpstr_nofold(base, a1, a2)
     local temp1 = a1.."_".. a2
+    --second temp buffer use should act as a barrier to the fold
     temp2 = a2.."_"..a1
     
     buf:clear()
@@ -456,33 +544,31 @@ function tmpstr_nofold(base, a1, a2)
     return (buf:tostring())
 end
 
-testjit("foo123_456", tmpstr_nofold, "foo", "123", "456")
-asserteq(temp2,  "456_123")
-
 function str_fold(a1, a2, tail) 
     local tempstr = a1.."_".. a2
     return tempstr.."_"..tail
 end
 
---test the existing fold for temp buffer ownly 'bufput_append' LJFOLD(BUFPUT BUFHDR BUFSTR)
-testjit("123_456_foo", str_fold, "123", "456", "foo")
+function tests.fold_tmpbufstr()
+  testjit("foo1234_5678", tmpstr_fold, "foo", "1234", "5678")
+  testjit("foo123_456", tmpstr_nofold, "foo", "123", "456")
+  asserteq(temp2,  "456_123")
+  
+  --test the existing fold for temp buffer only 'bufput_append' LJFOLD(BUFPUT BUFHDR BUFSTR)
+  testjit("123_456_foo", str_fold, "123", "456", "foo")
+end
 
-
-function str_fold(a1, a2, tail) 
-    local tempstr = a1.."_".. a2
-    return tempstr.."_"..tail
+if singletest then
+  singletest()
+else
+  --should really order these by line
+  for name,func in pairs(tests) do
+    print("Running: "..name)
+    func()
+  end
 end
 
 print("tests past")
-
-buf:clear()
-buf:write("return function(a) return a+1 end")
-local f, err = loadstring(buf)
-asserteq(f()(1), 2)
-
-f, err = loadstring("return function(a) return a+1 end")
-asserteq(f()(1), 2)
-
 
 function testloop(buf, count, name)
 
