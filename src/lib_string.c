@@ -978,7 +978,7 @@ LJLIB_CF(stringbuf_byte) LJLIB_REC(stringbuf_byte 0)
 
   pos--;
 
-  if (pos < 0 || pos > sbuflen(sb))
+  if (pos < 0 || pos >= (int32_t)sbuflen(sb))
       lj_err_arg(L, 2, LJ_ERR_IDXRNG);
 
   setintV(L->top++, sbufB(sb)[pos]);
@@ -999,7 +999,7 @@ LJLIB_CF(stringbuf_setbyte) LJLIB_REC(stringbuf_byte 1)
 
   pos--;
 
-  if (pos < 0 || pos >= sbuflen(sb))
+  if (pos < 0 || pos >= (int32_t)sbuflen(sb))
     lj_err_arg(L, 2, LJ_ERR_IDXRNG);
 
   if (tvisnumber(bytev)) {

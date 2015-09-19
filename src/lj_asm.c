@@ -1053,7 +1053,7 @@ static void asm_bufhdr(ASMState *as, IRIns *ir)
 	ir = irp;
       }
     }
-  } else{
+  } else {
     Reg tmp = ra_scratch(as, rset_exclude(RSET_GPR, sb));
     /* Passing ir isn't strictly correct, but it's an IRT_P32, too. */
     emit_storeofs(as, ir, tmp, sb, offsetof(SBuf, p));

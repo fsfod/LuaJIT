@@ -226,6 +226,8 @@ local tostring_turtle = setmetatable({}, {
 local buf_empty = string.createbuffer()
 local buf_a = string.createbuffer()
 buf_a:write("a")
+local buf_abc = string.createbuffer()
+buf_abc:write("abc")
 
 buf = string.createbuffer()
 buf2 = string.createbuffer()
@@ -299,7 +301,12 @@ end
 
 function tests.byte()
   testjit(string.byte("a"), getbyte, buf_a, 1)
-  --FIXME: testjit(string.byte("a"), getbyte, buf_a, -1)
+  testjit(string.byte("b"), getbyte, buf_abc, 2)
+  testjit(string.byte("a"), getbyte, buf_a, -1)
+  testjit(string.byte("a"), getbyte, buf_abc, -3)
+  
+  assert(not pcall(getbyte, buf_empty, 1))
+  assert(not pcall(getbyte, buf_empty, -1))
 end
 
 local function fixslash(buf, path)
@@ -318,21 +325,24 @@ local function fixslash(buf, path)
   return (buf:tostring())
 end
 
+local function setbyte(buf, i, b)
+  buf:setbyte(i, b)
+  return (buf:tostring())
+end
+
 function tests.setbyte()
   clear_write(buf, "a")
 
-  buf:setbyte(1, "b")
-  assert(buf:equals("b"))
+  asserteq(setbyte(buf, 1, "b"), "b")
+  asserteq(setbyte(buf, -1, "c"), "c")
+  asserteq(setbyte(buf, 1, 97), "a")
   
-  buf:setbyte(-1, "c")
-  assert(buf:equals("c"))
-  
+  --check error for index out of range
   clear_write(buf, "a")
-  --check error for postive index out of range
-  assert(not pcall(function() buf:setbyte(2, "b") end))
+  assert(not pcall(setbyte, buf, 2, "b"))
   assert(buf:equals("a"))
   
-  assert(not pcall(function() buf:setbyte(-2, "b") end))
+  assert(not pcall(setbyte, -2, "b"))
   assert(buf:equals("a"))
   
   --TODO: refactor jittest for this
