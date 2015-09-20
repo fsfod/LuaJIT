@@ -1,9 +1,12 @@
 local jit = require("jit")
 local jutil = require("jit.util")
 local vmdef = require("jit.vmdef")
+local tracker = require("tracetracker")
 local funcinfo, funcbc, traceinfo = jutil.funcinfo, jutil.funcbc, jutil.traceinfo
 local band = bit.band
+local unpack = unpack
 local buf, buf2
+
 
 local function fmtfunc(func, pc)
   local fi = funcinfo(func, pc)
@@ -20,69 +23,12 @@ end
 
 jit.off(fmtfunc)
 
--- Format trace error message.
-local function fmterr(err, info)
-  if type(err) == "number" then
-    if type(info) == "function" then info = fmtfunc(info) end
-    err = string.format(vmdef.traceerr[err], info)
-  end
-  return err
-end
-
-jit.off(fmterr)
-
 local bcnames = {}
 
 for i=1,#vmdef.bcnames/6 do
   bcnames[i] = string.sub(vmdef.bcnames, i+1, i+6)
 end
 
-local traces = {}
-
-local printevents = false 
-
-local function trace_event(what, tr, func, pc, otr, oex)
-
-  local trace
-
-  if what == "flush" then
-    return
-  end
-  
-  if what == "start" then
-    trace = {
-      traceno = tr,
-      startfunc = func,
-      startpc = pc,
-    }
-    if(printevents) then 
-      print(string.format("\n[TRACE(%d) start at %s]", tr, fmtfunc(func, pc)))
-    end
-    traces[#traces+1] = trace
-  elseif what == "abort" or what == "stop" then
-    trace = traces[#traces]
-    assert(trace and trace.traceno == tr)
-    
-    trace.stopfunc = func
-    trace.stoppc = pc
-    
-    if what == "abort" then
-      trace.abort = fmterr(otr, oex)
-      
-      if(printevents) then 
-        print(string.format("[TRACE(%d) abort at %s, error = %s", tr, fmtfunc(func, pc), trace.abort))
-      end
-    else
-      if(printevents) then 
-        print(string.format("[TRACE(%d) stop at %s", tr, fmtfunc(func, pc)))
-      end
-    end
-  else
-    assert(false, what)
-  end
-end
-
-jit.attach(trace_event, "trace")
 
 local expectedlnk = "return"
 
@@ -123,37 +69,23 @@ end
 
 jit.off(checktrace)
 
-local function isjited(func)
-
-  local hasany = false
-
-  for tr in ipairs(traces) do  
-    if not tr.abort then
-      hasany = true
-      if tr.startfunc == func or tr.stopfunc == func then
-        return true, true
-      end
-    end
-  end
-  
-  return false,hasany
-end
-
 function testjit(expected, func, ...)
 
   jit.flush()
-  traces = {}
+  tracker.clear()
 
   for i=1, 30 do
   
     local result = func(...)
 
     if (result ~= expected) then
-      local jitted, anyjited = isjited(func)
+      local jitted, anyjited = tracker.isjited(func)
       error(string.format("expected '%s' but got '%s' - %s", tostring(expected), tostring(result), (jitted and "JITed") or "Interpreted"), 2)
     end
   end
 
+  local traces = tracker.traces()
+  
   if #traces == 0 then
     error("no traces were started for test "..expected, 2)
   end
@@ -161,7 +93,11 @@ function testjit(expected, func, ...)
   local tr = traces[1]
 
   checktrace(tr, func)
-  
+
+  if tracker.hasexits() then
+    trerror("unexpect traces exits"..expected)
+  end
+    
   if #traces > 1 then
     trerror("unexpect extra traces were started for test "..expected)
   end
@@ -178,6 +114,60 @@ function testjit(expected, func, ...)
 end
 
 jit.off(testjit)
+
+local function testjit2(func, config1, config2)
+
+  jit.flush()
+  tracker.clear()
+  local jitted = false
+  local trcount = 0
+  local config, expected, shoulderror = config1, config1.expected, config1.shoulderror 
+  
+  for i=1, 30 do
+    local status, result
+    
+    if not shoulderror then
+      result = func(unpack(config.args))
+    else
+      status, result = pcall(func, unpack(config.args))
+      
+      if(status) then
+        error("expected call to trigger error but didn't "..tostring(i), 2)
+      end
+    end
+    
+    local newtraces = tracker.traceattemps() ~= trcount
+    
+    if newtraces then
+      trcount = tracker.traceattemps()  
+      jitted, anyjited = tracker.isjited(func)
+    end
+    
+    if not shoulderror and result ~= expected then
+      error(string.format("expected '%s' but got '%s' - %s", tostring(expected), tostring(result), (jitted and "JITed") or "Interpreted"), 2)
+    end
+    
+    if newtraces then
+      config = config2
+      expected = config2.expected
+      shoulderror = config2.shoulderror
+    end
+    
+  end
+  
+  local traces = tracker.traces()
+  
+  if #traces == 0 then
+    error("no traces were started for test "..expected, 2)
+  end
+  
+  if not tracker.hasexits() then
+    trerror("Expect trace to exit to interpreter")
+  end
+end
+
+jit.off(testjit2)
+
 require("jit.opt").start("hotloop=2")
 --force the loop and function header in testjit to abort and be patched
 local dummyfunc = function() return "" end
@@ -185,7 +175,7 @@ for i=1,30 do
   pcall(testjit, "", dummyfunc, "")
 end
 
-require("jit.opt").start("hotloop=10")
+require("jit.opt").start("hotloop=5")
 
 function clear_write(buf, ...)
   buf:clear()
@@ -300,10 +290,24 @@ local function getbyte(buf, i)
 end
 
 function tests.byte()
-  testjit(string.byte("a"), getbyte, buf_a, 1)
-  testjit(string.byte("b"), getbyte, buf_abc, 2)
-  testjit(string.byte("a"), getbyte, buf_a, -1)
-  testjit(string.byte("a"), getbyte, buf_abc, -3)
+
+  local a = string.byte("a")
+  local b = string.byte("b")
+
+  testjit(a, getbyte, buf_a, 1)
+  testjit(b, getbyte, buf_abc, 2)
+  testjit(a, getbyte, buf_a, -1)
+  testjit(a, getbyte, buf_abc, -3)
+
+  --check guard for index changing from postive to negative
+  testjit2(getbyte, {args = {buf_abc, -3}, expected = a}, 
+                    {args = {buf_abc, 2}, expected = b})
+
+  local start = {args = {buf_a, 1}, expected = a}
+  
+  testjit2(getbyte, start, {args = {buf_a, -1}, expected = a}) 
+  testjit2(getbyte, start, {args = {buf_a, 2}, shoulderror = true})                   
+  testjit2(getbyte, start, {args = {buf_a, -2}, shoulderror = true})
   
   assert(not pcall(getbyte, buf_empty, 1))
   assert(not pcall(getbyte, buf_empty, -1))
@@ -568,7 +572,11 @@ function tests.fold_tmpbufstr()
   testjit("123_456_foo", str_fold, "123", "456", "foo")
 end
 
+tracker.start()
+--tracker.setprintevents(true)
+
 if singletest then
+  print("Running: single test")
   singletest()
 else
   --should really order these by line
