@@ -68,6 +68,8 @@ cTValue *stringbuf_tryputobj(SBuf *sb, cTValue *o, int checkmt)
     lj_buf_putmem(sb, "false", 5);
   } else if (tvistrue(o)) {
     lj_buf_putmem(sb, "true", 4);
+  } else if(tvisstrbuf(o)) {
+    lj_buf_putbuf(sb, udstrbufV(o));
   } else if(!checkmt){
     stringbuf_putobj_default(sb, o);
   } else {

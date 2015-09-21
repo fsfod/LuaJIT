@@ -1117,8 +1117,14 @@ static void LJ_FASTCALL recff_stringbuf_write(jit_State *J, RecordFFData *rd)
     } else if (tref_isnumber(arg)) {
       arg = emitir(IRT(IR_TOSTR, IRT_STR), arg, tref_isnum(arg) ? IRTOSTR_NUM : IRTOSTR_INT);
       tr = emitir(IRT(IR_BUFPUT, IRT_P32), tr, arg);
-    } else {
-      /*TODO: appending other string buffers */
+    } else if (tref_ispri(arg)) {
+      arg = lj_ir_kstr(J, lj_strfmt_obj(J->L, &rd->argv[i]));
+      tr = emitir(IRT(IR_BUFPUT, IRT_P32), tr, arg);
+    } else if (tref_isudata(arg)) {
+      arg = loadstringbuf(J, rd, i);
+      tr = lj_ir_call(J, IRCALL_lj_buf_putbuf, tr, arg);
+    }else{
+      /* NYI calling meta tostring */
       lj_trace_err(J, LJ_TRERR_BADTYPE);
     }
   }

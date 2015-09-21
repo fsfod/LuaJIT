@@ -161,6 +161,10 @@ local function testjit2(func, config1, config2)
     error("no traces were started for test "..expected, 2)
   end
   
+  local tr = traces[1]
+
+  checktrace(tr, func)
+  
   if not tracker.hasexits() then
     trerror("Expect trace to exit to interpreter")
   end
@@ -377,18 +381,22 @@ function tests.write()
   testjit("bar", testwrite, "bar")
   testjit("1234567890", testwrite, 1234567890)
   testjit("foo2bar", testwrite, "foo", 2, "bar")
+  testjit("true1false", testwrite, true, 1, false)
   
   asserteq(testwrite(tostringobj), "tostring_result")
   
   --Make sure the buffer is unmodifed if an error is thrown
   reset_write(buf, "foo")
-  local status, err = pcall(function(buff, s) buff:write(s) end, buf, tostringerr, "end")
+  local status, err = pcall(function(buff, s, tostr) 
+    buff:write(s, tostr)
+  end, buf, "end", tostringerr)
+  
   assert(not status and err == "throwing tostring")
   asserteq(buf:tostring() , "foo")
   
   --appending one buff to another
   reset_write(buf2, "buftobuf")
-  assert(testwrite(buf2), "buftobuf")
+  testjit("foobuftobuf", testwrite, "foo", buf2)
 end
 
 local function testwriteln(a1)
