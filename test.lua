@@ -177,8 +177,8 @@ end
 
 require("jit.opt").start("hotloop=5")
 
-function clear_write(buf, ...)
-  buf:clear()
+function reset_write(buf, ...)
+  buf:reset()
   buf:write(...)
     
   return buf
@@ -276,12 +276,12 @@ function tests.equals()
   assert(not buf_empty:equals("a"))
   
   --compare buffer to buffer
-  clear_write(buf, "foo")
+  reset_write(buf, "foo")
   assert(buf:equals(buf))
   assert(buf_empty:equals(buf_empty))
   assert(not buf:equals(buf_empty))
   
-  clear_write(buf2, "foo")
+  reset_write(buf2, "foo")
   assert(buf:equals(buf2))
 end
 
@@ -317,7 +317,7 @@ local function fixslash(buf, path)
 
   local slash = string.byte("\\")
 
-  buf:clear()
+  buf:reset()
   buf:write(path)
   
   for i=1,#buf do
@@ -335,14 +335,14 @@ local function setbyte(buf, i, b)
 end
 
 function tests.setbyte()
-  clear_write(buf, "a")
+  reset_write(buf, "a")
 
   asserteq(setbyte(buf, 1, "b"), "b")
   asserteq(setbyte(buf, -1, "c"), "c")
   asserteq(setbyte(buf, 1, 97), "a")
   
   --check error for index out of range
-  clear_write(buf, "a")
+  reset_write(buf, "a")
   assert(not pcall(setbyte, buf, 2, "b"))
   assert(buf:equals("a"))
   
@@ -355,7 +355,7 @@ function tests.setbyte()
 end
 
 function testwrite(a1, a2, a3, a4)
-  buf:clear()
+  buf:reset()
 
   if(a2 == nil) then
     buf:write(a1)
@@ -381,18 +381,18 @@ function tests.write()
   asserteq(testwrite(tostringobj), "tostring_result")
   
   --Make sure the buffer is unmodifed if an error is thrown
-  clear_write(buf, "foo")
+  reset_write(buf, "foo")
   local status, err = pcall(function(buff, s) buff:write(s) end, buf, tostringerr, "end")
   assert(not status and err == "throwing tostring")
   asserteq(buf:tostring() , "foo")
   
   --appending one buff to another
-  clear_write(buf2, "buftobuf")
+  reset_write(buf2, "buftobuf")
   assert(testwrite(buf2), "buftobuf")
 end
 
 local function testwriteln(a1)
-    buf:clear()
+    buf:reset()
     
     if(a1 == nil) then
       buf:writeln()
@@ -409,7 +409,7 @@ function tests.writeln()
 end
 
 local function testwritesub(base, s, ofs, len)
-  buf:clear()
+  buf:reset()
   buf:write(base)
     
   if(len == nil) then
@@ -432,14 +432,14 @@ function tests.writesub()
   testjit("n01234567", testwritesub, "n", "01234567", -20, 8)
   
   --test writing a sub string where the source is another buffer
-  clear_write(buf2, "01234567")
+  reset_write(buf2, "01234567")
   testjit("n1234567", testwritesub, "n", buf2,  2)
   testjit("n67",      testwritesub, "n", buf2, -2)
   testjit("n12345",   testwritesub, "n", buf2,  2, -3)
 end
 
 function testformat(a1, a2, a3, a4)
-  buf:clear()
+  buf:reset()
   
   if(a2 == nil) then
     buf:format(a1)
@@ -469,17 +469,17 @@ function tests.format()
   testjit("\"\\0bar\\0\"", testformat, "%q", "\0bar\0")
 
   --test using a buff in place of string for a string format entry
-  clear_write(buf2, "foo")
+  reset_write(buf2, "foo")
   asserteq(testformat(" %s ", buf2), " foo ")
   asserteq(testformat("_%-5s", buf2), "_foo  ")
   testjit(" foo ", testformat, " %s ", buf2)
   
-  clear_write(buf2, "\0bar\0")
+  reset_write(buf2, "\0bar\0")
   testjit("\"\\0bar\\0\"", testformat, "%q", buf2)
 end
 
 local function testrep(s, rep, sep)
-  buf:clear()
+  buf:reset()
   
   if(sep == nil) then
     buf:rep(s, rep)
@@ -497,7 +497,7 @@ function tests.rep()
 end
 
 local function lower(buf, s)
-  buf:clear()
+  buf:reset()
   buf:write(s)
   buf:lower()
   
@@ -511,7 +511,7 @@ function tests.lower()
 end
 
 local function upper(buf, s)
-  buf:clear()
+  buf:reset()
   buf:write(s)
   buf:upper()
   
@@ -529,7 +529,7 @@ function tests.other()
   io.write("\nwrite buf test:",buf)
   
   --test buffer support added to loadstring
-  buf:clear()
+  buf:reset()
   buf:write("return function(a) return a+1 end")
   local f, err = loadstring(buf)
   asserteq(f()(1), 2)
@@ -541,7 +541,7 @@ end
 -- Test folding a BUFSTR with the target being the tmp buffer LJFOLD(BUFPUT any BUFSTR)
 function tmpstr_fold(base, a1, a2) 
     local tempstr = a1.."_".. a2
-    buf:clear()
+    buf:reset()
     buf:write(base, tempstr)
     
     return (buf:tostring())
@@ -552,7 +552,7 @@ function tmpstr_nofold(base, a1, a2)
     --second temp buffer use should act as a barrier to the fold
     temp2 = a2.."_"..a1
     
-    buf:clear()
+    buf:reset()
     buf:write(base, temp1)
     
     return (buf:tostring())
@@ -590,8 +590,8 @@ print("tests past")
 
 function testloop(buf, count, name)
 
-  buf:clear()
-  buf2:clear()
+  buf:reset()
+  buf2:reset()
   
   if(count > 1) then
     buf2:write("arg1")

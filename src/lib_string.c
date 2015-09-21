@@ -1068,7 +1068,7 @@ LJLIB_CF(stringbuf_equals)
   return 1;
 }
 
-LJLIB_CF(stringbuf_clear) LJLIB_REC(.)
+LJLIB_CF(stringbuf_reset) LJLIB_REC(.)
 {
   SBuf *sb = check_bufarg(L);
   lj_buf_reset(sb);

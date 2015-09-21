@@ -1156,7 +1156,7 @@ static void LJ_FASTCALL recff_stringbuf_writerange(jit_State *J, RecordFFData *r
   emitir(IRT(IR_BUFTAIL, IRT_P32), tr, hdr);
  }
 
-static void LJ_FASTCALL recff_stringbuf_clear(jit_State *J, RecordFFData *rd)
+static void LJ_FASTCALL recff_stringbuf_reset(jit_State *J, RecordFFData *rd)
 {
   TRef hdr = recff_stringbufhdr(J, rd, 0, IRBUFHDR_RESET);
   emitir(IRT(IR_USE, IRT_NIL), hdr, 0);
