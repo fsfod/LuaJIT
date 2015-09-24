@@ -26,6 +26,7 @@
 LJ_FUNC char *LJ_FASTCALL lj_buf_need2(SBuf *sb, MSize sz);
 LJ_FUNC char *LJ_FASTCALL lj_buf_more2(SBuf *sb, MSize sz);
 LJ_FUNC void LJ_FASTCALL lj_buf_shrink(lua_State *L, SBuf *sb);
+LJ_FUNC SBuf *LJ_FASTCALL lj_buf_resize(SBuf *sb, MSize nsz);
 LJ_FUNC char * LJ_FASTCALL lj_buf_tmp(lua_State *L, MSize sz);
 
 static LJ_AINLINE void lj_buf_init(lua_State *L, SBuf *sb)

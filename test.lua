@@ -229,6 +229,14 @@ buf2 = string.createbuffer()
 
 tests = {}
 
+function tests.createbuffer()
+
+  --the internal buffer should always be allocated
+  assert(string.createbuffer():capacity() ~= 0)
+  -- test providing the initial capacity
+  assert(string.createbuffer(512):capacity() >= 512)
+end
+
 local function bufcapacity(buf)
   return (buf:capacity())
 end
@@ -238,14 +246,29 @@ local function bufleft(buf)
 end
 
 function tests.capacity()
-
   local capacity = buf:capacity()
   testjit(capacity, bufcapacity, buf)
   
   capacity = buf_a:capacity()
   testjit(capacity-1, bufleft, buf_a)
+end
+
+function tests.setcapacity()
+  reset_write(buf, "foobar")
+  buf:setcapacity(120)
+  asserteq(buf:capacity(), 120)
+  asserteq(buf:tostring(), "foobar")
   
-  testjit(0, bufcapacity, buf_empty)
+  buf:setcapacity(32)
+  asserteq(buf:capacity(), 32)
+  asserteq(buf:tostring(), "foobar")
+  
+  --check clamping to min capacity
+  buf:setcapacity(0)
+  assert(buf:capacity() ~= 0)
+  asserteq(buf:tostring(), "foobar")
+
+  assert(not pcall(buf.setcapacity, buf, 0x7fffff01))
 end
 
 local function bufsize(buf)
@@ -268,6 +291,52 @@ function tests.size()
   
   --check buffer pointers are reloaded when getting the size before and after an append to the buffer
   testjit(3, bufsizechange, buf, "foo")
+end
+
+function tests.setsize()
+  
+  buf:setsize(1)
+  asserteq(buf:size(), 1)
+  
+  buf:setsize(0)
+  asserteq(buf:size(), 0)
+
+  --setting size larger than the buffer should throw an error
+  assert(not pcall(buf.setsize, buf, buf:capacity()+1))
+  assert(not pcall(buf.setsize, buf, -1))
+
+  --check truncating contents in the buffer
+  buf:write("foobar1")
+  asserteq(buf:size(), 7)
+  buf:setsize(6)
+  asserteq(buf:size(), 6)
+  asserteq(buf:tostring(), "foobar")
+  
+  --Check setting size to capacity
+  local minsize = buf:capacity()
+  buf:setsize(buf:capacity())
+  buf:write("a")
+  assert(buf:size() > minsize)
+  
+  buf:setsize(6)
+  asserteq(buf:tostring(), "foobar")
+end
+
+function tests.reserve()
+  local capacity = buf:capacity()
+  
+  buf:setsize(buf:capacity()-1)
+  
+  buf:reserve(0)
+  asserteq(buf:capacity(), capacity)
+  
+  buf:reserve(1)
+  asserteq(buf:capacity(), capacity)
+  
+  buf:reserve(2)
+  assert(buf:capacity() > capacity)
+  
+  assert(not pcall(buf.reserve, buf, -1))
 end
 
 function tests.equals()
@@ -303,7 +372,7 @@ function tests.byte()
   testjit(a, getbyte, buf_a, -1)
   testjit(a, getbyte, buf_abc, -3)
 
-  --check guard for index changing from postive to negative
+  --check guard for index changing from negative to positive 
   testjit2(getbyte, {args = {buf_abc, -3}, expected = a}, 
                     {args = {buf_abc, 2}, expected = b})
 
@@ -532,9 +601,10 @@ function tests.upper()
   testjit("", upper, buf, "")
 end
 
-function tests.other()
-  print(buf)
-  io.write("\nwrite buf test:",buf)
+function tests.apibuffersupport()
+  reset_write(buf, "buff test")
+  print("print", buf)
+  io.write("file.write ", buf, "\n")
   
   --test buffer support added to loadstring
   buf:reset()

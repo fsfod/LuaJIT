@@ -878,6 +878,7 @@ LJLIB_PUSH(top-2) LJLIB_SET(!)  /* Set environment. */
 
 LJLIB_CF(string_createbuffer)
 {
+  int32_t initsz = lj_lib_optint(L, 1, LJ_MIN_SBUF);
   SBuf *sb = (SBuf *)lua_newuserdata(L, sizeof(SBuf));
   GCudata *ud = udataV(L->top - 1);
   ud->udtype = UDTYPE_STRING_BUF;
@@ -885,6 +886,8 @@ LJLIB_CF(string_createbuffer)
   setgcrefr(ud->metatable, curr_func(L)->c.env);
   
   lj_buf_init(L, sb);
+  /* force the buffer to always be in an allocated state */
+  lj_buf_more(sb, initsz);
 
   return 1;
 }
@@ -1028,6 +1031,26 @@ LJLIB_CF(stringbuf_size) LJLIB_REC(stringbuf_info 0)
   return 1;
 }
 
+LJLIB_CF(stringbuf_setsize) 
+{
+  SBuf *sb = check_bufarg(L);
+  int32_t size = lj_lib_checkint(L, 2);
+  int32_t extra = size-sbuflen(sb);
+
+  if (size < 0 || size > sbufsz(sb))
+    lj_err_arg(L, 2, LJ_ERR_BADVAL);
+
+  setsbufofs(sb, size);
+
+#ifdef LUAJIT_DISABLE_FFI
+  /* Don't expose what could be contents of recently freed memory */
+  if (extra > 0) {
+    memset(sbufP(sb)-extra, 0, extra);
+  }
+#endif
+  return 0;
+}
+
 LJLIB_CF(stringbuf_capacity) LJLIB_REC(stringbuf_info 1)
 {
   SBuf *sb = check_bufarg(L);
@@ -1042,18 +1065,27 @@ LJLIB_CF(stringbuf_setcapacity)
 
   if (capacity < 0) {
     lj_err_arg(L, 1, LJ_ERR_BADVAL);
+  } else if (capacity > LJ_MAX_BUF) {
+    lj_err_mem(L);
   }
 
-  if (capacity == 0) {
-    lj_buf_free(G(L), sb);
-    lj_buf_init(L, sb);
-  }
+  if (capacity < LJ_MIN_SBUF)
+    capacity = LJ_MIN_SBUF;
 
-  if ((MSize)capacity > sbufsz(sb)) {
-    lj_buf_need(sb, capacity);
-  } else {
-    /* TODO: shrink*/
+  lj_buf_resize(sb, capacity);
+
+  return 0;
+}
+
+LJLIB_CF(stringbuf_reserve)
+{
+  SBuf *sb = check_bufarg(L);
+  int more = lj_lib_checkint(L, 2);
+
+  if (more < 0) {
+    lj_err_arg(L, 1, LJ_ERR_BADVAL);
   }
+  lj_buf_more(sb, more);
 
   return 0;
 }
