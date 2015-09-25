@@ -124,10 +124,9 @@
   \
   /* Buffer operations. */ \
   _(BUFHDR,	L , ref, lit) \
-  _(BUFTAIL,    S , ref, ref) \
+  _(BUFTL,      S , ref, ref) \
   _(BUFPUT,	L , ref, ref) \
   _(BUFSTR,	A , ref, ref) \
-  _(BUFINFO,	L , ref, lit) \
   \
   /* Barriers. */ \
   _(TBAR,	S , ref, ___) \

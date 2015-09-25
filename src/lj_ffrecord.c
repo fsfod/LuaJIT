@@ -927,7 +927,7 @@ static void LJ_FASTCALL recff_string_rep(jit_State *J, RecordFFData *rd)
   tr = lj_ir_call(J, IRCALL_lj_buf_putstr_rep, tr, str, rep);
 
   if (rd->data) {
-    emitir(IRT(IR_BUFTAIL, IRT_P32), tr, hdr);
+    emitir(IRT(IR_BUFTL, IRT_P32), tr, hdr);
     J->needsnap = 1;
   } else {
     J->base[0] = emitir(IRT(IR_BUFSTR, IRT_STR), tr, hdr);
@@ -946,7 +946,7 @@ static void LJ_FASTCALL recff_stringbuf_op(jit_State *J, RecordFFData *rd)
 {
   TRef hdr = recff_stringbufhdr(J, rd, 0, IRBUFHDR_APPEND);
   TRef tr = lj_ir_call(J, rd->data, hdr);
-  emitir(IRT(IR_BUFTAIL, IRT_P32), tr, hdr);
+  emitir(IRT(IR_BUFTL, IRT_P32), tr, hdr);
   J->needsnap = 1;
 }
 
@@ -1107,7 +1107,7 @@ static void LJ_FASTCALL recff_string_format(jit_State *J, RecordFFData *rd)
   if (!isstrbuf){
     J->base[0] = emitir(IRT(IR_BUFSTR, IRT_STR), tr, hdr);
   } else {
-    emitir(IRT(IR_BUFTAIL, IRT_P32), tr, hdr);
+    emitir(IRT(IR_BUFTL, IRT_P32), tr, hdr);
     J->needsnap = 1;
   }
 }
@@ -1143,7 +1143,7 @@ static void LJ_FASTCALL recff_stringbuf_write(jit_State *J, RecordFFData *rd)
     tr = lj_ir_call(J, IRCALL_lj_buf_putchar, tr, lj_ir_kint(J, (int)'\n'));
   }
 
-  emitir(IRT(IR_BUFTAIL, IRT_P32), tr, hdr);
+  emitir(IRT(IR_BUFTL, IRT_P32), tr, hdr);
   J->needsnap = 1;
 }
 
@@ -1169,7 +1169,7 @@ static void LJ_FASTCALL recff_stringbuf_writerange(jit_State *J, RecordFFData *r
     tr = lj_ir_call(J, IRCALL_lj_buf_putbuf_range, hdr, str, trstart, trend);
   }
 
-  emitir(IRT(IR_BUFTAIL, IRT_P32), tr, hdr);
+  emitir(IRT(IR_BUFTL, IRT_P32), tr, hdr);
   J->needsnap = 1;
  }
 

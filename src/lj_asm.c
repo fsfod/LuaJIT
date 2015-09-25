@@ -1668,7 +1668,7 @@ static void asm_ir(ASMState *as, IRIns *ir)
   case IR_BUFHDR: asm_bufhdr(as, ir); break;
   case IR_BUFPUT: asm_bufput(as, ir); break;
   case IR_BUFSTR: asm_bufstr(as, ir); break;
-  case IR_BUFTAIL: asm_buftail(as, ir); break;
+  case IR_BUFTL: asm_buftail(as, ir); break;
 
   /* Write barriers. */
   case IR_TBAR: asm_tbar(as, ir); break;
