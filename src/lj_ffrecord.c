@@ -202,7 +202,13 @@ static TRef loadstringbuf(jit_State *J, RecordFFData *rd, int slot)
 static TRef recff_stringbufhdr(jit_State *J, RecordFFData *rd, int slot, int mode)
 {
   TRef tr = loadstringbuf(J, rd, slot);
-  return emitir(IRT(IR_BUFHDR, IRT_P32), tr, IRBUFHDR_STRBUF | mode);
+  tr = emitir(IRT(IR_BUFHDR, IRT_P32), tr, IRBUFHDR_STRBUF | mode);
+
+  if (mode == IRBUFHDR_RESET) {
+    J->needsnap = 1;
+  }
+
+  return tr;
 }
 
 /* -- Base library fast functions ----------------------------------------- */
@@ -922,6 +928,7 @@ static void LJ_FASTCALL recff_string_rep(jit_State *J, RecordFFData *rd)
 
   if (rd->data) {
     emitir(IRT(IR_BUFTAIL, IRT_P32), tr, hdr);
+    J->needsnap = 1;
   } else {
     J->base[0] = emitir(IRT(IR_BUFSTR, IRT_STR), tr, hdr);
   }
@@ -940,6 +947,7 @@ static void LJ_FASTCALL recff_stringbuf_op(jit_State *J, RecordFFData *rd)
   TRef hdr = recff_stringbufhdr(J, rd, 0, IRBUFHDR_APPEND);
   TRef tr = lj_ir_call(J, rd->data, hdr);
   emitir(IRT(IR_BUFTAIL, IRT_P32), tr, hdr);
+  J->needsnap = 1;
 }
 
 static void LJ_FASTCALL recff_string_find(jit_State *J, RecordFFData *rd)
@@ -1100,6 +1108,7 @@ static void LJ_FASTCALL recff_string_format(jit_State *J, RecordFFData *rd)
     J->base[0] = emitir(IRT(IR_BUFSTR, IRT_STR), tr, hdr);
   } else {
     emitir(IRT(IR_BUFTAIL, IRT_P32), tr, hdr);
+    J->needsnap = 1;
   }
 }
 
@@ -1135,6 +1144,7 @@ static void LJ_FASTCALL recff_stringbuf_write(jit_State *J, RecordFFData *rd)
   }
 
   emitir(IRT(IR_BUFTAIL, IRT_P32), tr, hdr);
+  J->needsnap = 1;
 }
 
 static void LJ_FASTCALL recff_stringbuf_writerange(jit_State *J, RecordFFData *rd)
@@ -1160,6 +1170,7 @@ static void LJ_FASTCALL recff_stringbuf_writerange(jit_State *J, RecordFFData *r
   }
 
   emitir(IRT(IR_BUFTAIL, IRT_P32), tr, hdr);
+  J->needsnap = 1;
  }
 
 static void LJ_FASTCALL recff_stringbuf_reset(jit_State *J, RecordFFData *rd)
@@ -1221,6 +1232,7 @@ static void LJ_FASTCALL recff_stringbuf_byte(jit_State *J, RecordFFData *rd)
    emitir(IRTGI(IR_GE), byte, zero);
    emitir(IRTGI(IR_LE), byte, lj_ir_kint(J, 255));
    emitir(IRT(IR_XSTORE, IRT_U8), tr, byte);
+   J->needsnap = 1;
   } else {
     J->base[0] = emitir(IRT(IR_XLOAD, IRT_U8), tr, 0);
   }
