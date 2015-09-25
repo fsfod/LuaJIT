@@ -761,7 +761,7 @@ static int string_format(lua_State *L, int isstrbuf)
   int arg, top = (int)(L->top - L->base);
   GCstr *fmt;
   SBuf *sb;
-  MSize savedbufpos;
+  MSize savedbufpos = 0;
   FormatState fs;
   SFormat sf;
   int retry = 0;

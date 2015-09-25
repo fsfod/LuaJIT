@@ -1162,7 +1162,6 @@ static void LJ_FASTCALL recff_stringbuf_writerange(jit_State *J, RecordFFData *r
   }
 
   if (tref_isstr(str)) {
-    TRef sptr = emitir(IRT(IR_STRREF, IRT_P32), str, lj_ir_kint(J, 0));
     tr = lj_ir_call(J, IRCALL_lj_buf_putstr_range, hdr, str, trstart, trend);
   } else {
     str = loadstringbuf(J, rd, 1);

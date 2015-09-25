@@ -614,7 +614,7 @@ LJFOLDF(bufput_kgc)
 LJFOLD(BUFPUT any BUFSTR)
 LJFOLDF(bufput_fromtempbuf)
 {
-  IRRef ref, limit, chainstart = 0;
+  IRRef ref, limit;
   IRIns *ir;
   int chainsize = 0;
   IRRef1 bufchain[12];
