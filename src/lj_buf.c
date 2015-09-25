@@ -60,6 +60,22 @@ void LJ_FASTCALL lj_buf_shrink(lua_State *L, SBuf *sb)
   }
 }
 
+SBuf * LJ_FASTCALL lj_buf_resize(SBuf *sb, MSize nsz)
+{
+  char *b = sbufB(sb);
+  MSize osz = (MSize)(sbufE(sb) - b);
+
+  lua_assert(nsz >= LJ_MIN_SBUF && nsz < LJ_MAX_BUF);
+
+  MSize n = (MSize)(sbufP(sb) - b);
+  b = lj_mem_realloc(sbufL(sb), b, osz, nsz);
+  setmref(sb->b, b);
+  setmref(sb->p, b + n);
+  setmref(sb->e, b + nsz);
+
+  return sb;
+}
+
 char * LJ_FASTCALL lj_buf_tmp(lua_State *L, MSize sz)
 {
   SBuf *sb = &G(L)->tmpbuf;
