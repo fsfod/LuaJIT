@@ -69,10 +69,15 @@ end
 
 jit.off(checktrace)
 
+local function begin_jittest(func)
+  jit.flush()
+  jit.on(func) --clear any interpreter only function/loop headers that may have been caused by other tests
+  tracker.clear()
+end
+
 function testjit(expected, func, ...)
 
-  jit.flush()
-  tracker.clear()
+  begin_jittest(func)
 
   for i=1, 30 do
   
@@ -115,10 +120,11 @@ end
 
 jit.off(testjit)
 
+--FIXME: the side traces that happen for config 2 will always abort because they trace out into this function which has jit turned off
 local function testjit2(func, config1, config2)
 
-  jit.flush()
-  tracker.clear()
+  begin_jittest(func)
+  
   local jitted = false
   local trcount = 0
   local config, expected, shoulderror = config1, config1.expected, config1.shoulderror 
@@ -366,24 +372,33 @@ function tests.byte()
 
   local a = string.byte("a")
   local b = string.byte("b")
-
+  
+  assert(not pcall(getbyte, buf_a, 0))
+  assert(not pcall(getbyte, buf_empty, 0))
+  assert(not pcall(getbyte, buf_empty, 1))
+  assert(not pcall(getbyte, buf_empty, -1))
+  
   testjit(a, getbyte, buf_a, 1)
   testjit(b, getbyte, buf_abc, 2)
   testjit(a, getbyte, buf_a, -1)
   testjit(a, getbyte, buf_abc, -3)
-
+  
   --check guard for index changing from negative to positive 
   testjit2(getbyte, {args = {buf_abc, -3}, expected = a}, 
                     {args = {buf_abc, 2}, expected = b})
 
   local start = {args = {buf_a, 1}, expected = a}
-  
-  testjit2(getbyte, start, {args = {buf_a, -1}, expected = a}) 
-  testjit2(getbyte, start, {args = {buf_a, 2}, shoulderror = true})                   
+
+  testjit2(getbyte, start, {args = {buf_abc, -2}, expected = b})
+  testjit2(getbyte, start, {args = {buf_a, 0}, shoulderror = true})
+  testjit2(getbyte, start, {args = {buf_a, 2}, shoulderror = true})
   testjit2(getbyte, start, {args = {buf_a, -2}, shoulderror = true})
-  
-  assert(not pcall(getbyte, buf_empty, 1))
-  assert(not pcall(getbyte, buf_empty, -1))
+
+  --check when the buffer changed to empty
+  start = {args = {buf_a, -1}, expected = a}
+  testjit2(getbyte, start, {args = {buf_empty, 0}, shoulderror = true})
+  testjit2(getbyte, start, {args = {buf_empty, 1}, shoulderror = true})
+  testjit2(getbyte, start, {args = {buf_empty, -1}, shoulderror = true})
 end
 
 local function fixslash(buf, path)

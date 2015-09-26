@@ -187,7 +187,7 @@ static TRef loadstringbuf(jit_State *J, RecordFFData *rd, int slot)
   TValue* o = &rd->argv[slot];
   TRef tr = J->base[slot];
 
-  if (!tvisudata(o) || !udataV(o)->udtype == UDTYPE_STRING_BUF) {
+  if (!tvisudata(o) || udataV(o)->udtype != UDTYPE_STRING_BUF) {
     lj_trace_err(J, LJ_TRERR_BADTYPE);
   }
 
@@ -1215,12 +1215,24 @@ static void LJ_FASTCALL recff_stringbuf_byte(jit_State *J, RecordFFData *rd)
 
   if (pos < 0) {
     emitir(IRTGI(IR_LT), trpos, zero);
-    /* sb.p+pos */
+    
     end = emitir(IRT(IR_FLOAD, IRT_P32), buf, IRFL_SBUF_P);
+
+#if LJ_64
+    /* sb.b + sb.p-sb.b + pos */
+    tr = emitir(IRT(IR_SUB, IRT_INT), end, base);
+    trpos = emitir(IRT(IR_ADD, IRT_INT), tr, trpos);
+    tr = emitir(IRTI(IR_ADD), base, trpos);
+
+    /* trpos = emitir(IRT(IR_CONV, IRT_INTP), trpos, IRT_INT | (IRT_INTP << 5) | IRCONV_SEXT); */
+#else
+    /* sb.p+pos */
     tr = emitir(IRT(IR_ADD, IRT_INT), end, trpos);
+#endif
+
   } else {
-    trpos = emitir(IRT(IR_ADD, IRT_INT), base, trpos);
-    tr = emitir(IRTI(IR_ADD), trpos, lj_ir_kint(J, -1));
+    trpos = emitir(IRTI(IR_ADD), base, trpos);
+    tr = emitir(IRTI(IR_SUB), trpos, lj_ir_kint(J, 1));
   }
 
   emitir(IRTGI(IR_GE), tr, base);
