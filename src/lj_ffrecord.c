@@ -1198,19 +1198,20 @@ static void LJ_FASTCALL recff_stringbuf_byte(jit_State *J, RecordFFData *rd)
   TRef buf = recff_stringbufhdr(J, rd, 0, IRBUFHDR_MODIFY);
   TRef trpos = lj_opt_narrow_toint(J, J->base[1]);
   int32_t pos = argv2int(J, &rd->argv[1]);
-  TRef byte = J->base[2], base = emitir(IRT(IR_FLOAD, IRT_P32), buf, IRFL_SBUF_B);
+  TRef trbyte = J->base[2], base = emitir(IRT(IR_FLOAD, IRT_P32), buf, IRFL_SBUF_B);
   TRef tr, end;
   TRef zero = lj_ir_kint(J, 0);
   
-  if (rd->data) {
-    if (tref_isnumber(byte)) {
-      byte = lj_opt_narrow_toint(J, byte);
-    } else if(tref_isstr(byte)){
-      tr = emitir(IRTI(IR_FLOAD), byte, IRFL_STR_LEN);
-      emitir(IRTGI(IR_GT), tr, zero);
-      byte = emitir(IRT(IR_STRREF, IRT_P32), byte, zero);
-      emitir(IRT(IR_XLOAD, IRT_U8), byte, IRXLOAD_READONLY);
-    }  
+  if (rd->data) {/* setbyte */
+     if(tref_isstr(trbyte)){
+      /* use the first char of the string as the byte */
+      tr = emitir(IRTI(IR_FLOAD), trbyte, IRFL_STR_LEN);
+      emitir(IRTGI(IR_UGT), tr, zero);
+      trbyte = emitir(IRT(IR_STRREF, IRT_P32), trbyte, zero);
+      trbyte = emitir(IRT(IR_XLOAD, IRT_U8), trbyte, IRXLOAD_READONLY);
+    } else {
+      trbyte = lj_opt_narrow_toint(J, trbyte);
+    }
   }
 
   if (pos < 0) {
@@ -1231,18 +1232,16 @@ static void LJ_FASTCALL recff_stringbuf_byte(jit_State *J, RecordFFData *rd)
 #endif
 
   } else {
-    trpos = emitir(IRTI(IR_ADD), base, trpos);
-    tr = emitir(IRTI(IR_SUB), trpos, lj_ir_kint(J, 1));
+    tr = emitir(IRTI(IR_SUB), base, lj_ir_kint(J, 1));
+    tr = emitir(IRTI(IR_ADD), tr, trpos);
   }
 
-  emitir(IRTGI(IR_GE), tr, base);
+  emitir(IRTGI(IR_UGE), tr, base);
   end = emitir(IRT(IR_FLOAD, IRT_P32), buf, IRFL_SBUF_P);
-  emitir(IRTGI(IR_LT), tr, end);
+  emitir(IRTGI(IR_ULT), tr, end);
 
   if (rd->data) {/* setbyte */
-   emitir(IRTGI(IR_GE), byte, zero);
-   emitir(IRTGI(IR_LE), byte, lj_ir_kint(J, 255));
-   emitir(IRT(IR_XSTORE, IRT_U8), tr, byte);
+   emitir(IRT(IR_XSTORE, IRT_U8), tr, trbyte);
    J->needsnap = 1;
   } else {
     J->base[0] = emitir(IRT(IR_XLOAD, IRT_U8), tr, 0);

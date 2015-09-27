@@ -1015,10 +1015,6 @@ LJLIB_CF(stringbuf_setbyte) LJLIB_REC(stringbuf_byte 1)
     lj_err_argtype(L, 3, "string or number");
   }
 
-  if (b < 0 || b > 255) {
-    lj_err_arg(L, 3, LJ_ERR_BADVAL);
-  }
-
   sbufB(sb)[pos] = b;
 
   return 0;
