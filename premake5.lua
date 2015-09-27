@@ -148,7 +148,7 @@ solution "LuaJit"
       uuid "C78D880B-3397-887C-BC12-9F7C281B947C"
       kind "SharedLib"
       buildoptions "/c"
-      dependson { "buildvm", "minilua"}
+      dependson "buildvm"
       targetdir "bin/%{cfg.buildcfg}/%{cfg.platform}"
       targetname "lua51"
       vectorextensions "SSE2"
