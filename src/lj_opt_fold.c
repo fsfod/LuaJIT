@@ -542,12 +542,13 @@ LJFOLD(BUFHDR any any)
 LJFOLDF(bufhdr_fold)
 {
   /* Reuse the last header for this buffer if its also a IRBUFHDR_MODIFY */
-  if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD) && fins->op2 == (IRBUFHDR_STRBUF | IRBUFHDR_MODIFY) && J->chain[IR_BUFHDR]) {
+  if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD) && 
+      fins->op2 == (IRBUFHDR_STRBUF|IRBUFHDR_MODIFY) && J->chain[IR_BUFHDR]) {
     IRRef ref = J->chain[IR_BUFHDR];
-    IRIns *prev = IR(ref);
     
-    /* Can safely ignore the temp buffer since it can never be used in IRBUFHDR_MODIFY mode */
-    while (ref && (!(IR(ref)->op2&IRBUFHDR_STRBUF) || (IR(ref)->op2&IRBUFHDR_MODEMASK) == IRBUFHDR_MODIFY)) {
+    /* Ignore the temp buffer since it can never be used in IRBUFHDR_MODIFY mode */
+    while (ref && (!(IR(ref)->op2&IRBUFHDR_STRBUF) || 
+                   (IR(ref)->op2&IRBUFHDR_MODEMASK) == IRBUFHDR_MODIFY)) {
       if (IR(ref)->op1 == fins->op1) {
         return ref;
       }
@@ -572,24 +573,6 @@ LJFOLDF(buf_fload)
   return EMITFOLD;
 }
 
-/* BUFHDR is emitted like a store, see below. */
-LJFOLD(BUFPUT BUFHDR BUFSTR)
-LJFOLDF(bufput_append)
-{
-  /* New buffer, no other buffer op inbetween and same buffer? */
-  if ((J->flags & JIT_F_OPT_FWD) &&
-      !(fleft->op2 & IRBUFHDR_STRBUF) &&
-      (fleft->op2 & IRBUFHDR_MODEMASK) == IRBUFHDR_RESET &&
-      fleft->prev == fright->op2 &&
-      fleft->op1 == IR(fright->op2)->op1) {
-    IRRef ref = fins->op1;
-    IR(ref)->op2 = ((fleft->op2 & ~IRBUFHDR_MODEMASK) | IRBUFHDR_APPEND);  /* Modify BUFHDR. */
-    IR(ref)->op1 = fright->op1;
-    return ref;
-  }
-  return EMITFOLD;  /* Always emit, CSE later. */
-}
-
 LJFOLD(BUFPUT any any)
 LJFOLDF(bufput_kgc)
 {
@@ -611,17 +594,26 @@ LJFOLDF(bufput_kgc)
   return EMITFOLD;  /* Always emit, CSE later. */
 }
 
+/* BUFHDR is emitted like a store, see below. */
 LJFOLD(BUFPUT any BUFSTR)
 LJFOLDF(bufput_fromtempbuf)
 {
   IRRef ref, limit;
-  IRIns *ir;
-  int chainsize = 0;
-  IRRef1 bufchain[12];
 
   /* Only try to fold the string allocation if its from the temp buffer */
-  if ((IR(fright->op2)->op2&IRBUFHDR_STRBUF) || LJ_UNLIKELY((J->flags & JIT_F_OPT_FWD) == 0)) {
+  if ((IR(fright->op2)->op2 & IRBUFHDR_STRBUF) || LJ_UNLIKELY((J->flags & JIT_F_OPT_FWD) == 0)) {
     return EMITFOLD;
+  }
+
+  /*  New temp buffer, no other buffer op inbetween and same buffer? */
+  if (fleft->o == IR_BUFHDR && !(fleft->op2 & IRBUFHDR_STRBUF) && 
+     (fleft->op2 & IRBUFHDR_MODEMASK) == IRBUFHDR_RESET &&
+      fleft->prev == fright->op2 &&
+      fleft->op1 == IR(fright->op2)->op1) {
+    IRRef ref = fins->op1;
+    IR(ref)->op2 = ((fleft->op2 & ~IRBUFHDR_MODEMASK) | IRBUFHDR_APPEND);  /* Modify BUFHDR. */
+    IR(ref)->op1 = fright->op1;
+    return ref;
   }
 
   ref = fins->op1;
@@ -634,6 +626,13 @@ LJFOLDF(bufput_fromtempbuf)
   if (!(IR(ref)->op2&IRBUFHDR_STRBUF)) {
     return EMITFOLD;
   }
+  
+  /* Disable cloning temp buffer chains into string buffer chains for now. 
+     performance could be worse if the BUFSTR does not endup as deadcode after our fold
+  */
+#if 0
+  int chainsize = 0;
+  IRRef1 bufchain[12];
 
   ref = fright->op1; /* buf chain end */
 
@@ -642,36 +641,15 @@ LJFOLDF(bufput_fromtempbuf)
 
     if (ir->o == IR_CALLL) {
       switch (ir->op2) {
-        case IRCALL_lj_strfmt_putfxint:
-        case IRCALL_lj_strfmt_putfnum_int:
-        case IRCALL_lj_strfmt_putfnum_uint:
-        case IRCALL_lj_strfmt_putfnum:
-        case IRCALL_lj_strfmt_putfstr:
-        case IRCALL_lj_strfmt_putfchar:
-          break;
-
         case IRCALL_lj_buf_putbuf:
+        case IRCALL_lj_buf_putbuf_range:
         case IRCALL_lj_buf_puttab:
-        default:
           chainsize = -1;
-        break;
+          break;
+        default:
+          break;
       }
     } else if (ir->o == IR_BUFPUT) {
-      IRIns *putval = IR(ir->op2);
-
-      switch (putval->o) {
-        case IR_TOSTR:
-          if (irref_isk(putval->op1) || IR(putval->op1)->op1)
-            break;
-
-        case IR_KGC:
-        case IR_SLOAD:
-          lua_assert(irt_type(putval->t) == IRT_STR);
-          break;
-
-        default:
-          break;
-      }
     } else if (ir->o == IR_BUFHDR) {
       break;
     }
@@ -697,7 +675,7 @@ LJFOLDF(bufput_fromtempbuf)
 
     return tr;
   }
-
+#endif
   /* fallback to just trying to copy the buffer */
   limit = fins->op2;
   ref = J->chain[IR_BUFHDR];
