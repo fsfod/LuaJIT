@@ -34,6 +34,8 @@ local expectedlnk = "return"
 
 function trerror(s, a1, ...)
 
+  tracker.print_savedevevents()
+
   if(a1) then
     error(string.format(s, a1, ...), 4)
   else
@@ -71,8 +73,20 @@ jit.off(checktrace)
 
 local function begin_jittest(func)
   jit.flush()
-  jit.on(func) --clear any interpreter only function/loop headers that may have been caused by other tests
+  jit.on(func, true) --clear any interpreter only function/loop headers that may have been caused by other tests
   tracker.clear()
+end
+
+function trerror2(s, a1, ...)
+
+  tracker.print_savedevevents()
+
+  if(a1) then
+    error(string.format(s, a1, ...), 3)
+  else
+    error(s, 3)
+  end
+
 end
 
 function testjit(expected, func, ...)
@@ -85,14 +99,15 @@ function testjit(expected, func, ...)
 
     if (result ~= expected) then
       local jitted, anyjited = tracker.isjited(func)
-      error(string.format("expected '%s' but got '%s' - %s", tostring(expected), tostring(result), (jitted and "JITed") or "Interpreted"), 2)
+      tracker.print_savedevevents()
+      trerror2("expected '%s' but got '%s' - %s", tostring(expected), tostring(result), (jitted and "JITed") or "Interpreted")
     end
   end
 
   local traces = tracker.traces()
   
   if #traces == 0 then
-    error("no traces were started for test "..expected, 2)
+    trerror2("no traces were started for test "..expected, 2)
   end
   
   local tr = traces[1]
@@ -100,11 +115,11 @@ function testjit(expected, func, ...)
   checktrace(tr, func)
 
   if tracker.hasexits() then
-    trerror("unexpect traces exits"..expected)
+    trerror2("unexpect traces exits "..expected)
   end
     
   if #traces > 1 then
-    trerror("unexpect extra traces were started for test "..expected)
+    trerror2("unexpect extra traces were started for test "..expected)
   end
   --trace stop event doesn't provide a pc so would need to save the last pc traced
   --[[
@@ -128,6 +143,8 @@ local function testjit2(func, config1, config2)
   local jitted = false
   local trcount = 0
   local config, expected, shoulderror = config1, config1.expected, config1.shoulderror 
+  local state = 1
+  local sideexit_start = 0
   
   for i=1, 30 do
     local status, result
@@ -138,25 +155,44 @@ local function testjit2(func, config1, config2)
       status, result = pcall(func, unpack(config.args))
       
       if(status) then
-        error("expected call to trigger error but didn't "..tostring(i), 2)
+        tracker.print_savedevevents()
+        trerror2("expected call to trigger error but didn't "..tostring(i))
       end
+    end
+    
+    if state == 2 then
+      if tracker.hasexits() then
+        trerror2("trace exited on first run after being compiled "..expected)
+      end
+      state = 3
     end
     
     local newtraces = tracker.traceattemps() ~= trcount
     
     if newtraces then
-      trcount = tracker.traceattemps()  
-      jitted, anyjited = tracker.isjited(func)
+      trcount = tracker.traceattemps()
+      jitted, anyjited = tracker.isjited(func)  
+      
+      if state == 1 then
+      --let the trace be executed once before we switch to the next arguments
+        state = 2
+      elseif state == 4 and not tracker.traces()[trcount].abort  then
+        state = 5
+        sidestart = tracker.exitcount()
+        print("side trace compiled ".. tostring(expected))
+      end
     end
     
     if not shoulderror and result ~= expected then
+      tracker.print_savedevevents()
       error(string.format("expected '%s' but got '%s' - %s", tostring(expected), tostring(result), (jitted and "JITed") or "Interpreted"), 2)
     end
     
-    if newtraces then
+    if state == 3 then
       config = config2
       expected = config2.expected
       shoulderror = config2.shoulderror
+      state = 4
     end
     
   end
@@ -164,7 +200,7 @@ local function testjit2(func, config1, config2)
   local traces = tracker.traces()
   
   if #traces == 0 then
-    error("no traces were started for test "..expected, 2)
+    trerror2("no traces were started for test "..expected)
   end
   
   local tr = traces[1]
@@ -172,7 +208,11 @@ local function testjit2(func, config1, config2)
   checktrace(tr, func)
   
   if not tracker.hasexits() then
-    trerror("Expect trace to exit to interpreter")
+    trerror2("Expect trace to exit to interpreter")
+  end
+  
+  if sidestart ~= 0 and tracker.exitcount() > sidestart then
+    trerror2("Unexpected exits from side trace")
   end
 end
 
@@ -372,6 +412,7 @@ function tests.byte()
 
   local a = string.byte("a")
   local b = string.byte("b")
+  local c = string.byte("c")
   
   assert(not pcall(getbyte, buf_a, 0))
   assert(not pcall(getbyte, buf_empty, 0))
@@ -388,8 +429,12 @@ function tests.byte()
                     {args = {buf_abc, 2}, expected = b})
 
   local start = {args = {buf_a, 1}, expected = a}
-
+  testjit2(getbyte, start, {args = {buf_abc, -3}, expected = a})
   testjit2(getbyte, start, {args = {buf_abc, -2}, expected = b})
+  testjit2(getbyte, start, {args = {buf_abc, -1}, expected = c})
+  
+  testjit2(getbyte, start, {args = {buf_empty, 0}, shoulderror = true})
+  testjit2(getbyte, start, {args = {buf_abc, 0}, shoulderror = true})
   testjit2(getbyte, start, {args = {buf_a, 0}, shoulderror = true})
   testjit2(getbyte, start, {args = {buf_a, 2}, shoulderror = true})
   testjit2(getbyte, start, {args = {buf_a, -2}, shoulderror = true})
@@ -400,6 +445,8 @@ function tests.byte()
   testjit2(getbyte, start, {args = {buf_empty, 1}, shoulderror = true})
   testjit2(getbyte, start, {args = {buf_empty, -1}, shoulderror = true})
 end
+--tracker.setprintevents(true)
+--singletest = tests.byte
 
 local function fixslash(buf, path)
 
@@ -461,7 +508,7 @@ end
 function tests.write()
   asserteq(testwrite("a"), "a")
   asserteq(testwrite(""), "")
-  
+
   testjit("bar", testwrite, "bar")
   testjit("1234567890", testwrite, 1234567890)
   testjit("foo2bar", testwrite, "foo", 2, "bar")
@@ -667,6 +714,7 @@ end
 
 tracker.start()
 --tracker.setprintevents(true)
+collectgarbage("stop")
 
 if singletest then
   print("Running: single test")

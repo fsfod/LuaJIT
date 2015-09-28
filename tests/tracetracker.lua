@@ -157,6 +157,31 @@ local function clear()
   lib.aborts = 0
 end
 
+local function print_savedevevents()
+
+  local nextexit = texits[1] and texits[1].order
+  local exi = 1
+
+  for i,tr in ipairs(traces) do
+    print_trevent(tr, true)
+    
+    if i >= nextexit then
+      for i=exi,#texits do
+        
+        local exit = texits[i]
+        
+        if exit.order > i then 
+          exi = i
+          break
+        end
+      
+        print("---- TRACE ", exit.tr, " exit ", exit.exitno)
+      end
+    end
+    
+  end
+end
+
 lib = {
   start = start,
   stop = stop,
@@ -166,8 +191,9 @@ lib = {
   hasexits = function() return texits[1] ~= nil end,
   setprintevents = function(enabled) printevents = enabled end,
   traces = function() return traces end,
+  exitcount = function() return #texits end,
   traceattemps = function() return #traces end,
-  
+  print_savedevevents = print_savedevevents,
   aborts = 0,
 }
 

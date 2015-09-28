@@ -1,0 +1,28 @@
+String buffers created with string.createbuffer([initcapacity])
+
+
+API:
+ * boolean equals(string/stringbuffer)
+ * string tostring() copies the buffer to a new lua string.
+ * int size() size of the string buffer, length # operator also works.
+ * setsize(int size,[fillvalue]) sets the new size of the buffer(max value is current capacity) filling any extra space with 0/fill value provided or 
+   it can be left uninitialized if false is passed in and luajit is built with ffi enabled.
+* int capacity() gets the current capacity of the buffer.
+* setcapacity(int capacity) adjusts the capacity directly reallocating the buffer in the process.
+ * reset() Resets the buffers size back to 0 but leaving its capacity unchanged.
+ 
+* reserve(int more) Ensure the buffer has the specified space left spare causing it to reallocate to a larger capacity to provide atleast the space requested
+ * int byte(int n) returns the n-th character of the string buffer. Has fold rules to avoid constantly reloading buffer pointers in a jitted loop if the buffer is not appended to in the loop
+ * setbyte(int n, int byte) directly sets byte in the buffer at n offset. n has tobe smaller than the current buffer size
+ * write(...) writes a list of values to the buffer invoking there meta __tostring if needed. string buffers passed in are directly copied instead of tostring being called on them
+ 
+* writeln(...) same as write but automatically appends a \n newline after writing the values passed in
+ * writesub(string/stringbuffer, int start[, int end]) writes a substring of either a string or string buffer. start/end works like string.sub
+ * format(string s, ...) arguments works the same as string.format but can also take string buffers in place of strings for %s format entries
+ 
+* rep(string s, rep[, string sep]) works the same as string  
+ * lower() in-place string lower 
+ * upper() in-place string upper
+
+Extended some built in apis print/loadstring/file.write to support being passed string buffers inplace of a string
+
