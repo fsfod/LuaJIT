@@ -18,11 +18,18 @@
 
 static void buf_grow(SBuf *sb, MSize sz)
 {
-  MSize osz = sbufsz(sb), len = sbuflen(sb), nsz = osz;
-  char *b;
+  MSize osz = sbufsz(sb), len = sbuflen(sb), nsz;
+  char *b = sbufB(sb);
+  sz += sizeof(GCstr);
+  if (osz != 0) {
+    b -= sizeof(GCstr);
+    osz += sizeof(GCstr);
+  }
+  nsz = osz;
   if (nsz < LJ_MIN_SBUF) nsz = LJ_MIN_SBUF;
   while (nsz < sz) nsz += nsz;
-  b = (char *)lj_mem_realloc(sbufL(sb), sbufB(sb), osz, nsz);
+  b = (char *)lj_mem_realloc(sbufL(sb), b, osz, nsz+sizeof(GCstr));
+  b += sizeof(GCstr);
   setmref(sb->b, b);
   setmref(sb->p, b + len);
   setmref(sb->e, b + nsz);
@@ -61,10 +68,12 @@ void LJ_FASTCALL lj_buf_shrink(lua_State *L, SBuf *sb)
   MSize osz = (MSize)(sbufE(sb) - b);
   if (osz > 2*LJ_MIN_SBUF) {
     MSize n = (MSize)(sbufP(sb) - b);
-    b = lj_mem_realloc(L, b, osz, (osz >> 1));
+    MSize nsz = (osz >> 1);
+    b = lj_mem_realloc(L, b-sizeof(GCstr), osz+sizeof(GCstr), nsz+sizeof(GCstr));
+    b += sizeof(GCstr);
     setmref(sb->b, b);
     setmref(sb->p, b + n);
-    setmref(sb->e, b + (osz >> 1));
+    setmref(sb->e, b + nsz);
   }
 }
 
@@ -319,6 +328,20 @@ SBuf *lj_buf_puttab(SBuf *sb, GCtab *t, GCstr *sep, int32_t i, int32_t e)
 GCstr * LJ_FASTCALL lj_buf_tostr(SBuf *sb)
 {
   return lj_str_new(sbufL(sb), sbufB(sb), sbuflen(sb));
+}
+
+GCstr * LJ_FASTCALL lj_buf_tostr_tmp(SBuf *sb)
+{
+  GCstr *s;
+  lj_buf_more(sb, 1)[0] = 0;
+  s = (GCstr*)(sbufB(sb)-sizeof(GCstr));
+  s->len = sbuflen(sb);
+  /* Try to trigger obvious errors/asserts for string escaping out of the 
+     C function it was used in
+  */
+  s->gct = ~LJ_TNIL;
+  setgcrefp(s->nextgc, s);
+  return s;
 }
 
 static int fastcmp(const char *a, const char *b, MSize len)

@@ -196,6 +196,8 @@ GCstr *lj_lib_checkstr(lua_State *L, int narg)
   if (o < L->top) {
     if (LJ_LIKELY(tvisstr(o))) {
       return strV(o);
+    } else if(tvissbuf(o)) {
+      return lj_buf_tostr_tmp(sbufV(o));
     } else if (tvisnumber(o)) {
       GCstr *s = lj_strfmt_number(L, o);
       setstrV(L, o, s);
