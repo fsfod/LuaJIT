@@ -248,6 +248,7 @@ end
     vpaths { ["libs"] = "src/lib_*.h" }
     vpaths { ["libs"] = "src/lib_*.c" }
     debugenvs {"LUA_PATH=%{sln.location}src/?.lua;%{sln.location}bin/%{cfg.buildcfg}/%{cfg.platform}/?.lua;%{sln.location}tests/?.lua"..DEBUG_LUA_PATH}
+    debugargs {"../tests/test.lua"}
     
     files {
       "src/luajit.c"
