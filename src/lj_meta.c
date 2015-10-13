@@ -162,6 +162,9 @@ TValue *lj_meta_tset(lua_State *L, cTValue *o, cTValue *k)
 {
   TValue tmp;
   int loop;
+  if (tvistab(o) && lj_tab_isro(tabV(o))) {
+    lj_err_msg(L, LJ_ERR_TABRO);
+  }
   for (loop = 0; loop < LJ_MAX_IDXCHAIN; loop++) {
     cTValue *mo;
     if (LJ_LIKELY(tvistab(o))) {

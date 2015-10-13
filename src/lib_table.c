@@ -81,6 +81,9 @@ LJLIB_CF(table_insert)		LJLIB_REC(.)
   GCtab *t = lj_lib_checktab(L, 1);
   int32_t n, i = (int32_t)lj_tab_len(t) + 1;
   int nargs = (int)((char *)L->top - (char *)L->base);
+  if (lj_tab_isro(t)) {
+    lj_err_msg(L, LJ_ERR_TABRO);
+  }
   if (nargs != 2*sizeof(TValue)) {
     if (nargs != 3*sizeof(TValue))
       lj_err_caller(L, LJ_ERR_TABINS);
@@ -147,6 +150,19 @@ LJLIB_CF(table_concat)		LJLIB_REC(.)
   setstrV(L, L->top-1, lj_buf_str(L, sbx));
   lj_gc_check(L);
   return 1;
+}
+
+LJLIB_CF(table_setreadonly)
+{
+  GCtab *t = lj_lib_checktab(L, 1);
+  lj_tab_set_readonly(L, t);
+  settabV(L, L->top-1, t);
+  return 1;
+}
+
+void LJ_FASTCALL lj_err_tabro(lua_State *L)
+{
+  lj_err_msg(L, LJ_ERR_TABRO);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -240,6 +256,9 @@ LJLIB_CF(table_sort)
 {
   GCtab *t = lj_lib_checktab(L, 1);
   int32_t n = (int32_t)lj_tab_len(t);
+  if (lj_tab_isro(t)) {
+    lj_err_msg(L, LJ_ERR_TABRO);
+  }
   lua_settop(L, 2);
   if (!tvisnil(L->base+1))
     lj_lib_checkfunc(L, 2);
@@ -275,7 +294,11 @@ LJLIB_NOREG LJLIB_CF(table_new)		LJLIB_REC(.)
 
 LJLIB_NOREG LJLIB_CF(table_clear)	LJLIB_REC(.)
 {
-  lj_tab_clear(lj_lib_checktab(L, 1));
+  GCtab *t = lj_lib_checktab(L, 1);
+  if (lj_tab_isro(t)) {
+    lj_err_msg(L, LJ_ERR_TABRO);
+  }
+  lj_tab_clear(t);
   return 0;
 }
 
