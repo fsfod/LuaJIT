@@ -74,6 +74,22 @@ function BuildVmCommand(cmd, outputfile, addLibList, outputDir)
     return result
 end
 
+HOST_LUA = _OPTIONS["HOST_LUA"]
+
+if not HOST_LUA then
+
+  if os.isfile(path.join(BuildDir, "minilua.exe")) then
+    HOST_LUA = path.join(BuildDir, "minilua.exe")
+  elseif os.isfile("minilua.exe") then
+    HOST_LUA = "minilua.exe"
+  end
+  
+  if HOST_LUA then
+    HOST_LUA = '"'..os.realpath(HOST_LUA)..'"'
+  end
+end
+
+minilua = HOST_LUA or'"obj/minilua/%{cfg.buildcfg}%{cfg.platform}/minilua.exe"'
 
 -- A solution contains projects, and defines the available configurations
 solution "LuaJit"
@@ -89,7 +105,8 @@ solution "LuaJit"
 
   filter "platforms:x64"
     architecture "x86_64"
-   
+ 
+if not HOST_LUA then  
    project "minilua"
       uuid "74FBF227-E0DA-71C3-E9F2-FC995551D824"
       kind "ConsoleApp"
@@ -108,12 +125,14 @@ solution "LuaJit"
       configuration "Release"
          defines { "NDEBUG" }
          optimize"Speed" 
-    
+end   
 
    project "buildvm"
       uuid "B86F1F94-244F-9E2F-2D67-290699C50491"
       kind "ConsoleApp"
+if not HOST_LUA then
       dependson { "minilua" } 
+end
       vectorextensions "SSE2"
       location(BuildDir)
       language "C"
@@ -130,7 +149,7 @@ solution "LuaJit"
       filter{'architecture:x32', 'files:src/vm_x86.dasc'}
         buildmessage 'Compiling %{file.relpath}'
         buildcommands {
-           '"obj/minilua/%{cfg.buildcfg}%{cfg.platform}/minilua.exe" %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+           minilua..' %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
         }
         buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
         
@@ -138,7 +157,7 @@ solution "LuaJit"
       filter{'architecture:x64', 'files:src/vm_x86.dasc'}
         buildmessage 'Compiling %{file.relpath}'
         buildcommands {
-           '"obj/minilua/%{cfg.buildcfg}%{cfg.platform}/minilua.exe" %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -D P64 -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+           minilua..' %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -D P64 -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
         }
         buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
 
