@@ -234,12 +234,22 @@ void LJ_FASTCALL lj_tab_free(global_State *g, GCtab *t)
 {
   if (t->hmask > 0)
     lj_mem_freevec(g, noderef(t->node), t->hmask+1, Node);
-  if (t->asize > 0 && LJ_MAX_COLOSIZE != 0 && t->colo <= 0)
+  if (t->asize > 0 && LJ_MAX_COLOSIZE != 0 && (t->colo <= 0 || lj_tab_isro(t)))
     lj_mem_freevec(g, tvref(t->array), t->asize, TValue);
-  if (LJ_MAX_COLOSIZE != 0 && t->colo)
+  if (LJ_MAX_COLOSIZE != 0 && t->colo && !lj_tab_isro(t))
     lj_mem_free(g, t, sizetabcolo((uint32_t)t->colo & 0x7f));
   else
     lj_mem_freet(g, t);
+}
+
+void LJ_FASTCALL lj_tab_set_readonly(lua_State *L, GCtab *t)
+{
+  /* table has colocated array so we cannot set out custom colocated size */
+  if (t->colo != 0 && !lj_tab_isro(t)) {
+    lj_err_msg(L, LJ_ERR_TABNORO);
+  }
+
+  t->colo = LJ_MAX_COLOSIZE+1;
 }
 
 /* -- Table resizing ------------------------------------------------------ */
@@ -250,6 +260,9 @@ void lj_tab_resize(lua_State *L, GCtab *t, uint32_t asize, uint32_t hbits)
   Node *oldnode = noderef(t->node);
   uint32_t oldasize = t->asize;
   uint32_t oldhmask = t->hmask;
+  if (lj_tab_isro(t)) {
+    lj_err_msg(L, LJ_ERR_TABRO);
+  }
   if (asize > oldasize) {  /* Array part grows? */
     TValue *array;
     uint32_t i;
@@ -513,6 +526,9 @@ TValue *lj_tab_setinth(lua_State *L, GCtab *t, int32_t key)
 {
   TValue k;
   Node *n;
+  if (lj_tab_isro(t)) {
+    lj_err_msg(L, LJ_ERR_TABRO);
+  }
   k.n = (lua_Number)key;
   n = hashnum(t, &k);
   do {
@@ -526,6 +542,9 @@ TValue *lj_tab_setstr(lua_State *L, GCtab *t, GCstr *key)
 {
   TValue k;
   Node *n = hashstr(t, key);
+  if (lj_tab_isro(t)) {
+    lj_err_msg(L, LJ_ERR_TABRO);
+  }
   do {
     if (tvisstr(&n->key) && strV(&n->key) == key)
       return &n->val;
@@ -538,6 +557,9 @@ TValue *lj_tab_set(lua_State *L, GCtab *t, cTValue *key)
 {
   Node *n;
   t->nomm = 0;  /* Invalidate negative metamethod cache. */
+  if (lj_tab_isro(t)) {
+    lj_err_msg(L, LJ_ERR_TABRO);
+  }
   if (tvisstr(key)) {
     return lj_tab_setstr(L, t, strV(key));
   } else if (tvisint(key)) {

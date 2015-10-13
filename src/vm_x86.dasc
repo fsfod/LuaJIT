@@ -393,7 +393,8 @@
 |.macro checkint, reg, target; checktp reg, LJ_TISNUM; jne target; .endmacro
 |.macro checkstr, reg, target; checktp reg, LJ_TSTR; jne target; .endmacro
 |.macro checktab, reg, target; checktp reg, LJ_TTAB; jne target; .endmacro
-|
+|.macro checktabro, reg; cmp byte TAB:reg->colo, 17; je ->vmeta_tsetv; .endmacro
+|//LJ_RO_COLOSIZE 17
 |// These operands must be used with movzx.
 |.define PC_OP, byte [PC-4]
 |.define PC_RA, byte [PC-3]
@@ -2622,7 +2623,6 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov RBa, TMPa
   |  push RBa				// Restore return address.
   |  ret
-  |
   |//-----------------------------------------------------------------------
   |//-- Special dispatch targets -------------------------------------------
   |//-----------------------------------------------------------------------
@@ -4395,7 +4395,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_ABC	// RA = src, RB = table, RC = key
     |  checktab RB, ->vmeta_tsetv
     |  mov TAB:RB, [BASE+RB*8]
-    |
+    |  checktabro RB
     |  // Integer key?
     |.if DUALNUM
     |  checkint RC, >5
@@ -4456,6 +4456,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  checktab RB, ->vmeta_tsets
     |  mov TAB:RB, [BASE+RB*8]
     |->BC_TSETS_Z:	// RB = GCtab *, RC = GCstr *, refetches PC_RA.
+    |  checktabro RB
     |  mov RA, TAB:RB->hmask
     |  and RA, STR:RC->hash
     |  imul RA, #NODE
