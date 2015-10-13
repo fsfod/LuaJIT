@@ -65,7 +65,7 @@ function BuildVmCommand(cmd, outputfile, addLibList, outputDir)
     
     outputDir = outputDir or "$(IntDir)"
     
-    local result = '"obj/buildvm/%{cfg.buildcfg}/%{cfg.platform}/buildvm.exe" '..cmd..' -o "'..outputDir..outputfile..'" '
+    local result = '"obj/buildvm/%{cfg.buildcfg}%{cfg.platform}/buildvm.exe" '..cmd..' -o "'..outputDir..outputfile..'" '
     
     if addLibList then
         result = result..liblistString
@@ -78,11 +78,17 @@ end
 -- A solution contains projects, and defines the available configurations
 solution "LuaJit"
    configurations { "Debug", "Release" }
-   platforms { "x32", "x64" }
+   platforms { "x86", "x64" }
    defines {"_CRT_SECURE_NO_DEPRECATE" }
-   objdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}/%{cfg.platform}/"
-   targetdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}/%{cfg.platform}/"
+   objdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}"
+   targetdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}"
    startproject"lua"
+   
+  filter "platforms:x86"
+    architecture "x86"
+
+  filter "platforms:x64"
+    architecture "x86_64"
    
    project "minilua"
       uuid "74FBF227-E0DA-71C3-E9F2-FC995551D824"
@@ -124,7 +130,7 @@ solution "LuaJit"
       filter{'architecture:x32', 'files:src/vm_x86.dasc'}
         buildmessage 'Compiling %{file.relpath}'
         buildcommands {
-           '"obj/minilua/%{cfg.buildcfg}/%{cfg.platform}/minilua.exe" %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+           '"obj/minilua/%{cfg.buildcfg}%{cfg.platform}/minilua.exe" %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
         }
         buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
         
@@ -132,7 +138,7 @@ solution "LuaJit"
       filter{'architecture:x64', 'files:src/vm_x86.dasc'}
         buildmessage 'Compiling %{file.relpath}'
         buildcommands {
-           '"obj/minilua/%{cfg.buildcfg}/%{cfg.platform}/minilua.exe" %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -D P64 -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+           '"obj/minilua/%{cfg.buildcfg}%{cfg.platform}/minilua.exe" %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -D P64 -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
         }
         buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
 
@@ -191,7 +197,7 @@ solution "LuaJit"
       
       prebuildcommands {
         '{MKDIR} %{cfg.targetdir}/jit/',
-        '"obj/buildvm/%{cfg.buildcfg}/%{cfg.platform}/buildvm.exe" -m peobj -o "$(IntDir)lj_vm.obj"',
+        '"obj/buildvm/%{cfg.buildcfg}%{cfg.platform}/buildvm.exe" -m peobj -o "$(IntDir)lj_vm.obj"',
          BuildVmCommand("-m bcdef","lj_bcdef.h", true),
          BuildVmCommand("-m ffdef", "lj_ffdef.h", true),
          BuildVmCommand("-m libdef", "lj_libdef.h", true),
