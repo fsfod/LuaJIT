@@ -91,6 +91,8 @@ end
 
 minilua = HOST_LUA or'"obj/minilua/%{cfg.buildcfg}%{cfg.platform}/minilua.exe"'
 
+DEBUG_LUA_PATH = _OPTIONS["DEBUG_LUA_PATH"] or ""
+
 -- A solution contains projects, and defines the available configurations
 solution "LuaJit"
    configurations { "Debug", "Release" }
@@ -246,6 +248,7 @@ end
         location(BuildDir)
         vpaths { ["libs"] = "src/lib_*.h" }
         vpaths { ["libs"] = "src/lib_*.c" }
+        debugenvs {"LUA_PATH=%{sln.location}/src/?.lua;bin/%{cfg.buildcfg}/%{cfg.platform}/?.lua;%{sln.location}/tests/?.lua"..DEBUG_LUA_PATH}
       
         files {
             "src/luajit.c"
