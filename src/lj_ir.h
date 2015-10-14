@@ -202,6 +202,7 @@ IRFPMDEF(FPMENUM)
   _(TAB_ASIZE,	offsetof(GCtab, asize)) \
   _(TAB_HMASK,	offsetof(GCtab, hmask)) \
   _(TAB_NOMM,	offsetof(GCtab, nomm)) \
+  _(TAB_COLO,	offsetof(GCtab, colo)) \
   _(UDATA_META,	offsetof(GCudata, metatable)) \
   _(UDATA_UDTYPE, offsetof(GCudata, udtype)) \
   _(UDATA_FILE,	sizeof(GCudata)) \

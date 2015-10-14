@@ -931,6 +931,20 @@ static BCReg rec_mm_prep(jit_State *J, ASMFunction cont)
   return top+1+LJ_FR2;
 }
 
+static void check_readonly_mt(jit_State *J, RecordIndex *ix, GCtab *mt)
+{
+  TRef trmt;
+
+  if (!mt || !lj_tab_isro(mt)) {
+    return;
+  }
+
+  /* Replace the mt field load with a constant if the mt is readonly */
+  trmt = lj_ir_ktab(J, mt);
+  emitir(IRTG(IR_EQ, IRT_TAB), ix->tab, trmt);
+  ix->tab = trmt;
+}
+
 /* Record metamethod lookup. */
 int lj_record_mm_lookup(jit_State *J, RecordIndex *ix, MMS mm)
 {
@@ -938,7 +952,8 @@ int lj_record_mm_lookup(jit_State *J, RecordIndex *ix, MMS mm)
   GCtab *mt;
   if (tref_istab(ix->tab)) {
     mt = tabref(tabV(&ix->tabv)->metatable);
-    mix.tab = emitir(IRT(IR_FLOAD, IRT_TAB), ix->tab, IRFL_TAB_META);
+    mix.tab = emitir(IRT(IR_FLOAD, IRT_TAB), ix->tab, IRFL_TAB_META);   
+    check_readonly_mt(J, &mix, mt);
   } else if (tref_isudata(ix->tab)) {
     int udtype = udataV(&ix->tabv)->udtype;
     mt = tabref(udataV(&ix->tabv)->metatable);
@@ -967,6 +982,7 @@ int lj_record_mm_lookup(jit_State *J, RecordIndex *ix, MMS mm)
       return 1;  /* Got metamethod or index table. */
     }
     mix.tab = emitir(IRT(IR_FLOAD, IRT_TAB), ix->tab, IRFL_UDATA_META);
+    check_readonly_mt(J, &mix, mt);
   } else {
     /* Specialize to base metatable. Must flush mcode in lua_setmetatable(). */
     mt = tabref(basemt_obj(J2G(J), &ix->tabv));
@@ -1420,6 +1436,19 @@ TRef lj_record_idx(jit_State *J, RecordIndex *ix)
     }
   }
 
+  /* We depend on GGet and lj_record_mm_lookup to turn loading a table set to readonly into a constant */
+  if (tref_isk(ix->tab) && lj_tab_isro(tabV(&ix->tabv)) && tref_isk(ix->key)) {
+    GCtab *t = tabV(&ix->tabv);
+    cTValue* value = lj_tab_get(J->L, t, &ix->keyv);
+    
+    /* TODO: Change this when write only tables are added to revert to a normal table lookup */
+    if (tvisnil(value)) {
+      return TREF_NIL;
+    }
+
+    return lj_record_constify(J, value);
+  }
+
   /* Record the key lookup. */
   xref = rec_idx_key(J, ix, &rbref, &rbguard);
   xrefop = IR(tref_ref(xref))->o;
@@ -1447,6 +1476,11 @@ TRef lj_record_idx(jit_State *J, RecordIndex *ix)
   } else {  /* Indexed store. */
     GCtab *mt = tabref(tabV(&ix->tabv)->metatable);
     int keybarrier = tref_isgcv(ix->key) && !tref_isnil(ix->val);
+    TRef tr;
+    /* make sure the table stays non readonly */
+    tr = emitir(IRT(IR_FLOAD, IRT_I8), ix->tab, IRFL_TAB_COLO);
+    emitir(IRTG(IR_LT, IRT_I8), tr, lj_ir_kint(J, LJ_MAX_COLOSIZE+1));
+
     if (tref_ref(xref) < rbref) {  /* HREFK forwarded? */
       lj_ir_rollback(J, rbref);  /* Rollback to eliminate hmask guard. */
       J->guardemit = rbguard;
@@ -1558,7 +1592,14 @@ static int rec_upvalue_constify(jit_State *J, GCupval *uvp)
 #else
     UNUSED(J);
 #endif
-    if (!(tvistab(o) || tvisudata(o) || tvisthread(o)))
+    /* Allow constifying readonly tables because we know there size can't grow without flushing all traces */
+    if (tvistab(o)) {
+      GCtab *t = tabV(o);
+      /*TODO: tune these or something */
+      return lj_tab_isro(t) && t->asize < 1024 && t->hmask < 1024;
+    }
+
+    if (!(tvisudata(o) || tvisthread(o)))
       return 1;
   }
   return 0;
@@ -2287,8 +2328,15 @@ void lj_record_ins(jit_State *J)
   /* -- Table ops --------------------------------------------------------- */
 
   case BC_GGET: case BC_GSET:
+    /* Treat the env load as constant if the env table is marked readonly */
+    if (op == BC_GGET && lj_tab_isro(tabref(J->fn->l.env))) {
+      TRef env = emitir(IRT(IR_FLOAD, IRT_TAB), getcurrf(J), IRFL_FUNC_ENV);
+      ix.tab = lj_ir_ktab(J, tabref(J->fn->l.env));
+      emitir(IRTG(IR_EQ, IRT_TAB), env, ix.tab);
+    } else {
+      ix.tab = emitir(IRT(IR_FLOAD, IRT_TAB), getcurrf(J), IRFL_FUNC_ENV);
+    }
     settabV(J->L, &ix.tabv, tabref(J->fn->l.env));
-    ix.tab = emitir(IRT(IR_FLOAD, IRT_TAB), getcurrf(J), IRFL_FUNC_ENV);
     ix.idxchain = LJ_MAX_IDXCHAIN;
     rc = lj_record_idx(J, &ix);
     break;
