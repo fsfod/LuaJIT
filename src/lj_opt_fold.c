@@ -2155,6 +2155,24 @@ LJFOLD(FLOAD any IRFL_TAB_HMASK)
 LJFOLDF(fload_tab_ah)
 {
   TRef tr = lj_opt_cse(J);
+
+  if (tref_isk(fins->op1) && fins->o != IR_HREF){
+    GCtab *t = ir_ktab(IR(fleft->op1));
+
+    if (lj_tab_isro(t)) {
+      switch (fins->op2) {
+        case IRFL_TAB_ASIZE:
+          return INTFOLD((int32_t)t->asize);
+        case IRFL_TAB_HMASK:
+          return INTFOLD((int32_t)t->hmask);
+        case IRFL_TAB_NODE:
+          return lj_ir_kkptr(J, noderef(t->node));
+        case IRFL_TAB_ARRAY:
+          return lj_ir_kkptr(J, mref(t->array, TValue));
+      }
+    }
+  }
+
   return lj_opt_fwd_tptr(J, tref_ref(tr)) ? tr : EMITFOLD;
 }
 
