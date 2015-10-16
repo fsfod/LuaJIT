@@ -135,6 +135,11 @@ static TRef fwd_ahload(jit_State *J, IRRef xref)
   IRRef lim = xref;  /* Search limit. */
   IRRef ref;
 
+  /* readonly tables */
+  if (tref_isk(xr->op1) && (xr->o == IR_HREFK || xr->o == IR_AREF) && IR(xr->op1)->o == IR_KKPTR) {
+    goto cselim;
+  }
+
   /* Search for conflicting stores. */
   ref = J->chain[fins->o+IRDELTA_L2S];
   while (ref > xref) {
