@@ -10,71 +10,69 @@
 
 typedef struct 
 {
-    size_t count;
-    size_t totalsize;
-    size_t maxsize;
+  size_t count;
+  size_t totalsize;
+  size_t maxsize;
 }gcstat_obj;
 
-typedef enum 
+typedef enum gcobj_type
 {
-    gcobj_string,
-    gcobj_upvalue,
-    gcobj_thread,
-    gcobj_funcprototype,
-    gcobj_function,
-    gcobj_trace,
-    gcobj_cdata,
-    gcobj_table,
-    gcobj_udata,
-    gcobj_MAX,
+  gcobj_string,
+  gcobj_upvalue,
+  gcobj_thread,
+  gcobj_funcprototype,
+  gcobj_function,
+  gcobj_trace,
+  gcobj_cdata,
+  gcobj_table,
+  gcobj_udata,
+  gcobj_MAX,
 }gcobj_type;
 
 typedef struct
 {
-    uint32_t arraysize;
-    uint32_t arraycapacity;
-    uint32_t hashsize;
-    uint32_t hashcapacity;
-    uint32_t hashcollisions;
+  uint32_t arraysize;
+  uint32_t arraycapacity;
+  uint32_t hashsize;
+  uint32_t hashcapacity;
+  uint32_t hashcollisions;
 }gcstat_table;
 
 typedef struct  
 {
-    gcstat_obj objstats[gcobj_MAX];
-
-    gcstat_table registry;
-    gcstat_table globals;
-    int finlizercdata_count;
+  gcstat_obj objstats[gcobj_MAX];
+  
+  gcstat_table registry;
+  gcstat_table globals;
+  int finlizercdata_count;
 }gcstats;
 
 LUA_API void gcstats_collect(lua_State *L, gcstats* result);
 
 LUA_API int findobjuses(lua_State *L);
 
-
-
-typedef struct
+typedef struct gctime
 {
-    uint64_t mark;
-    uint64_t sweep;
-    int finalizedcount;
+  uint64_t mark;
+  uint64_t sweep;
+  int finalizedcount;
 }gctime;
 
-typedef struct
+typedef struct snapshot_obj
 {
-    uint32_t typeandsize;
-    void* address;
+  uint32_t typeandsize;
+  void* address;
 }snapshot_obj;
 
 typedef struct gcsnapshot_handle gcsnapshot_handle;
 
-typedef struct
+typedef struct gcsnapshot
 {
-    uint32_t count;
-    snapshot_obj* objects;
-    char* gcmem;
-    size_t gcmem_size;
-    gcsnapshot_handle* handle;
+  uint32_t count;
+  snapshot_obj* objects;
+  char* gcmem;
+  size_t gcmem_size;
+  gcsnapshot_handle* handle;
 }gcsnapshot;
 
 LUA_API gcsnapshot* gcsnapshot_create(lua_State *L);

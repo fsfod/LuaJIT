@@ -17,12 +17,12 @@ struct ScanContext;
 typedef void (*obj_foundcb)(struct ScanContext* context, GCobj* holdingobj, GCRef* field_holding_object);
 
 typedef struct ScanContext {
-    GCobj* obj;
-    uint32_t typefilter;
-    obj_foundcb callback;
-    void* userstate;
-    lua_State* L;
-    int abort;
+  GCobj* obj;
+  uint32_t typefilter;
+  obj_foundcb callback;
+  void* userstate;
+  lua_State* L;
+  int abort;
 }ScanContext;
 
 void scan_func(GCfunc *fn, ScanContext* state);
