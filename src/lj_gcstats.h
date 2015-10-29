@@ -7,13 +7,14 @@
 
 #include "lua.h"
 #include <stdint.h>
+#include <stdio.h>
 
-typedef struct 
+typedef struct GCObjStat
 {
   size_t count;
   size_t totalsize;
   size_t maxsize;
-}gcstat_obj;
+}GCObjStat;
 
 typedef enum gcobj_type
 {
@@ -29,61 +30,61 @@ typedef enum gcobj_type
   gcobj_MAX,
 }gcobj_type;
 
-typedef struct
+typedef struct GCStatsTable
 {
   uint32_t arraysize;
   uint32_t arraycapacity;
   uint32_t hashsize;
   uint32_t hashcapacity;
   uint32_t hashcollisions;
-}gcstat_table;
+}GCStatsTable;
 
-typedef struct  
+typedef struct GCStats
 {
-  gcstat_obj objstats[gcobj_MAX];
+  GCObjStat objstats[gcobj_MAX];
   
-  gcstat_table registry;
-  gcstat_table globals;
+  GCStatsTable registry;
+  GCStatsTable globals;
   int finlizercdata_count;
-}gcstats;
+}GCStats;
 
-LUA_API void gcstats_collect(lua_State *L, gcstats* result);
+LUA_API void gcstats_collect(lua_State *L, GCStats* result);
 
 LUA_API int findobjuses(lua_State *L);
 
-typedef struct gctime
+typedef struct GCTime
 {
   uint64_t mark;
   uint64_t sweep;
   int finalizedcount;
-}gctime;
+}GCTime;
 
-typedef struct snapshot_obj
+typedef struct SnapshotObj
 {
   uint32_t typeandsize;
-  void* address;
-}snapshot_obj;
+  uint32_t address;
+}SnapshotObj;
 
-typedef struct gcsnapshot_handle gcsnapshot_handle;
+typedef struct GCSnapshotHandle GCSnapshotHandle;
 
-typedef struct gcsnapshot
+typedef struct GCSnapshot
 {
   uint32_t count;
-  snapshot_obj* objects;
+  SnapshotObj* objects;
   char* gcmem;
   size_t gcmem_size;
-  gcsnapshot_handle* handle;
-}gcsnapshot;
+  GCSnapshotHandle* handle;
+}GCSnapshot;
 
-LUA_API gcsnapshot* gcsnapshot_create(lua_State *L);
-LUA_API void gcsnapshot_free(gcsnapshot* snapshot);
+LUA_API GCSnapshot* gcsnapshot_create(lua_State *L);
+LUA_API void gcsnapshot_free(GCSnapshot* snapshot);
 
 struct FILE;
 
-LUA_API void gcsnapshot_savetofile(gcsnapshot* snapshot, const char* path);
-LUA_API void gcsnapshot_save(gcsnapshot* snapshot, struct FILE* f);
+LUA_API void gcsnapshot_savetofile(GCSnapshot* snapshot, const char* path);
+LUA_API void gcsnapshot_save(GCSnapshot* snapshot, FILE* f);
 
-LUA_API int gcsnapshot_validate(gcsnapshot* dump);
+LUA_API int gcsnapshot_validate(GCSnapshot* dump);
 
 
 #endif

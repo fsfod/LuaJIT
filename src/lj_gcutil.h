@@ -8,9 +8,10 @@
 #include "lj_obj.h"
 #include "lj_trace.h"
 #include "lj_gcstats.h"
+#include "lj_buf.h"
 
 size_t gcobj_size(GCobj *o);
-void gcobj_tablestats(GCtab* t, gcstat_table* result);
+void gcobj_tablestats(GCtab* t, GCStatsTable* result);
 
 struct ScanContext;
 
@@ -36,7 +37,7 @@ int gcobj_finduses(lua_State* L, GCobj* obj, GCobj** foundholders);
 
 void gcobj_findusesinlist(GCobj* liststart, ScanContext* state);
 
-int validatedump(int count, snapshot_obj* objects, char* objectmem, size_t mem_size);
+int validatedump(int count, SnapshotObj* objects, char* objectmem, size_t mem_size);
 
 typedef struct {
     MSize count;
@@ -65,7 +66,7 @@ typedef struct {
 
 #define lj_list_current(L, l, t) (((t*)(l).list)+(l).count)
 
-int lj_buf_chunkstart(SBuf* sb, const char* id)
+static int lj_buf_chunkstart(SBuf* sb, const char* id)
 {
     ChunkHeader header = { 0 };
     memcpy(header.id, id, 4);
@@ -75,7 +76,7 @@ int lj_buf_chunkstart(SBuf* sb, const char* id)
     return sbuflen(sb);
 }
 
-char* lj_buf_chunkend(SBuf* sb, int datastart)
+static char* lj_buf_chunkend(SBuf* sb, int datastart)
 {
     char* start = sbufB(sb) + datastart;
 

@@ -25,13 +25,12 @@
 
 #include "lj_gcutil.h"
 #include "lj_gcstats.h"
-#include <stdio.h>
 
 
-static void gcstats_walklist(global_State *g, GCobj *liststart, gcstat_obj* stats_result);
-static void tablestats(GCtab* t, gcstat_table* result);
+static void gcstats_walklist(global_State *g, GCobj *liststart, GCObjStat* stats_result);
+static void tablestats(GCtab* t, GCStatsTable* result);
 
-size_t gcstats_strings(lua_State *L, gcstat_obj* result);
+size_t gcstats_strings(lua_State *L, GCObjStat* result);
 
 
 size_t basesizes[~LJ_TNUMX] = {
@@ -95,10 +94,10 @@ const int8_t invtypeconverter[gcobj_MAX] = {
 };      
 
 //TODO: do counts of userdata based on grouping by hashtable pointer
-LUA_API void gcstats_collect(lua_State *L, gcstats* result)
+LUA_API void gcstats_collect(lua_State *L, GCStats* result)
 {
   global_State *g = G(L);
-  gcstat_obj objstats[~LJ_TNUMX] = {0};
+  GCObjStat objstats[~LJ_TNUMX] = {0};
   int i = 0;
 
   gcstats_walklist(g, gcref(g->gc.root), objstats);
@@ -111,11 +110,11 @@ LUA_API void gcstats_collect(lua_State *L, gcstats* result)
   //Adjust the object slot indexes for external consumption
   for (size_t i = 0; i < gcobj_MAX; i++)
   {
-    memcpy(&result->objstats[i], &objstats[invtypeconverter[i]], sizeof(gcstat_obj));
+    memcpy(&result->objstats[i], &objstats[invtypeconverter[i]], sizeof(GCObjStat));
   }
 }
 
-size_t gcstats_strings(lua_State *L, gcstat_obj* result)
+size_t gcstats_strings(lua_State *L, GCObjStat* result)
 {
   global_State *g = G(L);
   size_t count = 0, maxsize = 0, totalsize = 0;
@@ -145,11 +144,11 @@ size_t gcstats_strings(lua_State *L, gcstat_obj* result)
   return count;
 }
 
-void gcstats_walklist(global_State *g, GCobj *liststart, gcstat_obj* result)
+void gcstats_walklist(global_State *g, GCobj *liststart, GCObjStat* result)
 {
 
   GCobj *o = liststart;
-  gcstat_obj stats[~LJ_TNUMX] = {0};
+  GCObjStat stats[~LJ_TNUMX] = {0};
 
   if (liststart == NULL)
   {
@@ -176,12 +175,12 @@ void gcstats_walklist(global_State *g, GCobj *liststart, gcstat_obj* result)
   }
 }
 
-LUA_API int gcsnapshot_validate(gcsnapshot* snapshot)
+LUA_API int gcsnapshot_validate(GCSnapshot* snapshot)
 {
   return validatedump(snapshot->count, snapshot->objects, snapshot->gcmem, snapshot->gcmem_size);
 }
 
-int validatedump(int count, snapshot_obj* objects, char* objectmem, size_t mem_size) 
+int validatedump(int count, SnapshotObj* objects, char* objectmem, size_t mem_size) 
 {
   
   char* position = objectmem;
@@ -212,24 +211,24 @@ int validatedump(int count, snapshot_obj* objects, char* objectmem, size_t mem_s
   return 0;
 }
 
-typedef struct gcsnapshot_handle{
+typedef struct GCSnapshotHandle{
   lua_State *L;
   LJList list;
   SBuf sb;
-}gcsnapshot_handle;
+}GCSnapshotHandle;
 
-LUA_API void gcsnapshot_free(gcsnapshot* snapshot)
+LUA_API void gcsnapshot_free(GCSnapshot* snapshot)
 {
-  gcsnapshot_handle* handle = snapshot->handle;
+  GCSnapshotHandle* handle = snapshot->handle;
   global_State* g = G(handle->L);
 
   lj_buf_free(g, &handle->sb);
-  lj_mem_freevec(g, handle->list.list, handle->list.capacity, snapshot_obj);
+  lj_mem_freevec(g, handle->list.list, handle->list.capacity, SnapshotObj);
 
-  lj_mem_free(g, handle, sizeof(gcsnapshot_handle)+sizeof(gcsnapshot));
+  lj_mem_free(g, handle, sizeof(GCSnapshotHandle)+sizeof(GCSnapshot));
 }
 
-size_t writeheader(FILE* f, const char* name, size_t size)
+size_t writeheader(FILE* f, const char* name, uint32_t size)
 {
   ChunkHeader header = { 0 };
   memcpy(&header.id, name, 4);
@@ -243,16 +242,16 @@ size_t writeint(FILE* f, int32_t i)
   return fwrite(&i, 4, 1, f);
 }
 
-LUA_API void gcsnapshot_save(gcsnapshot* snapshot, FILE* f)
+LUA_API void gcsnapshot_save(GCSnapshot* snapshot, FILE* f)
 {
 
   //Save object array
-  writeheader(f, "GCOB", (snapshot->count*sizeof(snapshot_obj))+4);
+  writeheader(f, "GCOB", (snapshot->count*sizeof(SnapshotObj))+4);
   writeint(f, snapshot->count);
-  fwrite(snapshot->objects, sizeof(snapshot_obj)*snapshot->count, 1, f);
+  fwrite(snapshot->objects, sizeof(SnapshotObj)*snapshot->count, 1, f);
 
   //Save objects memory
-  writeheader(f, "OMEM", snapshot->gcmem_size);
+  writeheader(f, "OMEM", (uint32_t)snapshot->gcmem_size);
 
   if (snapshot->gcmem_size != 0)
   {
@@ -260,26 +259,26 @@ LUA_API void gcsnapshot_save(gcsnapshot* snapshot, FILE* f)
   }
 }
 
-LUA_API void gcsnapshot_savetofile(gcsnapshot* snapshot, const char* path)
+LUA_API void gcsnapshot_savetofile(GCSnapshot* snapshot, const char* path)
 {
   FILE* f = fopen(path, "wb");
   gcsnapshot_save(snapshot, f);
   fclose(f);
 }
 
-gcsnapshot* gcsnapshot_create(lua_State *L)
+GCSnapshot* gcsnapshot_create(lua_State *L)
 {
-  gcsnapshot_handle* handle = lj_mem_newt(L, sizeof(gcsnapshot_handle)+ sizeof(gcsnapshot), gcsnapshot_handle);
-  gcsnapshot* snapshot = (gcsnapshot*)&handle[1];
+  GCSnapshotHandle* handle = lj_mem_newt(L, sizeof(GCSnapshotHandle)+ sizeof(GCSnapshot), GCSnapshotHandle);
+  GCSnapshot* snapshot = (GCSnapshot*)&handle[1];
 
   handle->L = L;
   lj_buf_init(L, &handle->sb);
-  lj_list_init(L, &handle->list, 32, snapshot_obj);
+  lj_list_init(L, &handle->list, 32, SnapshotObj);
 
   dump_gcobjects(L, gcref(G(L)->gc.root), &handle->list, &handle->sb);
 
   snapshot->count = handle->list.count;
-  snapshot->objects = (snapshot_obj*)handle->list.list;
+  snapshot->objects = (SnapshotObj*)handle->list.list;
   snapshot->gcmem = sbufB(&handle->sb);
   snapshot->gcmem_size = sbuflen(&handle->sb);
 
@@ -292,22 +291,19 @@ int dump_gcobjects(lua_State *L, GCobj *liststart, LJList* list, SBuf* buf)
 {
   global_State *g = G(L);
   GCobj *o = liststart;
-  snapshot_obj* entry;
-  int chunkheader;
+  SnapshotObj* entry;
 
   if (liststart == NULL)
   {
     return 0;
   }
 
-  //chunkheader = lj_buf_chunkstart(&buf, "OMEM");
-
   while (o != NULL)
   {
     int gct = o->gch.gct;
     size_t size = gcobj_size(o);
 
-    entry = lj_list_current(L, *list, snapshot_obj);
+    entry = lj_list_current(L, *list, SnapshotObj);
 
     if (size >= (1 << 28))
     {
@@ -316,9 +312,9 @@ int dump_gcobjects(lua_State *L, GCobj *liststart, LJList* list, SBuf* buf)
     }
 
     entry->typeandsize = ((uint32_t)size << 4) | typeconverter[gct];
-    entry->address = o;
+    entry->address = (uint32_t)(uintptr_t)o;
     
-    lj_list_increment(L, *list, snapshot_obj);
+    lj_list_increment(L, *list, SnapshotObj);
     
     if (gct != ~LJ_TTAB && gct != ~LJ_TTHREAD)
     {
@@ -365,12 +361,12 @@ int dump_gcobjects(lua_State *L, GCobj *liststart, LJList* list, SBuf* buf)
 
       lj_buf_putmem(buf, o, (MSize)size);
 
-      entry = lj_list_current(L, *list, snapshot_obj);
+      entry = lj_list_current(L, *list, SnapshotObj);
 
       entry->typeandsize = ((uint32_t)size << 4) | typeconverter[~LJ_TSTR];
-      entry->address = o;
+      entry->address = (uint32_t)(uintptr_t)o;
 
-      lj_list_increment(L, *list, snapshot_obj);
+      lj_list_increment(L, *list, SnapshotObj);
 
       o = gcref(o->gch.nextgc);
     }
@@ -384,7 +380,7 @@ int dump_gcobjects(lua_State *L, GCobj *liststart, LJList* list, SBuf* buf)
   return list->count;
 }
 
-void tablestats(GCtab* t, gcstat_table* result)
+void tablestats(GCtab* t, GCStatsTable* result)
 {
   TValue* array = tvref(t->array);
   Node *node = noderef(t->node);
@@ -713,6 +709,8 @@ GCRef fixupgcobj(dict* fixups , GCRef ref) {
     return ref;
   }
 
+  /*TODO: hashtable*/
+  return ref;
 }
 
 void fixup_table(GCtab *t, dict* fixups)
