@@ -211,6 +211,24 @@ int validatedump(int count, SnapshotObj* objects, char* objectmem, size_t mem_si
   return 0;
 }
 
+/* designed to support light weight snapshots that don't have the objects raw memory */
+LUA_API size_t gcsnapshot_getgcstats(GCSnapshot* snap, GCStats* gcstats)
+{
+  SnapshotObj* objects = snap->objects;
+  GCObjStat* stats = gcstats->objstats;
+
+  for (MSize i = 0; i < snap->count; i++) {
+    size_t size = objects[i].typeandsize >> 4;
+    gcobj_type type = (gcobj_type)(objects[i].typeandsize & 15);
+
+    stats[type].count++;
+    stats[type].totalsize += size;
+    stats[type].maxsize = stats[type].maxsize > size ? stats[type].maxsize : size;
+  }
+
+  return snap->count;
+}
+
 typedef struct GCSnapshotHandle{
   lua_State *L;
   LJList list;

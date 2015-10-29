@@ -83,7 +83,7 @@ struct FILE;
 
 LUA_API void gcsnapshot_savetofile(GCSnapshot* snapshot, const char* path);
 LUA_API void gcsnapshot_save(GCSnapshot* snapshot, FILE* f);
-
+LUA_API size_t gcsnapshot_getgcstats(GCSnapshot* snap, GCStats* gcstats);
 LUA_API int gcsnapshot_validate(GCSnapshot* dump);
 
 
