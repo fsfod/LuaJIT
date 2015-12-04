@@ -14,6 +14,7 @@
 #include "lj_strfmt.h"
 #include "lj_ctype.h"
 #include "lj_ccallback.h"
+#include "lj_intrinsic.h"
 
 /* -- C type definitions -------------------------------------------------- */
 
@@ -140,6 +141,14 @@ CTKWDEF(CTKWNAMEDEF)
 #else
 #define CTTYPETAB_MIN		128
 #endif
+
+#define MKREGKIND_CT(name, it, ct) ct,
+
+/* Default ctypes for each register kinds */
+CTypeID1 regkind_ct[16] = {
+  RKDEF_GPR(MKREGKIND_CT)
+  RKDEF_FPR(MKREGKIND_CT)
+};
 
 /* -- C type interning ---------------------------------------------------- */
 
@@ -445,6 +454,10 @@ static void ctype_repr(CTRepr *ctr, CTypeID id)
   for (;;) {
     CTInfo info = ct->info;
     CTSize size = ct->size;
+    if (id == CTID_INTRINS) {
+      ctype_preplit(ctr, "Intrinsic");
+      break;
+    }
     switch (ctype_type(info)) {
     case CT_NUM:
       if ((info & CTF_BOOL)) {
@@ -618,6 +631,12 @@ CTState *lj_ctype_init(lua_State *L)
       if (!ctype_isenum(info)) ctype_addtype(cts, ct, id);
     }
   }
+
+  /* FIXME: Defined as 31 but really 32 is too many bits to pack into the info
+   * for lj_ctype_typeinfo
+   */
+  cts->tab[CTID_V256].size = 32;
+
   setmref(G(L)->ctype_state, cts);
   return cts;
 }

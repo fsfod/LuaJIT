@@ -1216,6 +1216,8 @@ void LJ_FASTCALL recff_cdata_call(jit_State *J, RecordFFData *rd)
   if (id == CTID_CTYPEID) {
     id = crec_constructor(J, cd, J->base[0]);
     mm = MM_new;
+  }else if(id == CTID_INTRINS){
+    lj_trace_err(J, LJ_TRERR_NYICALL);
   } else if (crec_call(J, rd, cd)) {
     return;
   }

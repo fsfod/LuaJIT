@@ -16,6 +16,9 @@
 #include "lj_frame.h"
 #if LJ_HASFFI
 #include "lj_ctype.h"
+#if LJ_HASINTRINSICS
+#include "lj_intrinsic.h"
+#endif
 #endif
 #include "lj_ir.h"
 #include "lj_jit.h"
@@ -2272,6 +2275,249 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
   T->szmcode = (MSize)((char *)as->mctop - (char *)as->mcp);
   lj_mcode_sync(T->mcode, origtop);
 }
+
+#if LJ_HASINTRINSICS
+
+/*TODO: maybe define some stuff with IR instructions */
+static IRIns GPRIns = { {0} };
+
+static void lj_asm_setup_intrins(jit_State *J, ASMState *as)
+{
+  MCodeArea *mcarea = &J->mcarea_intrins;
+  memset(as, 0, sizeof(ASMState));
+  as->J = J;
+  as->flags = J->flags;
+  as->freeset = ~0;
+  /* Switch to the intrinsic machine code area */
+  J->curmcarea = mcarea;
+
+  /* Reserve MCode memory. */
+  as->mctop = lj_mcode_reserve(J, &as->mcbot);
+  as->mcp = mcarea->top;
+#ifdef LUA_USE_ASSERT
+  as->mcp_prev = as->mcp;
+#endif
+  as->mclim = mcarea->bot + MCLIM_REDZONE;
+  as->mcloop = NULL;
+  as->flagmcp = NULL;
+
+  GPRIns.t.irt = IRT_INTP;
+  GPRIns.o = IR_NOP;
+}
+
+static int popcnt(uint32_t i)
+{
+  i = i - ((i >> 1) & 0x55555555);
+  i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
+  return (((i + (i >> 4)) & 0x0F0F0F0F) * 0x01010101) >> 24;
+}
+
+/* 
+ * Stack spill slots and gpr slots in the context are always the size of a native pointer 
+ * The output context register is always spilled to a fixed stack offset
+ * The output context by default is the Lua stack. Signed 32 bit out register
+ * are directly written to it without any cdata boxing.
+ * Vectors are always passed in as pointers including the output context where
+ * the vector cdata is precreated and written to the stack before the wrapper is called.
+ * Vector are assumed tobe always unaligned for now when emitting load/stores
+*/
+
+void lj_asm_intrins(jit_State *J, AsmIntrins *intrins, void* intrinsmc)
+{
+  ASMState as_;
+  ASMState *as = &as_;
+  MCode *asmofs = NULL, *origtop;
+  RegSet inset = 0, outset = 0, allmodregs = intrins->mod;
+  RegSet saveregs = allmodregs & ~RSET_SCRATCH;
+  uint32_t i = 0, fpr;
+  int spadj = LJ_64 ? 32 : 0, offset = 0, contexspill = 0, contexofs = -1;
+  /*TODO: dynamic output context register selection */
+  Reg outcontext = RID_OUTCONTEXT;
+
+  lj_asm_setup_intrins(J, as);
+  origtop = as->mctop;
+
+  offset = 0;
+
+  /* Check if any input register is the same register as the input context and 
+   * save it offset in the input context so we can load it last.
+   */
+  for (i = 0; i < intrins->insz; i++) {
+    Reg r = ASMRID(intrins->in[i]);
+    if (r == RID_CONTEXT) {
+      contexofs = offset;
+    }
+
+    rset_set(inset, r);
+
+    offset += sizeof(intptr_t);
+  }
+
+  for (i = 0; i < intrins->outsz; i++) {
+    rset_set(outset, ASMRID(intrins->out[i]));
+  }
+  allmodregs |= inset|outset;
+  saveregs = allmodregs & ~RSET_SCRATCH;
+
+  /* Used for picking scatch register when loading or saving boxed values */
+  as->modset = allmodregs|RID_CONTEXT;
+
+  /* Check if we need to save the register used to hold the pointer of the output context */
+  if (intrins->outsz > 0) {
+    contexspill = rset_test(as->modset, outcontext);
+    ra_modified(as, outcontext);
+  }
+
+restart:
+  if (saveregs || contexspill) {
+    spadj = popcnt(as->modset & (RSET_GPR&~RSET_SCRATCH))*sizeof(intptr_t) +
+            popcnt(as->modset & (RSET_FPR&~RSET_SCRATCH))*FPRSAVESZ;
+
+    /* add some extra space for context spill and temp spill*/
+    spadj += sizeof(intptr_t)*3;
+  }
+
+  emit_epilogue(as, spadj, allmodregs, intrins->outsz);
+
+  /* If one of the output registers was the same as the outcontext we will
+   * of saved the output value to the stack earlier, now save it into context
+   */
+  if (rset_test(outset, outcontext)) {
+    offset = 0;
+    /* Don't use the context register as a scratch register */
+    rset_clear(as->freeset, outcontext);
+    rset_clear(as->freeset, RID_RET);
+
+    for (i = 0; i < intrins->outsz; i++) {
+      if (ASMRID(intrins->out[i]) == outcontext) {
+        break;
+      }
+      offset += sizeof(TValue);
+    }
+
+    emit_savegpr(as, ASMMKREG(RID_RET, ASMREGKIND(intrins->out[i])), RID_OUTCONTEXT, offset);
+    emit_loadofs(as, &GPRIns, RID_RET, RID_SP, TEMPSPILL);
+  }
+
+  offset = 0;
+
+  /* All registers start as free because were emitting backwards */
+  as->freeset = RSET_INIT;
+  rset_clear(as->freeset, outcontext);
+
+  /* Save output registers into the context */
+  for (i = 0; i < intrins->outsz; i++) {
+    Reg r = ASMRID(intrins->out[i]);
+    uint32_t reg = intrins->out[i];
+
+    if (r != outcontext) {
+      /* Exclude this register from the scratch set since its now live */
+      rset_clear(as->freeset, r);
+
+      if (r < RID_MAX_GPR) {
+        emit_savegpr(as, reg, outcontext, offset);
+      } else {
+        emit_savefpr(as, reg, outcontext, offset);
+      }
+    }
+
+    offset += sizeof(TValue);
+  }
+
+  /* TODO: user supplied output context/struct pointer */
+  /* Restore the context register if it was overwritten by the intrinsic or was
+   * an input register 
+   */
+  if (rset_test(allmodregs, outcontext)) {
+    emit_loadofs(as, &GPRIns, outcontext, RID_SP, CONTEXTSPILL);
+  }
+
+  /* Save the value of the output context register if it listed as an output register */
+  if (rset_test(outset, outcontext)) {
+    emit_storeofs(as, &GPRIns, outcontext, RID_SP, TEMPSPILL);
+  }
+
+  /* Write raw machine code to the wrapper */
+  asmofs = emit_intrins(as, intrins);
+
+  if (rset_test(inset, RID_CONTEXT)) {
+
+    /* Finally load the input register conflicting with the input context */
+    if (contexofs != -1) {
+      emit_loadofs(as, &GPRIns, RID_CONTEXT, RID_CONTEXT, contexofs);
+    }
+  }
+
+  offset = 0;
+  fpr = 0;
+
+  as->freeset = ~inset;
+  rset_clear(as->freeset, RID_CONTEXT);
+
+  /* If the output content is needed but not spilled we can't use it as a scatch */
+  if (intrins->outsz > 0 && !contexspill) {
+    rset_clear(as->freeset, outcontext);
+  }
+
+  /* Move values out the context into there respective input registers */
+  for (i = 0; i < intrins->insz; i++) {
+    Reg r = ASMRID(intrins->in[i]);
+    uint32_t reg = intrins->in[i];
+    uint32_t kind = ASMREGKIND(reg);
+
+    if (r < RID_MAX_GPR) {
+      if (r != RID_CONTEXT)
+        emit_loadofs(as, &GPRIns, r, RID_CONTEXT, offset);
+      offset += sizeof(intptr_t);
+    } else {
+      if (!rk_isvec(kind)) {
+        emit_loadfpr(as, reg, RID_CONTEXT,
+                     offsetof(RegContext, fpr)+(sizeof(double)*fpr));
+        fpr++;
+      } else {
+        /* we will be passed a pointer to the vector that will be in the gpr part of the context */
+        emit_loadfpr(as, reg, RID_CONTEXT, offset);
+        offset += sizeof(intptr_t);
+      }
+    }
+
+    if(r != RID_CONTEXT)
+      rset_set(as->freeset, r);
+  }
+
+  /* Save the output context pointer if it will be overwritten */
+  if (rset_test(allmodregs, outcontext)) {
+    emit_storeofs(as, &GPRIns, outcontext, RID_SP, CONTEXTSPILL);
+  }
+
+  emit_prologue(as, spadj, as->modset);
+
+  /* Check if we used any extra non scratch register needed for loading the 
+   * pointer of boxed values
+   */
+  if ((as->modset & ~RSET_SCRATCH) & ~allmodregs) {
+    allmodregs |= (as->modset & ~RSET_SCRATCH);
+    as->mcp = origtop;
+    /* Have to restart so we can emit the epilogue with the missing reg saves */
+    goto restart;
+  } 
+
+  intrins->wrapped = (IntrinsicWrapper)as->mcp;
+  intrins->wrappedsz = (uint16_t)(origtop-as->mcp);
+
+  /* we don't need the offset for the jit if were wrapping a raw opcode */
+  if (asmofs) {
+    lua_assert((asmofs-as->mcp) > 0 && (asmofs-as->mcp) < intrins->wrappedsz);
+    intrins->asmofs = (uint16_t)(asmofs-as->mcp);
+  }
+  
+  lj_mcode_sync(as->mcp, origtop);
+  lj_mcode_commit(J, as->mcp);
+  
+  /* Switch back the current machine code area to the jit one*/
+  J->curmcarea = &J->mcarea;
+}
+#endif
 
 #undef IR
 

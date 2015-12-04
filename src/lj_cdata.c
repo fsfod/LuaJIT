@@ -13,6 +13,7 @@
 #include "lj_ctype.h"
 #include "lj_cconv.h"
 #include "lj_cdata.h"
+#include "lj_intrinsic.h"
 
 /* -- C data allocation --------------------------------------------------- */
 
@@ -69,6 +70,10 @@ void LJ_FASTCALL lj_cdata_free(global_State *g, GCcdata *cd)
     CTSize sz = ctype_hassize(ct->info) ? ct->size : CTSIZE_PTR;
     lua_assert(ctype_hassize(ct->info) || ctype_isfunc(ct->info) ||
 	       ctype_isextern(ct->info));
+#if LJ_HASINTRINSICS
+    /*TODO: Better define intrinsic cdata and there base type*/
+    if (cd->ctypeid == CTID_INTRINS)sz = sizeof(AsmIntrins);
+#endif
     lj_mem_free(g, cd, sizeof(GCcdata) + sz);
   } else {
     lj_mem_free(g, memcdatav(cd), sizecdatav(cd));
