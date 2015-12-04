@@ -201,6 +201,7 @@ typedef enum {
   XI_JMP =	0xe9,
   XI_JMPs =	0xeb,
   XI_PUSH =	0x50, /* Really 50+r. */
+  XI_POP  =     0x58, /* Really 50+r. */
   XI_JCCs =	0x70, /* Really 7x. */
   XI_JCCn =	0x80, /* Really 0f8x. */
   XI_LEA =	0x8d,
@@ -212,6 +213,7 @@ typedef enum {
   XI_PUSHi8 =	0x6a,
   XI_TESTb =	0x84,
   XI_TEST =	0x85,
+  XI_RET =      0xC3,
   XI_MOVmi =	0xc7,
   XI_GROUP5 =	0xff,
 
@@ -270,6 +272,9 @@ typedef enum {
   XO_MOVSSto =	XO_f30f(11),
   XO_MOVLPD =	XO_660f(12),
   XO_MOVAPS =	XO_0f(28),
+  XO_MOVAPSto = XO_0f(29),
+  XO_MOVUPS   = XO_0f(10),
+  XO_MOVUPSto = XO_0f(11),
   XO_XORPS =	XO_0f(57),
   XO_ANDPS =	XO_0f(54),
   XO_ADDSD =	XO_f20f(58),
@@ -290,6 +295,10 @@ typedef enum {
   XO_ADDSS =	XO_f30f(58),
   XO_MOVD =	XO_660f(6e),
   XO_MOVDto =	XO_660f(7e),
+  XO_MOVDQA =   XO_660f(6f),
+  XO_MOVDQAto = XO_660f(7f),
+  XO_MOVDQU =   XO_f30f(6f),
+  XO_MOVDQUto = XO_f30f(7f),
 
   XO_FLDd =	XO_(d9), XOg_FLDd = 0,
   XO_FLDq =	XO_(dd), XOg_FLDq = 0,
