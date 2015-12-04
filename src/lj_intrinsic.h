@@ -28,6 +28,24 @@ typedef enum INTRINSFLAGs {
   INTRINSFLAG_MEMORYSIDE   = 2, /* has memory side effects so needs an IR memory barrier */
   INTRINSFLAG_SAVETOSTRUCT = 4, /* Output values are saved to a user supplied struct */
   INTRINSFLAG_VECTOR       = 8, /* Has input or output registers that are vectors */
+
+  /* Intrinsic should be emitted as a function that is called with all the 
+   * input registers set beforehand both in the jit and the interpreter */
+  INTRINSFLAG_CALLED   = 0x10, 
+
+  /* Dynamic register assignment for first input/output register */
+  INTRINSFLAG_DYNREG   = 0x100, 
+  /* The RM part of ModRM is part of the opcode */
+  INTRINSFLAG_RMOP     = 0x200, 
+  INTRINSFLAG_HASMODRM = INTRINSFLAG_DYNREG|INTRINSFLAG_RMOP,
+
+  /* the output register is also the second input register */
+  INTRINSFLAG_DYNREGINOUT = 0x400,
+  /* Don't fuse load into op only valid with DYNREG */
+  INTRINSFLAG_NOFUSE = 0x800,
+
+  INTRINSFLAG_REXW  = 0x1000, /* Force REX.w 64 bit override */
+
 }INTRINSFLAGs;
 
 typedef struct AsmIntrins{
@@ -99,6 +117,8 @@ CTypeID1 regkind_ct[16];
 #endif
 
 LJ_FUNC void lj_intrinsic_init(lua_State *L);
+LJ_FUNC void lj_intrinsic_asmlib(lua_State *L, GCtab* asmlib);
+LJ_FUNC TValue *lj_asmlib_index(lua_State *L, CLibrary *cl, GCstr *name);
 LJ_FUNC int lj_intrinsic_create(lua_State *L);
 LJ_FUNC int lj_intrinsic_call(lua_State *L, GCcdata *cd);
 

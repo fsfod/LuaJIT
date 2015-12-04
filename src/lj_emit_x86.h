@@ -584,23 +584,34 @@ static void emit_addptr(ASMState *as, Reg r, int32_t ofs)
 #define CONTEXTSPILL (1*SPILLSLOTSZ)
 
 
-static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins)
+static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins, Reg r1, Reg r2)
 {
+  if (intrins->flags & INTRINSFLAG_HASMODRM) {
+    if (intrins->flags & INTRINSFLAG_RMOP) {
+      r2 = ASMRID(intrins->in[1]);
+    }
+    emit_mrm(as, intrins->opcode, r2, r1);
 
-  lua_assert(intrins->asmsz != 0 && (intrins->wrappedsz == 0 ||
-    intrins->asmofs < intrins->wrappedsz));
-  as->mcp -= intrins->asmsz;
-  /* Were deliberately trying to force mcode area reallocation if intrinsic is too large
-   * silence the redzone assert since we may overflow it without writing anything yet
-   */
+    checkmclim(as);
+    /* No code offset to save if were dynamically generating from an opcode */
+    return NULL;
+  } else {
+    lua_assert(intrins->asmsz != 0 && (intrins->wrappedsz == 0 ||
+                                       intrins->asmofs < intrins->wrappedsz));
+    as->mcp -= intrins->asmsz;
+    /* Were deliberately trying to force mcode area reallocation if intrinsic is
+     * too large silence the redzone assert since we may overflow it without 
+     * writing anything yet
+     */
 #ifdef LUA_USE_ASSERT
-  as->mcp_prev = as->mcp;
+    as->mcp_prev = as->mcp;
 #endif
-  checkmclim(as);
-  /* Directly copy unmodified intrinsics machine code in */
-  memcpy(as->mcp, ((char*)intrins->mcode)+intrins->asmofs, intrins->asmsz);
+    checkmclim(as);
+    /* Directly copy the unmodified machine code of the intrinsic in */
+    memcpy(as->mcp, ((char*)intrins->mcode)+intrins->asmofs, intrins->asmsz);
 
-  return as->mcp;
+    return as->mcp;
+  }
 }
 
 static void emit_prologue(ASMState *as, int spadj, RegSet modregs)

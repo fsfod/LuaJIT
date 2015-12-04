@@ -409,10 +409,11 @@ void lj_clib_unload(CLibrary *cl)
 }
 
 /* Create the default C library object. */
-void lj_clib_default(lua_State *L, GCtab *mt)
+CLibrary *lj_clib_default(lua_State *L, GCtab *mt)
 {
   CLibrary *cl = clib_new(L, mt);
   cl->handle = CLIB_DEFHANDLE;
+  return cl;
 }
 
 #endif

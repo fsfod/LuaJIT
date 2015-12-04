@@ -1216,7 +1216,7 @@ void LJ_FASTCALL recff_cdata_call(jit_State *J, RecordFFData *rd)
   if (id == CTID_CTYPEID) {
     id = crec_constructor(J, cd, J->base[0]);
     mm = MM_new;
-  }else if(id == CTID_INTRINS){
+  } else if(id == CTID_INTRINS) {
     lj_trace_err(J, LJ_TRERR_NYICALL);
   } else if (crec_call(J, rd, cd)) {
     return;
@@ -1503,9 +1503,15 @@ void LJ_FASTCALL recff_clib_index(jit_State *J, RecordFFData *rd)
     CLibrary *cl = (CLibrary *)uddata(udataV(&rd->argv[0]));
     GCstr *name = strV(&rd->argv[1]);
     CType *ct;
-    CTypeID id = lj_ctype_getname(cts, &ct, name, CLNS_INDEX);
+    CTypeID id;
     cTValue *tv = lj_tab_getstr(cl->cache, name);
-    rd->nres = rd->data;
+    rd->nres = rd->data > 0 ? 1 : 0;
+    if (rd->data < 2) {
+      id = lj_ctype_getname(cts, &ct, name, CLNS_INDEX);
+    } else {
+      id = CTID_INTRINS;
+      ct = ctype_get(cts, CTID_INTRINS);
+    }
     if (id && tv && !tvisnil(tv)) {
       /* Specialize to the symbol name and make the result a constant. */
       emitir(IRTG(IR_EQ, IRT_STR), J->base[1], lj_ir_kstr(J, name));
