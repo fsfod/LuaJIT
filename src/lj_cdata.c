@@ -13,6 +13,7 @@
 #include "lj_ctype.h"
 #include "lj_cconv.h"
 #include "lj_cdata.h"
+#include "lj_intrinsic.h"
 
 /* -- C data allocation --------------------------------------------------- */
 

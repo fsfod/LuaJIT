@@ -1145,7 +1145,9 @@ static int crec_call(jit_State *J, RecordFFData *rd, GCcdata *cd)
     tp = (LJ_64 && ct->size == 8) ? IRT_P64 : IRT_P32;
     ct = ctype_rawchild(cts, ct);
   }
-  if (ctype_isfunc(ct->info)) {
+  if (ctype_isintrinsic(ct->info)) {
+    lj_trace_err(J, LJ_TRERR_NYICALL);
+  }else if (ctype_isfunc(ct->info)) {
     TRef func = emitir(IRT(IR_FLOAD, tp), J->base[0], IRFL_CDATA_PTR);
     CType *ctr = ctype_rawchild(cts, ct);
     IRType t = crec_ct2irt(cts, ctr);

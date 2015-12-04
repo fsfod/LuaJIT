@@ -72,6 +72,7 @@ LJ_STATIC_ASSERT(((int)CT_STRUCT & (int)CT_ARRAY) == CT_STRUCT);
 #define CTF_VECTOR	0x08000000u	/* Vector: ARRAY. */
 #define CTF_COMPLEX	0x04000000u	/* Complex: ARRAY. */
 #define CTF_UNION	0x00800000u	/* Union: STRUCT. */
+#define CTF_INTRINS	0x04000000u	/* Intrinsic: FUNC. */
 #define CTF_VARARG	0x00800000u	/* Vararg: FUNC. */
 #define CTF_SSEREGPARM	0x00400000u	/* SSE register parameters: FUNC. */
 
@@ -246,6 +247,9 @@ typedef struct CTState {
   (((info) & (CTMASK_NUM|CTATTRIB(CTMASK_ATTRIB))) == \
    CTINFO(CT_ATTRIB, CTATTRIB(at)))
 
+#define ctype_isintrinsic(info) \
+  (((info) & (CTMASK_NUM|CTF_INTRINS)) == CTINFO(CT_FUNC, CTF_INTRINS))
+
 /* Target-dependent sizes and alignments. */
 #if LJ_64
 #define CTSIZE_PTR	8
@@ -289,6 +293,8 @@ typedef struct CTState {
   _(DOUBLE,		8,	CT_NUM, CTF_FP|CTALIGN(3)) \
   _(COMPLEX_FLOAT,	8,	CT_ARRAY, CTF_COMPLEX|CTALIGN(2)|CTID_FLOAT) \
   _(COMPLEX_DOUBLE,	16,	CT_ARRAY, CTF_COMPLEX|CTALIGN(3)|CTID_DOUBLE) \
+  _(V128,		16,	CT_ARRAY, CTF_VECTOR|CTALIGN(2)|CTID_FLOAT) \
+  _(V256,		31,	CT_ARRAY, CTF_VECTOR|CTALIGN(2)|CTID_FLOAT) \
   _(P_VOID,	CTSIZE_PTR,	CT_PTR, CTALIGN_PTR|CTID_VOID) \
   _(P_CVOID,	CTSIZE_PTR,	CT_PTR, CTALIGN_PTR|CTID_CVOID) \
   _(P_CCHAR,	CTSIZE_PTR,	CT_PTR, CTALIGN_PTR|CTID_CCHAR) \
