@@ -264,13 +264,18 @@ end
       optimize "Speed"
 
 
-local bin = os.realpath(path.join(os.realpath(BuildDir), "..\bin"))
---Create directorys first so writing the .gitignore doesn't fail
-os.mkdir(os.realpath(BuildDir))
-os.mkdir(bin)
+local function mkdir_and_gitignore(dir)
+  --Create directorys first so writing the .gitignore doesn't fail
+  os.mkdir(dir)
+  os.writefile_ifnotequal("*.*", path.join(dir, ".gitignore"))
+end
+      
+local bin = os.realpath(path.join(os.realpath(BuildDir), "../bin"))
+local dotvs = os.realpath(path.join(os.realpath(BuildDir), "../.vs"))
 --Write .gitignore to directorys that contain just contain generated files
-os.writefile_ifnotequal("*.*", path.join(os.realpath(BuildDir), ".gitignore"))
-os.writefile_ifnotequal("*.*", path.join(bin, ".gitignore"))
-         
+mkdir_and_gitignore(os.realpath(BuildDir))
+mkdir_and_gitignore(bin)
+mkdir_and_gitignore(dotvs)
+   
          
       
