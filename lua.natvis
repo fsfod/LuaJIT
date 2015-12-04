@@ -180,6 +180,7 @@
 <Type Name="IRIns">
   <DisplayString Condition="o == IR_KGC">{(IROp)o,en} {t,en} {gcr}</DisplayString>
   <DisplayString Condition="o == IR_KINT">{(IROp)o,en} {i}</DisplayString>
+  <DisplayString Condition="o == IR_KINT64">{(IROp)o,en} {*((long long*)ptr.ptr32)}</DisplayString>
   <DisplayString Condition="o == IR_KPTR">{(IROp)o,en}({t,en}) {ptr.ptr32,x}</DisplayString>
   <DisplayString Condition="o == IR_KNUM">{(IROp)o,en} {*((double*)ptr.ptr32)}</DisplayString>
   <DisplayString Condition="o == IR_KPRI">{(IROp)o,en}({t,en})</DisplayString>
@@ -197,6 +198,7 @@
     
     <Item Name="Op 1">op1,i</Item>
     <Item Name="Op 2">op2,i</Item>
+    <Item Name="prev">prev-REF_BIAS,i</Item>
   </Expand>
 </Type>
 
