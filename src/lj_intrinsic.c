@@ -17,6 +17,8 @@
 #include "lj_cconv.h"
 #include "lj_jit.h"
 #include "lj_dispatch.h"
+#include "lj_vm.h"
+#include "lj_trace.h"
 
 #include "lj_target.h"
 
@@ -196,7 +198,7 @@ static AsmIntrins* intrinsic_new(lua_State *L)
 }
 
 
-extern void lj_asm_intrins(jit_State *J, AsmIntrins *intrins, void* intrinsmc);
+extern int lj_asm_intrins(lua_State *L, AsmIntrins *intrins);
 
 int lj_intrinsic_create(lua_State *L)
 {
@@ -205,6 +207,7 @@ int lj_intrinsic_create(lua_State *L)
   GCtab *regs = lj_lib_checktab(L, 3);
   GCtab *t;
   cTValue *tv;
+  int err;
   void *intrinsmc;
   AsmIntrins _intrins;
   AsmIntrins* intrins = &_intrins;
@@ -238,8 +241,21 @@ int lj_intrinsic_create(lua_State *L)
   }
 
   intrins->mcode = intrinsmc;
+  err = lj_asm_intrins(L, intrins);
+
+  if (err != 0) {
+    /*TODO: better error msg 
+      else if (trerr == LJ_TRERR_BADRA) {
+        lua_pushstring(L, "Failed to pick a scratch register too many live registers");
+      } else if (trerr == LJ_TRERR_MCODEOV) {
+        lua_pushstring(L, "wrapper too large for any mcode area");
+      } else {
+        lua_pushstring(L, "Unknown error");
+      }
+    */
+    lj_err_callermsg(L, "Failed to create interpreter wrapper for intrinsic");
+  }
   
-  lj_asm_intrins(L2J(L), intrins, intrinsmc);
 
   /* Don't register the intrinsic until here in case errors are thrown */
   intrins = intrinsic_new(L);
