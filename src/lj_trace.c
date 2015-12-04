@@ -319,6 +319,9 @@ void lj_trace_freestate(global_State *g)
   }
 #endif
   lj_mcode_free(J, &J->mcarea);
+#if LJ_HASINTRINSICS
+  lj_mcode_free(J, &J->mcarea_intrins);
+#endif
   lj_ir_k64_freeall(J);
   lj_mem_freevec(g, J->snapmapbuf, J->sizesnapmap, SnapEntry);
   lj_mem_freevec(g, J->snapbuf, J->sizesnap, SnapShot);

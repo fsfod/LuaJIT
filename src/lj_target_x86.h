@@ -59,6 +59,20 @@ enum {
   RID_MAX_FPR = RID_MAX,
   RID_NUM_GPR = RID_MAX_GPR - RID_MIN_GPR,
   RID_NUM_FPR = RID_MAX_FPR - RID_MIN_FPR,
+
+#if LJ_64
+#if LJ_ABI_WIN
+  RID_CONTEXT = RID_ECX,
+  RID_OUTCONTEXT = RID_EDX,
+#else
+  RID_CONTEXT = RID_EDI,
+  RID_OUTCONTEXT = RID_ESI,
+#endif
+#else
+  /* Fast call arguments */
+  RID_CONTEXT = RID_ECX,
+  RID_OUTCONTEXT = RID_EDX,
+#endif
 };
 
 /* -- Register sets ------------------------------------------------------- */
@@ -201,6 +215,7 @@ typedef enum {
   XI_JMP =	0xe9,
   XI_JMPs =	0xeb,
   XI_PUSH =	0x50, /* Really 50+r. */
+  XI_POP  =     0x58, /* Really 50+r. */
   XI_JCCs =	0x70, /* Really 7x. */
   XI_JCCn =	0x80, /* Really 0f8x. */
   XI_LEA =	0x8d,
@@ -212,6 +227,7 @@ typedef enum {
   XI_PUSHi8 =	0x6a,
   XI_TESTb =	0x84,
   XI_TEST =	0x85,
+  XI_RET =      0xC3,
   XI_MOVmi =	0xc7,
   XI_GROUP5 =	0xff,
 
@@ -270,6 +286,9 @@ typedef enum {
   XO_MOVSSto =	XO_f30f(11),
   XO_MOVLPD =	XO_660f(12),
   XO_MOVAPS =	XO_0f(28),
+  XO_MOVAPSto = XO_0f(29),
+  XO_MOVUPS   = XO_0f(10),
+  XO_MOVUPSto = XO_0f(11),
   XO_XORPS =	XO_0f(57),
   XO_ANDPS =	XO_0f(54),
   XO_ADDSD =	XO_f20f(58),
