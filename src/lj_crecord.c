@@ -32,6 +32,8 @@
 #include "lj_crecord.h"
 #include "lj_dispatch.h"
 #include "lj_strfmt.h"
+#include "lj_intrinsic.h"
+#include "lj_target.h"
 
 /* Some local macros to save typing. Undef'd at the end. */
 #define IR(ref)			(&J->cur.ir[(ref)])
@@ -41,6 +43,14 @@
 
 #define emitconv(a, dt, st, flags) \
   emitir(IRT(IR_CONV, (dt)), (a), (st)|((dt) << 5)|(flags))
+
+
+#define MKREGKIND_IT(name, it, ct) it,
+
+uint8_t regkind_it[16] = {
+  RKDEF_GPR(MKREGKIND_IT)
+  RKDEF_FPR(MKREGKIND_IT)
+};
 
 /* -- C type checks ------------------------------------------------------- */
 
@@ -1205,6 +1215,113 @@ static int crec_call(jit_State *J, RecordFFData *rd, GCcdata *cd)
   return 0;
 }
 
+#if LJ_HASINTRINSICS
+
+void crec_call_intrins(jit_State *J, RecordFFData *rd, GCcdata *cd)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  TRef tintrins = J->base[0], arg = TREF_NIL;
+  AsmIntrins* intrins = (AsmIntrins*)cdataptr(cd);
+  size_t i;
+  IRType it;
+  int argofs = 1;
+
+  tintrins = lj_ir_kgc(J, gcval(&rd->argv[0]), IRT_CDATA);
+  emitir(IRTG(IR_EQ, IRT_CDATA), J->base[0], tintrins);
+
+
+  /* Convert parameters and load them into the input registers */
+  for (i = 0; i < intrins->insz; i++) {
+    TRef tr = J->base[i+argofs];
+    uint8_t reg = ASMRID(intrins->in[i]);
+
+    if (reg < RID_MAX_GPR) {
+
+      if (tref_isnumber(tr)) {
+        tr = lj_opt_narrow_tobit(J, tr);
+      } else {
+        tr = crec_ct_tv(J, ctype_get(cts, CTID_P_VOID), 0, tr, &rd->argv[i+argofs]);
+      }
+    } else {
+      uint32_t kind = ASMREGKIND(intrins->in[i]);
+
+      if (rk_isvec(kind)) {
+        /* NYI: support for vectors */
+        lj_trace_err(J, LJ_TRERR_NYIVEC);
+      } else {
+        tr = lj_ir_tonum(J, tr);
+
+        if (kind == REGKIND_FPR32) {
+          tr = emitconv(tr, IRT_FLOAT, IRT_NUM, 0);
+        }
+      }
+    }
+
+    arg = emitir(IRT(IR_CARG, IRT_NIL), arg, tr);
+  }
+
+  it = IRT_NIL;
+  /* Skip emitting IR_ASMREG for opcodes with dynamic registers */
+  if (intrins->flags & INTRINSFLAG_DYNREG && intrins->outsz == 1) {
+    it = rk_irt(ASMRID(intrins->in[0]), ASMREGKIND(intrins->in[0]));
+  }
+
+  J->base[0] = tintrins = emitir(IRT(IR_ASMINS, it), arg, tintrins);
+
+  if (intrins->flags & INTRINSFLAG_MEMORYSIDE) {
+    emitir(IRT(IR_XBAR, IRT_NIL), 0, 0);
+  }
+
+  for (i = 0; i < intrins->outsz; i++) {
+    uint8_t reg = ASMRID(intrins->out[i]);
+    int kind = ASMREGKIND(intrins->out[i]);
+    
+    /* no IR_ASMREG for opcodes with dynamic registers */
+    if (i == 0 && (intrins->flags&INTRINSFLAG_DYNREG)) {
+      continue;
+    }
+
+    J->base[i] = emitir(IRT(IR_ASMRET, rk_irt(reg, kind)), tintrins, reg);
+  }
+
+  /* Second pass to box values after all ASMRET have run to shuffle/spill the
+   * output registers. 
+   */
+  for (i = 0; i < intrins->outsz; i++) {
+    uint8_t reg = ASMRID(intrins->out[i]);
+    int kind = ASMREGKIND(intrins->out[i]);
+
+    if (reg < RID_MAX_GPR) {
+      if (kind == REGKIND_GPRI32)
+        continue;
+      /* Box the u32/64 bit value in the register */
+      J->base[i] = emitir(IRT(IR_CNEWI, IRT_CDATA),
+                          lj_ir_kint(J, rk_ctypegpr(kind)), J->base[i]);
+    } else {
+      if (kind == REGKIND_FPR64)
+        continue;
+
+      if (kind == REGKIND_FPR32) {
+        J->base[i] = emitconv(J->base[i], IRT_NUM, IRT_FLOAT, 0);
+      } else {
+        /* NYI: support for vectors */
+        lj_trace_err(J, LJ_TRERR_NYIVEC);
+      }
+
+    }
+  }
+
+  /* Intrinsics are assumed to always have side effects */
+  J->needsnap = 1;
+  rd->nres = intrins->outsz;
+}
+#else
+void crec_call_intrins(jit_State *J, RecordFFData *rd, GCcdata *cd)
+{
+  UNUSED(J);UNUSED(rd);UNUSED(cd);
+}
+#endif
+
 void LJ_FASTCALL recff_cdata_call(jit_State *J, RecordFFData *rd)
 {
   CTState *cts = ctype_ctsG(J2G(J));
@@ -1217,7 +1334,8 @@ void LJ_FASTCALL recff_cdata_call(jit_State *J, RecordFFData *rd)
     id = crec_constructor(J, cd, J->base[0]);
     mm = MM_new;
   } else if(id == CTID_INTRINS) {
-    lj_trace_err(J, LJ_TRERR_NYICALL);
+    crec_call_intrins(J, rd, cd);
+    return;
   } else if (crec_call(J, rd, cd)) {
     return;
   }

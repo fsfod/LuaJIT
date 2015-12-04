@@ -527,6 +527,175 @@ static void asm_gencall(ASMState *as, const CCallInfo *ci, IRRef *args)
 #endif
 }
 
+#if LJ_HASINTRINSICS
+
+void asm_intrinresult(ASMState *as, IRIns *ir, AsmIntrins* intrins)
+{
+  RegSet evict = intrins->mod;
+  uint32_t i = (intrins->flags&INTRINSFLAG_DYNREG) ? 1 : 0;
+
+  /* Second register will be dynamic too */
+  if (intrins->flags & INTRINSFLAG_DYNREGINOUT)
+    i++;
+
+  for (; i < intrins->insz; i++) {
+    /* If the input arg has the same register as the input register we could 
+     * avoid evicting it if it wasn't overwritten in the intrinsic
+     */
+    evict |= RID2RSET(ASMRID(intrins->in[i]));
+  }
+
+  /* Evict any values in modified and input registers */
+  ra_evictset(as, evict);
+}
+
+static int asm_swapopsref(ASMState *as, IRIns *ir, IRRef lref, IRRef rref);
+
+static void asm_asmins(ASMState *as, IRIns *ir)
+{
+  IRRef args[LJ_INTRINS_MAXREG];
+  IRIns *ira = ir;
+  Reg right = RID_NONE, dest = RID_NONE;
+  uint32_t n = 0;
+  AsmIntrins *intrins = (AsmIntrins*)cdataptr(ir_kcdata(IR(ir->op2)));
+
+  asm_intrinresult(as, ir, intrins);
+
+  /* Collect the input argument register refs */
+  while (ira->op1 != REF_NIL) {
+    ira = IR(ira->op1);
+    lua_assert(ira->o == IR_CARG);
+    args[n++] = ira->op2;
+  }
+  lua_assert(n == intrins->insz);
+
+  if (intrins->flags & INTRINSFLAG_HASMODRM) {
+    RegSet allow;
+    IRRef lref = 0, rref = args[intrins->insz-1];
+    right = IR(rref)->r;
+    
+    as->mrm.idx = as->mrm.base = RID_NONE;
+    as->mrm.scale = as->mrm.ofs = 0;
+
+    if (intrins->outsz > 0) {
+      allow = ASMRID(intrins->out[0]) < RID_MAX_GPR ? RSET_GPR : RSET_FPR;
+      if (ra_hasreg(right)) {
+        rset_clear(allow, right);
+        ra_noweak(as, right);
+      }
+      dest = ra_dest(as, ir, allow);
+    }
+
+    if (intrins->flags & INTRINSFLAG_DYNREGINOUT) {
+      lref = args[intrins->insz-2];
+
+      if (lref == rref) {
+        right = dest;
+      } else if (ra_noreg(right)) {
+        RegSet rallow = ASMRID(intrins->in[0]) < RID_MAX_GPR ? RSET_GPR : RSET_FPR;
+        /* TODO: flag to disable swapping maybe on by default for user defined op intrinsics */
+        if (asm_swapopsref(as, ir, lref, rref)) {
+          IRRef tmp = lref; lref = rref; rref = tmp;
+        }
+
+        if (!(intrins->flags & INTRINSFLAG_NOFUSE)) {
+          right = asm_fuseload(as, rref, rset_clear(rallow, dest));
+        }
+      }
+    } else {
+      /* Part of the instruction encoding is in ModRM */
+      if (intrins->flags & INTRINSFLAG_RMOP) {
+        as->mrm.idx = as->mrm.base = RID_NONE;
+        as->mrm.scale = as->mrm.ofs = 0;
+
+        if (!ra_hasreg(right)) {
+          /* FIXME: doesn't fuse array(kupvalue)+i which is turned into  (i << 2) + IR_KPTR*/
+          asm_fusexref(as, rref, rset_exclude(RSET_GPR, RID_EBP));
+        } else {
+          as->mrm.base = (uint8_t)ra_alloc1(as, rref, allow);
+        }
+        
+        right = RID_MRM;
+      }
+    }
+
+    if (!ra_hasreg(right)) {
+      allow = ASMRID(intrins->in[0]) < RID_MIN_FPR ? RSET_GPR : RSET_FPR;
+      right = ra_allocref(as, rref, allow);
+    }
+
+    emit_intrins(as, intrins, right, dest);
+    
+    if (intrins->flags & INTRINSFLAG_DYNREGINOUT) {
+      lua_assert(lref);
+      ra_left(as, dest, lref);
+    }
+  } else {
+    emit_intrins(as, intrins, 0, 0);
+  }
+  checkmclim(as);
+
+  if (((intrins->flags & INTRINSFLAG_HASMODRM) && intrins->insz == 1) ||
+      ((intrins->flags & INTRINSFLAG_DYNREGINOUT) && intrins->insz <= 2)) {
+    return;
+  }
+
+  /* Setup args into input registers */
+  for (n = 0; n < intrins->insz; n++) {  
+    IRRef ref = args[intrins->insz-(n+1)];
+    IRIns *ir = IR(ref);
+    Reg r = ASMRID(intrins->in[n]);
+
+    if (n == 0 && (intrins->flags & INTRINSFLAG_DYNREG))
+      continue;
+    
+    if (n == 1 && (intrins->flags & INTRINSFLAG_DYNREGINOUT))
+      continue;
+
+    if (r < RID_MAX_GPR && ref < ASMREF_TMP1) {
+#if LJ_64
+      if (ir->o == IR_KINT64)
+        emit_loadu64(as, r, ir_kint64(ir)->u64);
+      else
+#endif
+        emit_loadi(as, r, ir->i);
+    } else {
+      lua_assert(rset_test(as->freeset, r));
+
+      if (ra_hasreg(ir->r)) {
+        ra_noweak(as, ir->r);
+        if (r != ir->r)
+          emit_movrr(as, ir, r, ir->r);
+      } else {
+        ra_allocref(as, ref, RID2RSET(r));
+      }
+    }
+    checkmclim(as);
+  }
+}
+
+void asm_asmret(ASMState *as, IRIns *ir)
+{
+  if (ir->r != ir->op2) {
+    ra_evictset(as, RID2RSET(ir->op2));
+    ra_destreg(as, ir, ir->op2);
+  }else{
+    ra_destreg(as, ir, ir->op2);
+  }
+}
+#else
+static void asm_asmins(ASMState *as, IRIns *ir)
+{
+  UNUSED(as); UNUSED(ir);
+}
+
+void asm_asmret(ASMState *as, IRIns *ir)
+{
+  UNUSED(as); UNUSED(ir);
+}
+#endif
+
+
 /* Setup result reg/sp for call. Evict scratch regs. */
 static void asm_setupresult(ASMState *as, IRIns *ir, const CCallInfo *ci)
 {
@@ -1675,28 +1844,33 @@ static void asm_pow(ASMState *as, IRIns *ir)
     asm_fppowi(as, ir);
 }
 
-static int asm_swapops(ASMState *as, IRIns *ir)
+static int asm_swapopsref(ASMState *as, IRIns *ir, IRRef lref, IRRef rref)
 {
-  IRIns *irl = IR(ir->op1);
-  IRIns *irr = IR(ir->op2);
+  IRIns *irl = IR(lref);
+  IRIns *irr = IR(rref);
   lua_assert(ra_noreg(irr->r));
   if (!irm_iscomm(lj_ir_mode[ir->o]))
     return 0;  /* Can't swap non-commutative operations. */
-  if (irref_isk(ir->op2))
+  if (irref_isk(rref))
     return 0;  /* Don't swap constants to the left. */
   if (ra_hasreg(irl->r))
     return 1;  /* Swap if left already has a register. */
   if (ra_samehint(ir->r, irr->r))
     return 1;  /* Swap if dest and right have matching hints. */
   if (as->curins > as->loopref) {  /* In variant part? */
-    if (ir->op2 < as->loopref && !irt_isphi(irr->t))
+    if (rref < as->loopref && !irt_isphi(irr->t))
       return 0;  /* Keep invariants on the right. */
-    if (ir->op1 < as->loopref && !irt_isphi(irl->t))
+    if (lref < as->loopref && !irt_isphi(irl->t))
       return 1;  /* Swap invariants to the right. */
   }
   if (opisfusableload(irl->o))
     return 1;  /* Swap fusable loads to the right. */
   return 0;  /* Otherwise don't swap. */
+}
+
+static int asm_swapops(ASMState *as, IRIns *ir)
+{
+  return asm_swapopsref(as, ir, ir->op1, ir->op2);
 }
 
 static void asm_fparith(ASMState *as, IRIns *ir, x86Op xo)

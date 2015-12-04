@@ -2,21 +2,9 @@ local tester = require("jit_tester")
 local testjit = tester.testsingle
 local telescope = require("telescope")
 
-telescope.make_assertion("jit", "", function(expect, func, ...) 
-  assert(func(...) == expect) 
-  return true 
-end)
-
-telescope.make_assertion("jitchecker", "", function(checker, func, ...) 
-  assert(checker(1, func(1, ...)) == nil) 
-  return true 
-end)
-
-telescope.make_assertion("noexit", "", function(expect, func, ...)
-  local result = func(...)
-  assert(result == expect, tostring(result)) 
-  return true 
-end)
+telescope.make_assertion("jit", "", tester.testsingle)
+telescope.make_assertion("jitchecker", "", tester.testwithchecker)
+telescope.make_assertion("noexit", "", tester.testnoexit)
 
 local callbacks = {}
 
