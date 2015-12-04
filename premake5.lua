@@ -39,7 +39,7 @@ function BuildDynasmFlags(buildflags)
     
     
     if buildflags["LUAJIT_NUMMODE"] == 2 then
-        flags = flags.." -D DUALNUM"
+      flags = flags.." -D DUALNUM"
     end
 end
 
@@ -163,7 +163,6 @@ end
       }
       buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
 
-
     configuration  {"Debug"}
       optimize"Speed"
  
@@ -197,7 +196,6 @@ end
       "src/lib_*.h",
       "src/lib_*.c",
       "lua.natvis",
-      
       --'$(IntDir)lj_vm.obj',--obj/lua/%{cfg.buildcfg}/%{cfg.platform}/
       
       '$(IntDir)/lj_bcdef.h',
@@ -228,7 +226,7 @@ end
     prebuildmessage"Running pre build commands"
     
     configuration  { "debug"}
-      defines { "DEBUG" }
+      defines { "DEBUG", "LUA_USE_ASSERT" }
       flags { "Symbols" }
   
     configuration { "release" }
@@ -247,7 +245,7 @@ end
     location(BuildDir)
     vpaths { ["libs"] = "src/lib_*.h" }
     vpaths { ["libs"] = "src/lib_*.c" }
-    debugenvs {"LUA_PATH=%{sln.location}src/?.lua;%{sln.location}bin/%{cfg.buildcfg}/%{cfg.platform}/?.lua;%{sln.location}tests/?.lua"..DEBUG_LUA_PATH}
+    debugenvs {"LUA_PATH=%{sln.location}src/?.lua;%{sln.location}bin/%{cfg.buildcfg}/%{cfg.platform}/?.lua;%{sln.location}tests/?.lua"..DEBUG_LUA_PATH..";%LUA_PATH%"}
     debugargs {"../tests/test.lua"}
     
     files {
@@ -255,7 +253,7 @@ end
     }
         
     configuration{"Debug"}        
-      defines { "DEBUG" }
+      defines { "DEBUG", "LUA_USE_ASSERT" }
       flags { "Symbols" }
  
     configuration{"Release"}
