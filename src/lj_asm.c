@@ -2537,16 +2537,23 @@ restart:
 /* Setup modrm to tobe a load from the input context pointer we assume offset is
  * 0 because the first input register should always be the dynamic one for opcodes 
  */
-  as->mrm.idx = RID_NONE;
+  as->mrm.base = as->mrm.idx = RID_NONE;
   as->mrm.ofs = 0;
   as->mrm.scale = XM_SCALE1;
 
-  if ((intrins->flags & INTRINSFLAG_NOFUSE)) {
-    as->mrm.base = RID_NONE;
-    lua_assert(rin != RID_NONE);
-  } else {
-    as->mrm.base = RID_CONTEXT;
-    rin = RID_MRM;
+  if (intrins->flags & INTRINSFLAG_DYNREG) {
+    if (intrins->flags & INTRINSFLAG_NOFUSE) {
+      as->mrm.base = RID_NONE;
+      lua_assert(rin != RID_NONE);
+    } else {
+      as->mrm.base = RID_CONTEXT;
+
+      if (ASMRID(intrins->in[0]) >= RID_MIN_FPR && !rk_isvec(ASMREGKIND(intrins->in[0]))) {
+        as->mrm.ofs = offsetof(RegContext, fpr);
+      }
+
+      rin = RID_MRM;
+    }
   }
 #endif
 
@@ -2583,7 +2590,12 @@ restart:
         emit_loadofs(as, &GPRIns, RID_CONTEXT, RID_CONTEXT, 0);
       }
       /* The load is fused into the modrm of the opcode emitted in emit_intrins */
-      offset += sizeof(intptr_t);
+      if (r < RID_MAX_GPR || rk_isvec(kind)) {
+        offset += sizeof(intptr_t);
+      } else {
+        fpr++;
+      }
+      
       continue;
     }
 

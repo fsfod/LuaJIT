@@ -1263,7 +1263,7 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, GCcdata *cd)
   it = IRT_NIL;
   /* Skip emitting IR_ASMREG for opcodes with dynamic registers */
   if (intrins->flags & INTRINSFLAG_DYNREG && intrins->outsz == 1) {
-    it = rk_irt(ASMRID(intrins->in[0]), ASMREGKIND(intrins->in[0]));
+    it = rk_irt(ASMRID(intrins->out[0]), ASMREGKIND(intrins->out[0]));
   }
 
   J->base[0] = tintrins = emitir(IRT(IR_ASMINS, it), arg, tintrins);

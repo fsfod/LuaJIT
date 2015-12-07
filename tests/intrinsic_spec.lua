@@ -335,6 +335,61 @@ it("rdtscp", function()
   assert_jitchecker(checker, getticks)  
 end)
 
+it("addsd", function()
+  local addsd = ffi.intrinsic(0xF20F58, {rin = {"xmm0", "xmm1"}, rout = {"xmm0"}, mode = "modrm"})
+   
+  function test_addsd(n1, n2)
+    return (addsd(n1, n2))
+  end
+   
+  assert_equal(3, addsd(1, 2))
+  assert_equal(0, addsd(0, 0))
+  
+  assert_jit(-3, test_addsd, -4.5, 1.5)
+  assert_noexit(3, test_addsd, 4.5, -1.5)
+  --check dual num exit
+  assert_equal(5, test_addsd(3, 2))
+end)
+
+context("mixed register type opcodes", function()
+  it("cvttsd2s", function()
+    local cvttsd2s = ffi.intrinsic(0xF20F2C, {rin = {"xmm0"}, rout = {"ecx"}, mode = "modrm1"})
+    
+    function test_cvttsd2s(n)
+      return (cvttsd2s(n))
+    end
+    
+    assert_equal(0, cvttsd2s(-0))
+    assert_equal(1, cvttsd2s(1))
+    assert_equal(1, cvttsd2s(1.2))
+    
+    assert_jit(3, test_cvttsd2s, 3.3)
+    assert_noexit(-1, test_cvttsd2s, -1.5)
+    --check dual num exit
+    assert_equal(5, test_cvttsd2s(5))
+  end)
+  
+  it("cvtsi2sd", function() 
+    local cvtsi2sd = ffi.intrinsic(0xF20F2A , {rin = {"ecx"}, rout = {"xmm0"}, mode = "modrm1"})
+    
+    function test_cvtsi2sd(n1, n2)
+      return (cvtsi2sd(n1)+n2)
+    end
+    
+    assert_equal(0.5, test_cvtsi2sd(0, 0.5))
+    assert_equal(1.25, test_cvtsi2sd(1.0, 0.25))
+    assert_equal(-1.5, test_cvtsi2sd(-2, 0.5))
+    
+    assert_jit(3.25, test_cvtsi2sd, 3, 0.25)
+    assert_noexit(-1.5, test_cvtsi2sd, -2, 0.5)
+    
+    --check dual num exit
+    assert_equal(11, test_cvtsi2sd(5, 6))
+  end)
+end)
+
+
+
 it("idiv", function()
 
   local idiv = asmfromstr("\x99\xF7\xF9", {rin = {"eax", "ecx"}, rout = {"eax", "edx"}})
