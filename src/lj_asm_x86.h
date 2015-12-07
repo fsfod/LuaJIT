@@ -549,7 +549,7 @@ void asm_intrinresult(ASMState *as, IRIns *ir, AsmIntrins* intrins)
   ra_evictset(as, evict);
 }
 
-static int asm_swapopsref(ASMState *as, IRIns *ir, IRRef lref, IRRef rref);
+static int asm_swaprefs(ASMState *as, IRIns *ir, IRRef lref, IRRef rref);
 
 static void asm_asmins(ASMState *as, IRIns *ir)
 {
@@ -593,8 +593,8 @@ static void asm_asmins(ASMState *as, IRIns *ir)
         right = dest;
       } else if (ra_noreg(right)) {
         RegSet rallow = ASMRID(intrins->in[0]) < RID_MAX_GPR ? RSET_GPR : RSET_FPR;
-        /* TODO: flag to disable swapping maybe on by default for user defined op intrinsics */
-        if (asm_swapopsref(as, ir, lref, rref)) {
+
+        if ((intrins->flags & INTRINSFLAG_ISCOMM) && asm_swaprefs(as, ir, lref, rref)) {
           IRRef tmp = lref; lref = rref; rref = tmp;
         }
 
@@ -1844,13 +1844,11 @@ static void asm_pow(ASMState *as, IRIns *ir)
     asm_fppowi(as, ir);
 }
 
-static int asm_swapopsref(ASMState *as, IRIns *ir, IRRef lref, IRRef rref)
+static int asm_swaprefs(ASMState *as, IRIns *ir, IRRef lref, IRRef rref)
 {
   IRIns *irl = IR(lref);
   IRIns *irr = IR(rref);
-  lua_assert(ra_noreg(irr->r));
-  if (!irm_iscomm(lj_ir_mode[ir->o]))
-    return 0;  /* Can't swap non-commutative operations. */
+  lua_assert(ra_noreg(irr->r)); 
   if (irref_isk(rref))
     return 0;  /* Don't swap constants to the left. */
   if (ra_hasreg(irl->r))
@@ -1870,7 +1868,9 @@ static int asm_swapopsref(ASMState *as, IRIns *ir, IRRef lref, IRRef rref)
 
 static int asm_swapops(ASMState *as, IRIns *ir)
 {
-  return asm_swapopsref(as, ir, ir->op1, ir->op2);
+  if (!irm_iscomm(lj_ir_mode[ir->o]))
+    return 0;  /* Can't swap non-commutative operations. */
+  return asm_swaprefs(as, ir, ir->op1, ir->op2);
 }
 
 static void asm_fparith(ASMState *as, IRIns *ir, x86Op xo)
