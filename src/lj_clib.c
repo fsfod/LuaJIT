@@ -339,9 +339,13 @@ TValue *lj_clib_index(lua_State *L, CLibrary *cl, GCstr *name)
       CType *ctt = ctype_child(cts, ct);
       lua_assert(ctype_isinteger(ctt->info) && ctt->size <= 4);
       if ((ctt->info & CTF_UNSIGNED) && (int32_t)ct->size < 0)
-	setnumV(tv, (lua_Number)(uint32_t)ct->size);
+        setnumV(tv, (lua_Number)(uint32_t)ct->size);
       else
-	setintV(tv, (int32_t)ct->size);
+        setintV(tv, (int32_t)ct->size);
+    } else if(ctype_isintrinsic(ct->info)) {
+      GCcdata *cd = lj_cdata_new(cts, id, CTSIZE_PTR);
+      *(void **)cdataptr(cd) = 0;
+      setcdataV(L, tv, cd);
     } else {
       const char *sym = clib_extsym(cts, ct, name);
 #if LJ_TARGET_WINDOWS

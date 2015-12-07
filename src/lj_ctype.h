@@ -72,6 +72,7 @@ LJ_STATIC_ASSERT(((int)CT_STRUCT & (int)CT_ARRAY) == CT_STRUCT);
 #define CTF_VECTOR	0x08000000u	/* Vector: ARRAY. */
 #define CTF_COMPLEX	0x04000000u	/* Complex: ARRAY. */
 #define CTF_UNION	0x00800000u	/* Union: STRUCT. */
+#define CTF_INTRINS	0x04000000u	/* Intrinsic: FUNC. */
 #define CTF_VARARG	0x00800000u	/* Vararg: FUNC. */
 #define CTF_SSEREGPARM	0x00400000u	/* SSE register parameters: FUNC. */
 
@@ -246,6 +247,9 @@ typedef struct CTState {
   (((info) & (CTMASK_NUM|CTATTRIB(CTMASK_ATTRIB))) == \
    CTINFO(CT_ATTRIB, CTATTRIB(at)))
 
+#define ctype_isintrinsic(info) \
+  (((info) & (CTMASK_NUM|CTF_INTRINS)) == CTINFO(CT_FUNC, CTF_INTRINS))
+
 /* Target-dependent sizes and alignments. */
 #if LJ_64
 #define CTSIZE_PTR	8
@@ -340,14 +344,14 @@ CTTYDEF(CTTYIDDEF)
   _(VOID) _(BOOL) _(CHAR) _(INT) _(FP) \
   _(LONG) _(LONGLONG) _(SHORT) _(COMPLEX) _(SIGNED) _(UNSIGNED) \
   _(CONST) _(VOLATILE) _(RESTRICT) _(INLINE) \
-  _(TYPEDEF) _(EXTERN) _(STATIC) _(AUTO) _(REGISTER)
+  _(TYPEDEF) _(EXTERN) _(STATIC) _(AUTO)  _(REGISTER)
 
 /* C keywords. */
 #define CKWDEF(_) \
   CDSDEF(_) _(EXTENSION) _(ASM) _(ATTRIBUTE) \
   _(DECLSPEC) _(CCDECL) _(PTRSZ) \
   _(STRUCT) _(UNION) _(ENUM) \
-  _(SIZEOF) _(ALIGNOF)
+  _(SIZEOF) _(MCODE) _(ALIGNOF)
 
 /* C token numbers. */
 enum {

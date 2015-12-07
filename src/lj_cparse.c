@@ -17,6 +17,7 @@
 #include "lj_char.h"
 #include "lj_strscan.h"
 #include "lj_strfmt.h"
+#include "lj_intrinsic.h"
 
 /*
 ** Important note: this is NOT a validating C parser! This is a minimal
@@ -353,6 +354,7 @@ typedef struct CPDecl {
   CTInfo specfattr;	/* Saved function attributes. */
   CTSize bits;		/* Field size in bits (if any). */
   CType stack[CPARSE_MAX_DECLSTACK];  /* Type declaration stack. */
+  uint32_t opcode;
 } CPDecl;
 
 /* Forward declarations. */
@@ -805,6 +807,8 @@ static void cp_push_type(CPDecl *decl, CTypeID id)
   }
 }
 
+int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, uint32_t opcode);
+
 /* Consume the declaration element chain and intern the C type. */
 static CTypeID cp_decl_intern(CPState *cp, CPDecl *decl)
 {
@@ -848,6 +852,15 @@ static CTypeID cp_decl_intern(CPState *cp, CPDecl *decl)
       fct->size = size;
       fct->sib = sib;
       id = fid;
+
+      if (ctype_isintrinsic(info)) {
+        CTypeID1 cid = lj_intrinsic_fromcdef(cp->L, fid, decl->opcode);
+        if (cid == 0)
+          cp_err(cp, LJ_ERR_FFI_INVTYPE);
+
+        fct->info = cinfo = info + cid;
+      }
+
     } else if (ctype_isattrib(info)) {
       if (ctype_isxattrib(info, CTA_QUAL))
 	cinfo |= size;
@@ -1138,6 +1151,8 @@ static void cp_decl_msvcattribute(CPState *cp, CPDecl *decl)
   cp_check(cp, ')');
 }
 
+static void cp_decl_mcode(CPState *cp, CPDecl *decl);
+
 /* Parse declaration attributes (and common qualifiers). */
 static void cp_decl_attributes(CPState *cp, CPDecl *decl)
 {
@@ -1161,10 +1176,57 @@ static void cp_decl_attributes(CPState *cp, CPDecl *decl)
       CTF_INSERT(decl->attr, MSIZEP, cp->ct->size);
 #endif
       break;
+
+    case CTOK_MCODE:
+      cp_decl_mcode(cp, decl);
+      break;
+
     default: return;
     }
     cp_next(cp);
   }
+}
+
+
+/* 
+  How to declare multiple return values since the parser won't now yet its mcode when parsing return type earlier on
+*/
+static void cp_decl_mcode(CPState *cp, CPDecl *decl)
+{
+  cp_next(cp);
+  cp_check(cp, '(');
+  uint32_t opcode = 0;
+  AsmIntrins intrins;
+  memset(&intrins, 0, sizeof(AsmIntrins));
+  
+  if (decl->top == 0) {
+    cp_err(cp, LJ_ERR_FFI_INVTYPE);
+  } else {
+    CTInfo info = decl->stack[decl->top-1].info;
+
+    if (!ctype_isfunc(info) || (info & CTF_VARARG)) {
+      cp_err(cp, LJ_ERR_FFI_INVTYPE);
+    }
+  }
+
+  if (cp->tok != CTOK_INTEGER) {
+    cp_err_token(cp, CTOK_INTEGER);
+  }
+
+  decl->opcode = cp->val.u32;
+  cp_next(cp);
+  cp_opt(cp, ',');
+
+  if (cp->tok != ')') {
+    do {
+      if (cp->tok == CTOK_IDENT) {
+        GCstr *flag = cp->str;
+      }
+      cp_next(cp);
+    } while (cp_opt(cp, ','));
+  }
+
+  decl->stack[decl->top-1].info |= CTF_INTRINS;
 }
 
 /* Parse struct/union/enum name. */

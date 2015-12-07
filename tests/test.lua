@@ -3,10 +3,17 @@ local jit = require("jit")
 local jit_opt = require("jit.opt")
 local asm = ffi.ASM
 
-dofile("runtests.lua")
+--dofile("runtests.lua")
+
+ffi.cdef[[
+typedef float float4 __attribute__((__vector_size__(16)));
+float __rsqrtss(float x) __mcode(0xF30F52, rM);
+]]
+
+ffi.new("float4")
 
 if 1 then
-return 
+  return
 end
 
 local cpuidins = "\x0F\xA2"     
