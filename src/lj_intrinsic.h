@@ -44,7 +44,8 @@ typedef enum INTRINSFLAGs {
   /* Don't fuse load into op only valid with DYNREG */
   INTRINSFLAG_NOFUSE = 0x800,
 
-  INTRINSFLAG_REXW  = 0x1000, /* Force REX.w 64 bit override */
+  /* Force REX.w 64 bit size override tobe emitted for the opcode intrinsic */
+  INTRINSFLAG_REXW  = 0x1000, 
 
 }INTRINSFLAGs;
 

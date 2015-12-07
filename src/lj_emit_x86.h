@@ -590,6 +590,12 @@ static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins, Reg r1, Reg r2)
     if (intrins->flags & INTRINSFLAG_RMOP) {
       r2 = ASMRID(intrins->in[1]);
     }
+    
+    /* force 64 bit operands */
+    if(intrins->flags & INTRINSFLAG_REXW) {
+      r2 |= REX_64;
+    }
+
     emit_mrm(as, intrins->opcode, r2, r1);
 
     checkmclim(as);
