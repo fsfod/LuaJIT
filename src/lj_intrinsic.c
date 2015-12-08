@@ -404,7 +404,7 @@ static int regfromffi(CTState *cts, CTypeID id) {
     CType *vtype;
     int kind;
   vec:
-    vtype = ctype_get(cts, ctype_raw(cts, ctype_cid(base->info)));
+    vtype = ctype_raw(cts, ctype_cid(base->info));
 
     if (base->size != 16 && base->size != 32)
       return -1;
@@ -427,7 +427,6 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, uint32_t opcode)
   CTState *cts = ctype_cts(L);
   cTValue *tv;
   int err;
-  void *intrinsmc;
   AsmIntrins _intrins;
   AsmIntrins* intrins = &_intrins;
   CType *func = ctype_get(cts, fid);
@@ -569,7 +568,7 @@ int ffi_intrinsiccall(lua_State *L, CTState *cts, CType *ct)
   /* Clear unused regs to get some determinism in case of misdeclaration. */
   memset(&context, 0, sizeof(RegContext));
 
-  intrins = (AsmIntrins *)cdataptr(cdataV(lj_tab_getinth(cts->miscmap, -ctype_cid(ct->info))));
+  intrins = (AsmIntrins *)cdataptr(cdataV(lj_tab_getinth(cts->miscmap, -(int32_t)ctype_cid(ct->info))));
   
 
   /* Perform required setup for some result types.
@@ -598,8 +597,8 @@ int ffi_intrinsiccall(lua_State *L, CTState *cts, CType *ct)
     CTypeID did;
     CType *d;
     CTSize sz;
-    MSize n, isfp = 0, isva = 0;
-    void *dp, *rp = NULL;
+    MSize n, isfp = 0;
+    void *dp;
 
     if (fid) {  /* Get argument type from field. */
       CType *ctf = ctype_get(cts, fid);
@@ -648,10 +647,7 @@ int ffi_intrinsiccall(lua_State *L, CTState *cts, CType *ct)
 
     /* Extend passed integers to 32 bits at least. */
     if (ctype_isinteger_or_bool(d->info) && d->size < 4) {
-      if (d->info & CTF_UNSIGNED)
-        *(uint32_t *)dp = d->size == 1 ? (uint32_t)*(uint8_t *)dp :
-        (uint32_t)*(uint16_t *)dp;
-      else
+      if (!(d->info & CTF_UNSIGNED))
         *(int32_t *)dp = d->size == 1 ? (int32_t)*(int8_t *)dp :
         (int32_t)*(int16_t *)dp;
     }
