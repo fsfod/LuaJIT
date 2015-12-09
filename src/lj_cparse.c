@@ -354,7 +354,6 @@ typedef struct CPDecl {
   CTInfo specfattr;	/* Saved function attributes. */
   CTSize bits;		/* Field size in bits (if any). */
   CType stack[CPARSE_MAX_DECLSTACK];  /* Type declaration stack. */
-  uint32_t opcode;
 } CPDecl;
 
 /* Forward declarations. */
@@ -807,7 +806,7 @@ static void cp_push_type(CPDecl *decl, CTypeID id)
   }
 }
 
-int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, uint32_t opcode);
+int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode);
 
 /* Consume the declaration element chain and intern the C type. */
 static CTypeID cp_decl_intern(CPState *cp, CPDecl *decl)
@@ -854,11 +853,11 @@ static CTypeID cp_decl_intern(CPState *cp, CPDecl *decl)
       id = fid;
 
       if (ctype_isintrinsic(info)) {
-        CTypeID1 cid = lj_intrinsic_fromcdef(cp->L, fid, decl->opcode);
+        CTypeID1 cid = lj_intrinsic_fromcdef(cp->L, fid, decl->redir);
         if (cid == 0)
           cp_err(cp, LJ_ERR_FFI_INVTYPE);
-
-        fct->info = cinfo = info + cid;
+        decl->redir = NULL;
+        ctype_get(cp->cts, fid)->info = cinfo = info + cid;
       }
 
     } else if (ctype_isattrib(info)) {
@@ -1195,9 +1194,6 @@ static void cp_decl_mcode(CPState *cp, CPDecl *decl)
 {
   cp_next(cp);
   cp_check(cp, '(');
-  uint32_t opcode = 0;
-  AsmIntrins intrins;
-  memset(&intrins, 0, sizeof(AsmIntrins));
   
   if (decl->top == 0) {
     cp_err(cp, LJ_ERR_FFI_INVTYPE);
@@ -1209,18 +1205,19 @@ static void cp_decl_mcode(CPState *cp, CPDecl *decl)
     }
   }
 
-  if (cp->tok != CTOK_INTEGER) {
+  if (cp->tok == CTOK_STRING) {
+    decl->redir = cp->str;
+  } else {
     cp_err_token(cp, CTOK_INTEGER);
   }
 
-  decl->opcode = cp->val.u32;
   cp_next(cp);
   cp_opt(cp, ',');
 
   if (cp->tok != ')') {
     do {
-      if (cp->tok == CTOK_IDENT) {
-        GCstr *flag = cp->str;
+      if (cp->tok == CTOK_INTEGER) {
+        /* TODO: immediate */
       }
       cp_next(cp);
     } while (cp_opt(cp, ','));

@@ -243,7 +243,7 @@ end)
 
 it("popcnt", function()
 
-  local popcnt = ffi.intrinsic(0xf30fb8, {rin = {"eax"}, rout = {"eax"}, mode = "modrm1"})
+  local popcnt = ffi.intrinsic(0xf30fb8, {rin = {"eax"}, rout = {"eax"}, mode = "rM"})
 
   assert_equal(popcnt(7),    3)
   assert_equal(popcnt(1024), 1)
@@ -336,7 +336,7 @@ it("rdtscp", function()
 end)
 
 it("addsd", function()
-  local addsd = ffi.intrinsic(0xF20F58, {rin = {"xmm0", "xmm1"}, rout = {"xmm0"}, mode = "modrm"})
+  local addsd = ffi.intrinsic(0xF20F58, {rin = {"xmm0", "xmm1"}, rout = {"xmm0"}, mode = "rM"})
    
   function test_addsd(n1, n2)
     return (addsd(n1, n2))
@@ -353,7 +353,7 @@ end)
 
 context("mixed register type opcodes", function()
   it("cvttsd2s", function()
-    local cvttsd2s = ffi.intrinsic(0xF20F2C, {rin = {"xmm0"}, rout = {"ecx"}, mode = "modrm1"})
+    local cvttsd2s = ffi.intrinsic(0xF20F2C, {rin = {"xmm0"}, rout = {"ecx"}, mode = "rM"})
     
     function test_cvttsd2s(n)
       return (cvttsd2s(n))
@@ -370,7 +370,7 @@ context("mixed register type opcodes", function()
   end)
   
   it("cvtsi2sd", function() 
-    local cvtsi2sd = ffi.intrinsic(0xF20F2A , {rin = {"ecx"}, rout = {"xmm0"}, mode = "modrm1"})
+    local cvtsi2sd = ffi.intrinsic(0xF20F2A , {rin = {"ecx"}, rout = {"xmm0"}, mode = "rM"})
     
     function test_cvtsi2sd(n1, n2)
       return (cvtsi2sd(n1)+n2)

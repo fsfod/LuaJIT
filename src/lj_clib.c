@@ -343,6 +343,7 @@ TValue *lj_clib_index(lua_State *L, CLibrary *cl, GCstr *name)
       else
         setintV(tv, (int32_t)ct->size);
     } else if(ctype_isintrinsic(ct->info)) {
+      /*TODO: maybe move to ASM namespace only */
       GCcdata *cd = lj_cdata_new(cts, id, CTSIZE_PTR);
       *(void **)cdataptr(cd) = 0;
       setcdataV(L, tv, cd);

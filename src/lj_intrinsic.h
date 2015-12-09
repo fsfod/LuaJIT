@@ -47,7 +47,9 @@ typedef enum INTRINSFLAGs {
   /* Force REX.w 64 bit size override tobe emitted for the opcode intrinsic */
   INTRINSFLAG_REXW  = 0x1000,
   /* Opcode is commutative allowing the input registers to be swapped to allow better fusing */
-  INTRINSFLAG_ISCOMM = 0x1000, 
+  INTRINSFLAG_ISCOMM = 0x2000, 
+  /* opcode has needs immediate byte specified at construction time*/
+  INTRINSFLAG_IMMB = 0x4000,
 
 }INTRINSFLAGs;
 
