@@ -257,6 +257,12 @@ it("popcnt", function()
   assert_noexit(32, testpopcnt, -1)
   assert_noexit(0, testpopcnt, 0)
   assert_noexit(1, testpopcnt, 1)
+  
+  --check unfused
+  popcnt = ffi.intrinsic(0xf30fb8, {rin = {"eax"}, rout = {"eax"}, mode = "r"})
+  
+  assert_equal(popcnt(7),    3)
+  assert_equal(popcnt(1024), 1)
 end)
 
 local function getcpuidstr(eax)
@@ -349,6 +355,12 @@ it("addsd", function()
   assert_noexit(3, test_addsd, 4.5, -1.5)
   --check dual num exit
   assert_equal(5, test_addsd(3, 2))
+  
+  --check unfused
+  addsd = ffi.intrinsic(0xF20F58, {rin = {"xmm0", "xmm1"}, rout = {"xmm0"}, mode = "r"})
+  
+  assert_equal(3, addsd(1, 2))
+  assert_equal(0, addsd(0, 0))
 end)
 
 context("mixed register type opcodes", function()
@@ -367,6 +379,13 @@ context("mixed register type opcodes", function()
     assert_noexit(-1, test_cvttsd2s, -1.5)
     --check dual num exit
     assert_equal(5, test_cvttsd2s(5))
+    
+    --check unfused
+    cvttsd2s = ffi.intrinsic(0xF20F2C, {rin = {"xmm0"}, rout = {"ecx"}, mode = "r"})
+    
+    assert_equal(0, cvttsd2s(-0))
+    assert_equal(1, cvttsd2s(1))
+    assert_equal(1, cvttsd2s(1.2))
   end)
   
   it("cvtsi2sd", function() 
@@ -385,6 +404,12 @@ context("mixed register type opcodes", function()
     
     --check dual num exit
     assert_equal(11, test_cvtsi2sd(5, 6))
+    
+    --check unfused
+    cvtsi2sd = ffi.intrinsic(0xF20F2A , {rin = {"ecx"}, rout = {"xmm0"}, mode = "r"})
+    assert_equal(0.5, test_cvtsi2sd(0, 0.5))
+    assert_equal(1.25, test_cvtsi2sd(1.0, 0.25))
+    assert_equal(-1.5, test_cvtsi2sd(-2, 0.5))
   end)
 end)
 

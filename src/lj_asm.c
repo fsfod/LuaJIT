@@ -2401,6 +2401,7 @@ static void wrap_intrins(jit_State *J, AsmIntrins *intrins)
   RegSet saveregs = allmodregs & ~RSET_SCRATCH;
   uint32_t i = 0, fpr;
   int spadj = LJ_64 ? 32 : 0, offset = 0, contexspill = 0, contexofs = -1;
+  int nofuse = intrins->flags & INTRINSFLAG_NOFUSE;
   /*TODO: dynamic output context register selection */
   Reg rout = RID_NONE, rin = RID_NONE, outcontext = RID_OUTCONTEXT;
 
@@ -2415,6 +2416,8 @@ static void wrap_intrins(jit_State *J, AsmIntrins *intrins)
 
     if (ASMRID(intrins->in[0]) < RID_MAX_GPR) {
       rin = RID_CONTEXT;
+      if (nofuse)
+        contexofs = 0;
     } else {
       rin = rset_pickbot(scatch&RSET_FPR);
       rset_clear(scatch, rin);
@@ -2434,7 +2437,7 @@ static void wrap_intrins(jit_State *J, AsmIntrins *intrins)
   /* Check if any input register is the same register as the input context and 
    * save it offset in the input context so we can load it last.
    */
-  for (i = 0; i < intrins->insz; i++) {
+  for (i = rin != RID_NONE ? 1 : 0; i < intrins->insz; i++) {
     Reg r = ASMRID(intrins->in[i]);
     if (r == RID_CONTEXT && !(intrins->flags&INTRINSFLAG_DYNREG)) {
       contexofs = offset;
@@ -2542,7 +2545,7 @@ restart:
   as->mrm.scale = XM_SCALE1;
 
   if (intrins->flags & INTRINSFLAG_DYNREG) {
-    if (intrins->flags & INTRINSFLAG_NOFUSE) {
+    if (nofuse) {
       as->mrm.base = RID_NONE;
       lua_assert(rin != RID_NONE);
     } else {
@@ -2584,19 +2587,24 @@ restart:
     uint32_t reg = intrins->in[i];
     uint32_t kind = ASMREGKIND(reg);
 
-    if (i == 0 && (intrins->flags & (INTRINSFLAG_DYNREG|INTRINSFLAG_NOFUSE)) == INTRINSFLAG_DYNREG) {
-      if (r >= RID_MAX_GPR && rk_isvec(kind)) {
-        /* Still need to load vector pointer out of the input context */
-        emit_loadofs(as, &GPRIns, RID_CONTEXT, RID_CONTEXT, 0);
-      }
-      /* The load is fused into the modrm of the opcode emitted in emit_intrins */
-      if (r < RID_MAX_GPR || rk_isvec(kind)) {
-        offset += sizeof(intptr_t);
+    if (i == 0 && (intrins->flags & INTRINSFLAG_DYNREG)) {
+
+      if (nofuse) {
+        reg = ASMMKREG(rin, ASMREGKIND(reg));
+        r = rin;
       } else {
-        fpr++;
+        if (r >= RID_MAX_GPR && rk_isvec(kind)) {
+          /* Still need to load vector pointer out of the input context */
+          emit_loadofs(as, &GPRIns, RID_CONTEXT, RID_CONTEXT, 0);
+        }
+        /* The load is fused into the modrm of the opcode emitted in emit_intrins */
+        if (r < RID_MAX_GPR || rk_isvec(kind)) {
+          offset += sizeof(intptr_t);
+        } else {
+          fpr++;
+        }
+        continue;
       }
-      
-      continue;
     }
 
     if (i == 1 && (intrins->flags & INTRINSFLAG_DYNREGINOUT)) {
