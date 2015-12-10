@@ -19,6 +19,8 @@
 #define REX_64			0
 #endif
 
+#define OP4B 0x10000
+
 #define VEX_R(vex, rr) (vex & ~((rr<<4)&0x80))
 #define VEX_RBX(rr, rb, rx, map) ((0xe0 & ~(((rr<<4)&0x80) | ((rx<<3)&0x40) | ((rb<<2)&0x20))) | (map))
 
@@ -49,6 +51,8 @@ static LJ_AINLINE MCode *emit_op(x86Op xo, Reg rr, Reg rb, Reg rx,
 				 MCode *p, int delta)
 {
   int n = (int8_t)xo;
+  if (rr & OP4B)
+    n = -5;
 #if defined(__GNUC__)
   if (__builtin_constant_p(xo) && n == -2)
     p[delta-2] = (MCode)(xo >> 24);
