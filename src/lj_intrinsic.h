@@ -31,7 +31,10 @@ typedef enum INTRINSFLAGs {
 
   /* Intrinsic should be emitted as a function that is called with all the 
    * input registers set beforehand both in the jit and the interpreter */
-  INTRINSFLAG_CALLED   = 0x10, 
+  INTRINSFLAG_CALLED = 0x10, 
+
+  /* Upcode is larger than the emit system normally handles x86/x64(4 bytes) */
+  INTRINSFLAG_LARGEOP = 0x20,
 
   /* Dynamic register assignment for first input/output register */
   INTRINSFLAG_DYNREG   = 0x100, 
@@ -39,7 +42,7 @@ typedef enum INTRINSFLAGs {
   INTRINSFLAG_RMOP     = 0x200, 
   INTRINSFLAG_HASMODRM = INTRINSFLAG_DYNREG|INTRINSFLAG_RMOP,
 
-  /* the output register is also the second input register */
+  /* Output register is also the second input register */
   INTRINSFLAG_DYNREGINOUT = 0x400,
   /* Don't fuse load into op only valid with DYNREG */
   INTRINSFLAG_NOFUSE = 0x800,
@@ -48,7 +51,7 @@ typedef enum INTRINSFLAGs {
   INTRINSFLAG_REXW  = 0x1000,
   /* Opcode is commutative allowing the input registers to be swapped to allow better fusing */
   INTRINSFLAG_ISCOMM = 0x2000, 
-  /* opcode has needs immediate byte specified at construction time*/
+  /* Opcode has an immediate byte that needs tobe set at construction time */
   INTRINSFLAG_IMMB = 0x4000,
 
 }INTRINSFLAGs;

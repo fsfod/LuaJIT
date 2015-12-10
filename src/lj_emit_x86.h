@@ -598,10 +598,32 @@ static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins, Reg r1, Reg r2)
     /* force 64 bit operands */
     if(intrins->flags & INTRINSFLAG_REXW) {
       r2 |= REX_64;
+    } 
+
+    if (intrins->flags & INTRINSFLAG_IMMB) {
+      *--as->mcp = intrins->in[LJ_INTRINS_MAXREG-1];
+    }
+    
+    if (intrins->flags & INTRINSFLAG_LARGEOP) {
+      r2 |= OP4B;
     }
 
-    emit_mrm(as, intrins->opcode, r2, r1);
+    if (((int8_t)intrins->opcode) != -1) {
+      emit_mrm(as, intrins->opcode, r2, r1);
+    } else {
+      Reg rb = r1, rx = as->mrm.idx;
+ 
+      /* don't emit rex here so we can write the rest of the opcode after */
+      emit_mrm(as, 0, r2&3, r1&3);
 
+      if (r1 == RID_MRM)
+        rb = as->mrm.base; /* may be RID_NONE but that will result in REX.B as zero */
+
+  
+      *--((uint32_t*)as->mcp) = *(uint32_t*)&intrins->in[4];
+
+      as->mcp = emit_op(intrins->opcode, r2&~3, r1&~3, 0, as->mcp, 0);
+    }
     checkmclim(as);
     /* No code offset to save if were dynamically generating from an opcode */
     return NULL;
@@ -652,9 +674,6 @@ static void emit_prologue(ASMState *as, int spadj, RegSet modregs)
     /*TODO: always align correctly on x64 */
     emit_spsub(as, spadj);
   }
-
- // if (!rset_test(RSET_SCRATCH, RID_TEMP))
- //   emit_push(as, RID_TEMP);
 
   if (NEEDSFP) {
     emit_rr(as, XO_MOV, RID_EBP|REX_64, RID_ESP);

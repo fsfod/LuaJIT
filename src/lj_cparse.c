@@ -1212,16 +1212,19 @@ static void cp_decl_mcode(CPState *cp, CPDecl *decl)
   }
 
   cp_next(cp);
-  cp_opt(cp, ',');
 
-  if (cp->tok != ')') {
+  if (cp_opt(cp, ',')) {
     do {
       if (cp->tok == CTOK_INTEGER) {
         /* TODO: immediate */
+      } else {
+        cp_err_token(cp, CTOK_INTEGER);
       }
       cp_next(cp);
     } while (cp_opt(cp, ','));
   }
+
+  cp_check(cp, ')');
 
   decl->stack[decl->top-1].info |= CTF_INTRINS;
 }

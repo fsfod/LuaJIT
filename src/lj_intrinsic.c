@@ -66,13 +66,6 @@ typedef struct RegEntry {
   _(MM0, mm0) _(MM1, mm1) _(MM2, mm2) _(MM3, mm3) _(MM4, mm4) _(MM5, mm5) _(MM6, mm6) _(MM7, mm7)
 #endif
 
-#define OPTDEF(_) \
-  _(nofuse, INTRINSFLAG_NOFUSE) \
-  _(modrm,  INTRINSFLAG_DYNREGINOUT|INTRINSFLAG_DYNREG) \
-  _(modrm1, INTRINSFLAG_DYNREG) \
-
-#define MKREGOPT(name,  flags) {#name, (flags) << 16},
-
 RegEntry reglut[] = {
   GPRDEF2(MKREGGPR)
   FPRDEF2(MKREGXMM)
@@ -81,7 +74,6 @@ RegEntry reglut[] = {
 #if LJ_64
   GPRDEF_R64(MKREG_GPR64)
 #endif
-  OPTDEF(MKREGOPT)
 };
 
 #define XO_0F2(b1, b2)	((uint32_t)(0x0ffc + (0x##b2<<24) + (0x##b1<<16)))
@@ -176,11 +168,6 @@ static uint32_t buildregset(lua_State *L, GCtab *regs, AsmIntrins *intrins, int 
     reg = (uint32_t)(uintptr_t)lightudV(reginfo);
     r = ASMRID(reg);
     kind = ASMREGKIND(reg);
-
-    if (reg & 0xffff0000) {
-      /* mode string found in register table */
-      lj_err_callerv(L, LJ_ERR_FFI_BADREG, strVdata(slot), listname);
-    }
     
     /* Check for duplicate registers in the list */
     if (rset_test(rset, r)) {
@@ -267,16 +254,17 @@ static int parse_opmode(const char *op, MSize len)
         M = 1;
         flags |= INTRINSFLAG_DYNREG;
         break;
-
       case 'r':
       case 'R':
         /* modrm register */
         flags |= INTRINSFLAG_DYNREG;
         break;
-
       case 'U':
       case 'S':
         flags |= INTRINSFLAG_IMMB;
+        break;
+      case 's':
+        flags |= INTRINSFLAG_MEMORYSIDE;
         break;
       case 'c':
         flags |= INTRINSFLAG_ISCOMM;
@@ -299,18 +287,50 @@ static int parse_opmode(const char *op, MSize len)
   return flags;
 }
 
-static uint64_t parse_opstr(GCstr *opstr, uint16_t *pflags)
+
+static uint32_t process_opcode(lua_State *L, uint32_t opcode, uint16_t *flags)
+{
+  int len;
+
+  if (opcode == 0) {
+    lj_err_callermsg(L, "bad opcode literal");
+  }
+
+  if (opcode <= 0xff) {
+    len = 1;
+  } else if (opcode <= 0xffff) {
+    len = 2;
+  } else if (opcode <= 0xffffff) {
+    len = 3;
+  } else {
+    len = 4;
+  }
+
+#if LJ_TARGET_X86ORX64
+  opcode = lj_bswap(opcode);
+
+  if (len < 4) {
+    opcode |= (uint8_t)(int8_t)-(len+1);
+  } else {
+    *flags |= INTRINSFLAG_LARGEOP;
+  }
+#endif 
+
+  return opcode;
+}
+
+static int parse_opstr(lua_State *L, GCstr *opstr, AsmIntrins *intrins)
 {
   const char *op = strdata(opstr);
 
-  uint64_t opcode = 0;
+  uint32_t opcode = 0;
   uint32_t i;
   int flags;
 
   for (i = 0; i < opstr->len && lj_char_isxdigit(op[i]); i++) {
   }
 
-  if (i == 0 || i > 16) {
+  if (i == 0 || i > 8) {
     /* invalid or no hex number */
     return 0;
   }
@@ -324,33 +344,14 @@ static uint64_t parse_opstr(GCstr *opstr, uint16_t *pflags)
   flags = parse_opmode(op, opstr->len - (op-strdata(opstr)));
 
   if (flags < 0) {
-    return 0;
+    return flags;
   } else {
-    *pflags |= flags;
+    intrins->flags |= flags;
   }
 
-  return opcode;
-}
+  intrins->opcode = process_opcode(L, opcode, &intrins->flags);
 
-static uint32_t process_opcode(lua_State *L, uint32_t opcode)
-{
-  opcode = lj_bswap(opcode);
-
-  if (opcode == 0) {
-    lj_err_callermsg(L, "bad opcode literal");
-  }
-
-  if ((opcode&0x00ffffff) == 0) {
-    opcode |= 0xfe;
-  } else if ((opcode & 0x0000ffff) == 0) {
-    opcode |= 0xfd;
-  } else if ((opcode & 0x000000ff) == 0) {
-    opcode |= 0xfc;
-  } else {
-    lj_err_callermsg(L, "opcode literal too long");
-  }
-  
-  return opcode;
+  return 1;
 }
 
 int lj_intrinsic_create(lua_State *L)
@@ -358,28 +359,35 @@ int lj_intrinsic_create(lua_State *L)
   CTState *cts = ctype_cts(L);
   GCtab *t, *regs;
   cTValue *tv;
-  int err;
+  int err, argi = 0;
   void *intrinsmc;
-  uint32_t opcode = 0;
+  GCstr *opstr = NULL;
+  uint32_t opcode;
   AsmIntrins _intrins;
   AsmIntrins* intrins = &_intrins;
   
   memset(intrins, 0, sizeof(AsmIntrins));
 
-  if (!tviscdata(L->base) && !tvisstr(L->base) && !tvisnumber(L->base)) {
-    lj_err_callermsg(L, "expected a string or a cdata pointer to intrinsic machine code");
+  if (!tviscdata(L->base) && !tvisstr(L->base)) {
+    lj_err_argtype(L, 1, "expected a string or cdata");
   }
 
-  if (tvisnumber(L->base)) {
-    opcode = process_opcode(L, (uint32_t)lj_lib_checkint(L, 1));
-  } else {
+  /* If we have a number for the second argument the first must be a pointer/string to machine code */
+  if (tvisnumber(L->base+1)) {
     lj_cconv_ct_tv(cts, ctype_get(cts, CTID_P_CVOID), (uint8_t *)&intrinsmc, 
                    L->base, CCF_ARG(1));
     intrins->mcode = intrinsmc;
     intrins->asmsz = lj_lib_checkint(L, 2);
+    argi++;
+  } else {
+    opstr = lj_lib_checkstr(L, 1);
+
+    if (parse_opstr(L, opstr, intrins) == 0) {
+      lj_err_callermsg(L, "bad opcode literal");
+    }
   }
 
-  regs = lj_lib_checktab(L, opcode ? 2 : 3);
+  regs = lj_lib_checktab(L, 2+argi);
   tv = lj_tab_getstr(regs, lj_str_newz(L, "mode"));
 
   if (tv && tvisstr(tv)) {
@@ -397,9 +405,7 @@ int lj_intrinsic_create(lua_State *L)
   }
 
   if (intrins->flags & INTRINSFLAG_DYNREG) {
-    intrins->opcode = opcode;
-
-    /* Have to infer this */
+    /* Have to infer this based on 2 input parameters being declared */
     if (intrins->insz == 2) {
       intrins->flags |= INTRINSFLAG_DYNREGINOUT;
     }
@@ -408,23 +414,37 @@ int lj_intrinsic_create(lua_State *L)
       /* Disable fusing vectors loads into opcodes in case there unaligned */
       intrins->flags |= INTRINSFLAG_NOFUSE;
     }
-  } else if(opcode) {
-    intrins->asmsz = (-(int8_t)opcode)-1;
-    intrins->mcode = ((char*)&opcode) + 4-intrins->asmsz;
-  }
-
+  } 
+  
   if ((t = getopttab(L, regs, "rout"))) {
     buildregset(L, t, intrins, REGSET_OUT);
   }
 
   if ((t = getopttab(L, regs, "mod"))) {
     buildregset(L, t, intrins, REGSET_MOD);
+  }
 
-    tv = lj_tab_getstr(t, lj_str_newlit(L, "memory"));
+  if (intrins->flags & INTRINSFLAG_IMMB) {
+    int32_t imm = lj_lib_checkint(L, argi+3);
+    lua_assert(intrins->insz < LJ_INTRINS_MAXREG-1);
 
-    if (tv && tvistruecond(tv)) {
-      intrins->flags |= INTRINSFLAG_MEMORYSIDE;
+    if (imm < 0) {
+      intrins->in[LJ_INTRINS_MAXREG-1] = (uint8_t)(int8_t)imm;
+    } else {
+      intrins->in[LJ_INTRINS_MAXREG-1] = (uint8_t)imm;
     }
+  } 
+  
+  /* If the opcode doesn't have dynamic registers just treat it as raw machine code */
+  if(opstr && !(intrins->flags & INTRINSFLAG_DYNREG)) {
+    opcode = intrins->opcode;
+    if (intrins->flags & INTRINSFLAG_LARGEOP) {
+      intrins->asmsz = 4;
+    } else {
+      intrins->asmsz = (-(int8_t)intrins->opcode)-1; 
+    }
+    intrins->mcode = ((char*)&opcode) + 4-intrins->asmsz;
+    intrins->asmofs = 0;
   }
   
   err = lj_asm_intrins(L, intrins);
@@ -544,15 +564,10 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode)
   }
 
   if (1) {
-    uint64_t op = parse_opstr(opcode, &intrins->flags);
-
-    if (op == 0) {
+    if (parse_opstr(L, opcode, intrins) == 0) {
       return 0;
     }
 
-    op = process_opcode(L, op);
-
-    intrins->opcode = op;
     intrins->flags |= intrins->insz == 1 ? INTRINSFLAG_DYNREG : INTRINSFLAG_DYNREGINOUT;
   }
   

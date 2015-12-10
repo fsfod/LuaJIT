@@ -61,6 +61,45 @@ context("intrinsic errors", function()
               "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"}
     })
   end)
+  
+
+end)
+
+context("__mcode parsing", function()
+  
+  it("incomplete mcode def", function()
+    assert_error(function() ffi.cdef([[int test1() __mcode]]) end)
+    assert_error(function() ffi.cdef([[int test2() __mcode(]]) end)
+    assert_error(function() ffi.cdef([[int test3() __mcode()]]) end)
+    assert_error(function() ffi.cdef([[int test4() __mcode("ff"]]) end)
+    assert_error(function() ffi.cdef([[int test5() __mcode("ff" 1)]]) end)
+    assert_error(function() ffi.cdef([[int test6() __mcode("ff", )]]) end)
+    assert_error(function() ffi.cdef([[int test7() __mcode("ff", 1]]) end)
+    
+    assert_error(function() ffi.cdef([[__mcode("90")]]) end)
+    assert_error(function() ffi.cdef([[int __mcode("90")]]) end)
+    assert_error(function() ffi.cdef([[struct c{float a __mcode("90");};]]) end)
+    assert_error(function() ffi.cdef([[struct b{float a; __mcode("90");};]]) end)
+  end)
+  
+
+  it("bad mcoddef", function()
+    assert_error(function() ffi.cdef([[void test1(float a) __mcode(0);]]) end)
+    assert_error(function() ffi.cdef([[void test2(float a) __mcode("");]]) end)
+    assert_error(function() ffi.cdef([[void test3(float a) __mcode("0");]]) end)
+    assert_error(function() ffi.cdef([[void test4(float a) __mcode("rff");]]) end)
+  end)
+  
+  it("bad ffi types mcod", function()
+    assert_error(function() ffi.cdef([[void testffi1(float a2, ...) __mcode("90")]]) end)
+    assert_error(function() ffi.cdef([[void testffi2(complex a2, ...) __mcode("90")]]) end)
+    
+    --NYI non 16/32 byte vectors
+    assert_error(function() ffi.cdef([[
+      typedef float float2 __attribute__((__vector_size__(8)));
+      void testffi2(float2 a2) __mcode("90")
+    ]]) end)
+  end)
 end)
 
 context("nopinout", function()
@@ -85,7 +124,7 @@ context("nopinout", function()
   end)
   
   it("gpr", function()
-    local gpr1 = ffi.intrinsic(0x90, {rin = {"eax"}, rout = {"eax"}})
+    local gpr1 = ffi.intrinsic("90", {rin = {"eax"}, rout = {"eax"}})
   
     local function testgpr1(num) 
       return (gpr1(num)) 
@@ -109,7 +148,7 @@ context("nopinout", function()
 if ffi.arch == "x64" then
   it("gpr64", function()
 
-    local gpr1 = ffi.intrinsic(0x90, {rin = {"rcx"}, rout = {"rcx"}})
+    local gpr1 = ffi.intrinsic("90", {rin = {"rcx"}, rout = {"rcx"}})
   
     local function testgpr1(num) 
       return (gpr1(num)) 
@@ -243,7 +282,7 @@ end)
 
 it("popcnt", function()
 
-  local popcnt = ffi.intrinsic(0xf30fb8, {rin = {"eax"}, rout = {"eax"}, mode = "rM"})
+  local popcnt = ffi.intrinsic("f30fb8rM", {rin = {"eax"}, rout = {"eax"}})
 
   assert_equal(popcnt(7),    3)
   assert_equal(popcnt(1024), 1)
@@ -259,7 +298,7 @@ it("popcnt", function()
   assert_noexit(1, testpopcnt, 1)
   
   --check unfused
-  popcnt = ffi.intrinsic(0xf30fb8, {rin = {"eax"}, rout = {"eax"}, mode = "r"})
+  popcnt = ffi.intrinsic("f30fb8r", {rin = {"eax"}, rout = {"eax"}})
   
   assert_equal(popcnt(7),    3)
   assert_equal(popcnt(1024), 1)
@@ -301,7 +340,7 @@ end)
 
 it("rdtsc", function()
   
-  local rdtsc = ffi.intrinsic(0x0F31, {rout = {"eax", "edx"}}) 
+  local rdtsc = ffi.intrinsic("0F31", {rout = {"eax", "edx"}}) 
   
   local function getticks()
     union64.low, union64.high = rdtsc()
@@ -342,7 +381,7 @@ it("rdtscp", function()
 end)
 
 it("addsd", function()
-  local addsd = ffi.intrinsic(0xF20F58, {rin = {"xmm0", "xmm1"}, rout = {"xmm0"}, mode = "rM"})
+  local addsd = ffi.intrinsic("F20F58rM", {rin = {"xmm0", "xmm1"}, rout = {"xmm0"}})
    
   function test_addsd(n1, n2)
     return (addsd(n1, n2))
@@ -357,7 +396,7 @@ it("addsd", function()
   assert_equal(5, test_addsd(3, 2))
   
   --check unfused
-  addsd = ffi.intrinsic(0xF20F58, {rin = {"xmm0", "xmm1"}, rout = {"xmm0"}, mode = "r"})
+  addsd = ffi.intrinsic("F20F58r", {rin = {"xmm0", "xmm1"}, rout = {"xmm0"}})
   
   assert_equal(3, addsd(1, 2))
   assert_equal(0, addsd(0, 0))
@@ -365,7 +404,7 @@ end)
 
 context("mixed register type opcodes", function()
   it("cvttsd2s", function()
-    local cvttsd2s = ffi.intrinsic(0xF20F2C, {rin = {"xmm0"}, rout = {"ecx"}, mode = "rM"})
+    local cvttsd2s = ffi.intrinsic("F20F2CrM", {rin = {"xmm0"}, rout = {"ecx"}})
     
     function test_cvttsd2s(n)
       return (cvttsd2s(n))
@@ -381,7 +420,7 @@ context("mixed register type opcodes", function()
     assert_equal(5, test_cvttsd2s(5))
     
     --check unfused
-    cvttsd2s = ffi.intrinsic(0xF20F2C, {rin = {"xmm0"}, rout = {"ecx"}, mode = "r"})
+    cvttsd2s = ffi.intrinsic("F20F2Cr", {rin = {"xmm0"}, rout = {"ecx"}})
     
     assert_equal(0, cvttsd2s(-0))
     assert_equal(1, cvttsd2s(1))
@@ -389,7 +428,7 @@ context("mixed register type opcodes", function()
   end)
   
   it("cvtsi2sd", function() 
-    local cvtsi2sd = ffi.intrinsic(0xF20F2A , {rin = {"ecx"}, rout = {"xmm0"}, mode = "rM"})
+    local cvtsi2sd = ffi.intrinsic("F20F2ArM", {rin = {"ecx"}, rout = {"xmm0"}})
     
     function test_cvtsi2sd(n1, n2)
       return (cvtsi2sd(n1)+n2)
@@ -406,7 +445,7 @@ context("mixed register type opcodes", function()
     assert_equal(11, test_cvtsi2sd(5, 6))
     
     --check unfused
-    cvtsi2sd = ffi.intrinsic(0xF20F2A , {rin = {"ecx"}, rout = {"xmm0"}, mode = "r"})
+    cvtsi2sd = ffi.intrinsic("F20F2Ar" , {rin = {"ecx"}, rout = {"xmm0"}})
     assert_equal(0.5, test_cvtsi2sd(0, 0.5))
     assert_equal(1.25, test_cvtsi2sd(1.0, 0.25))
     assert_equal(-1.5, test_cvtsi2sd(-2, 0.5))
@@ -441,7 +480,7 @@ it("idiv", function()
 
   assert_jitchecker(checker, test_idiv, 3)
   
-  idiv = ffi.intrinsic(0x99F7F9, {rin = {"eax", "ecx"}, rout = {"eax", "edx"}})
+  idiv = ffi.intrinsic("99F7F9", {rin = {"eax", "ecx"}, rout = {"eax", "edx"}})
   
   assert_jitchecker(checker, test_idiv, 3)
 end)
