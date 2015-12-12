@@ -719,12 +719,8 @@ int lj_intrinsic_call(lua_State *L, GCcdata *cd)
                          o, CCF_ARG(i+1));
         }
       } else {
-        if (tviscdata(o)) {
-          lj_cconv_ct_tv(cts, ctype_get(cts, CTID_DOUBLE), (uint8_t *)&context.fpr[fpr++],
-                         o, CCF_CAST|CCF_ARG(i+1));
-        } else {
-          context.fpr[fpr++] = lj_lib_checknum(L, i+2);
-        }
+        lj_cconv_ct_tv(cts, ctype_get(cts, rk_ctypefpr(kind)), (uint8_t *)&context.fpr[fpr++],
+                       o, CCF_CAST|CCF_ARG(i+1));
       }
     }
   }

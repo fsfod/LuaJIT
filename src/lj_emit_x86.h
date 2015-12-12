@@ -789,8 +789,7 @@ static void emit_loadfpr(ASMState *as, uint32_t reg, Reg base, int ofs)
     op = XO_MOVSD;
     break;
   case REGKIND_FPR32:
-    op = XO_MOVSD;
-    emit_mrm(as, XO_CVTSD2SS, r, r);
+    op = XO_MOVSS;
     break;
   case REGKIND_V128U:
   case REGKIND_V256U:
