@@ -1226,9 +1226,9 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, GCcdata *cd)
   IRType it;
   int argofs = 1;
 
+  /* guard on the intrinsic cdata pointer */
   tintrins = lj_ir_kgc(J, gcval(&rd->argv[0]), IRT_CDATA);
   emitir(IRTG(IR_EQ, IRT_CDATA), J->base[0], tintrins);
-
 
   /* Convert parameters and load them into the input registers */
   for (i = 0; i < intrins->insz; i++) {
@@ -1261,8 +1261,8 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, GCcdata *cd)
   }
 
   it = IRT_NIL;
-  /* Skip emitting IR_ASMREG for opcodes with dynamic registers */
-  if (intrins->flags & INTRINSFLAG_DYNREG && intrins->outsz == 1) {
+  /* Skip emitting IR_ASMREG for the first dynamic output register */
+  if (intrin_dynrout(intrins)) {
     it = rk_irt(ASMRID(intrins->out[0]), ASMREGKIND(intrins->out[0]));
   }
 
@@ -1277,7 +1277,7 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, GCcdata *cd)
     int kind = ASMREGKIND(intrins->out[i]);
     
     /* no IR_ASMREG for opcodes with dynamic registers */
-    if (i == 0 && (intrins->flags&INTRINSFLAG_DYNREG)) {
+    if (i == 0 && intrin_dynrout(intrins)) {
       continue;
     }
 
@@ -1307,7 +1307,6 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, GCcdata *cd)
         /* NYI: support for vectors */
         lj_trace_err(J, LJ_TRERR_NYIVEC);
       }
-
     }
   }
 

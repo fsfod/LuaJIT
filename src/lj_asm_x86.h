@@ -532,11 +532,7 @@ static void asm_gencall(ASMState *as, const CCallInfo *ci, IRRef *args)
 void asm_intrinresult(ASMState *as, IRIns *ir, AsmIntrins* intrins)
 {
   RegSet evict = intrins->mod;
-  uint32_t i = (intrins->flags&INTRINSFLAG_DYNREG) ? 1 : 0;
-
-  /* Second register will be dynamic too */
-  if (intrins->flags & INTRINSFLAG_DYNREGINOUT)
-    i++;
+  uint32_t i = intrin_regmode(intrins) ? intrins->dyninsz : 0;
 
   for (; i < intrins->insz; i++) {
     /* If the input arg has the same register as the input register we could 
@@ -558,6 +554,7 @@ static void asm_asmins(ASMState *as, IRIns *ir)
   Reg right = RID_NONE, dest = RID_NONE;
   uint32_t n = 0;
   AsmIntrins *intrins = (AsmIntrins*)cdataptr(ir_kcdata(IR(ir->op2)));
+  uint32_t dynreg = intrin_regmode(intrins);
 
   asm_intrinresult(as, ir, intrins);
 
@@ -569,7 +566,7 @@ static void asm_asmins(ASMState *as, IRIns *ir)
   }
   lua_assert(n == intrins->insz);
 
-  if (intrins->flags & INTRINSFLAG_HASMODRM) {
+  if (dynreg) {
     RegSet allow;
     IRRef lref = 0, rref = args[intrins->insz-1];
     right = IR(rref)->r;
@@ -577,7 +574,7 @@ static void asm_asmins(ASMState *as, IRIns *ir)
     as->mrm.idx = as->mrm.base = RID_NONE;
     as->mrm.scale = as->mrm.ofs = 0;
 
-    if (intrins->outsz > 0) {
+    if (intrins->outsz > 0 && intrin_dynrout(intrins)) {
       allow = ASMRID(intrins->out[0]) < RID_MAX_GPR ? RSET_GPR : RSET_FPR;
       if (ra_hasreg(right)) {
         rset_clear(allow, right);
@@ -586,7 +583,7 @@ static void asm_asmins(ASMState *as, IRIns *ir)
       dest = ra_dest(as, ir, allow);
     }
 
-    if (intrins->flags & INTRINSFLAG_DYNREGINOUT) {
+    if (dynreg == DYNREG_INOUT) {
       lref = args[intrins->insz-2];
 
       if (lref == rref) {
@@ -604,7 +601,7 @@ static void asm_asmins(ASMState *as, IRIns *ir)
       }
     } else {
       /* Part of the instruction encoding is in ModRM */
-      if (intrins->flags & INTRINSFLAG_RMOP) {
+      if (dynreg == DYNREG_ONEOPENC) {
         as->mrm.idx = as->mrm.base = RID_NONE;
         as->mrm.scale = as->mrm.ofs = 0;
 
@@ -626,7 +623,7 @@ static void asm_asmins(ASMState *as, IRIns *ir)
 
     emit_intrins(as, intrins, right, dest);
     
-    if (intrins->flags & INTRINSFLAG_DYNREGINOUT) {
+    if (dynreg == DYNREG_INOUT) {
       lua_assert(lref);
       ra_left(as, dest, lref);
     }
@@ -635,8 +632,8 @@ static void asm_asmins(ASMState *as, IRIns *ir)
   }
   checkmclim(as);
 
-  if (((intrins->flags & INTRINSFLAG_HASMODRM) && intrins->insz == 1) ||
-      ((intrins->flags & INTRINSFLAG_DYNREGINOUT) && intrins->insz <= 2)) {
+  if ((dynreg && intrins->insz == 1) ||
+      ((dynreg >= DYNREG_INOUT) && intrins->insz <= 2)) {
     return;
   }
 
@@ -646,10 +643,10 @@ static void asm_asmins(ASMState *as, IRIns *ir)
     IRIns *ir = IR(ref);
     Reg r = ASMRID(intrins->in[n]);
 
-    if (n == 0 && (intrins->flags & INTRINSFLAG_DYNREG))
+    if (n == 0 && dynreg)
       continue;
     
-    if (n == 1 && (intrins->flags & INTRINSFLAG_DYNREGINOUT))
+    if (n == 1 && dynreg >= DYNREG_INOUT)
       continue;
 
     if (r < RID_MAX_GPR && ref < ASMREF_TMP1) {

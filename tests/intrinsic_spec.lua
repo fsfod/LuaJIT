@@ -381,7 +381,7 @@ it("rdtscp", function()
 end)
 
 it("addsd", function()
-  local addsd = ffi.intrinsic("F20F58rM", {rin = {"xmm0", "xmm1"}, rout = {"xmm0"}})
+  local addsd = ffi.intrinsic("F20F58rM", {rin = {"xmm", "xmm"}, rout = {"xmm"}})
    
   function test_addsd(n1, n2)
     return (addsd(n1, n2))
@@ -396,7 +396,7 @@ it("addsd", function()
   assert_equal(5, test_addsd(3, 2))
   
   --check unfused
-  addsd = ffi.intrinsic("F20F58r", {rin = {"xmm0", "xmm1"}, rout = {"xmm0"}})
+  addsd = ffi.intrinsic("F20F58r", {rin = {"xmm", "xmm"}, rout = {"xmm"}})
   
   assert_equal(3, addsd(1, 2))
   assert_equal(0, addsd(0, 0))

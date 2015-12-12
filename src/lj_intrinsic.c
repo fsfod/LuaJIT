@@ -25,8 +25,8 @@
 
 typedef enum RegFlags {
   REGFLAG_YMM = REGKIND_V256U << 6,
-  REGFLAG_XMMV = REGKIND_V128U << 6,
   REGFLAG_64BIT = REGKIND_GPRI64 << 6, /* 64 bit override */
+  REGFLAG_DYN = 1 << 17,
 }RegFlags;
 
 typedef struct RegEntry {
@@ -37,11 +37,6 @@ typedef struct RegEntry {
 #define RIDENUM(name)	RID_##name,
 
 #define MKREG(name) {#name, RID_##name},
-
-#define MKREGYMM(mm, name) {"y"#name, REGFLAG_YMM|RID_X##mm},
-#define MKREGXMMV(mm, name) {"x"#name"v", REGFLAG_XMMV|RID_X##mm},
-#define MKREGXMMf(mm, name) {"x"#name"f", REGFLAG_XMMF|RID_X##mm},
-#define MKREGXMM(mm, name) {"x"#name, RID_X##mm},
 
 #define MKREGGPR(reg, name) {#name, RID_##reg},
 
@@ -68,9 +63,6 @@ typedef struct RegEntry {
 
 RegEntry reglut[] = {
   GPRDEF2(MKREGGPR)
-  FPRDEF2(MKREGXMM)
-  FPRDEF2(MKREGYMM)
-  FPRDEF2(MKREGXMMV)
 #if LJ_64
   GPRDEF_R64(MKREG_GPR64)
 #endif
@@ -106,15 +98,67 @@ static const BuiltinIntrins builtin[] = {
   {"rdpmc",  XO_0f(33),      REG1(ECX),      REG2(EAX, EDX),           0, 0},
 
   /* Note part of the opcode is encoded in MODRM(second register) */
-  {"prefetchnta", XO_0f(18), REG2(EAX, EAX), NOREG, 0, INTRINSFLAG_RMOP },
-  {"prefetch0",   XO_0f(18), REG2(EAX, ECX), NOREG, 0, INTRINSFLAG_RMOP },
-  {"prefetch1",   XO_0f(18), REG2(EAX, EDX), NOREG, 0, INTRINSFLAG_RMOP },
-  {"prefetch2",   XO_0f(18), REG2(EAX, EBX), NOREG, 0, INTRINSFLAG_RMOP },
+  {"prefetchnta", XO_0f(18), REG2(EAX, EAX), NOREG, 0, DYNREG_ONEOPENC },
+  {"prefetch0",   XO_0f(18), REG2(EAX, ECX), NOREG, 0, DYNREG_ONEOPENC },
+  {"prefetch1",   XO_0f(18), REG2(EAX, EDX), NOREG, 0, DYNREG_ONEOPENC },
+  {"prefetch2",   XO_0f(18), REG2(EAX, EBX), NOREG, 0, DYNREG_ONEOPENC },
 
   {"mfence", XO_0F2(ae, f0), NOREG,          NOREG, 0, INTRINSFLAG_MEMORYSIDE },
   {"sfence", XO_0F2(ae, f8), NOREG,          NOREG, 0, INTRINSFLAG_MEMORYSIDE },
   {"lfence", XO_0F2(ae, e8), NOREG,          NOREG, 0, INTRINSFLAG_MEMORYSIDE },
 };
+
+static int parse_fprreg(const char *name, uint32_t len)
+{
+  uint32_t rid = 0, kind = REGKIND_FPR64;
+  uint32_t pos = 3;
+  int dynreg = 0;
+
+  if (len < 3 || name[0] != 'x' && name[0] != 'y')
+    return -1;
+
+  if (lj_char_isdigit(name[3])) {
+    rid = name[3] - '0';
+    pos = 4;
+
+    if (LJ_64 && lj_char_isdigit(name[4])) {
+      rid = rid*10;
+      rid += name[4] - '0';
+      pos++;
+    }
+
+    if (rid >= RID_NUM_FPR) {
+      return -1;
+    }
+    rid += RID_MIN_FPR;
+  } else {
+    /* Unnumbered reg is considered a placeholder for a dynamic reg */
+    dynreg = REGFLAG_DYN;
+    rid = RID_MIN_FPR;
+  }
+
+  if (name[0] == 'y') {
+    kind = REGKIND_V256U;
+  } else {
+    if (pos < len) {
+      if (name[pos] == 'f') {
+        kind = REGKIND_FPR32;
+        pos++;
+      } else if (name[pos] == 'v') {
+        kind = REGKIND_V128U;
+        pos++;
+      } else {
+        kind = REGKIND_FPR64;
+      }
+    }
+  }
+
+  if (pos < len) {
+    return -1;
+  }
+
+  return ASMMKREG(rid, kind) | dynreg;
+}
 
 enum IntrinsRegSet {
   REGSET_IN,
@@ -124,8 +168,7 @@ enum IntrinsRegSet {
 
 static uint32_t buildregset(lua_State *L, GCtab *regs, AsmIntrins *intrins, int regsetid)
 {
-  uint32_t i, count = 0;
-  uint32_t reg;
+  uint32_t i, count = 0, dyncount = 0; 
   GCtab *reglookup = tabref(curr_func(L)->c.env);
   RegSet rset = 0;
   const char *listname;
@@ -143,8 +186,10 @@ static uint32_t buildregset(lua_State *L, GCtab *regs, AsmIntrins *intrins, int 
 
   for (i = 1; i < regs->asize; i++) {
     cTValue *reginfo, *slot = arrayslot(regs, i);
+    const char* name;
     Reg r = 0;
     uint32_t kind;
+    int32_t reg = -1;
 
     if (tvisnil(slot)) {
       break;
@@ -155,31 +200,46 @@ static uint32_t buildregset(lua_State *L, GCtab *regs, AsmIntrins *intrins, int 
     }
 
     if (!tvisstr(slot)) {
-      lj_err_callerv(L, LJ_ERR_FFI_BADREGVAL, lj_obj_itypename[itypemap(slot)], listname);
+      lj_err_callerv(L, LJ_ERR_FFI_BADREG, "not a string",  lj_obj_itypename[itypemap(slot)], listname);
     }
 
-    reginfo = lj_tab_getstr(reglookup, strV(slot));
+    name = strVdata(slot);
+
+    if (name[0] == 'x' || name[0] == 'y') {
+      reg = parse_fprreg(name, strV(slot)->len);
+    } else {
+      reginfo = lj_tab_getstr(reglookup, strV(slot));
     
-    if (!reginfo || tvisnil(reginfo)) {
+      if (reginfo && !tvisnil(reginfo)) {
+        reg = (uint32_t)(uintptr_t)lightudV(reginfo);
+      }
+    }
+
+    if (reg < 0) {
       /* Unrecognized register name */
-      lj_err_callerv(L, LJ_ERR_FFI_BADREG, strVdata(slot), listname);
+      lj_err_callerv(L, LJ_ERR_FFI_BADREG, "invalid name", name, listname);
     }
 
-    reg = (uint32_t)(uintptr_t)lightudV(reginfo);
-    r = ASMRID(reg);
-    kind = ASMREGKIND(reg);
+    r = ASMRID(reg&0xff);
+    kind = ASMREGKIND(reg&0xff);
     
-    /* Check for duplicate registers in the list */
-    if (rset_test(rset, r)) {
-      lj_err_callerv(L, LJ_ERR_FFI_DUPREG, strVdata(slot), listname);
+    if (!(reg & REGFLAG_DYN)) {
+      /* Check for duplicate registers in the list */
+      if (rset_test(rset, r)) {
+        lj_err_callerv(L, LJ_ERR_FFI_BADREG, "duplicate", name, listname);
+      }
+      rset_set(rset, r);
+    } else{
+      if (++dyncount > LJ_INTRINS_MAXDYNREG) {
+        lj_err_callerv(L, LJ_ERR_FFI_BADREG, "too many dynamic", name, listname);
+      }
     }
-    rset_set(rset, r);
 
     if (r == RID_SP) {
-      lj_err_callerv(L, LJ_ERR_FFI_BLACKREG, strVdata(slot), listname);
+      lj_err_callerv(L, LJ_ERR_FFI_BADREG, "blacklisted", name, listname);
     }
 
-    if (regsetid != REGSET_MOD && rk_isvec(kind)) {
+    if (regsetid != REGSET_MOD && r >= RID_MIN_FPR && rk_isvec(kind)) {
       intrins->flags |= INTRINSFLAG_VECTOR;
     }
 
@@ -189,12 +249,15 @@ static uint32_t buildregset(lua_State *L, GCtab *regs, AsmIntrins *intrins, int 
     }
 
     if (regout) {
-      regout[count++] = reg;
+      regout[count++] = (uint8_t)reg;
     }
   }
 
   if (regsetid == REGSET_IN) {
     intrins->insz = (uint8_t)count;
+    if (dyncount != 0) {
+      intrins->dyninsz = dyncount;
+    }
   } else if (regsetid == REGSET_OUT) {
     intrins->outsz = (uint8_t)count;
   } else {
@@ -243,21 +306,24 @@ extern int lj_asm_intrins(lua_State *L, AsmIntrins *intrins);
 static int parse_opmode(const char *op, MSize len)
 {
   MSize i = 0;
-  int M = 0;
+  int m = 0;
+  int r = 0;
   int flags = 0;
 
   for (; i < len; i++) {
 
     switch (op[i]) {
       case 'm':
-      case 'M':
-        M = 1;
-        flags |= INTRINSFLAG_DYNREG;
+        m = 1;
         break;
+      case 'M':
+        m = 2;
+        break;
+      /* modrm register */
       case 'r':
+        r = 1;
       case 'R':
-        /* modrm register */
-        flags |= INTRINSFLAG_DYNREG;
+        r = 2;
         break;
       case 'U':
       case 'S':
@@ -275,20 +341,23 @@ static int parse_opmode(const char *op, MSize len)
 
       default:
         /* return index of invalid flag */
-        return -(int)i;;
+        return -(int)i;
     }
   }
 
-  /* if neither of the operands is listed as memory disable trying to fuse a load in */
-  if ((flags & INTRINSFLAG_DYNREG) && !M) {
-    flags |= INTRINSFLAG_NOFUSE;
+  if (r || m) {
+    flags |= DYNREG_ONE;
+      
+    /* if neither of the operands is listed as memory disable trying to fuse a load in */
+    if (r != 0 && m == 0) {
+      flags |= INTRINSFLAG_NOFUSE;
+    } 
   }
-  
+
   return flags;
 }
 
-
-static uint32_t process_opcode(lua_State *L, uint32_t opcode, uint16_t *flags)
+static void setopcode(lua_State *L, AsmIntrins *intrins, uint32_t opcode)
 {
   int len;
 
@@ -312,11 +381,11 @@ static uint32_t process_opcode(lua_State *L, uint32_t opcode, uint16_t *flags)
   if (len < 4) {
     opcode |= (uint8_t)(int8_t)-(len+1);
   } else {
-    *flags |= INTRINSFLAG_LARGEOP;
+    intrins->flags |= INTRINSFLAG_LARGEOP;
   }
 #endif 
 
-  return opcode;
+  intrins->opcode = opcode;
 }
 
 static int parse_opstr(lua_State *L, GCstr *opstr, AsmIntrins *intrins)
@@ -341,7 +410,7 @@ static int parse_opstr(lua_State *L, GCstr *opstr, AsmIntrins *intrins)
     opcode = (opcode << 4) + (d & 15);
   }
 
-  flags = parse_opmode(op, opstr->len - (op-strdata(opstr)));
+  flags = parse_opmode(op, opstr->len - (MSize)(op-strdata(opstr)));
 
   if (flags < 0) {
     return flags;
@@ -349,7 +418,7 @@ static int parse_opstr(lua_State *L, GCstr *opstr, AsmIntrins *intrins)
     intrins->flags |= flags;
   }
 
-  intrins->opcode = process_opcode(L, opcode, &intrins->flags);
+  setopcode(L, intrins, opcode);
 
   return 1;
 }
@@ -359,7 +428,7 @@ int lj_intrinsic_create(lua_State *L)
   CTState *cts = ctype_cts(L);
   GCtab *t, *regs;
   cTValue *tv;
-  int err, argi = 0;
+  int err, argi = 0, flags = 0;
   void *intrinsmc;
   GCstr *opstr = NULL;
   uint32_t opcode;
@@ -392,7 +461,7 @@ int lj_intrinsic_create(lua_State *L)
 
   if (tv && tvisstr(tv)) {
     GCstr *flagstr = strV(tv);
-    int flags = parse_opmode(strdata(flagstr), flagstr->len);
+    flags = parse_opmode(strdata(flagstr), flagstr->len);
 
     if (flags < 0)
       lj_err_callermsg(L, "bad opmode string");
@@ -403,18 +472,6 @@ int lj_intrinsic_create(lua_State *L)
   if ((t = getopttab(L, regs, "rin"))) {
     buildregset(L, t, intrins, REGSET_IN);
   }
-
-  if (intrins->flags & INTRINSFLAG_DYNREG) {
-    /* Have to infer this based on 2 input parameters being declared */
-    if (intrins->insz == 2) {
-      intrins->flags |= INTRINSFLAG_DYNREGINOUT;
-    }
-
-    if (intrins->flags & INTRINSFLAG_VECTOR) {
-      /* Disable fusing vectors loads into opcodes in case there unaligned */
-      intrins->flags |= INTRINSFLAG_NOFUSE;
-    }
-  } 
   
   if ((t = getopttab(L, regs, "rout"))) {
     buildregset(L, t, intrins, REGSET_OUT);
@@ -435,8 +492,21 @@ int lj_intrinsic_create(lua_State *L)
     }
   } 
   
+  if (intrin_regmode(intrins) != DYNREG_FIXED) {
+    /* Have to infer this based on 2 input parameters being declared */
+    if (intrins->insz == 2) {
+      intrins->flags &= ~INTRINSFLAG_REGMODEMASK;
+      intrins->flags |= DYNREG_INOUT;
+    }
+
+    if (intrins->flags & INTRINSFLAG_VECTOR) {
+      /* Disable fusing vectors loads into opcodes in case there unaligned */
+      intrins->flags |= INTRINSFLAG_NOFUSE;
+    }
+  }
+
   /* If the opcode doesn't have dynamic registers just treat it as raw machine code */
-  if(opstr && !(intrins->flags & INTRINSFLAG_DYNREG)) {
+  if(opstr && intrin_regmode(intrins) == DYNREG_FIXED) {
     opcode = intrins->opcode;
     if (intrins->flags & INTRINSFLAG_LARGEOP) {
       intrins->asmsz = 4;
@@ -467,60 +537,59 @@ int lj_intrinsic_create(lua_State *L)
   return 1;
 }
 
-static int regfromffi(CTState *cts, CTypeID id) {
-
+static int buildreg_ffi(CTState *cts, CTypeID id) {
   CType *base = ctype_raw(cts, id);
   CTSize sz = base->size;
-
+  int rid = -1, kind = -1;
   uint32_t reg = 0;
 
   if (ctype_isnum(base->info)) {
     if (ctype_isfp(base->info)) {
+      rid = RID_MIN_FPR;
       if (sz > 8)
         return -1;
-
-      return ASMMKREG(RID_MIN_FPR, sz == 4 ? REGKIND_FPR32 : REGKIND_FPR64);
+      kind = sz == 4 ? REGKIND_FPR32 : REGKIND_FPR64;
     } else {
-      if (sz == 4) {
-        return ASMMKREG(RID_MIN_GPR, base->info & CTF_UNSIGNED ? REGKIND_GPRU32 : REGKIND_GPRI32);
+      rid = RID_MIN_GPR;
+      if (sz == 8) {
+        kind = base->info & CTF_UNSIGNED ? REGKIND_GPRU64 : REGKIND_GPRI64;
       } else {
-        return ASMMKREG(RID_MIN_GPR, REGKIND_GPRU64);
+        kind = base->info & CTF_UNSIGNED ? REGKIND_GPRU32 : REGKIND_GPRI32;
       }
     }
   } else if (ctype_isptr(base->info)) {
     base = ctype_raw(cts, ctype_cid(base->info));
-
     if (ctype_isvector(base->info)) {
       goto vec;
+    } else {
+      rid = RID_MIN_GPR;
+      kind = LJ_32 ? REGKIND_GPRI32 : REGKIND_GPRI64;
     }
-
-    return ASMMKREG(RID_MIN_GPR, LJ_32 ? REGKIND_GPRI32 : REGKIND_GPRI64);
   } else if (ctype_isvector(base->info)) {
     CType *vtype;
     int kind;
   vec:
-    vtype = ctype_raw(cts, ctype_cid(base->info));
-
-    if (base->size != 16 && base->size != 32)
+    vtype = ctype_raw(cts, ctype_cid(base->info));    
+    if (ctype_typeid(cts, vtype) < CTID_BOOL || ctype_typeid(cts, vtype) > CTID_DOUBLE ||
+       (base->size != 16 && base->size != 32)) {
       return -1;
+    }
 
     kind = base->size == 16 ? REGKIND_V128U : REGKIND_V256U;
-
     if (ctype_align(base->info) == sz)
       kind += 2;
-
-    return ASMMKREG(RID_MIN_FPR, kind);
   } else {
-
+    lua_assert(0);
+    return -1;
   }
 
-  return -1;
+
+  return ASMMKREG(rid, kind);
 }
 
 int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode)
 {
   CTState *cts = ctype_cts(L);
-  cTValue *tv;
   int err;
   CType *func = ctype_get(cts, fid);
   CTypeID sib = func->sib, id;
@@ -530,12 +599,13 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode)
 
   while (sib != 0) {
     CType *arg = ctype_get(cts, sib);
-    int reg = regfromffi(cts, ctype_cid(arg->info));
+    int reg = buildreg_ffi(cts, ctype_cid(arg->info));
 
     if (reg == -1) {
       return 0;
     }
-
+    /*TODO: deferred creation ? using these reg values */
+    arg->size = reg;
     intrins->in[intrins->insz++] = (uint8_t)reg;
     sib = arg->sib;
 
@@ -554,7 +624,7 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode)
 
   /* TODO: multiple return values */
   if (ctype_cid(func->info)) {
-    int reg = regfromffi(cts, ctype_cid(func->info));
+    int reg = buildreg_ffi(cts, ctype_cid(func->info));
 
     if (reg == -1) {
       return 0;
@@ -568,10 +638,15 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode)
       return 0;
     }
 
-    intrins->flags |= intrins->insz == 1 ? INTRINSFLAG_DYNREG : INTRINSFLAG_DYNREGINOUT;
+    intrins->flags |= intrins->insz == 1 ? DYNREG_ONE : DYNREG_INOUT;
   }
   
   err = lj_asm_intrins(L, intrins);
+
+  if (true) {
+
+  }
+
   id = register_intrinsic(L, intrins);
   L->top--;
 
@@ -804,7 +879,7 @@ static CTypeID lj_intrinsic_builtin(lua_State *L, const BuiltinIntrins* builtin)
   AsmIntrins *intrins = &_intrins;
   memset(&_intrins, 0, sizeof(AsmIntrins));
 
-  if (builtin->flags & (INTRINSFLAG_RMOP|INTRINSFLAG_DYNREG)) {
+  if (intrin_regmode(builtin) != DYNREG_FIXED) {
     intrins->opcode = builtin->op;
   } else {
     intrins->asmsz = (-(int8_t)builtin->op)-1;
@@ -817,7 +892,7 @@ static CTypeID lj_intrinsic_builtin(lua_State *L, const BuiltinIntrins* builtin)
   intrins->flags |= builtin->flags;
 
   /* The Second input register id is part of the opcode */
-  if (builtin->flags & INTRINSFLAG_RMOP)
+  if (intrin_regmode(intrins) == DYNREG_ONEOPENC)
     intrins->insz = 1;
 
   if (lj_asm_intrins(L, intrins) != 0) {

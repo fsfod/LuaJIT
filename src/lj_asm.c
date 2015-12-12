@@ -1253,13 +1253,13 @@ static RegSet asm_intrinsichints(ASMState *as, IRIns *ir)
   RegSet mod = intrins->mod;
   IRIns *ira = IR(ir->op1), *irval;
   int i;
+  int dynreg = intrin_regmode(intrins);
 
   /* Propagate the fixed registers of the arguments to refs passed in for them */
   for (i = intrins->insz-1; i >= 0; i--) {
     Reg r = ASMRID(intrins->in[i]);
 
-    if ((i == 0 && (intrins->flags & INTRINSFLAG_HASMODRM)) ||
-        (i == 1 && (intrins->flags & INTRINSFLAG_DYNREGINOUT))) {
+    if (dynreg && i < intrins->dyninsz) {
       /* Dynamic register so no hint needed */
       ira = IR(ira->op1);
       continue;
@@ -1279,17 +1279,13 @@ static RegSet asm_intrinsichints(ASMState *as, IRIns *ir)
     ira = IR(ira->op1);
   }
 
-  i = 0;
-#if LJ_TARGET_X86ORX64
-  if (intrins->flags & INTRINSFLAG_DYNREGINOUT)
-    i++;
-#endif
+  i = intrin_dynrout(intrins) ? 1 : 0;
 
   for (; i < intrins->outsz; i++) {
     mod |= 1 << ASMRID(intrins->out[i]);
   }
 
-  if (intrins->flags & INTRINSFLAG_DYNREG) {
+  if (intrin_dynrout(intrins)) {
     ir->prev = REGSP_INIT;
   }
 
@@ -2402,6 +2398,7 @@ static void wrap_intrins(jit_State *J, AsmIntrins *intrins)
   uint32_t i = 0, fpr;
   int spadj = LJ_64 ? 32 : 0, offset = 0, contexspill = 0, contexofs = -1;
   int nofuse = intrins->flags & INTRINSFLAG_NOFUSE;
+  int dynreg = intrin_regmode(intrins);
   /*TODO: dynamic output context register selection */
   Reg rout = RID_NONE, rin = RID_NONE, outcontext = RID_OUTCONTEXT;
 
@@ -2411,7 +2408,7 @@ static void wrap_intrins(jit_State *J, AsmIntrins *intrins)
   offset = 0;
   
   /* Pick some ABI specific scratch registers for the opcode's input/output registers */
-  if (intrins->flags & INTRINSFLAG_DYNREG) {
+  if (dynreg) {
     RegSet scatch = RSET_SCRATCH;
 
     if (ASMRID(intrins->in[0]) < RID_MAX_GPR) {
@@ -2424,7 +2421,7 @@ static void wrap_intrins(jit_State *J, AsmIntrins *intrins)
     }
     rset_set(inset, rin);
 
-    if (intrins->outsz > 0) {
+    if (intrin_dynrout(intrins)) {
       if (ASMRID(intrins->out[0]) < RID_MAX_GPR) {
         rout = RID_RET;
       } else {
@@ -2439,7 +2436,7 @@ static void wrap_intrins(jit_State *J, AsmIntrins *intrins)
    */
   for (i = rin != RID_NONE ? 1 : 0; i < intrins->insz; i++) {
     Reg r = ASMRID(intrins->in[i]);
-    if (r == RID_CONTEXT && !(intrins->flags&INTRINSFLAG_DYNREG)) {
+    if (r == RID_CONTEXT && !(dynreg)) {
       contexofs = offset;
     }
 
@@ -2504,7 +2501,7 @@ restart:
     Reg r = ASMRID(intrins->out[i]);
     uint32_t reg = intrins->out[i];
 
-    if (i == 0 && (intrins->flags & INTRINSFLAG_DYNREG)) {
+    if (i == 0 && intrin_dynrout(intrins)) {
       reg = ASMMKREG(rout, ASMREGKIND(reg));
       r = rout;
     }
@@ -2537,22 +2534,26 @@ restart:
   }
 
 #if LJ_TARGET_X86ORX64
-/* Setup modrm to tobe a load from the input context pointer we assume offset is
- * 0 because the first input register should always be the dynamic one for opcodes 
+/* Setup modrm to tobe a load from the input context pointer we assume offset
+ * will be to the first value in either the gpr or fpr part of the context
+ * because the first input register should always be the dynamic one for opcodes 
  */
   as->mrm.base = as->mrm.idx = RID_NONE;
-  as->mrm.ofs = 0;
   as->mrm.scale = XM_SCALE1;
 
-  if (intrins->flags & INTRINSFLAG_DYNREG) {
+  if (dynreg) {
     if (nofuse) {
       as->mrm.base = RID_NONE;
+      as->mrm.ofs = 0;
       lua_assert(rin != RID_NONE);
     } else {
       as->mrm.base = RID_CONTEXT;
 
+      /* set the fused offset into the input context */
       if (ASMRID(intrins->in[0]) >= RID_MIN_FPR && !rk_isvec(ASMREGKIND(intrins->in[0]))) {
         as->mrm.ofs = offsetof(RegContext, fpr);
+      } else {
+        as->mrm.ofs = 0;
       }
 
       rin = RID_MRM;
@@ -2587,7 +2588,7 @@ restart:
     uint32_t reg = intrins->in[i];
     uint32_t kind = ASMREGKIND(reg);
 
-    if (i == 0 && (intrins->flags & INTRINSFLAG_DYNREG)) {
+    if (i == 0 && dynreg) {
 
       if (nofuse) {
         reg = ASMMKREG(rin, ASMREGKIND(reg));
@@ -2607,10 +2608,15 @@ restart:
       }
     }
 
-    if (i == 1 && (intrins->flags & INTRINSFLAG_DYNREGINOUT)) {
-      /* Destructive opcode second input register must match the output register */
-      reg = ASMMKREG(rout, ASMREGKIND(reg));
-      r = rout;
+    if (i == 1 && dynreg >= DYNREG_INOUT) {
+      if (dynreg == DYNREG_INOUT) {
+        /* Destructive opcode second input register must match the output register */
+        r = rout;
+      } else {
+        /* TODO: VEX non destructive and 2 input */
+        lua_assert(0);
+      }
+      reg = ASMMKREG(r, ASMREGKIND(reg));
     }
 
     if (r < RID_MAX_GPR) {

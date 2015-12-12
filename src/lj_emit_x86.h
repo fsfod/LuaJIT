@@ -590,8 +590,9 @@ static void emit_addptr(ASMState *as, Reg r, int32_t ofs)
 
 static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins, Reg r1, Reg r2)
 {
-  if (intrins->flags & INTRINSFLAG_HASMODRM) {
-    if (intrins->flags & INTRINSFLAG_RMOP) {
+  uint32_t regmode = intrin_regmode(intrins);
+  if (regmode) {
+    if (regmode == DYNREG_ONEOPENC) {
       r2 = ASMRID(intrins->in[1]);
     }
     

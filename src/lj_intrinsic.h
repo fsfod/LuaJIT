@@ -16,6 +16,9 @@
 #define LJ_INTRINS_MAXREG 8
 #endif
 
+/* The max number of dynamic registers in each reglist(in/out)*/
+#define LJ_INTRINS_MAXDYNREG 2
+
 typedef struct LJ_ALIGN(16) RegContext {
   intptr_t gpr[LJ_INTRINS_MAXREG];
   double fpr[LJ_INTRINS_MAXREG];
@@ -23,34 +26,42 @@ typedef struct LJ_ALIGN(16) RegContext {
 
 typedef int (LJ_FASTCALL *IntrinsicWrapper)(RegContext *context, void* outcontext);
 
+typedef enum REGMODE {
+  DYNREG_FIXED = 0,
+  /* one input register and optionally one output */
+  DYNREG_ONE,
+  /* one input register and the second is part of part of the opcode */
+  DYNREG_ONEOPENC,
+  /* Two input register and one output same register that's same RID the second input */ 
+  DYNREG_INOUT,
+  /* Two input registers and no dynamic output register */
+  DYNREG_TWOIN,
+  /* 2 in, 1 out */
+  DYNREG_VEX3,
+}REGMODE;
+
 typedef enum INTRINSFLAGs {
-  INTRINSFLAG_BOXEDOUTS    = 1, /* one or more of the output registers need boxing to cdata */
-  INTRINSFLAG_MEMORYSIDE   = 2, /* has memory side effects so needs an IR memory barrier */
-  INTRINSFLAG_SAVETOSTRUCT = 4, /* Output values are saved to a user supplied struct */
-  INTRINSFLAG_VECTOR       = 8, /* Has input or output registers that are vectors */
+  INTRINSFLAG_REGMODEMASK = 7,
+
+  INTRINSFLAG_MEMORYSIDE   = 0x08, /* has memory side effects so needs an IR memory barrier */
+  INTRINSFLAG_SAVETOSTRUCT = 0x10, /* Output values are saved to a user supplied struct */
+  INTRINSFLAG_BOXEDOUTS    = 0x20, /* one or more of the output registers need boxing to cdata */
+  INTRINSFLAG_VECTOR       = 0x40, /* Has input or output registers that are vectors */
+  INTRINSFLAG_AMEM         = 0x80, /* use aligned loads for input register values */
 
   /* Intrinsic should be emitted as a function that is called with all the 
    * input registers set beforehand both in the jit and the interpreter */
-  INTRINSFLAG_CALLED = 0x10, 
+  INTRINSFLAG_CALLED = 0x100, 
 
-  /* Upcode is larger than the emit system normally handles x86/x64(4 bytes) */
-  INTRINSFLAG_LARGEOP = 0x20,
+  /* opcode is larger than the emit system normally handles x86/x64(4 bytes) */
+  INTRINSFLAG_LARGEOP = 0x80,
 
-  /* Dynamic register assignment for first input/output register */
-  INTRINSFLAG_DYNREG   = 0x100, 
-  /* The RM part of ModRM is part of the opcode */
-  INTRINSFLAG_RMOP     = 0x200, 
-  INTRINSFLAG_HASMODRM = INTRINSFLAG_DYNREG|INTRINSFLAG_RMOP,
-
-  /* Output register is also the second input register */
-  INTRINSFLAG_DYNREGINOUT = 0x400,
-  /* Don't fuse load into op only valid with DYNREG */
-  INTRINSFLAG_NOFUSE = 0x800,
-
-  /* Force REX.w 64 bit size override tobe emitted for the opcode intrinsic */
-  INTRINSFLAG_REXW  = 0x1000,
+  /* Force REX.w 64 bit size override bit tobe set for x64 */
+  INTRINSFLAG_REXW  = 0x800,
+  /* Don't fuse load into op only valid */
+  INTRINSFLAG_NOFUSE = 0x1000,
   /* Opcode is commutative allowing the input registers to be swapped to allow better fusing */
-  INTRINSFLAG_ISCOMM = 0x2000, 
+  INTRINSFLAG_ISCOMM = 0x2000,
   /* Opcode has an immediate byte that needs tobe set at construction time */
   INTRINSFLAG_IMMB = 0x4000,
 
@@ -61,7 +72,13 @@ typedef struct AsmIntrins{
     IntrinsicWrapper wrapped;
     void* mcode; /* Raw unwrapped machine code temporally saved here */
   };
-  uint8_t in[LJ_INTRINS_MAXREG];
+  union {
+    uint8_t in[LJ_INTRINS_MAXREG];
+    struct {
+      uint32_t opregs;
+      uint8_t dyninsz; /* dynamic input register count */
+    };
+  };
   uint8_t out[LJ_INTRINS_MAXREG];
   uint8_t insz;
   uint8_t outsz;
@@ -78,6 +95,11 @@ typedef struct AsmIntrins{
   
   uint16_t flags;
 }AsmIntrins;
+
+#define intrin_regmode(intrins) ((intrins)->flags & INTRINSFLAG_REGMODEMASK)
+/* odd numbered have an dynamic output */
+#define intrin_dynrout(intrins) (intrin_regmode(intrins) & 1)
+#define intrin_immb(intrins) (intrins)->in[] 
 
 #define RKDEF_FPR(_) \
   _(FPR64, IRT_NUM,   CTID_DOUBLE) \
