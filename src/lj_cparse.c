@@ -853,7 +853,7 @@ static CTypeID cp_decl_intern(CPState *cp, CPDecl *decl)
       id = fid;
 
       if (ctype_isintrinsic(info)) {
-        CTypeID1 cid = lj_intrinsic_fromcdef(cp->L, fid, decl->redir);
+        CTypeID1 cid = lj_intrinsic_fromcdef(cp->L, fid, decl->redir, decl->bits);
         if (cid == 0)
           cp_err(cp, LJ_ERR_FFI_INVTYPE);
         decl->redir = NULL;
@@ -1175,7 +1175,6 @@ static void cp_decl_attributes(CPState *cp, CPDecl *decl)
       CTF_INSERT(decl->attr, MSIZEP, cp->ct->size);
 #endif
       break;
-
     case CTOK_MCODE:
       cp_decl_mcode(cp, decl);
       break;
@@ -1192,9 +1191,7 @@ static void cp_decl_attributes(CPState *cp, CPDecl *decl)
 */
 static void cp_decl_mcode(CPState *cp, CPDecl *decl)
 {
-  cp_next(cp);
-  cp_check(cp, '(');
-  
+  /* Check were declared after a function definition */
   if (decl->top == 0) {
     cp_err(cp, LJ_ERR_FFI_INVTYPE);
   } else {
@@ -1205,23 +1202,28 @@ static void cp_decl_mcode(CPState *cp, CPDecl *decl)
     }
   }
 
-  if (cp->tok == CTOK_STRING) {
-    decl->redir = cp->str;
-  } else {
-    cp_err_token(cp, CTOK_INTEGER);
-  }
+  cp_next(cp);
+  cp_check(cp, '(');
+
+  if (cp->tok != CTOK_STRING)
+     cp_err_token(cp, CTOK_STRING);
+  decl->redir = cp->str;
 
   cp_next(cp);
-
+  /* Check if we have an immediate byte value */
   if (cp_opt(cp, ',')) {
-    do {
-      if (cp->tok == CTOK_INTEGER) {
-        /* TODO: immediate */
-      } else {
-        cp_err_token(cp, CTOK_INTEGER);
-      }
+    decl->bits = 0;
+
+    if (cp->tok == CTOK_INTEGER) {
+      decl->bits = (CTSize) (cp->val.i32 < 0 ? 
+                             (uint8_t)(int8_t)cp->val.i32 : cp->val.i32);
       cp_next(cp);
-    } while (cp_opt(cp, ','));
+    } else if (cp->tok == CTOK_REGLIST) {
+      cp_next(cp);
+
+    } else {
+      cp_err_token(cp, CTOK_INTEGER);
+    }
   }
 
   cp_check(cp, ')');

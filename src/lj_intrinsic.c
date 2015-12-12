@@ -483,13 +483,9 @@ int lj_intrinsic_create(lua_State *L)
 
   if (intrins->flags & INTRINSFLAG_IMMB) {
     int32_t imm = lj_lib_checkint(L, argi+3);
-    lua_assert(intrins->insz < LJ_INTRINS_MAXREG-1);
+    lua_assert(intrins->insz <= 4);
 
-    if (imm < 0) {
-      intrins->in[LJ_INTRINS_MAXREG-1] = (uint8_t)(int8_t)imm;
-    } else {
-      intrins->in[LJ_INTRINS_MAXREG-1] = (uint8_t)imm;
-    }
+    intrins->immb = imm < 0 ? (uint8_t)(int8_t)imm : (uint8_t)imm;
   } 
   
   if (intrin_regmode(intrins) != DYNREG_FIXED) {
@@ -567,7 +563,6 @@ static int buildreg_ffi(CTState *cts, CTypeID id) {
     }
   } else if (ctype_isvector(base->info)) {
     CType *vtype;
-    int kind;
   vec:
     vtype = ctype_raw(cts, ctype_cid(base->info));    
     if (ctype_typeid(cts, vtype) < CTID_BOOL || ctype_typeid(cts, vtype) > CTID_DOUBLE ||
@@ -578,8 +573,9 @@ static int buildreg_ffi(CTState *cts, CTypeID id) {
     kind = base->size == 16 ? REGKIND_V128U : REGKIND_V256U;
     if (ctype_align(base->info) == sz)
       kind += 2;
+    rid = RID_MIN_FPR;
   } else {
-    lua_assert(0);
+    lua_assert(ctype_iscomplex(base->info));
     return -1;
   }
 
@@ -587,7 +583,7 @@ static int buildreg_ffi(CTState *cts, CTypeID id) {
   return ASMMKREG(rid, kind);
 }
 
-int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode)
+int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode, uint32_t imm)
 {
   CTState *cts = ctype_cts(L);
   int err;
@@ -623,7 +619,7 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode)
   }
 
   /* TODO: multiple return values */
-  if (ctype_cid(func->info)) {
+  if (ctype_cid(func->info) != CTID_VOID) {
     int reg = buildreg_ffi(cts, ctype_cid(func->info));
 
     if (reg == -1) {
@@ -640,11 +636,15 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode)
 
     intrins->flags |= intrins->insz == 1 ? DYNREG_ONE : DYNREG_INOUT;
   }
+
+  if (intrins->flags & INTRINSFLAG_IMMB) {
+    intrins->immb = (uint8_t)imm;
+  }
   
   err = lj_asm_intrins(L, intrins);
 
-  if (true) {
-
+  if (err != 0) {
+    lj_err_callermsg(L, "Failed to create interpreter wrapper for intrinsic");
   }
 
   id = register_intrinsic(L, intrins);
@@ -797,11 +797,13 @@ int ffi_intrinsiccall(lua_State *L, CTState *cts, CType *ct)
         isfp = 1;
       }
     } else if (ctype_isvector(d->info)) {
-      if (sz == 16 || sz == 32)
+      if (sz == 16 || sz == 32) {
         /* we want a pointer to the vector in the context */
         did = lj_ctype_intern(cts, CTINFO_REF(did), CTSIZE_PTR);
-      else
+        d = ctype_raw(cts, did);
+      } else {
         goto err_nyi;
+      }
     } else if (ctype_isstruct(d->info)) {
       lua_assert(ASMRID(reg) < RID_MAX_GPR);
       did = lj_ctype_intern(cts, CTINFO_REF(did), CTSIZE_PTR);
@@ -823,7 +825,7 @@ int ffi_intrinsiccall(lua_State *L, CTState *cts, CType *ct)
       dp = &context.fpr[nfpr++];
     }
 
-    lj_cconv_ct_tv(cts, d, (uint8_t *)dp, o, CCF_ARG(narg+1));
+    lj_cconv_ct_tv(cts, d, (uint8_t *)dp, o, CCF_ARG(narg+1)|CCF_INTRINS_ARG);
 
     /* Extend passed signed integers to 32 bits at least. */
     if (ctype_isinteger_or_bool(d->info) && d->size < 4) {

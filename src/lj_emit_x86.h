@@ -602,7 +602,7 @@ static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins, Reg r1, Reg r2)
     } 
 
     if (intrins->flags & INTRINSFLAG_IMMB) {
-      *--as->mcp = intrins->in[LJ_INTRINS_MAXREG-1];
+      *--as->mcp = intrins->immb;
     }
     
     if (intrins->flags & INTRINSFLAG_LARGEOP) {

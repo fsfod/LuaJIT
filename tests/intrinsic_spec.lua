@@ -4,6 +4,11 @@ local asm = ffi.ASM
 --local assert_jit,assert_noexit = assert_jit, assert_noexit
 local nop = "\x90"
 
+ffi.cdef[[
+typedef float float4 __attribute__((__vector_size__(16)));
+typedef float int4 __attribute__((__vector_size__(16)));
+]]
+
 local float4 = ffi.new("float[4]")
 local float4_2 = ffi.new("float[4]", {2, 2, 2, 2})
 local float8 = ffi.new("float[8]", 0)
@@ -78,21 +83,22 @@ context("__mcode parsing", function()
     
     assert_error(function() ffi.cdef([[__mcode("90")]]) end)
     assert_error(function() ffi.cdef([[int __mcode("90")]]) end)
-    assert_error(function() ffi.cdef([[struct c{float a __mcode("90");};]]) end)
-    assert_error(function() ffi.cdef([[struct b{float a; __mcode("90");};]]) end)
   end)
   
 
-  it("bad mcoddef", function()
+  it("bad mcoddef", function() 
+   -- assert_error(function() ffi.cdef([[struct c{float a __mcode("90");};]]) end)
+    --assert_error(function() ffi.cdef([[struct b{float a; __mcode("90");};]]) end)
+    
     assert_error(function() ffi.cdef([[void test1(float a) __mcode(0);]]) end)
     assert_error(function() ffi.cdef([[void test2(float a) __mcode("");]]) end)
     assert_error(function() ffi.cdef([[void test3(float a) __mcode("0");]]) end)
     assert_error(function() ffi.cdef([[void test4(float a) __mcode("rff");]]) end)
   end)
   
-  it("bad ffi types mcod", function()
-    assert_error(function() ffi.cdef([[void testffi1(float a2, ...) __mcode("90")]]) end)
-    assert_error(function() ffi.cdef([[void testffi2(complex a2, ...) __mcode("90")]]) end)
+  it("bad ffi types mcode", function()
+    assert_error(function() ffi.cdef([[void testffi1(float a2, ...) __mcode("90");]]) end)
+    assert_error(function() ffi.cdef([[void testffi2(complex a2) __mcode("90");]]) end)
     
     --NYI non 16/32 byte vectors
     assert_error(function() ffi.cdef([[
@@ -282,7 +288,9 @@ end)
 
 it("popcnt", function()
 
-  local popcnt = ffi.intrinsic("f30fb8rM", {rin = {"eax"}, rout = {"eax"}})
+  ffi.cdef([[int32_t popcnt(int32_t n) __mcode("f30fb8rM");]])
+
+  local popcnt = ffi.C.popcnt
 
   assert_equal(popcnt(7),    3)
   assert_equal(popcnt(1024), 1)
@@ -297,8 +305,9 @@ it("popcnt", function()
   assert_noexit(0, testpopcnt, 0)
   assert_noexit(1, testpopcnt, 1)
   
+  ffi.cdef([[int32_t popcntuf(int32_t n) __mcode("f30fb8r");]])
   --check unfused
-  popcnt = ffi.intrinsic("f30fb8r", {rin = {"eax"}, rout = {"eax"}})
+  popcnt = ffi.C.popcntuf
   
   assert_equal(popcnt(7),    3)
   assert_equal(popcnt(1024), 1)
@@ -381,7 +390,32 @@ it("rdtscp", function()
 end)
 
 it("addsd", function()
-  local addsd = ffi.intrinsic("F20F58rM", {rin = {"xmm", "xmm"}, rout = {"xmm"}})
+  ffi.cdef[[double addsd(double n1, double n2) __mcode("F20F58rM");]]
+  local addsd = ffi.C.addsd
+  
+  function test_addsd(n1, n2)
+    return (addsd(n1, n2))
+  end
+   
+  assert_equal(3, addsd(1, 2))
+  assert_equal(0, addsd(0, 0))
+  
+  assert_jit(-3, test_addsd, -4.5, 1.5)
+  assert_noexit(3, test_addsd, 4.5, -1.5)
+  --check dual num exit
+  assert_equal(5, test_addsd(3, 2))
+  
+  --check unfused
+  ffi.cdef([[double addsduf(double n1, double n2) __mcode("F20F58r");]])
+  addsd = ffi.C.addsduf
+  
+  assert_equal(3, addsd(1, 2))
+  assert_equal(0, addsd(0, 0))
+end)
+
+it("addss", function()
+  ffi.cdef[[float addss(float n1, float n2) __mcode("F30F58rM");]]
+  local addsd = ffi.C.addss
    
   function test_addsd(n1, n2)
     return (addsd(n1, n2))
@@ -396,15 +430,47 @@ it("addsd", function()
   assert_equal(5, test_addsd(3, 2))
   
   --check unfused
-  addsd = ffi.intrinsic("F20F58r", {rin = {"xmm", "xmm"}, rout = {"xmm"}})
+  ffi.cdef[[float addssuf(float n1, float n2) __mcode("F30F58r");]]
+  addsd = ffi.C.addssuf
   
   assert_equal(3, addsd(1, 2))
   assert_equal(0, addsd(0, 0))
 end)
 
+it("shufps", function()
+
+  ffi.cdef([[float4 shufps(float4 v1, float4 v2) __mcode("0FC6rMU", 0);]])
+  
+  local shufps = ffi.C.shufps
+   
+  local v = ffi.new("float4", 1.5, 2.25, 3.125, 4.0625)
+  local vzero = ffi.new("float4", 1)
+   
+  function test_shufps(v1, v2)
+    return (shufps(v1, v2))
+  end
+  
+  local vout = shufps(v, v)
+  assert_equal(vout[0], 1.5)
+  assert_equal(vout[1], 1.5)
+  assert_equal(vout[2], 1.5)
+  assert_equal(vout[3], 1.5)
+  
+  ffi.cdef([[float4 shufpsrev(float4 v1, float4 v2) __mcode("0FC6rMU", 0x1b);]])
+  
+  local vout = ffi.C.shufpsrev(v, v)
+
+  assert_equal(vout[0], 4.0625)
+  assert_equal(vout[1], 3.125)
+  assert_equal(vout[2], 2.25)
+  assert_equal(vout[3], 1.5)
+end)
+
 context("mixed register type opcodes", function()
   it("cvttsd2s", function()
-    local cvttsd2s = ffi.intrinsic("F20F2CrM", {rin = {"xmm0"}, rout = {"ecx"}})
+  
+    ffi.cdef([[int cvttsd2s(double n) __mcode("F20F2CrM");]])
+    local cvttsd2s = ffi.C.cvttsd2s
     
     function test_cvttsd2s(n)
       return (cvttsd2s(n))
@@ -420,15 +486,17 @@ context("mixed register type opcodes", function()
     assert_equal(5, test_cvttsd2s(5))
     
     --check unfused
-    cvttsd2s = ffi.intrinsic("F20F2Cr", {rin = {"xmm0"}, rout = {"ecx"}})
+    ffi.cdef([[int cvttsd2suf(double n) __mcode("F20F2Cr");]])
+    cvttsd2s = ffi.C.cvttsd2suf
     
     assert_equal(0, cvttsd2s(-0))
     assert_equal(1, cvttsd2s(1))
     assert_equal(1, cvttsd2s(1.2))
   end)
   
-  it("cvtsi2sd", function() 
-    local cvtsi2sd = ffi.intrinsic("F20F2ArM", {rin = {"ecx"}, rout = {"xmm0"}})
+  it("cvtsi2sd", function()
+    ffi.cdef([[double cvtsi2sd(int n) __mcode("F20F2ArM");]])
+    local cvtsi2sd = ffi.C.cvtsi2sd
     
     function test_cvtsi2sd(n1, n2)
       return (cvtsi2sd(n1)+n2)
@@ -445,10 +513,19 @@ context("mixed register type opcodes", function()
     assert_equal(11, test_cvtsi2sd(5, 6))
     
     --check unfused
-    cvtsi2sd = ffi.intrinsic("F20F2Ar" , {rin = {"ecx"}, rout = {"xmm0"}})
+    ffi.cdef([[double cvtsi2sd(int n) __mcode("F20F2Ar");]])
+    cvtsi2sd = ffi.C.cvtsi2sduf
     assert_equal(0.5, test_cvtsi2sd(0, 0.5))
     assert_equal(1.25, test_cvtsi2sd(1.0, 0.25))
     assert_equal(-1.5, test_cvtsi2sd(-2, 0.5))
+  end)
+  
+  it("pcmpistri", function() 
+    local pcmpistri = ffi.intrinsic("660F3A63rMU", {rin = {"xmm0v", "xmm1v"}, rout = {"ecx"}}, 0x14)
+    
+    function test_pcmpistri(n1, n2)
+      return (cvtsi2sd(n1)+n2)
+    end
   end)
 end)
 

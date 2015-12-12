@@ -12,7 +12,7 @@
 
 #if LJ_HASINTRINSICS
 
-#ifndef LJ_INTRINS_MAXREG
+#if !defined(LJ_INTRINS_MAXREG) || LJ_INTRINS_MAXREG < 8
 #define LJ_INTRINS_MAXREG 8
 #endif
 
@@ -77,6 +77,7 @@ typedef struct AsmIntrins{
     struct {
       uint32_t opregs;
       uint8_t dyninsz; /* dynamic input register count */
+      uint8_t immb;
     };
   };
   uint8_t out[LJ_INTRINS_MAXREG];
@@ -99,7 +100,6 @@ typedef struct AsmIntrins{
 #define intrin_regmode(intrins) ((intrins)->flags & INTRINSFLAG_REGMODEMASK)
 /* odd numbered have an dynamic output */
 #define intrin_dynrout(intrins) (intrin_regmode(intrins) & 1)
-#define intrin_immb(intrins) (intrins)->in[] 
 
 #define RKDEF_FPR(_) \
   _(FPR64, IRT_NUM,   CTID_DOUBLE) \
