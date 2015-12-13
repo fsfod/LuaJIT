@@ -58,7 +58,7 @@ typedef enum INTRINSFLAGs {
 
   /* Force REX.w 64 bit size override bit tobe set for x64 */
   INTRINSFLAG_REXW  = 0x800,
-  /* Don't fuse load into op only valid */
+  /* Don't fuse load into op */
   INTRINSFLAG_NOFUSE = 0x1000,
   /* Opcode is commutative allowing the input registers to be swapped to allow better fusing */
   INTRINSFLAG_ISCOMM = 0x2000,
@@ -155,7 +155,9 @@ LJ_FUNC void lj_intrinsic_init(lua_State *L);
 LJ_FUNC void lj_intrinsic_asmlib(lua_State *L, GCtab* asmlib);
 LJ_FUNC TValue *lj_asmlib_index(lua_State *L, CLibrary *cl, GCstr *name);
 LJ_FUNC int lj_intrinsic_create(lua_State *L);
-LJ_FUNC int lj_intrinsic_call(lua_State *L, GCcdata *cd);
+LJ_FUNC int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode, uint32_t imm);
+LJ_FUNC AsmIntrins *lj_intrinsic_get(CTState *cts, CTypeID id);
+LJ_FUNC int lj_intrinsic_call(CTState *cts, CType *ct);
 
 
 #endif

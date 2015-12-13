@@ -300,7 +300,6 @@ typedef struct CTState {
   _(P_CCHAR,	CTSIZE_PTR,	CT_PTR, CTALIGN_PTR|CTID_CCHAR) \
   _(A_CCHAR,		-1,	CT_ARRAY, CTF_CONST|CTALIGN(0)|CTID_CCHAR) \
   _(CTYPEID,		4,	CT_ENUM, CTALIGN(2)|CTID_INT32) \
-  _(INTRINS,		4,	CT_FUNC, 0) \
   CTTYDEFP(_) \
   /* End of type list. */
 

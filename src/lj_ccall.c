@@ -943,7 +943,7 @@ static int ccall_get_results(lua_State *L, CTState *cts, CType *ct,
   return lj_cconv_tv_ct(cts, ctr, 0, L->top-1, sp);
 }
 
-int ffi_intrinsiccall(lua_State *L, CTState *cts, CType *ct);
+int lj_intrinsic_call(CTState *cts, CType *ct);
 
 /* Call C function. */
 int lj_ccall_func(lua_State *L, GCcdata *cd)
@@ -957,7 +957,7 @@ int lj_ccall_func(lua_State *L, GCcdata *cd)
   }
 
   if (ctype_isintrinsic(ct->info)) {
-    return ffi_intrinsiccall(L, cts, ct);
+    return lj_intrinsic_call(cts, ct);
   }else if (ctype_isfunc(ct->info)) {
     CCallState cc;
     int gcsteps, ret;

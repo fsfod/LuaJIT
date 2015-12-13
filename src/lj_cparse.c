@@ -806,8 +806,6 @@ static void cp_push_type(CPDecl *decl, CTypeID id)
   }
 }
 
-int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode);
-
 /* Consume the declaration element chain and intern the C type. */
 static CTypeID cp_decl_intern(CPState *cp, CPDecl *decl)
 {
@@ -1175,9 +1173,7 @@ static void cp_decl_attributes(CPState *cp, CPDecl *decl)
       CTF_INSERT(decl->attr, MSIZEP, cp->ct->size);
 #endif
       break;
-    case CTOK_MCODE:
-      cp_decl_mcode(cp, decl);
-      break;
+    case CTOK_MCODE: cp_decl_mcode(cp, decl); continue;
 
     default: return;
     }

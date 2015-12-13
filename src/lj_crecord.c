@@ -1145,6 +1145,8 @@ static void crec_snap_caller(jit_State *J)
   J->base[-1] = ftr; J->pc = pc;
 }
 
+void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *cts);
+
 /* Record function call. */
 static int crec_call(jit_State *J, RecordFFData *rd, GCcdata *cd)
 {
@@ -1155,7 +1157,11 @@ static int crec_call(jit_State *J, RecordFFData *rd, GCcdata *cd)
     tp = (LJ_64 && ct->size == 8) ? IRT_P64 : IRT_P32;
     ct = ctype_rawchild(cts, ct);
   }
-  if (ctype_isfunc(ct->info)) {
+
+  if (ctype_isintrinsic(ct->info)) {
+    crec_call_intrins(J, rd, ct);
+    return 1;
+  }else if (ctype_isfunc(ct->info)) {
     TRef func = emitir(IRT(IR_FLOAD, tp), J->base[0], IRFL_CDATA_PTR);
     CType *ctr = ctype_rawchild(cts, ct);
     IRType t = crec_ct2irt(cts, ctr);
@@ -1217,18 +1223,62 @@ static int crec_call(jit_State *J, RecordFFData *rd, GCcdata *cd)
 
 #if LJ_HASINTRINSICS
 
-void crec_call_intrins(jit_State *J, RecordFFData *rd, GCcdata *cd)
+static void crec_intrins_result(jit_State *J, AsmIntrins *intrins, int i, CTypeID id) {
+  uint8_t reg = ASMRID(intrins->out[i]);
+  int kind = ASMREGKIND(intrins->out[i]);
+
+  if (reg < RID_MAX_GPR) {
+    CTState *cts;
+    CTypeID cid;
+    if (!id) {
+      /* If no ctype is specified use the default type for the register kind */
+      if (kind == REGKIND_GPRI32)return;
+      id = rk_ctypegpr(kind);
+    }
+
+    cts = ctype_ctsG(J2G(J));
+    cid = ctype_typeid(cts, ctype_raw(cts, id));
+    if (cid != CTID_INT32) {
+      /* Box the u32/64 bit value in the register */
+      J->base[i] = emitir(IRT(IR_CNEWI, IRT_CDATA), lj_ir_kint(J, id), J->base[i]);
+    }
+    
+  } else {
+    if (kind == REGKIND_FPR64)
+      return;
+
+    if (kind == REGKIND_FPR32) {
+      J->base[i] = emitconv(J->base[i], IRT_NUM, IRT_FLOAT, 0);
+    } else {
+      /* NYI: support for vectors */
+      lj_trace_err(J, LJ_TRERR_NYIVEC);
+    }
+  }
+}
+
+void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *ct)
 {
   CTState *cts = ctype_ctsG(J2G(J));
   TRef tintrins = J->base[0], arg = TREF_NIL;
-  AsmIntrins* intrins = (AsmIntrins*)cdataptr(cd);
+  AsmIntrins *intrins;
   size_t i;
   IRType it;
   int argofs = 1;
+  CTypeID sib =  ct->info;
+  CType *rtct = NULL;
 
-  /* guard on the intrinsic cdata pointer */
-  tintrins = lj_ir_kgc(J, gcval(&rd->argv[0]), IRT_CDATA);
-  emitir(IRTG(IR_EQ, IRT_CDATA), J->base[0], tintrins);
+  if (ctype_cid(ct->info) != 0) {
+    intrins = lj_intrinsic_get(cts, ctype_cid(ct->info));
+    
+    rtct = ctype_rawchild(cts, ctype_rawchild(cts, ct));
+    
+    tintrins = lj_ir_kgc(J, (GCobj*)(((char*)intrins)-sizeof(GCcdata)), IRT_CDATA);
+  } else {
+    /* guard on the intrinsic cdata pointer */
+    tintrins = lj_ir_kgc(J, gcval(&rd->argv[0]), IRT_CDATA);
+    emitir(IRTG(IR_EQ, IRT_CDATA), J->base[0], tintrins);
+    intrins = (AsmIntrins*)cdataptr(cdataV(&rd->argv[0]));
+  }
 
   /* Convert parameters and load them into the input registers */
   for (i = 0; i < intrins->insz; i++) {
@@ -1284,40 +1334,34 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, GCcdata *cd)
     J->base[i] = emitir(IRT(IR_ASMRET, rk_irt(reg, kind)), tintrins, reg);
   }
 
+  sib = rtct ? ctype_typeid(cts, rtct) : 0;
+  
   /* Second pass to box values after all ASMRET have run to shuffle/spill the
    * output registers. 
    */
-  for (i = 0; i < intrins->outsz; i++) {
-    uint8_t reg = ASMRID(intrins->out[i]);
-    int kind = ASMREGKIND(intrins->out[i]);
+  if (intrins->outsz == 1) {
+    crec_intrins_result(J, intrins, 0, sib);
+  } else {
+    for (i = 0; i < intrins->outsz; i++) {
+      CTypeID id = 0;
 
-    if (reg < RID_MAX_GPR) {
-      if (kind == REGKIND_GPRI32)
-        continue;
-      /* Box the u32/64 bit value in the register */
-      J->base[i] = emitir(IRT(IR_CNEWI, IRT_CDATA),
-                          lj_ir_kint(J, rk_ctypegpr(kind)), J->base[i]);
-    } else {
-      if (kind == REGKIND_FPR64)
-        continue;
-
-      if (kind == REGKIND_FPR32) {
-        J->base[i] = emitconv(J->base[i], IRT_NUM, IRT_FLOAT, 0);
-      } else {
-        /* NYI: support for vectors */
-        lj_trace_err(J, LJ_TRERR_NYIVEC);
+      if (sib) {
+        ct = ctype_get(cts, sib);
+        sib = ct->sib;
+        id = ctype_cid(ct->info);
       }
+
+      crec_intrins_result(J, intrins, i, id);
     }
   }
-
   /* Intrinsics are assumed to always have side effects */
   J->needsnap = 1;
   rd->nres = intrins->outsz;
 }
 #else
-void crec_call_intrins(jit_State *J, RecordFFData *rd, GCcdata *cd)
+void crec_call_intrins(jit_State *J, RecordFFData *rd, CTypeID id)
 {
-  UNUSED(J);UNUSED(rd);UNUSED(cd);
+  UNUSED(J);UNUSED(rd);UNUSED(id);
 }
 #endif
 
@@ -1332,9 +1376,6 @@ void LJ_FASTCALL recff_cdata_call(jit_State *J, RecordFFData *rd)
   if (id == CTID_CTYPEID) {
     id = crec_constructor(J, cd, J->base[0]);
     mm = MM_new;
-  } else if(id == CTID_INTRINS) {
-    crec_call_intrins(J, rd, cd);
-    return;
   } else if (crec_call(J, rd, cd)) {
     return;
   }
@@ -1626,8 +1667,9 @@ void LJ_FASTCALL recff_clib_index(jit_State *J, RecordFFData *rd)
     if (rd->data < 2) {
       id = lj_ctype_getname(cts, &ct, name, CLNS_INDEX);
     } else {
-      id = CTID_INTRINS;
-      ct = ctype_get(cts, CTID_INTRINS);
+      /* set some dummy values for the intrinsic namespace */
+      id = CTID_VOID;
+      ct = ctype_get(cts, id);
     }
     if (id && tv && !tvisnil(tv)) {
       /* Specialize to the symbol name and make the result a constant. */

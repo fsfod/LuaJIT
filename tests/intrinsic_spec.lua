@@ -495,7 +495,7 @@ context("mixed register type opcodes", function()
   end)
   
   it("cvtsi2sd", function()
-    ffi.cdef([[double cvtsi2sd(int n) __mcode("F20F2ArM");]])
+    ffi.cdef([[double cvtsi2sd(int32_t n) __mcode("F20F2ArM");]])
     local cvtsi2sd = ffi.C.cvtsi2sd
     
     function test_cvtsi2sd(n1, n2)
@@ -513,7 +513,7 @@ context("mixed register type opcodes", function()
     assert_equal(11, test_cvtsi2sd(5, 6))
     
     --check unfused
-    ffi.cdef([[double cvtsi2sd(int n) __mcode("F20F2Ar");]])
+    ffi.cdef([[double cvtsi2sduf(int32_t n) __mcode("F20F2Ar");]])
     cvtsi2sd = ffi.C.cvtsi2sduf
     assert_equal(0.5, test_cvtsi2sd(0, 0.5))
     assert_equal(1.25, test_cvtsi2sd(1.0, 0.25))

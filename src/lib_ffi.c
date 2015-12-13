@@ -228,8 +228,6 @@ LJLIB_CF(ffi_meta___call)	LJLIB_REC(cdata_call)
   if (cd->ctypeid == CTID_CTYPEID) {
     id = *(CTypeID *)cdataptr(cd);
     mm = MM_new;
-  } else if(cd->ctypeid == CTID_INTRINS){
-    return lj_intrinsic_call(L, cd);
   } else {
     int ret = lj_ccall_func(L, cd);
     if (ret >= 0)

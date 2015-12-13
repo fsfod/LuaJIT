@@ -455,10 +455,6 @@ static void ctype_repr(CTRepr *ctr, CTypeID id)
   for (;;) {
     CTInfo info = ct->info;
     CTSize size = ct->size;
-    if (id == CTID_INTRINS) {
-      ctype_preplit(ctr, "Intrinsic");
-      break;
-    }
     switch (ctype_type(info)) {
     case CT_NUM:
       if ((info & CTF_BOOL)) {
@@ -535,6 +531,8 @@ static void ctype_repr(CTRepr *ctr, CTypeID id)
       }
       break;
     case CT_FUNC:
+      if (ctype_isintrinsic(info))
+        ctype_preplit(ctr, "Intrinsic ");
       ctr->needsp = 1;
       if (ptrto) { ptrto = 0; ctype_prepc(ctr, '('); ctype_appc(ctr, ')'); }
       ctype_appc(ctr, '(');
