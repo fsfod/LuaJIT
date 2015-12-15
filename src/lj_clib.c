@@ -17,6 +17,7 @@
 #include "lj_cdata.h"
 #include "lj_clib.h"
 #include "lj_strfmt.h"
+#include "lj_intrinsic.h"
 
 /* -- OS-specific functions ----------------------------------------------- */
 
@@ -344,9 +345,7 @@ TValue *lj_clib_index(lua_State *L, CLibrary *cl, GCstr *name)
         setintV(tv, (int32_t)ct->size);
     } else if(ctype_isintrinsic(ct->info)) {
       /*TODO: maybe move to ASM namespace only */
-      GCcdata *cd = lj_cdata_new(cts, id, CTSIZE_PTR);
-      *(void **)cdataptr(cd) = 0;
-      setcdataV(L, tv, cd);
+      setcdataV(L, tv, lj_intrinsic_createffi(cts, ct));
     } else {
       const char *sym = clib_extsym(cts, ct, name);
 #if LJ_TARGET_WINDOWS

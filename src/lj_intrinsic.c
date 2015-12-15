@@ -444,7 +444,7 @@ int lj_intrinsic_create(lua_State *L)
   memset(intrins, 0, sizeof(AsmIntrins));
 
   if (!tviscdata(L->base) && !tvisstr(L->base)) {
-    lj_err_argtype(L, 1, "expected a string or cdata");
+    lj_err_argtype(L, 1, "string or cdata");
   }
 
   /* If we have a number for the second argument the first must be a pointer/string to machine code */
@@ -543,7 +543,6 @@ static int buildreg_ffi(CTState *cts, CTypeID id) {
   CType *base = ctype_raw(cts, id);
   CTSize sz = base->size;
   int rid = -1, kind = -1;
-  uint32_t reg = 0;
 
   if (ctype_isnum(base->info)) {
     if (ctype_isfp(base->info)) {
@@ -592,15 +591,101 @@ static int buildreg_ffi(CTState *cts, CTypeID id) {
   return ASMMKREG(rid, kind);
 }
 
+CTypeID intrinsic_toffi(CTState *cts, AsmIntrins* intrins, CType *func)
+{
+  CType *ct, *prev;
+  CTypeID id, anchor;
+
+  anchor = id = lj_ctype_new(cts, &ct);
+  prev = ct;
+  ct->info = CTINFO(CT_FIELD, ctype_cid(func->info));
+  ct->size = (intrins->dyninsz << 29) | intrins->flags;
+
+  lua_assert(intrins->insz < 16 && intrins->outsz < 16);
+  ct->size |= (intrins->insz << 16) | (intrins->outsz << 20);
+
+  id = lj_ctype_new(cts, &ct);
+  prev->sib = id;
+  ct->info = CTINFO(CT_FIELD, intrins->immb);
+  ct->size = intrins->opcode;
+  ct->sib = 0;
+
+  lua_assert(intrins->mod == 0);
+
+  return anchor;
+}
+
+static void buildffiwrapper(CTState *cts, CType *func, AsmIntrins *intrins) {
+  int i;
+  CTypeID sib = func->sib;
+  
+  for (i = 0; sib && i < intrins->insz; i++) {
+    CType *ctarg = ctype_get(cts, sib);
+    lua_assert(ctype_isfield(ctarg->info));
+    intrins->in[i] = ctarg->size & 0xff;
+    sib = ctarg->sib;
+  }
+
+  for (i = 0; sib && i < intrins->outsz; i++) {
+    CType *ctarg = ctype_get(cts, sib);
+    lua_assert(ctype_isfield(ctarg->info));
+    intrins->out[i] = ctarg->size & 0xff;
+    sib = ctarg->sib;
+  }
+
+  int err = lj_asm_intrins(cts->L, intrins);
+
+  if (err != 0) {
+    lj_err_callermsg(cts->L, "Failed to create interpreter wrapper for intrinsic");
+  }
+}
+
+AsmIntrins *lj_intrinsic_fromffi(CTState *cts, CType *func, AsmIntrins *intrins)
+{
+  CType *ct = ctype_child(cts, func);
+  lua_assert(ctype_isfunc(func->info) && ctype_isfield(ct->info));
+
+  intrins->flags = ct->size&0xffff;
+  intrins->dyninsz = ct->size >> 29;
+  intrins->insz = (ct->size >> 16) & 0xf;
+  intrins->outsz = (ct->size >> 20) & 0xf;
+  intrins->mod = 0;
+
+  ct = ctype_get(cts, ct->sib);
+  intrins->opcode = ct->size;
+  intrins->immb = ct->info&0xff;
+
+  return intrins;
+}
+
+GCcdata *lj_intrinsic_createffi(CTState *cts, CType *func)
+{
+  GCcdata *cd;
+  AsmIntrins intrins = {0};
+
+  lj_intrinsic_fromffi(cts, func, &intrins);
+  buildffiwrapper(cts, func, &intrins);
+
+  func->info = func->info&0xffffff00;
+  /* TODO: dynamically rebuild this when needed instead */
+  func->info |= register_intrinsic(cts->L, &intrins);
+
+  cd = lj_cdata_new(cts, ctype_typeid(cts, func), CTSIZE_PTR);
+  *(void **)cdataptr(cd) = intrins.wrapped;
+
+  return cd;
+}
+
 int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode, uint32_t imm)
 {
   CTState *cts = ctype_cts(L);
-  int err;
-  CType *func = ctype_get(cts, fid);
-  CTypeID sib = func->sib, id;
+  CType *func = ctype_get(cts, fid), *argend;
+  CTypeID sib = func->sib;
   AsmIntrins _intrins;
   AsmIntrins* intrins = &_intrins;
   memset(intrins, 0, sizeof(AsmIntrins));
+
+  argend = func;
 
   while (sib != 0) {
     CType *arg = ctype_get(cts, sib);
@@ -609,14 +694,19 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode, uint32_t imm
     if (reg == -1) {
       return 0;
     }
-    /* apply any flags needed for this register type */
-    intrins->flags |= reg&0xff00;
-
-    /*TODO: deferred creation ? using these reg values */
+    /* Save the register info in place of the argument index */
     arg->size = reg;
-    intrins->in[intrins->insz++] = (uint8_t)reg;
-    sib = arg->sib;
+    /* Merge shared register flags */
+    intrins->flags |= reg&0xff00;
+    
+    if (reg & REGFLAG_DYN) {
+      intrins->dyninsz++;
+    }
 
+    sib = arg->sib;
+    argend = arg;
+
+    intrins->insz++;
     if (sib != 0 && intrins->insz == LJ_INTRINS_MAXREG) {
       return 0;
     }
@@ -624,17 +714,24 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode, uint32_t imm
 
   /* TODO: multiple return values */
   if (ctype_cid(func->info) != CTID_VOID) {
+    CType *ct;
     int reg = buildreg_ffi(cts, ctype_cid(func->info));
 
     if (reg == -1) {
       return 0;
     }
+    /* Merge shared register flags */
     intrins->flags |= reg&0xff00;
 
-    intrins->out[intrins->outsz++] = (uint8_t)reg;
+    /* Append a return field to the end of the argument list */
+    argend->sib = lj_ctype_new(cts, &ct);
+    ct->info = CTINFO(CT_FIELD, ctype_cid(func->info));
+    ct->size = reg;
+
+    intrins->outsz++;
   }
 
-  if (1) {
+  if (opcode) {
     if (parse_opstr(L, opcode, intrins) == 0) {
       return 0;
     }
@@ -646,22 +743,7 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode, uint32_t imm
     intrins->immb = (uint8_t)imm;
   }
   
-  err = lj_asm_intrins(L, intrins);
-
-  if (err != 0) {
-    lj_err_callermsg(L, "Failed to create interpreter wrapper for intrinsic");
-  }
-
-  /* FIXME: we leak cdata with bad ids if an error is thrown when declaring
-   * multiple intrinsics in one cdef call
-   */
-  id = register_intrinsic(L, intrins);
-  CType* intr = ctype_get(cts, id);
-  /* set the return type of the intrinsic */
-  intr->info = (intr->info&0xff00) | ctype_cid(func->info);
-  L->top--;
-
-  return id;
+  return intrinsic_toffi(cts, intrins, func);
 }
 
 /* Pre-create cdata for any output values that need boxing the wrapper will directly
@@ -784,7 +866,6 @@ static int typed_call(CTState *cts, AsmIntrins *intrins, CType *ct)
   lua_State *L = cts->L;
   TValue *o, *top = L->top;
   CTypeID fid;
-  CType *ctr;
   MSize ngpr = 0, nfpr = 0, narg;
   RegContext context;
   void* outcontent = L->top;
@@ -802,11 +883,11 @@ static int typed_call(CTState *cts, AsmIntrins *intrins, CType *ct)
   }
 
   /* Walk through all passed arguments. */
-  for (o = L->base+1, narg = 0; o < top; o++, narg++) {
+  for (o = L->base+1, narg = 0; o < top && narg < intrins->insz; o++, narg++) {
     CTypeID did;
     CType *d;
     CTSize sz;
-    MSize n, isfp = 0;
+    MSize isfp = 0;
     void *dp;
 
     if (fid) {  /* Get argument type from field. */
@@ -871,12 +952,13 @@ static int typed_call(CTState *cts, AsmIntrins *intrins, CType *ct)
     }
   }
 
-  if (fid) lj_err_caller(L, LJ_ERR_FFI_NUMARG);  /* Too few arguments. */
+  if (fid && narg < intrins->insz) 
+    lj_err_caller(L, LJ_ERR_FFI_NUMARG);  /* Too few arguments. */
 
-  setup_results(L, intrins, ctype_cid(ctype_child(cts, ct)->info));
+  setup_results(L, intrins, fid);
 
-  /* Execute the intrinsic through the wrapper created on construction */
-  return intrins->wrapped(&context, outcontent);
+  /* Execute the intrinsic through the wrapper created on first lookup */
+  return (*(IntrinsicWrapper*)cdataptr(cdataV(L->base)))(&context, outcontent);
 }
 
 int lj_intrinsic_call(CTState *cts, CType *ct)
@@ -887,6 +969,14 @@ int lj_intrinsic_call(CTState *cts, CType *ct)
     intrins = lj_intrinsic_get(cts, ctype_typeid(cts, ct));
     return untyped_call(cts, intrins, ct);
   } else {
+    CType *cct = ctype_child(cts, ct);
+    AsmIntrins _intrins;
+
+    if (ctype_isfield(cct->info)) {
+      intrins = lj_intrinsic_fromffi(cts, ct, &_intrins);
+
+    }
+
     intrins = lj_intrinsic_get(cts, ctype_cid(ct->info));
     return typed_call(cts, intrins, ct);
   }
