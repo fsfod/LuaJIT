@@ -18,6 +18,9 @@
 #include "lj_cconv.h"
 #include "lj_jit.h"
 #include "lj_dispatch.h"
+#include "lj_vm.h"
+#include "lj_trace.h"
+
 #include "lj_target.h"
 
 typedef enum RegFlags {
@@ -268,14 +271,14 @@ static GCtab* getopttab(lua_State *L, GCtab *t, const char* key)
   return (tv && tvistab(tv)) ? tabV(tv) : NULL;
 }
 
-extern void lj_asm_intrins(jit_State *J, AsmIntrins *intrins);
+extern int lj_asm_intrins(lua_State *L, AsmIntrins *intrins);
 
 int lj_intrinsic_create(lua_State *L)
 {
   CTState *cts = ctype_cts(L);
   GCtab *t, *regs;
   cTValue *tv;
-  int argi = 1, flags = 0;
+  int err, argi = 1, flags = 0;
   void *intrinsmc;
   AsmIntrins _intrins;
   AsmIntrins* intrins = &_intrins;
@@ -315,8 +318,20 @@ int lj_intrinsic_create(lua_State *L)
   if ((t = getopttab(L, regs, "mod"))) {
     buildregset(L, t, intrins, REGSET_MOD);
   }
- 
-  lj_asm_intrins(L2J(L), intrins);
+
+  err = lj_asm_intrins(L, intrins);
+  if (err != 0) {
+    /*TODO: better error msg 
+      else if (trerr == LJ_TRERR_BADRA) {
+        lua_pushstring(L, "Failed to pick a scratch register too many live registers");
+      } else if (trerr == LJ_TRERR_MCODEOV) {
+        lua_pushstring(L, "wrapper too large for any mcode area");
+      } else {
+        lua_pushstring(L, "Unknown error");
+      }
+    */
+    lj_err_callermsg(L, "Failed to create interpreter wrapper for intrinsic");
+  }
   register_intrinsic(L, intrins);
 
   return 1;

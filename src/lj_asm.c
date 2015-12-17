@@ -31,6 +31,7 @@
 #include "lj_asm.h"
 #include "lj_dispatch.h"
 #include "lj_vm.h"
+#include "lj_err.h"
 #include "lj_target.h"
 
 #ifdef LUA_USE_ASSERT
@@ -2322,7 +2323,7 @@ static int popcnt(uint32_t i)
  * Vector are assumed tobe always unaligned for now when emitting load/stores
 */
 
-void lj_asm_intrins(jit_State *J, AsmIntrins *intrins)
+static void wrap_intrins(jit_State *J, AsmIntrins *intrins)
 {
   ASMState as_;
   ASMState *as = &as_;
@@ -2517,6 +2518,47 @@ restart:
   /* Switch back the current machine code area to the jit one*/
   J->curmcarea = &J->mcarea;
 }
+
+static TValue *wrap_intrins_cp(lua_State *L, lua_CFunction dummy, void *ud)
+{
+  AsmIntrins *intrins = (AsmIntrins*)ud;
+  UNUSED(dummy);
+
+  wrap_intrins(L2J(L), intrins);
+  
+  return NULL;
+}
+
+int lj_asm_intrins(lua_State *L, AsmIntrins *intrins)
+{
+  int errcode = 0;
+
+  while ((errcode = lj_vm_cpcall(L, NULL, (void *)intrins, wrap_intrins_cp)) != 0) {
+    jit_State *J = L2J(L);
+
+    lj_mcode_abort(J);
+    J->curmcarea = &J->mcarea;
+
+    if (errcode == LUA_ERRRUN){
+      if (tvisnumber(L->top-1)) {  /* Trace error? */
+        TraceError trerr = (TraceError)numberVint(L->top-1);
+
+        if (trerr == LJ_TRERR_MCODELM) {
+          L->top--;
+          continue;
+        }
+        return trerr;
+      } else {
+        return -1;
+      }
+    } else {
+      lj_err_throw(L, errcode);
+    }
+  }
+
+  return 0;
+}
+
 #endif
 
 #undef IR
