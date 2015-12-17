@@ -584,23 +584,49 @@ static void emit_addptr(ASMState *as, Reg r, int32_t ofs)
 #define CONTEXTSPILL (1*SPILLSLOTSZ)
 
 
-static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins)
+static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins, Reg r1, Reg r2)
 {
+  uint32_t regmode = intrin_regmode(intrins);
+  if (regmode) {
+    if (regmode == DYNREG_ONEOPENC) {
+      r2 = ASMRID(intrins->in[1]);
+    }
+    
+    /* force 64 bit operands */
+    if(intrins->flags & INTRINSFLAG_REXW) {
+      r2 |= REX_64;
+    } 
 
-  lua_assert(intrins->asmsz != 0 && (intrins->wrappedsz == 0 ||
-    intrins->asmofs < intrins->wrappedsz));
-  as->mcp -= intrins->asmsz;
-  /* Were deliberately trying to force mcode area reallocation if intrinsic is too large
-   * silence the redzone assert since we may overflow it without writing anything yet
-   */
+    if (intrins->flags & INTRINSFLAG_IMMB) {
+      *--as->mcp = intrins->immb;
+    }
+
+    if (((int8_t)intrins->opcode) < 0) {
+      emit_mrm(as, intrins->opcode, r2, r1);
+    } else {
+      /*TODO: Vex encoded ops */
+      lua_assert(0);
+    }
+    checkmclim(as);
+    /* No code offset to save if were dynamically generating from an opcode */
+    return NULL;
+  } else {
+    lua_assert(intrins->asmsz != 0 && (intrins->wrappedsz == 0 ||
+                                       intrins->asmofs < intrins->wrappedsz));
+    as->mcp -= intrins->asmsz;
+    /* Were deliberately trying to force mcode area reallocation if intrinsic is
+     * too large silence the redzone assert since we may overflow it without 
+     * writing anything yet
+     */
 #ifdef LUA_USE_ASSERT
-  as->mcp_prev = as->mcp;
+    as->mcp_prev = as->mcp;
 #endif
-  checkmclim(as);
-  /* Directly copy unmodified intrinsics machine code in */
-  memcpy(as->mcp, ((char*)intrins->mcode)+intrins->asmofs, intrins->asmsz);
+    checkmclim(as);
+    /* Directly copy the unmodified machine code of the intrinsic in */
+    memcpy(as->mcp, ((char*)intrins->mcode)+intrins->asmofs, intrins->asmsz);
 
-  return as->mcp;
+    return as->mcp;
+  }
 }
 
 #define align16(n) ((n + 16) & ~(16 - 1))
