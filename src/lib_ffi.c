@@ -508,8 +508,6 @@ LJLIB_CF(ffi_cdef)
   return 0;
 }
 
-LJLIB_PUSH(top-10) LJLIB_SET(!) /* Store reference to intrinsic register lookup table */
-
 LJLIB_CF(ffi_intrinsic)
 {
 #if LJ_HASINTRINSICS
@@ -791,7 +789,7 @@ LJLIB_CF(ffi_abi)	LJLIB_REC(.)
 
 #undef H_
 
-LJLIB_PUSH(top-11) LJLIB_SET(!)  /* Store reference to miscmap table. */
+LJLIB_PUSH(top-10) LJLIB_SET(!)  /* Store reference to miscmap table. */
 
 LJLIB_CF(ffi_metatype)
 {

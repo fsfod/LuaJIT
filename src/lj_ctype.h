@@ -350,7 +350,7 @@ CTTYDEF(CTTYIDDEF)
   CDSDEF(_) _(EXTENSION) _(ASM) _(ATTRIBUTE) \
   _(DECLSPEC) _(CCDECL) _(PTRSZ) \
   _(STRUCT) _(UNION) _(ENUM) \
-  _(SIZEOF) _(MCODE) _(ALIGNOF)
+  _(SIZEOF) _(MCODE) _(REGLIST) _(ALIGNOF)
 
 /* C token numbers. */
 enum {

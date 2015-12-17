@@ -845,22 +845,32 @@ static CTypeID cp_decl_intern(CPState *cp, CPDecl *decl)
       sib = ct->sib;  /* Next line may reallocate the C type table. */
       fid = lj_ctype_new(cp->cts, &fct);
       csize = CTSIZE_INVALID;
-      fct->info = cinfo = info + id;
+      fct->info = info;
       fct->size = size;
       fct->sib = sib;
-      id = fid;
 
       if (ctype_isintrinsic(info)) {
 #if LJ_HASINTRINSICS
-        CTypeID1 cid = lj_intrinsic_fromcdef(cp->L, fid, decl->redir, decl->bits);
+        CTypeID1 cid;
+        /* Don't overwrite the any attached register lists */
+        if (ctype_cid(info) == 0) {
+          fct->info = info + id;
+        }
+
+        cid = lj_intrinsic_fromcdef(cp->L, fid, decl->redir, decl->bits);
         if (cid == 0)
           cp_err(cp, LJ_ERR_FFI_INVTYPE);
         decl->redir = NULL;
-        ctype_get(cp->cts, fid)->info = cinfo = info + cid;
+        fct = ctype_get(cp->cts, fid);
+        fct->info = (info&0xffff0000) + cid;
 #else
         decl->redir = NULL;
 #endif
+      } else {
+        fct->info = info + id;
       }
+      cinfo = fct->info;
+      id = fid;
     } else if (ctype_isattrib(info)) {
       if (ctype_isxattrib(info, CTA_QUAL))
 	cinfo |= size;
@@ -1200,6 +1210,75 @@ static void cp_decl_mcode(CPState *cp, CPDecl *decl)
   decl->stack[decl->top-1].info |= CTF_INTRINS;
 }
 
+static void cp_reglist(CPState *cp, CPDecl *decl)
+{
+  cp_next(cp);
+  cp_check(cp, '(');
+  CTypeID lastid = 0, anchor = 0;
+  CType *ct;
+  int listid = 0;
+
+  if (cp->tok != CTOK_IDENT)
+    cp_err_token(cp, CTOK_IDENT);
+
+  if (strcmp(strdata(cp->str), "in") == 0) {
+    listid = 1;
+  } else if (strcmp(strdata(cp->str), "mod") == 0) {
+    listid = 2;
+  } else if (strcmp(strdata(cp->str), "out") == 0) {
+    listid = 3;
+  } else {
+    cp_errmsg(cp, CTOK_STRING, LJ_ERR_FFI_INVTYPE);
+  }
+
+  cp_next(cp);
+  cp_check(cp, ',');
+  do {
+    CPDecl decl;
+    CTypeID ctypeid = 0, fieldid;
+
+    if (listid == 3) {
+      cp_decl_spec(cp, &decl, CDF_REGISTER);
+      decl.mode = CPARSE_MODE_DIRECT|CPARSE_MODE_ABSTRACT;
+      cp_declarator(cp, &decl);
+      ctypeid = cp_decl_intern(cp, &decl);
+      ct = ctype_raw(cp->cts, ctypeid);
+
+      if (ctype_isvoid(ct->info) || ctype_isstruct(ct->info) || ctype_isfunc(ct->info)) {
+        lua_assert(0);
+        // FFI_INVTYPE
+      } else if (ctype_isrefarray(ct->info)) {
+        ctypeid = lj_ctype_intern(cp->cts,
+          CTINFO(CT_PTR, CTALIGN_PTR|ctype_cid(ct->info)), CTSIZE_PTR);
+      }
+    } else {
+      if (cp->tok != CTOK_IDENT)
+        cp_err_token(cp, CTOK_IDENT);
+    }
+
+    /* Add new parameter. */
+    fieldid = lj_ctype_new(cp->cts, &ct);
+    if (listid == 3) {
+      if (decl.name)
+        ctype_setname(ct, decl.name);
+    } else {
+      ctype_setname(ct, cp->str);
+    }
+    ct->info = CTINFO(CT_FIELD, ctypeid);
+    ct->size = 0;
+
+    if (anchor)
+      ctype_get(cp->cts, lastid)->sib = fieldid;
+    else
+      anchor = fieldid;
+    lastid = fieldid;
+  } while (cp_opt(cp, ','));
+
+  decl->stack[decl->top-1].info = (decl->stack[decl->top-1].info & 0xffff0000) | anchor;
+
+  cp_check(cp, ')');
+}
+
 /* Parse declaration attributes (and common qualifiers). */
 static void cp_decl_attributes(CPState *cp, CPDecl *decl)
 {
@@ -1211,6 +1290,7 @@ static void cp_decl_attributes(CPState *cp, CPDecl *decl)
     case CTOK_EXTENSION: break;  /* Ignore. */
     case CTOK_ATTRIBUTE: cp_decl_gccattribute(cp, decl); continue;
     case CTOK_ASM: cp_decl_asm(cp, decl); continue;
+    case CTOK_REGLIST: cp_reglist(cp, decl); continue;
     case CTOK_MCODE: cp_decl_mcode(cp, decl); continue;
     case CTOK_DECLSPEC: cp_decl_msvcattribute(cp, decl); continue;
     case CTOK_CCDECL:

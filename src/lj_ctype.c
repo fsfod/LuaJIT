@@ -94,6 +94,7 @@
   _("__asm",		0,	CTOK_ASM) \
   _("__asm__",		0,	CTOK_ASM) \
   _("__mcode",		0,	CTOK_MCODE) \
+  _("__reglist",	0,	CTOK_REGLIST) \
   /* MSVC Attributes. */ \
   _("__declspec",	0,	CTOK_DECLSPEC) \
   _("__cdecl",		CTCC_CDECL,	CTOK_CCDECL) \

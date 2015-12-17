@@ -166,13 +166,23 @@ enum IntrinsRegSet {
   REGSET_MOD,
 };
 
-static uint32_t buildregset(lua_State *L, GCtab *regs, AsmIntrins *intrins, int regsetid)
+/* Walks through either a Lua table(array) of register names or ctype linked list 
+** of typed parameters  who's name will be the register for that specific parameter.
+** The register names are converted into a register id\kind which are packed 
+** together into a uint8_t that is saved into one of the register lists of the 
+** AsmIntrins passed in.
+*/
+static uint32_t process_reglist(lua_State *L, AsmIntrins *intrins, int regsetid,
+                                GCtab *regs, CTypeID liststart)
 {
+  CTState *cts = ctype_cts(L);
   uint32_t i, count = 0, dyncount = 0; 
-  GCtab *reglookup = tabref(curr_func(L)->c.env);
+  GCtab *reglookup = cts->miscmap;
   RegSet rset = 0;
   const char *listname;
   uint8_t *regout = NULL;
+  CTypeID sib = liststart;
+  lua_assert((regs && liststart == 0) || (!regs && liststart != 0));
 
   if (regsetid == REGSET_IN) {
     listname = "in";
@@ -184,32 +194,47 @@ static uint32_t buildregset(lua_State *L, GCtab *regs, AsmIntrins *intrins, int 
     listname = "mod";
   }
 
-  for (i = 1; i < regs->asize; i++) {
-    cTValue *reginfo, *slot = arrayslot(regs, i);
+  for (i = 1;; i++) {
+    GCstr *str;
+    CType *ctarg = NULL;
     const char* name;
     Reg r = 0;
     uint32_t kind;
     int32_t reg = -1;
 
-    if (tvisnil(slot)) {
-      break;
+    if (regs) {
+      cTValue *slot;
+      if (i >= regs->asize) break;
+      slot = arrayslot(regs, i);
+
+      if (tvisnil(slot)) 
+        break;
+      if (!tvisstr(slot)) {
+        lj_err_callerv(L, LJ_ERR_FFI_BADREG, "not a string",  
+                       lj_obj_itypename[itypemap(slot)], listname);
+      }
+      str = strV(slot);
+    } else {
+      if (!sib)
+        break;
+      /* Walk the parameter list of the __reglist */
+      ctarg = ctype_get(cts, sib);
+      sib = ctarg->sib;
+      /* The name of the parameter should be the name of a valid register */
+      str = strref(ctarg->name);
     }
 
-    if (i > LJ_INTRINS_MAXREG && regout) {
+    name = strdata(str);
+
+    if (i > LJ_INTRINS_MAXREG && regsetid != REGSET_MOD) {
       lj_err_callerv(L, LJ_ERR_FFI_REGOV, listname, LJ_INTRINS_MAXREG);
     }
 
-    if (!tvisstr(slot)) {
-      lj_err_callerv(L, LJ_ERR_FFI_BADREG, "not a string",  lj_obj_itypename[itypemap(slot)], listname);
-    }
-
-    name = strVdata(slot);
-
     if (name[0] == 'x' || name[0] == 'y') {
-      reg = parse_fprreg(name, strV(slot)->len);
+      reg = parse_fprreg(name, str->len);
     } else {
-      reginfo = lj_tab_getstr(reglookup, strV(slot));
-    
+      cTValue *reginfo = lj_tab_getstr(reglookup, str);
+
       if (reginfo && !tvisnil(reginfo)) {
         reg = (uint32_t)(uintptr_t)lightudV(reginfo);
       }
@@ -219,6 +244,12 @@ static uint32_t buildregset(lua_State *L, GCtab *regs, AsmIntrins *intrins, int 
       /* Unrecognized register name */
       lj_err_callerv(L, LJ_ERR_FFI_BADREG, "invalid name", name, listname);
     }
+
+    /* Pack the register info into the ctype argument since we need it for the deferred  
+    ** creation of the intrinsic. That happens on first use.
+    */
+    if (ctarg)
+      ctarg->size = reg;
 
     r = ASMRID(reg&0xff);
     kind = ASMREGKIND(reg&0xff);
@@ -353,7 +384,7 @@ static int parse_opmode(const char *op, MSize len)
 
   if ((r || m) & !(flags & INTRINSFLAG_REGMODEMASK)) {
     
-    /* 'Rm' mem is left reg is right */
+    /* 'Rm' mem/r is left reg is right */
     if (r == 2 && m == 1) {
       flags |= DYNREG_STORE;
     } else {
@@ -505,15 +536,15 @@ int lj_intrinsic_create(lua_State *L)
   }
 
   if ((t = getopttab(L, regs, "rin"))) {
-    buildregset(L, t, intrins, REGSET_IN);
+    process_reglist(L, intrins, REGSET_IN, t, 0);
   }
   
   if ((t = getopttab(L, regs, "rout"))) {
-    buildregset(L, t, intrins, REGSET_OUT);
+    process_reglist(L, intrins, REGSET_OUT, t, 0);
   }
 
   if ((t = getopttab(L, regs, "mod"))) {
-    buildregset(L, t, intrins, REGSET_MOD);
+    process_reglist(L, intrins, REGSET_MOD, t, 0);
   }
 
   if (intrins->flags & INTRINSFLAG_IMMB) {
@@ -524,8 +555,10 @@ int lj_intrinsic_create(lua_State *L)
   
   if (intrin_regmode(intrins) != DYNREG_FIXED) {
     /* Have to infer this based on 2 input parameters being declared */
-    if (intrins->insz == 2) {
+    if (intrins->insz == 2 && intrins->outsz == 1) {
       intrin_setregmode(intrins, DYNREG_INOUT);
+    } else if(intrins->dyninsz == 2){
+      intrin_setregmode(intrins, DYNREG_TWOIN);
     }
 
     if (intrins->flags & INTRINSFLAG_VECTOR) {
@@ -763,25 +796,31 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode, uint32_t imm
     }
   }
 
-  /* TODO: multiple return values */
-  if (ctype_cid(func->info) != CTID_VOID) {
-    CType *ct;
-    int reg = buildreg_ffi(cts, retid);
+  if (retid != CTID_VOID) {
+    CType *ct = ctype_get(cts, retid);
 
-    if (reg == -1) {
-      return 0;
+    /* Check if the intrinsic had __reglist declared on it */
+    if (ctype_isfield(ct->info)) {
+      process_reglist(L, intrins, REGSET_OUT, NULL, retid);
+      sib = retid;
+    } else {
+      int reg = buildreg_ffi(cts, retid);
+
+      if (reg == -1) {
+        return 0;
+      }
+      /* Merge shared register flags */
+      intrins->flags |= reg & 0xff00;
+
+      /* Create a field entry for the return value that we make the ctype child
+      ** of the function.
+      */
+      sib = lj_ctype_new(cts, &ct);
+      ct->info = CTINFO(CT_FIELD, retid);
+      ct->size = reg;
+
+      intrins->outsz++;
     }
-    /* Merge shared register flags */
-    intrins->flags |= reg&0xff00;
-
-    /* Create a field entry for the return value that we make the ctype child
-    ** of the function.
-    */
-    sib = lj_ctype_new(cts, &ct);
-    ct->info = CTINFO(CT_FIELD, retid);
-    ct->size = reg;
-
-    intrins->outsz++;
   } else {
     sib = retid;
   }
@@ -798,7 +837,13 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode, uint32_t imm
       intrins->dyninsz = 2;
       intrin_setregmode(intrins, DYNREG_INOUT);
     } else if(intrins->dyninsz == 0){
-      intrins->dyninsz = 1;
+      if (intrins->insz >= 2) {
+        intrins->dyninsz = 2;
+        intrin_setregmode(intrins, DYNREG_TWOIN);
+      } else {
+        lua_assert(intrins->insz == 1);
+        intrins->dyninsz = 1;
+      }
     }
   } else if (intrins->dyninsz == 0) {
     if (intrin_regmode(intrins) == DYNREG_STORE) {
@@ -814,7 +859,8 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode, uint32_t imm
   if (intrins->flags & INTRINSFLAG_PREFIX) {
     intrins->prefix = (uint8_t)imm;
     /* Prefix values should be declared before an immediate value in the 
-    ** __mcode definition.
+    ** __mcode definition the second number declared is shifted right when
+    ** packed in the ctype.
     */
     imm >>= 8;
   }
@@ -822,6 +868,8 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode, uint32_t imm
   if (intrins->flags & INTRINSFLAG_IMMB) {
     intrins->immb = (uint8_t)(imm & 0xff);
   }
+
+  lua_assert(sib > 0 && sib < cts->top);
   
   return intrinsic_toffi(cts, intrins, opcode, sib);
 }
@@ -1149,8 +1197,7 @@ void lj_intrinsic_asmlib(lua_State *L, GCtab *mt)
 void lj_intrinsic_init(lua_State *L)
 {
   uint32_t i, count = (uint32_t)(sizeof(reglut)/sizeof(RegEntry));
-  GCtab *t = lj_tab_new_ah(L, 0, (int)(count*1.3));
-  settabV(L, L->top++, t);
+  GCtab *t = ctype_cts(L)->miscmap;
 
   /* Build register name lookup table */
   for (i = 0; i < count; i++) {

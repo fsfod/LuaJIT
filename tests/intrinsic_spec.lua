@@ -7,6 +7,7 @@ local nop = "\x90"
 ffi.cdef[[
 typedef float float4 __attribute__((__vector_size__(16)));
 typedef int int4 __attribute__((__vector_size__(16)));
+typedef uint8_t byte16 __attribute__((__vector_size__(16)));
 ]]
 
 local float4 = ffi.new("float[4]")
@@ -78,6 +79,8 @@ context("__mcode", function()
     assert_error(function() ffi.cdef([[int test6() __mcode("ff" 1)]]) end)
     assert_error(function() ffi.cdef([[int test7() __mcode("ff", )]]) end)
     assert_error(function() ffi.cdef([[int test8() __mcode("ff", 1]]) end)
+    
+    assert_error(function() ffi.cdef([[int test8() __mcode("ff", 1) ]]) end)
     
     assert_error(function() ffi.cdef([[__mcode("90")]]) end)
     assert_error(function() ffi.cdef([[int __mcode("90")]]) end)
@@ -225,6 +228,48 @@ context("__mcode", function()
       
     end)
   end
+end)
+
+context("__reglist", function()
+
+  it("incomplete reglist", function()
+    assert_error(function() ffi.cdef([[int test1() __reglist]]) end)
+    assert_error(function() ffi.cdef([[int test2() __reglist(]]) end)
+    assert_error(function() ffi.cdef([[int test3() __reglist();]]) end)
+    assert_error(function() ffi.cdef([[int test3() __reglist(,);]]) end)
+    assert_error(function() ffi.cdef([[int test3() __reglist("in", eax);]]) end)
+    assert_error(function() ffi.cdef([[int test3() __reglist(in, ]]) end)
+  
+    assert_error(function() ffi.cdef([[int test3() __reglist(in, eax, ]]) end)
+    assert_error(function() ffi.cdef([[int test3() __reglist("in, ]]) end)
+
+    --invalid reglist name
+    assert_error(function() ffi.cdef([[int test3() __reglist(inn, eax)]]) end)
+    assert_error(function() ffi.cdef([[int test3() __reglist(o, eax)]]) end)
+    assert_error(function() ffi.cdef([[int test3() __reglist(oout, eax)]]) end)
+    assert_error(function() ffi.cdef([[int test3() __reglist(o]]) end)
+    assert_error(function() ffi.cdef([[int test3() __reglist(ou]]) end)
+  end)
+  
+  it("pcmpstr", function()
+    ffi.cdef([[void pcmpistri(byte16 string, byte16 mask) __mcode("660F3A63rMU", 0x2) __reglist(out, int32_t ecx)]])
+    
+    local charlist = ffi.new("byte16", 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1)
+    local string = ffi.new("byte16",   2, 2, 3, 2, 1, 1, 2, 3, 4, 5, 6, 7, 7, 7, 2, 2)
+
+    local ecx = ffi.C.pcmpistri(string, charlist)
+    assert_equal(ecx, 4)
+    
+    ffi.cdef([[
+      void pcmpistrm(byte16 string, byte16 mask) __mcode("660F3A62rMU", 0x40) __reglist(out, byte16 xmm0v);
+      int32_t pmovmskb(byte16 mask) __mcode("660FD7rM");
+    ]])
+    
+    local mask = ffi.C.pcmpistrm(string, charlist)
+    mask = ffi.C.pmovmskb(mask)
+    
+    assert_equal(mask, 48)
+  end)
 end)
 
 context("nopinout", function()
