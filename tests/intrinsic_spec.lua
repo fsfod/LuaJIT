@@ -70,32 +70,51 @@ context("intrinsic errors", function()
 
 end)
 
-context("__mcode parsing", function()
+context("__mcode", function()
   
   it("incomplete mcode def", function()
     assert_error(function() ffi.cdef([[int test1() __mcode]]) end)
     assert_error(function() ffi.cdef([[int test2() __mcode(]]) end)
     assert_error(function() ffi.cdef([[int test3() __mcode()]]) end)
+    assert_error(function() ffi.cdef([[int test3() __mcode(,)]]) end)
     assert_error(function() ffi.cdef([[int test4() __mcode("ff"]]) end)
-    assert_error(function() ffi.cdef([[int test5() __mcode("ff" 1)]]) end)
-    assert_error(function() ffi.cdef([[int test6() __mcode("ff", )]]) end)
-    assert_error(function() ffi.cdef([[int test7() __mcode("ff", 1]]) end)
+    assert_error(function() ffi.cdef([[int test5() __mcode("ff",,)]]) end)
+    assert_error(function() ffi.cdef([[int test6() __mcode("ff" 1)]]) end)
+    assert_error(function() ffi.cdef([[int test7() __mcode("ff", )]]) end)
+    assert_error(function() ffi.cdef([[int test8() __mcode("ff", 1]]) end)
     
     assert_error(function() ffi.cdef([[__mcode("90")]]) end)
     assert_error(function() ffi.cdef([[int __mcode("90")]]) end)
   end)
-  
 
   it("bad mcoddef", function() 
-   -- assert_error(function() ffi.cdef([[struct c{float a __mcode("90");};]]) end)
-    --assert_error(function() ffi.cdef([[struct b{float a; __mcode("90");};]]) end)
-    
     assert_error(function() ffi.cdef([[void test1(float a) __mcode(0);]]) end)
     assert_error(function() ffi.cdef([[void test2(float a) __mcode("");]]) end)
     assert_error(function() ffi.cdef([[void test3(float a) __mcode("0");]]) end)
     assert_error(function() ffi.cdef([[void test4(float a) __mcode("rff");]]) end)
+    assert_error(function() ffi.cdef([[struct c{float a __mcode("90");};]]) end)
+    
+    assert_error(function() ffi.cdef([[struct b{float a; __mcode("90");};]]) end)
   end)
   
+  it("multidef rollback", function()
+  
+    --check ctype rollback after parsing a valid intrinsic the line before
+    assert_error(function() ffi.cdef[[
+      double multi1(double a) __mcode("90");
+      double multi2(double a) __mcode("0");
+    ]] end)
+    
+    assert_error(function() ffi.C.multi1() end)
+    assert_error(function() ffi.C.multi2() end)
+    
+    assert_not_error(function() ffi.cdef[[
+      int32_t multi1(int32_t a) __mcode("90");
+    ]] end)
+    
+    assert_equal(ffi.C.multi1(1.1), 1)
+  end)
+
   it("bad ffi types mcode", function()
     assert_error(function() ffi.cdef([[void testffi1(float a2, ...) __mcode("90");]]) end)
     assert_error(function() ffi.cdef([[void testffi2(complex a2) __mcode("90");]]) end)
@@ -106,6 +125,25 @@ context("__mcode parsing", function()
       void testffi2(float2 a2) __mcode("90")
     ]]) end)
   end)
+
+  it("bad args", function()
+    ffi.cdef([[float calltest_addss(float n1, float n2) __mcode("F30F58rM");]])
+    
+    local addss = ffi.C.calltest_addss
+    
+    assert_equal(addss(1, 2), 3)
+    --too few arguments
+    assert_error(function() addss() end)
+    assert_error(function() addss(nil) end)
+    assert_error(function() addss(1) end)
+    assert_error(function() addss(1, nil) end)
+    
+    --too many arguments
+    assert_error(function() addss(1, 2, nil) end)
+    assert_error(function() addss(1, 2, 3) end) 
+    assert_error(function() addss(1, 2, 3, 4) end)
+  end)
+
 end)
 
 context("nopinout", function()

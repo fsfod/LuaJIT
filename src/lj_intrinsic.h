@@ -70,7 +70,7 @@ typedef enum INTRINSFLAGs {
 typedef struct AsmIntrins{
   union {
     IntrinsicWrapper wrapped;
-    void* mcode; /* Raw unwrapped machine code temporally saved here */
+    const void* mcode; /* Raw unwrapped machine code temporally saved here */
   };
   union {
     uint8_t in[LJ_INTRINS_MAXREG];
@@ -98,6 +98,9 @@ typedef struct AsmIntrins{
 }AsmIntrins;
 
 #define intrin_regmode(intrins) ((intrins)->flags & INTRINSFLAG_REGMODEMASK)
+#define intrin_setregmode(intrins, mode) \
+  (intrins)->flags = ((intrins)->flags & ~INTRINSFLAG_REGMODEMASK)|(mode)
+
 /* odd numbered have an dynamic output */
 #define intrin_dynrout(intrins) (intrin_regmode(intrins) & 1)
 

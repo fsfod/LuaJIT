@@ -1223,7 +1223,7 @@ static int crec_call(jit_State *J, RecordFFData *rd, GCcdata *cd)
 
 #if LJ_HASINTRINSICS
 
-void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *ct)
+void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *func)
 {
   CTState *cts = ctype_ctsG(J2G(J));
   TRef tintrins = J->base[0], arg = TREF_NIL;
@@ -1233,10 +1233,10 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *ct)
   int argofs = 1;
   CType *ctr = NULL, *cta = NULL;
 
-  if (ctype_cid(ct->info) != 0) {
-    intrins = lj_intrinsic_get(cts, ctype_cid(ct->info));
+  if (ctype_cid(func->info) != 0) {
+    intrins = lj_intrinsic_get(cts, ctype_typeid(cts, func));
     
-    cta = ctype_get(cts, ct->sib);
+    cta = ctype_get(cts, func->sib);
     
     tintrins = lj_ir_kgc(J, (GCobj*)(((char*)intrins)-sizeof(GCcdata)), IRT_CDATA);
   } else {
@@ -1253,8 +1253,8 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *ct)
     CType *d;
     
     if (cta) {
-      d = ctype_rawchild(cts, cta);
-      reg = d->size;
+      reg = cta->size;
+      d = ctype_rawchild(cts, cta);  
       if (cta->sib)
         cta = ctype_get(cts, cta->sib);
     } else {
@@ -1265,7 +1265,7 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *ct)
 
     if (ASMRID(reg) < RID_MAX_GPR) {
       if (!cta && tref_isnumber(tra)) {
-        tr = lj_opt_narrow_tobit(J, tra);
+        tr = lj_opt_narrow_toint(J, tra);
       }
     } else {
       uint32_t kind = ASMREGKIND(reg);
@@ -1299,16 +1299,19 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *ct)
   if (intrins->flags & INTRINSFLAG_MEMORYSIDE) {
     emitir(IRT(IR_XBAR, IRT_NIL), 0, 0);
   }
-
-  ctr = cta;
+  
+  if (cta) {
+    /* Fetch the output register ctype list */
+    ctr = ctype_child(cts, ctype_child(cts, func));
+  }
 
   for (i = 0; i < intrins->outsz; i++) {
     uint32_t reg;
     
-    if (cta) {
-      reg = cta->size;
-      if (cta->sib)
-        cta = ctype_get(cts, cta->sib);
+    if (ctr) {
+      reg = ctr->size;
+      if (ctr->sib)
+        ctr = ctype_get(cts, ctr->sib);
     } else {
       reg = intrins->out[i];
     }
@@ -1322,7 +1325,9 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *ct)
                         tintrins, ASMRID(reg));
   }
 
-  cta = ctr;
+  if (cta) {
+    ctr = ctype_child(cts, ctype_child(cts, func));
+  }
 
   /* Second pass to box values after all ASMRET have run to shuffle/spill the
    * output registers. 
@@ -1332,11 +1337,11 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *ct)
     uint32_t reg;
     uint32_t kind;
 
-    if (cta) {
-      id = ctype_cid(cta->info);
-      reg = cta->size;
-      if (cta->sib)
-        cta = ctype_get(cts, cta->sib);
+    if (ctr) {
+      id = ctype_cid(ctr->info);
+      reg = ctr->size;
+      if (ctr->sib)
+        ctr = ctype_get(cts, cta->sib);
     } else {
       reg = intrins->out[i];
     }
@@ -1344,7 +1349,7 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *ct)
 
     if (ASMRID(reg) < RID_MAX_GPR) {
       CTypeID cid;
-      if (!cta) {
+      if (!ctr) {
         /* If no ctype is specified use the default type for the register kind */
         if (kind == REGKIND_GPRI32)
           continue;
