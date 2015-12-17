@@ -6,7 +6,17 @@ telescope.make_assertion("jit", "", tester.testsingle)
 telescope.make_assertion("jitchecker", "", tester.testwithchecker)
 telescope.make_assertion("noexit", "", tester.testnoexit)
 
+filter = filter or ""
+
+local function printfail()
+  print("  Failed!")
+end
+
 local callbacks = {}
+
+callbacks.err = printfail
+callbacks.fail = printfail
+
 
 function callbacks.before(t) 
   print("running", t.name) 
@@ -22,8 +32,21 @@ end
 local buffer = {}
 local testfilter
 
-if test_pattern then
-  testfilter = function(t) return t.name:match(test_pattern) end
+if filter then
+
+  if(type(filter) == "table") then  
+    testfilter = function() 
+      for _,patten in ipairs(filter) do
+        if t.name:match(filter) then
+          return true
+        end
+      end
+      
+      return false
+    end
+  elseif(filter ~= "") then 
+    testfilter = function(t) return t.name:match(filter) end
+  end
 end
 
 local results = telescope.run(contexts, callbacks, testfilter)
