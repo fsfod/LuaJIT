@@ -131,6 +131,7 @@ typedef enum REGKINDFPR {
   REGKIND_VEC_START = REGKIND_V128,
 }REGKINDFPR;
 
+uint8_t regkind_it[16];
 CTypeID1 regkind_ct[16];
 
 #define ASMRID(r) ((r)&63)
@@ -140,6 +141,10 @@ CTypeID1 regkind_ct[16];
 #define rk_ctypegpr(kind) (regkind_ct[(kind)])
 #define rk_ctypefpr(kind) (regkind_ct[(kind)+8])
 #define rk_ctype(rid, kind) ((rid) < RID_MAX_GPR ? rk_ctypegpr(kind) : rk_ctypefpr(kind))
+
+#define rk_irtgpr(kind) ((IRType)regkind_it[(kind)])
+#define rk_irtfpr(kind) ((IRType)regkind_it[(kind)+8])
+#define rk_irt(rid, kind) ((rid) < RID_MAX_GPR ? rk_irtgpr(kind) : rk_irtfpr(kind))
 
 #define rk_isvec(kind) ((kind) >= REGKIND_VEC_START)
 

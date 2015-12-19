@@ -32,6 +32,8 @@
 #include "lj_crecord.h"
 #include "lj_dispatch.h"
 #include "lj_strfmt.h"
+#include "lj_intrinsic.h"
+#include "lj_target.h"
 
 /* Some local macros to save typing. Undef'd at the end. */
 #define IR(ref)			(&J->cur.ir[(ref)])
@@ -41,6 +43,14 @@
 
 #define emitconv(a, dt, st, flags) \
   emitir(IRT(IR_CONV, (dt)), (a), (st)|((dt) << 5)|(flags))
+
+
+#define MKREGKIND_IT(name, it, ct) it,
+
+uint8_t regkind_it[16] = {
+  RKDEF_GPR(MKREGKIND_IT)
+  RKDEF_FPR(MKREGKIND_IT)
+};
 
 /* -- C type checks ------------------------------------------------------- */
 
@@ -1135,6 +1145,8 @@ static void crec_snap_caller(jit_State *J)
   J->base[-1] = ftr; J->pc = pc;
 }
 
+void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *cts);
+
 /* Record function call. */
 static int crec_call(jit_State *J, RecordFFData *rd, GCcdata *cd)
 {
@@ -1146,7 +1158,8 @@ static int crec_call(jit_State *J, RecordFFData *rd, GCcdata *cd)
     ct = ctype_rawchild(cts, ct);
   }
   if (ctype_isintrinsic(ct->info)) {
-    lj_trace_err(J, LJ_TRERR_NYICALL);
+    crec_call_intrins(J, rd, ct);
+    return 1;
   }else if (ctype_isfunc(ct->info)) {
     TRef func = emitir(IRT(IR_FLOAD, tp), J->base[0], IRFL_CDATA_PTR);
     CType *ctr = ctype_rawchild(cts, ct);
@@ -1206,6 +1219,169 @@ static int crec_call(jit_State *J, RecordFFData *rd, GCcdata *cd)
   }
   return 0;
 }
+
+#if LJ_HASINTRINSICS
+
+void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *func)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  TRef tintrins = J->base[0], arg = TREF_NIL;
+  AsmIntrins *intrins;
+  size_t i;
+  IRType it;
+  int argofs = 1;
+  CType *ctr = NULL, *cta = NULL;
+
+  if (ctype_cid(func->info) != 0) {
+    intrins = lj_intrinsic_get(cts, ctype_typeid(cts, func));
+    
+    cta = ctype_get(cts, func->sib);
+    
+    tintrins = lj_ir_kgc(J, (GCobj*)(((char*)intrins)-sizeof(GCcdata)), IRT_CDATA);
+  } else {
+    /* guard on the intrinsic cdata pointer */
+    tintrins = lj_ir_kgc(J, gcval(&rd->argv[0]), IRT_CDATA);
+    emitir(IRTG(IR_EQ, IRT_CDATA), J->base[0], tintrins);
+    intrins = (AsmIntrins*)cdataptr(cdataV(&rd->argv[0]));
+  }
+
+  /* Convert parameters and load them into the input registers */
+  for (i = 0; i < intrins->insz; i++) {
+    TRef tr = 0, tra = J->base[i+argofs];
+    uint32_t reg;
+    CType *d;
+    
+    if (cta) {
+      reg = cta->size;
+      d = ctype_rawchild(cts, cta);  
+      if (cta->sib)
+        cta = ctype_get(cts, cta->sib);
+    } else {
+      /* Cast any value for gpr/vec to void* for untyped intrinsics */
+      d = ctype_get(cts, CTID_P_VOID);
+      reg = intrins->in[i];
+    }
+
+    if (ASMRID(reg) < RID_MAX_GPR) {
+      if (!cta && tref_isnumber(tra)) {
+        tr = lj_opt_narrow_toint(J, tra);
+      }
+    } else {
+      uint32_t kind = ASMREGKIND(reg);
+
+      if (rk_isvec(kind)) {
+        /* NYI: support for vectors */
+        lj_trace_err(J, LJ_TRERR_NYIVEC);
+      } else if(!cta){
+        tr = lj_ir_tonum(J, tra);
+
+        if (kind == REGKIND_FPR32) {
+          tr = emitconv(tr, IRT_FLOAT, IRT_NUM, 0);
+        }
+      }
+    }
+
+    if(!tr)
+      tr = crec_ct_tv(J, d, 0, tra, &rd->argv[i+argofs]);
+
+    arg = emitir(IRT(IR_CARG, IRT_NIL), arg, tr);
+  }
+
+  it = IRT_NIL;
+  /* Skip emitting IR_ASMREG for the first dynamic output register */
+  if (intrin_dynrout(intrins)) {
+    it = rk_irt(ASMRID(intrins->out[0]), ASMREGKIND(intrins->out[0]));
+  }
+
+  J->base[0] = tintrins = emitir(IRT(IR_ASMINS, it), arg, tintrins);
+
+  if (intrins->flags & INTRINSFLAG_MEMORYSIDE) {
+    emitir(IRT(IR_XBAR, IRT_NIL), 0, 0);
+  }
+  
+  if (cta) {
+    /* Fetch the output register ctype list */
+    ctr = ctype_child(cts, ctype_child(cts, func));
+  }
+
+  for (i = 0; i < intrins->outsz; i++) {
+    uint32_t reg;
+    
+    if (ctr) {
+      reg = ctr->size;
+      if (ctr->sib)
+        ctr = ctype_get(cts, ctr->sib);
+    } else {
+      reg = intrins->out[i];
+    }
+
+    /* no IR_ASMREG for opcodes with dynamic registers */
+    if (i == 0 && intrin_dynrout(intrins)) {
+      continue;
+    }
+
+    J->base[i] = emitir(IRT(IR_ASMRET, rk_irt(ASMRID(reg), ASMREGKIND(reg))),
+                        tintrins, ASMRID(reg));
+  }
+
+  if (cta) {
+    ctr = ctype_child(cts, ctype_child(cts, func));
+  }
+
+  /* Second pass to box values after all ASMRET have run to shuffle/spill the
+   * output registers. 
+   */
+  for (i = 0; i < intrins->outsz; i++) {
+    CTypeID id = 0;
+    uint32_t reg;
+    uint32_t kind;
+
+    if (ctr) {
+      id = ctype_cid(ctr->info);
+      reg = ctr->size;
+      if (ctr->sib)
+        ctr = ctype_get(cts, cta->sib);
+    } else {
+      reg = intrins->out[i];
+    }
+    kind = ASMREGKIND(reg);
+
+    if (ASMRID(reg) < RID_MAX_GPR) {
+      CTypeID cid;
+      if (!ctr) {
+        /* If no ctype is specified use the default type for the register kind */
+        if (kind == REGKIND_GPRI32)
+          continue;
+        id = rk_ctypegpr(kind);
+      }
+
+      cid = ctype_typeid(cts, ctype_raw(cts, id));
+      if (cid != CTID_INT32) {
+        /* Box the u32/64 bit value in the register */
+        J->base[i] = emitir(IRT(IR_CNEWI, IRT_CDATA), lj_ir_kint(J, id), J->base[i]);
+      }
+    } else {
+      if (kind == REGKIND_FPR32) {
+        J->base[i] = emitconv(J->base[i], IRT_NUM, IRT_FLOAT, 0);
+      } else if(rk_isvec(kind)) {
+        /* NYI: support for vectors */
+        lj_trace_err(J, LJ_TRERR_NYIVEC);
+      } else {
+        lua_assert(kind == REGKIND_FPR64);
+      }
+    }
+  }
+  
+  /* Intrinsics are assumed to always have side effects */
+  J->needsnap = 1;
+  rd->nres = intrins->outsz;
+}
+#else
+void crec_call_intrins(jit_State *J, RecordFFData *rd, CTypeID id)
+{
+  UNUSED(J);UNUSED(rd);UNUSED(id);
+}
+#endif
 
 void LJ_FASTCALL recff_cdata_call(jit_State *J, RecordFFData *rd)
 {
