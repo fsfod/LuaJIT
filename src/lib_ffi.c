@@ -359,8 +359,8 @@ LJLIB_PUSH("ffi") LJLIB_SET(__metatable)
 
 #define LJLIB_MODULE_ffi_clib
 
-/* Index C library by a name. */
-static TValue *ffi_clib_index(lua_State *L)
+/* Index C/Intrinsic library by a name. */
+static TValue *ffi_clib_index(lua_State *L, int isC)
 {
   TValue *o = L->base;
   CLibrary *cl;
@@ -369,12 +369,15 @@ static TValue *ffi_clib_index(lua_State *L)
   cl = (CLibrary *)uddata(udataV(o));
   if (!(o+1 < L->top && tvisstr(o+1)))
     lj_err_argt(L, 2, LUA_TSTRING);
-  return lj_clib_index(L, cl, strV(o+1));
+  if (isC)
+    return lj_clib_index(L, cl, strV(o+1));
+  else
+    return lj_asmlib_index(L, cl, strV(o+1));
 }
 
 LJLIB_CF(ffi_clib___index)	LJLIB_REC(clib_index 1)
 {
-  TValue *tv = ffi_clib_index(L);
+  TValue *tv = ffi_clib_index(L, 1);
   if (tviscdata(tv)) {
     CTState *cts = ctype_cts(L);
     GCcdata *cd = cdataV(tv);
@@ -394,7 +397,7 @@ LJLIB_CF(ffi_clib___index)	LJLIB_REC(clib_index 1)
 
 LJLIB_CF(ffi_clib___newindex)	LJLIB_REC(clib_index 0)
 {
-  TValue *tv = ffi_clib_index(L);
+  TValue *tv = ffi_clib_index(L, 0);
   TValue *o = L->base+2;
   if (o < L->top && tviscdata(tv)) {
     CTState *cts = ctype_cts(L);
@@ -423,6 +426,19 @@ LJLIB_CF(ffi_clib___gc)
   if (o < L->top && tvisudata(o) && udataV(o)->udtype == UDTYPE_FFI_CLIB)
     lj_clib_unload((CLibrary *)uddata(udataV(o)));
   return 0;
+}
+
+#include "lj_libdef.h"
+
+/* -- intrinsic library metamethods ------------------------------------ */
+
+#define LJLIB_MODULE_ffi_asmlib
+
+LJLIB_CF(ffi_asmlib___index)	LJLIB_REC(clib_index 2)
+{
+  TValue *tv = ffi_clib_index(L, 0);
+  copyTV(L, L->top-1, tv);
+  return 1;
 }
 
 #include "lj_libdef.h"
@@ -492,7 +508,7 @@ LJLIB_CF(ffi_cdef)
   return 0;
 }
 
-LJLIB_PUSH(top-8) LJLIB_SET(!) /* Store reference to intrinsic register lookup table */
+LJLIB_PUSH(top-10) LJLIB_SET(!) /* Store reference to intrinsic register lookup table */
 
 LJLIB_CF(ffi_intrinsic)
 {
@@ -775,7 +791,7 @@ LJLIB_CF(ffi_abi)	LJLIB_REC(.)
 
 #undef H_
 
-LJLIB_PUSH(top-9) LJLIB_SET(!)  /* Store reference to miscmap table. */
+LJLIB_PUSH(top-11) LJLIB_SET(!)  /* Store reference to miscmap table. */
 
 LJLIB_CF(ffi_metatype)
 {
@@ -827,9 +843,10 @@ LJLIB_CF(ffi_load)
   return 1;
 }
 
-LJLIB_PUSH(top-4) LJLIB_SET(C)
-LJLIB_PUSH(top-3) LJLIB_SET(os)
-LJLIB_PUSH(top-2) LJLIB_SET(arch)
+LJLIB_PUSH(top-4)  LJLIB_SET(C)
+LJLIB_PUSH(top-8) LJLIB_SET(ASM)
+LJLIB_PUSH(top-3)  LJLIB_SET(os)
+LJLIB_PUSH(top-2)  LJLIB_SET(arch)
 
 #include "lj_libdef.h"
 
@@ -864,6 +881,8 @@ LUALIB_API int luaopen_ffi(lua_State *L)
   CTState *cts = lj_ctype_init(L);
   settabV(L, L->top++, (cts->miscmap = lj_tab_new(L, 0, 1)));
   lj_intrinsic_init(L);
+  LJ_LIB_REG(L, NULL, ffi_asmlib);
+  lj_intrinsic_asmlib(L, tabV(L->top-1));/* Create ffi.ASM intrinsic namespace */
   cts->finalizer = ffi_finalizer(L);
   LJ_LIB_REG(L, NULL, ffi_meta);
   /* NOBARRIER: basemt is a GC root. */

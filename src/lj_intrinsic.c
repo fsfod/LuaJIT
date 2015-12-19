@@ -68,6 +68,45 @@ RegEntry reglut[] = {
 #endif
 };
 
+#define XO_0F2(b1, b2)	((uint32_t)(0x0ffc + (0x##b2<<24) + (0x##b1<<16)))
+
+#define MKBUILTIN(name, op, in, out, mod, modrm)\
+  {#name, op, in, out, 0, 0},
+
+/*FIXME: could be valid on other platforms*/
+#define REGEND 0xff
+#define NOREG {REGEND}
+#define REG1(reg) {RID_##reg, REGEND, REGEND, REGEND}
+#define REG2(reg1, reg2) {RID_##reg1, RID_##reg2, REGEND, REGEND}
+#define REG3(reg1, reg2, reg3) {RID_##reg1, RID_##reg2, RID_##reg3, REGEND}
+#define REG4(reg1, reg2, reg3, reg4) {RID_##reg1, RID_##reg2, RID_##reg3, RID_##reg4}
+
+typedef struct BuiltinIntrins {
+  const char *name;
+  x86Op op;
+  /* List size is implicitly defined based on first REGEND RID found */
+  uint8_t in[4];
+  uint8_t out[4];
+  uint16_t mod;
+  uint16_t flags;
+}BuiltinIntrins;
+
+static const BuiltinIntrins builtin[] = {
+  {"cpuid",  XO_0f(a2),      REG2(EAX, ECX), REG4(EAX, EBX, ECX, EDX), 0, 0},
+  {"rdtsc",  XO_0f(31),      NOREG,          REG2(EAX, EDX),           0, 0},
+  {"rdtscp", XO_0F2(01, f9), NOREG,          REG3(EAX, EDX, ECX),      0, 0},
+  {"rdpmc",  XO_0f(33),      REG1(ECX),      REG2(EAX, EDX),           0, 0},
+
+  /* Note part of the opcode is encoded in MODRM(second register) */
+  {"prefetchnta", XO_0f(18), REG2(EAX, EAX), NOREG, 0, DYNREG_ONEOPENC },
+  {"prefetch0",   XO_0f(18), REG2(EAX, ECX), NOREG, 0, DYNREG_ONEOPENC },
+  {"prefetch1",   XO_0f(18), REG2(EAX, EDX), NOREG, 0, DYNREG_ONEOPENC },
+  {"prefetch2",   XO_0f(18), REG2(EAX, EBX), NOREG, 0, DYNREG_ONEOPENC },
+
+  {"mfence", XO_0F2(ae, f0), NOREG,          NOREG, 0, INTRINSFLAG_MEMORYSIDE },
+  {"sfence", XO_0F2(ae, f8), NOREG,          NOREG, 0, INTRINSFLAG_MEMORYSIDE },
+  {"lfence", XO_0F2(ae, e8), NOREG,          NOREG, 0, INTRINSFLAG_MEMORYSIDE },
+};
 
 static int parse_fprreg(const char *name, uint32_t len)
 {
@@ -586,6 +625,91 @@ int lj_intrinsic_call(CTState *cts, CType *ct)
   return untyped_call(cts, intrins, ct);
 }
 
+static uint32_t walkreglist(AsmIntrins* intrins, const uint8_t *list, int regsetid)
+{
+  uint32_t i;
+  uint8_t *output = regsetid == REGSET_IN ? intrins->in : intrins->out;
+
+  for (i = 0; i < 4; i++) {
+    uint8_t r = list[i];
+    /* Check for special marker register id which marks the end of list */
+    if (r == REGEND)break;
+    output[i] = r;
+
+    if (rk_isvec(ASMREGKIND(r))) {
+      intrins->flags |= INTRINSFLAG_VECTOR;
+    }
+  }
+
+  if (REGSET_IN) {
+    intrins->insz = i;
+  } else {
+    intrins->outsz = i;
+  }
+
+  return i;
+}
+
+static CTypeID lj_intrinsic_builtin(lua_State *L, const BuiltinIntrins* builtin)
+{
+  CTState *cts = ctype_cts(L);
+  CTypeID id;
+  AsmIntrins _intrins;
+  AsmIntrins *intrins = &_intrins;
+  memset(&_intrins, 0, sizeof(AsmIntrins));
+
+  if (intrin_regmode(builtin) != DYNREG_FIXED) {
+    intrins->opcode = builtin->op;
+  } else {
+    intrins->asmsz = (-(int8_t)builtin->op)-1;
+    intrins->mcode = ((char*)&builtin->op) + 4-intrins->asmsz;
+  }
+
+  intrins->insz = walkreglist(intrins, builtin->in, 0);
+  intrins->outsz = walkreglist(intrins, builtin->out, 1);
+  intrins->mod = builtin->mod;
+  intrins->flags |= builtin->flags;
+
+  /* The Second input register id is part of the opcode */
+  if (intrin_regmode(intrins) == DYNREG_ONEOPENC)
+    intrins->insz = 1;
+
+  if (lj_asm_intrins(L, intrins) != 0) {
+    lj_err_callermsg(L, "Failed to create interpreter wrapper for built-in intrinsic");
+  }
+
+  id = register_intrinsic(L, intrins);
+  ctype_setname(ctype_get(cts, id), lj_str_newz(L, builtin->name));
+
+  return id;
+}
+
+TValue *lj_asmlib_index(lua_State *L, CLibrary *cl, GCstr *name)
+{
+  TValue *tv = lj_tab_setstr(L, cl->cache, name);
+  if (LJ_UNLIKELY(tvisnil(tv) || !tviscdata(tv))) {
+    if (tvisnil(tv)) {
+      lj_err_callerv(L, LJ_ERR_FFI_NODECL, strdata(name));
+    }
+    /*TODO: deferred/dynamic intrinsic creation */
+    lua_assert(0);
+  }
+
+  return tv;
+}
+
+void lj_intrinsic_asmlib(lua_State *L, GCtab *mt)
+{
+  uint32_t i, count = (sizeof(builtin)/sizeof(BuiltinIntrins));
+  CLibrary *cl = lj_clib_default(L, mt);
+  lj_tab_resize(L, cl->cache, 0, hsize2hbits(count));
+
+  /* Could maybe delay creation of intrinsics until first use of each one */
+  for (i = 0; i < count ; i++) {
+    lj_intrinsic_builtin(L, &builtin[i]);
+    copyTV(L, lj_tab_setstr(L, cl->cache, lj_str_newz(L, builtin[i].name)), --L->top);
+  }
+}
 
 void lj_intrinsic_init(lua_State *L)
 {
@@ -613,6 +737,17 @@ void lj_intrinsic_init(lua_State *L)
   /* Still need a table left on the stack so the LJ_PUSH indexes stay correct */
   settabV(L, L->top++, lj_tab_new(L, 0, 9));
 }
+
+void lj_intrinsic_asmlib(lua_State *L, GCtab *mt)
+{
+  lj_clib_default(L, mt);
+}
+
+TValue *lj_asmlib_index(lua_State *L, CLibrary *cl, GCstr *name)
+{
+  lj_err_callermsg(L, "Intrinsics disabled");
+}
+
 #endif
 
 

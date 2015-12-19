@@ -195,6 +195,146 @@ end
   
 end)
 
+it("prefetch", function()
+
+  float4 = float4 and ffi.new("float[4]")
+
+  local function testprefetch(a, b, c)
+    local n = a+b
+    local ptr = float4_2+c
+    asm.prefetch2(ptr)
+    asm.prefetch0(float4ptr+a)
+    asm.prefetchnta(byte16)
+    asm.prefetch0(float4+a)
+    asm.prefetch1(float4+b)
+    return (ptr) ~= 0 and ptr[0] + ptr[0] 
+  end
+  
+  assert_jit(4, testprefetch, 1, 2, 3)
+end)
+
+it("memory fences", function()
+
+  local function mfence(n)
+    asm.mfence()
+    return n
+  end
+  assert_jit(9, mfence, 9)
+    
+  local function sfence(n)
+    asm.sfence()
+    return n
+  end 
+  assert_jit(9, sfence, 9)
+  
+  local function lfence(n)
+    asm.lfence()
+    return n
+  end
+  assert_jit(9, lfence, 9)
+end)
+
+
+it("popcnt", function()
+
+  local popcnt = ffi.intrinsic("f30fb8rM", {rin = {"eax"}, rout = {"eax"}})
+
+  assert_equal(popcnt(7),    3)
+  assert_equal(popcnt(1024), 1)
+  assert_equal(popcnt(1023), 10)
+
+  local function testpopcnt(num)
+    return (popcnt(num))
+  end
+  
+  assert_jit(10, testpopcnt, 1023)
+  assert_noexit(32, testpopcnt, -1)
+  assert_noexit(0, testpopcnt, 0)
+  assert_noexit(1, testpopcnt, 1)
+  
+  --check unfused
+  popcnt = ffi.intrinsic("f30fb8r", {rin = {"eax"}, rout = {"eax"}})
+  
+  assert_equal(popcnt(7),    3)
+  assert_equal(popcnt(1024), 1)
+end)
+
+local function getcpuidstr(eax)
+  int4[0] = 0; int4[1] = 0; int4[2] = 0; int4[3] = 0
+  int4[0], int4[1], int4[2], int4[3] = asm.cpuid(eax, 0)
+  return (ffi.string(ffi.cast("char*", int4+0)))
+end
+
+it("cpuid_brand", function()
+
+  local brand = getcpuidstr(-2147483646)..getcpuidstr(-2147483645)..getcpuidstr(-2147483644)
+  print("Processor brand: "..brand)
+
+  local function testcpuid_brand()    
+    local s = ""
+    
+    int4[0] = 0
+    int4[1] = 0 
+    int4[2] = 0 
+    int4[3] = 0
+    
+    int4[0], int4[1], int4[2], int4[3] = asm.cpuid(-2147483646, 0)
+    s = s..ffi.string(ffi.cast("char*", int4+0))
+    
+    int4[0], int4[1], int4[2], int4[3] = asm.cpuid(-2147483645, 0)
+    s = s..ffi.string(ffi.cast("char*", int4+0))
+    
+    int4[0], int4[1], int4[2], int4[3] = asm.cpuid(-2147483644, 0)
+    s = s..ffi.string(ffi.cast("char*", int4+0))
+  
+    return s
+  end
+  
+  assert_jit(brand, testcpuid_brand)
+end)
+
+it("rdtsc", function()
+  
+  local rdtsc = ffi.intrinsic("0F31", {rout = {"eax", "edx"}}) 
+  
+  local function getticks()
+    union64.low, union64.high = rdtsc()
+    return union64.i64
+  end
+  
+  local prev = 0ll
+  
+  local function checker(i, result)
+    assert(result > prev)
+    --print(tonumber(result-prev))
+    prev = result
+  end
+  
+  assert_jitchecker(checker, getticks)
+  
+end)
+
+it("rdtscp", function()
+  
+  local coreid = 0 
+  
+  local function getticks()
+    union64.low, union64.high, coreid = asm.rdtscp()
+    return union64.i64, coreid
+  end
+  
+  local prev = 0ll
+  
+  local function checker(i, result, coreid)
+    assert(result > prev)
+    assert(type(coreid) == "number")
+    --print(tonumber(result-prev))
+    prev = result
+  end
+  
+  assert_jitchecker(checker, getticks)  
+end)
+
 it("idiv", function()
 
   local idiv = asmfromstr("\x99\xF7\xF9", {rin = {"eax", "ecx"}, rout = {"eax", "edx"}})

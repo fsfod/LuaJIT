@@ -1503,9 +1503,16 @@ void LJ_FASTCALL recff_clib_index(jit_State *J, RecordFFData *rd)
     CLibrary *cl = (CLibrary *)uddata(udataV(&rd->argv[0]));
     GCstr *name = strV(&rd->argv[1]);
     CType *ct;
-    CTypeID id = lj_ctype_getname(cts, &ct, name, CLNS_INDEX);
+    CTypeID id;
     cTValue *tv = lj_tab_getstr(cl->cache, name);
-    rd->nres = rd->data;
+    rd->nres = rd->data > 0 ? 1 : 0;
+    if (rd->data < 2) {
+      id = lj_ctype_getname(cts, &ct, name, CLNS_INDEX);
+    } else {
+      /* set some dummy values for the intrinsic namespace */
+      id = CTID_VOID;
+      ct = ctype_get(cts, id);
+    }
     if (id && tv && !tvisnil(tv)) {
       /* Specialize to the symbol name and make the result a constant. */
       emitir(IRTG(IR_EQ, IRT_STR), J->base[1], lj_ir_kstr(J, name));

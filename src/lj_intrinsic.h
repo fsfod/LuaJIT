@@ -144,6 +144,8 @@ CTypeID1 regkind_ct[16];
 #define rk_isvec(kind) ((kind) >= REGKIND_VEC_START)
 
 LJ_FUNC void lj_intrinsic_init(lua_State *L);
+LJ_FUNC void lj_intrinsic_asmlib(lua_State *L, GCtab* asmlib);
+LJ_FUNC TValue *lj_asmlib_index(lua_State *L, CLibrary *cl, GCstr *name);
 LJ_FUNC int lj_intrinsic_create(lua_State *L);
 LJ_FUNC AsmIntrins *lj_intrinsic_get(CTState *cts, CTypeID id);
 LJ_FUNC int lj_intrinsic_call(CTState *cts, CType *ct);
