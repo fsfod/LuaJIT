@@ -19,6 +19,8 @@
 #define REX_64			0
 #endif
 
+#define OP4B 0x4000
+
 #define VEX_R(vex, rr) (vex & ~((rr<<4)&0x80))
 #define VEX_RBX(rr, rb, rx, map) ((0xe0 & ~(((rr<<4)&0x80) | ((rx<<3)&0x40) | ((rb<<2)&0x20))) | (map))
 
@@ -49,6 +51,8 @@ static LJ_AINLINE MCode *emit_op(x86Op xo, Reg rr, Reg rb, Reg rx,
 				 MCode *p, int delta)
 {
   int n = (int8_t)xo;
+  if (LJ_UNLIKELY(rr & OP4B))
+    n = -5;
 #if defined(__GNUC__)
   if (__builtin_constant_p(xo) && n == -2)
     p[delta-2] = (MCode)(xo >> 24);
@@ -63,7 +67,8 @@ static LJ_AINLINE MCode *emit_op(x86Op xo, Reg rr, Reg rb, Reg rx,
     uint32_t rex = 0x40 + ((rr>>1)&(4+(FORCE_REX>>1)))+((rx>>2)&2)+((rb>>3)&1);
     if (rex != 0x40) {
       rex |= (rr >> 16);
-      if (n == -4) { *p = (MCode)rex; rex = (MCode)(xo >> 8); }
+      if (n == -4) { *p = (MCode)rex; rex = (MCode)(xo >> 8); } 
+      else if (n == -5) { *p = (MCode)rex; rex = (MCode)(xo); }
       else if ((xo & 0xffffff) == 0x6600fd) { *p = (MCode)rex; rex = 0x66; }
       *--p = (MCode)rex;
     }
@@ -600,8 +605,12 @@ static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins, Reg r1, Reg r2)
     if (intrins->flags & INTRINSFLAG_IMMB) {
       *--as->mcp = intrins->immb;
     }
+    /* Tell emit_op the opcode is 4 bytes long */
+    if (intrins->flags & INTRINSFLAG_LARGEOP) {
+      r2 |= OP4B;
+    }
 
-    if (((int8_t)intrins->opcode) < 0) {
+    if (((int8_t)intrins->opcode) < 0 || (r2 & OP4B)) {
       emit_mrm(as, intrins->opcode, r2, r1);
     } else {
       /*TODO: Vex encoded ops */
