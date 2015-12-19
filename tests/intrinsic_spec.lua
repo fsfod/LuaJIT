@@ -4,6 +4,11 @@ local asm = ffi.ASM
 --local assert_jit,assert_noexit = assert_jit, assert_noexit
 local nop = "\x90"
 
+ffi.cdef[[
+typedef float float4 __attribute__((__vector_size__(16)));
+typedef float int4 __attribute__((__vector_size__(16)));
+]]
+
 local float4 = ffi.new("float[4]")
 local float4_2 = ffi.new("float[4]", {2, 2, 2, 2})
 local float8 = ffi.new("float[8]", 0)
@@ -57,6 +62,84 @@ context("intrinsic errors", function()
               "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"}
     })
   end)
+  
+
+end)
+
+context("__mcode", function()
+  
+  it("incomplete mcode def", function()
+    assert_error(function() ffi.cdef([[int test1() __mcode]]) end)
+    assert_error(function() ffi.cdef([[int test2() __mcode(]]) end)
+    assert_error(function() ffi.cdef([[int test3() __mcode()]]) end)
+    assert_error(function() ffi.cdef([[int test3() __mcode(,)]]) end)
+    assert_error(function() ffi.cdef([[int test4() __mcode("ff"]]) end)
+    assert_error(function() ffi.cdef([[int test5() __mcode("ff",,)]]) end)
+    assert_error(function() ffi.cdef([[int test6() __mcode("ff" 1)]]) end)
+    assert_error(function() ffi.cdef([[int test7() __mcode("ff", )]]) end)
+    assert_error(function() ffi.cdef([[int test8() __mcode("ff", 1]]) end)
+    
+    assert_error(function() ffi.cdef([[__mcode("90")]]) end)
+    assert_error(function() ffi.cdef([[int __mcode("90")]]) end)
+  end)
+
+  it("bad mcoddef", function() 
+    assert_error(function() ffi.cdef([[void test1(float a) __mcode(0);]]) end)
+    assert_error(function() ffi.cdef([[void test2(float a) __mcode("");]]) end)
+    assert_error(function() ffi.cdef([[void test3(float a) __mcode("0");]]) end)
+    assert_error(function() ffi.cdef([[void test4(float a) __mcode("rff");]]) end)
+    assert_error(function() ffi.cdef([[struct c{float a __mcode("90");};]]) end)
+    
+    assert_error(function() ffi.cdef([[struct b{float a; __mcode("90");};]]) end)
+  end)
+  
+  it("multidef rollback", function()
+  
+    --check ctype rollback after parsing a valid intrinsic the line before
+    assert_error(function() ffi.cdef[[
+      double multi1(double a) __mcode("90");
+      double multi2(double a) __mcode("0");
+    ]] end)
+    
+    assert_error(function() ffi.C.multi1() end)
+    assert_error(function() ffi.C.multi2() end)
+    
+    assert_not_error(function() ffi.cdef[[
+      int32_t multi1(int32_t a) __mcode("90");
+    ]] end)
+    
+    assert_equal(ffi.C.multi1(1.1), 1)
+  end)
+
+  it("bad ffi types mcode", function()
+    assert_error(function() ffi.cdef([[void testffi1(float a2, ...) __mcode("90");]]) end)
+    assert_error(function() ffi.cdef([[void testffi2(complex a2) __mcode("90");]]) end)
+    
+    --NYI non 16/32 byte vectors
+    assert_error(function() ffi.cdef([[
+      typedef float float2 __attribute__((__vector_size__(8)));
+      void testffi2(float2 a2) __mcode("90")
+    ]]) end)
+  end)
+
+  it("bad args", function()
+    ffi.cdef([[float calltest_addss(float n1, float n2) __mcode("F30F58rM");]])
+    
+    local addss = ffi.C.calltest_addss
+    
+    assert_equal(addss(1, 2), 3)
+    --too few arguments
+    assert_error(function() addss() end)
+    assert_error(function() addss(nil) end)
+    assert_error(function() addss(1) end)
+    assert_error(function() addss(1, nil) end)
+    
+    --too many arguments
+    assert_error(function() addss(1, 2, nil) end)
+    assert_error(function() addss(1, 2, 3) end) 
+    assert_error(function() addss(1, 2, 3, 4) end)
+  end)
+
 end)
 
 context("nopinout", function()
@@ -333,6 +416,167 @@ it("rdtscp", function()
   end
   
   assert_jitchecker(checker, getticks)  
+end)
+
+
+it("popcnt", function()
+
+  ffi.cdef([[int32_t popcnt(int32_t n) __mcode("f30fb8rM");]])
+
+  local popcnt = ffi.C.popcnt
+
+  assert_equal(popcnt(7),    3)
+  assert_equal(popcnt(1024), 1)
+  assert_equal(popcnt(1023), 10)
+
+  local function testpopcnt(num)
+    return (popcnt(num))
+  end
+  
+  assert_jit(10, testpopcnt, 1023)
+  assert_noexit(32, testpopcnt, -1)
+  assert_noexit(0, testpopcnt, 0)
+  assert_noexit(1, testpopcnt, 1)
+  
+  ffi.cdef([[int32_t popcntuf(int32_t n) __mcode("f30fb8r");]])
+  --check unfused
+  popcnt = ffi.C.popcntuf
+  
+  assert_equal(popcnt(7),    3)
+  assert_equal(popcnt(1024), 1)
+end)
+
+it("addsd", function()
+  ffi.cdef[[double addsd(double n1, double n2) __mcode("F20F58rM");]]
+  local addsd = ffi.C.addsd
+  
+  function test_addsd(n1, n2)
+    return (addsd(n1, n2))
+  end
+   
+  assert_equal(3, addsd(1, 2))
+  assert_equal(0, addsd(0, 0))
+  
+  assert_jit(-3, test_addsd, -4.5, 1.5)
+  assert_noexit(3, test_addsd, 4.5, -1.5)
+  --check dual num exit
+  assert_equal(5, test_addsd(3, 2))
+  
+  --check unfused
+  ffi.cdef([[double addsduf(double n1, double n2) __mcode("F20F58r");]])
+  addsd = ffi.C.addsduf
+  
+  assert_equal(3, addsd(1, 2))
+  assert_equal(0, addsd(0, 0))
+end)
+
+it("addss", function()
+  ffi.cdef[[float addss(float n1, float n2) __mcode("F30F58rM");]]
+  local addsd = ffi.C.addss
+   
+  function test_addsd(n1, n2)
+    return (addsd(n1, n2))
+  end
+   
+  assert_equal(3, addsd(1, 2))
+  assert_equal(0, addsd(0, 0))
+  
+  assert_jit(-3, test_addsd, -4.5, 1.5)
+  assert_noexit(3, test_addsd, 4.5, -1.5)
+  --check dual num exit
+  assert_equal(5, test_addsd(3, 2))
+  
+  --check unfused
+  ffi.cdef[[float addssuf(float n1, float n2) __mcode("F30F58r");]]
+  addsd = ffi.C.addssuf
+  
+  assert_equal(3, addsd(1, 2))
+  assert_equal(0, addsd(0, 0))
+end)
+
+it("shufps", function()
+
+  ffi.cdef([[float4 shufps(float4 v1, float4 v2) __mcode("0FC6rMU", 0);]])
+  
+  local shufps = ffi.C.shufps
+   
+  local v = ffi.new("float4", 1.5, 2.25, 3.125, 4.0625)
+  local vzero = ffi.new("float4", 1)
+   
+  function test_shufps(v1, v2)
+    return (shufps(v1, v2))
+  end
+  
+  local vout = shufps(v, v)
+  assert_equal(vout[0], 1.5)
+  assert_equal(vout[1], 1.5)
+  assert_equal(vout[2], 1.5)
+  assert_equal(vout[3], 1.5)
+  
+  ffi.cdef([[float4 shufpsrev(float4 v1, float4 v2) __mcode("0FC6rMU", 0x1b);]])
+  
+  local vout = ffi.C.shufpsrev(v, v)
+
+  assert_equal(vout[0], 4.0625)
+  assert_equal(vout[1], 3.125)
+  assert_equal(vout[2], 2.25)
+  assert_equal(vout[3], 1.5)
+end)
+
+context("mixed register type opcodes", function()
+  it("cvttsd2s", function()
+  
+    ffi.cdef([[int cvttsd2s(double n) __mcode("F20F2CrM");]])
+    local cvttsd2s = ffi.C.cvttsd2s
+    
+    function test_cvttsd2s(n)
+      return (cvttsd2s(n))
+    end
+    
+    assert_equal(0, cvttsd2s(-0))
+    assert_equal(1, cvttsd2s(1))
+    assert_equal(1, cvttsd2s(1.2))
+    
+    assert_jit(3, test_cvttsd2s, 3.3)
+    assert_noexit(-1, test_cvttsd2s, -1.5)
+    --check dual num exit
+    assert_equal(5, test_cvttsd2s(5))
+    
+    --check unfused
+    ffi.cdef([[int cvttsd2suf(double n) __mcode("F20F2Cr");]])
+    cvttsd2s = ffi.C.cvttsd2suf
+    
+    assert_equal(0, cvttsd2s(-0))
+    assert_equal(1, cvttsd2s(1))
+    assert_equal(1, cvttsd2s(1.2))
+  end)
+  
+  it("cvtsi2sd", function()
+    ffi.cdef([[double cvtsi2sd(int32_t n) __mcode("F20F2ArM");]])
+    local cvtsi2sd = ffi.C.cvtsi2sd
+    
+    function test_cvtsi2sd(n1, n2)
+      return (cvtsi2sd(n1)+n2)
+    end
+    
+    assert_equal(0.5, test_cvtsi2sd(0, 0.5))
+    assert_equal(1.25, test_cvtsi2sd(1.0, 0.25))
+    assert_equal(-1.5, test_cvtsi2sd(-2, 0.5))
+    
+    assert_jit(3.25, test_cvtsi2sd, 3, 0.25)
+    assert_noexit(-1.5, test_cvtsi2sd, -2, 0.5)
+    
+    --check dual num exit
+    assert_equal(11, test_cvtsi2sd(5, 6))
+    
+    --check unfused
+    ffi.cdef([[double cvtsi2sduf(int32_t n) __mcode("F20F2Ar");]])
+    cvtsi2sd = ffi.C.cvtsi2sduf
+    assert_equal(0.5, test_cvtsi2sd(0, 0.5))
+    assert_equal(1.25, test_cvtsi2sd(1.0, 0.25))
+    assert_equal(-1.5, test_cvtsi2sd(-2, 0.5))
+  end)
+  
 end)
 
 it("idiv", function()

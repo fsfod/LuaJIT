@@ -17,6 +17,7 @@
 #include "lj_char.h"
 #include "lj_strscan.h"
 #include "lj_strfmt.h"
+#include "lj_intrinsic.h"
 
 /*
 ** Important note: this is NOT a validating C parser! This is a minimal
@@ -848,6 +849,18 @@ static CTypeID cp_decl_intern(CPState *cp, CPDecl *decl)
       fct->size = size;
       fct->sib = sib;
       id = fid;
+
+      if (ctype_isintrinsic(info)) {
+#if LJ_HASINTRINSICS
+        CTypeID1 cid = lj_intrinsic_fromcdef(cp->L, fid, decl->redir, decl->bits);
+        if (cid == 0)
+          cp_err(cp, LJ_ERR_FFI_INVTYPE);
+        decl->redir = NULL;
+        ctype_get(cp->cts, fid)->info = cinfo = info + cid;
+#else
+        decl->redir = NULL;
+#endif
+      }
     } else if (ctype_isattrib(info)) {
       if (ctype_isxattrib(info, CTA_QUAL))
 	cinfo |= size;
@@ -1138,6 +1151,46 @@ static void cp_decl_msvcattribute(CPState *cp, CPDecl *decl)
   cp_check(cp, ')');
 }
 
+/* TODO: Multiple return values along with there register and type */
+static void cp_decl_mcode(CPState *cp, CPDecl *decl)
+{
+  /* Check were declared after a function definition */
+  if (decl->top == 0) {
+    cp_err(cp, LJ_ERR_FFI_INVTYPE);
+  } else {
+    CTInfo info = decl->stack[decl->top-1].info;
+    if (!ctype_isfunc(info) || (info & CTF_VARARG)) {
+      cp_err(cp, LJ_ERR_FFI_INVTYPE);
+    }
+  }
+  cp_next(cp);
+  cp_check(cp, '(');
+
+  if (cp->tok != CTOK_STRING)
+    cp_err_token(cp, CTOK_STRING);
+  /* Save the opcode/mode string for later parsing and validation */
+  decl->redir = cp->str;
+
+  cp_next(cp);
+  /* Check if we have an immediate byte value */
+  if (cp_opt(cp, ',')) {
+    decl->bits = 0;
+
+    if (cp->tok == CTOK_INTEGER) {
+      int32_t val = cp->val.i32;
+      /* Flatten negative values to a signed 8 bit number */
+      /* NYI: immediate values larger than 8 bits */
+      decl->bits = (CTSize)(val < 0 ? (uint8_t)(int8_t)val : val);
+      cp_next(cp);
+    } else {
+      cp_err_token(cp, CTOK_INTEGER);
+    }
+  }
+  cp_check(cp, ')');
+  /* Mark the function as an intrinsic */
+  decl->stack[decl->top-1].info |= CTF_INTRINS;
+}
+
 /* Parse declaration attributes (and common qualifiers). */
 static void cp_decl_attributes(CPState *cp, CPDecl *decl)
 {
@@ -1149,6 +1202,7 @@ static void cp_decl_attributes(CPState *cp, CPDecl *decl)
     case CTOK_EXTENSION: break;  /* Ignore. */
     case CTOK_ATTRIBUTE: cp_decl_gccattribute(cp, decl); continue;
     case CTOK_ASM: cp_decl_asm(cp, decl); continue;
+    case CTOK_MCODE: cp_decl_mcode(cp, decl); continue;
     case CTOK_DECLSPEC: cp_decl_msvcattribute(cp, decl); continue;
     case CTOK_CCDECL:
 #if LJ_TARGET_X86
