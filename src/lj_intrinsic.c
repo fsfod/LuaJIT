@@ -25,7 +25,8 @@
 
 typedef enum RegFlags {
   REGFLAG_YMM = REGKIND_V256 << 6,
-  REGFLAG_64BIT = REGKIND_GPRI64 << 6, /* 64 bit override */
+  REGFLAG_64BIT = REGKIND_GPR64 << 6, /* 64 bit override */
+  REGFLAG_FLAGSBIT = REGKIND_FLAGBIT << 6,
   REGFLAG_DYN = 1 << 17,
 }RegFlags;
 
@@ -61,11 +62,17 @@ typedef struct RegEntry {
   _(MM0, mm0) _(MM1, mm1) _(MM2, mm2) _(MM3, mm3) _(MM4, mm4) _(MM5, mm5) _(MM6, mm6) _(MM7, mm7)
 #endif
 
+#define FLAGSREGDEF(_) \
+  _(0, OF) _(2, CF) _(4, ZF) _(8, SF) _(a, PF) 
+
+#define MKREG_FLAGS(reg, name) {#name, REGFLAG_FLAGSBIT|0x##reg},
+
 RegEntry reglut[] = {
   GPRDEF2(MKREGGPR)
 #if LJ_64
   GPRDEF_R64(MKREG_GPR64)
 #endif
+  FLAGSREGDEF(MKREG_FLAGS)
 };
 
 #define XO_0F2(b1, b2)	((uint32_t)(0x0ffc + (0x##b2<<24) + (0x##b1<<16)))
@@ -224,28 +231,31 @@ static uint32_t buildregset(lua_State *L, GCtab *regs, AsmIntrins *intrins, int 
     kind = ASMREGKIND(reg&0xff);
     
     if (!(reg & REGFLAG_DYN)) {
-      /* Check for duplicate registers in the list */
-      if (rset_test(rset, r)) {
-        lj_err_callerv(L, LJ_ERR_FFI_BADREG, "duplicate", name, listname);
+      if (kind != REGKIND_FLAGBIT) {
+        /* Check for duplicate registers in the list */
+        if (rset_test(rset, r)) {
+          lj_err_callerv(L, LJ_ERR_FFI_BADREG, "duplicate", name, listname);
+        }
+        rset_set(rset, r);
       }
-      rset_set(rset, r);
-    } else{
+    } else {
       if (++dyncount > LJ_INTRINS_MAXDYNREG) {
         lj_err_callerv(L, LJ_ERR_FFI_BADREG, "too many dynamic", name, listname);
       }
     }
 
-    if (r == RID_SP) {
-      lj_err_callerv(L, LJ_ERR_FFI_BADREG, "blacklisted", name, listname);
-    }
+    if (kind != REGKIND_FLAGBIT) {
+      if (r == RID_SP) {
+        lj_err_callerv(L, LJ_ERR_FFI_BADREG, "blacklisted", name, listname);
+      }
 
-    if (regsetid != REGSET_MOD && r >= RID_MIN_FPR && rk_isvec(kind)) {
-      intrins->flags |= INTRINSFLAG_VECTOR;
-    }
+      if (regsetid != REGSET_MOD && r >= RID_MIN_FPR && rk_isvec(kind)) {
+        intrins->flags |= INTRINSFLAG_VECTOR;
+      }
 
-    if (regsetid == REGSET_OUT && ((r < RID_MAX_GPR && kind != REGKIND_GPRI32) ||
-                                   (r >= RID_MAX_GPR && rk_isvec(kind)))) {
-      intrins->flags |= INTRINSFLAG_BOXEDOUTS;
+      if (regsetid == REGSET_OUT && reg_isboxed(reg)) {
+        intrins->flags |= INTRINSFLAG_BOXEDOUTS;
+      }
     }
 
     if (regout) {
@@ -524,8 +534,10 @@ int lj_intrinsic_create(lua_State *L)
   
   if (intrin_regmode(intrins) != DYNREG_FIXED) {
     /* Have to infer this based on 2 input parameters being declared */
-    if (intrins->insz == 2) {
+    if (intrins->insz == 2 && intrins->outsz == 1) {
       intrin_setregmode(intrins, DYNREG_INOUT);
+    } else if(intrins->dyninsz == 2){
+      intrin_setregmode(intrins, DYNREG_TWOIN);
     }
 
     if (intrins->flags & INTRINSFLAG_VECTOR) {
@@ -573,7 +585,7 @@ static int buildreg_ffi(CTState *cts, CTypeID id) {
       if (sz == 8) {
         if (LJ_32)
           return -1; /* NYI: 64 bit pair registers */
-        kind = base->info & CTF_UNSIGNED ? REGKIND_GPRU64 : REGKIND_GPRI64;
+        kind = REGKIND_GPR64;
         rid |= INTRINSFLAG_REXW;
       } else {
         kind = base->info & CTF_UNSIGNED ? REGKIND_GPRU32 : REGKIND_GPRI32;
@@ -585,7 +597,7 @@ static int buildreg_ffi(CTState *cts, CTypeID id) {
       goto vec;
     } else {
       rid = RID_MIN_GPR;
-      kind = LJ_32 ? REGKIND_GPRI32 : REGKIND_GPRI64;
+      kind = LJ_32 ? REGKIND_GPRI32 : REGKIND_GPR64;
     }
   } else if (ctype_isvector(base->info)) {
     CType *vtype;

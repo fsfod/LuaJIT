@@ -122,14 +122,14 @@ typedef struct AsmIntrins{
   _(FPR7,  0,         0) \
 
 #define RKDEF_GPR(_) \
-  _(GPRI32, IRT_INT, CTID_INT32) \
-  _(GPRI64, IRT_I64, CTID_INT64) \
-  _(GPRU32, IRT_U32, CTID_UINT32) \
-  _(GPRU64, IRT_U64, CTID_UINT64) \
-  _(GPR4,   0,       0) \
-  _(GPR5,   0,       0) \
-  _(GPR6,   0,       0) \
-  _(GPR7,   0,       0) \
+  _(GPRI32,  IRT_INT, CTID_INT32) \
+  _(FLAGBIT, IRT_INT, CTID_INT32) \
+  _(GPR64,   IRT_I64, CTID_INT64) \
+  _(GPRU32,  IRT_U32, CTID_UINT32) \
+  _(GPR4,    0,       0) \
+  _(GPR5,    0,       0) \
+  _(GPR6,    0,       0) \
+  _(GPR7,    0,       0) \
 
 #define MKREGKIND(name, irt, ct) REGKIND_##name,
 

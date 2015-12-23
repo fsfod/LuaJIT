@@ -2450,6 +2450,7 @@ static void wrap_intrins(jit_State *J, AsmIntrins *intrins)
 
   i = intrin_dynrout(intrins) ? 1 : 0;
   for (; i < intrins->outsz; i++) {
+    if (ASMREGKIND(out[i]) == REGKIND_FLAGBIT)continue;
     rset_set(outset, ASMRID(out[i]));
   }
 
@@ -2557,12 +2558,16 @@ restart:
   for (i = 0; i < intrins->outsz; i++) {
     Reg r = ASMRID(out[i]);
     uint32_t reg = out[i];
+    int isgpr = reg_isgpr(reg);
 
-    if (r != outcontext) {
+    if(isgpr && ASMREGKIND(out[i]) == REGKIND_FLAGBIT) {
+      goto savegpr;
+    } else if (r != outcontext) {
       /* Exclude this register from the scratch set since its now live */
-      rset_clear(as->freeset, r);
+        rset_clear(as->freeset, r);
 
-      if (r < RID_MAX_GPR) {
+      if (isgpr) {
+savegpr:
         emit_savegpr(as, reg, outcontext, offset);
       } else {
         emit_savefpr(as, reg, outcontext, offset);

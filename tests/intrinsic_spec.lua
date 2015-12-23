@@ -627,6 +627,31 @@ it("phaddd 4byte opcode", function()
   assert_equal(hsum(vzero), 0)
 end)
 
+it("flags register", function()
+
+  local ptest = ffi.intrinsic("660F3817", {rin = {"xmmv", "xmmv"}, rout = {"ZF", "CF"}, mode = "rM"})
+  
+  local vone = ffi.new("int4", 1, 1, 1, 1)
+  local vzero = ffi.new("int4", 0)
+  
+  local zf, cf = ptest(vzero, vzero)
+  assert_equal(zf, 1)
+  assert_equal(cf, 1)
+  
+  zf, cf = ptest(vone, vzero)
+  assert_equal(zf, 1)
+  assert_equal(cf, 0)
+  
+  zf, cf = ptest(vone, vone)
+  assert_equal(zf, 0)
+  assert_equal(cf, 1)
+
+  function test_ptest(v1, v2)
+    return (ptest(v1, v2))
+  end
+
+end)
+
 context("mixed register type opcodes", function()
   it("cvttsd2s", function()
   

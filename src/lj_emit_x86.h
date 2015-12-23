@@ -774,16 +774,28 @@ static void emit_savegpr(ASMState *as, Reg reg, Reg base, int ofs)
   x86Op op = XO_MOVto;
   Reg r = ASMRID(reg);
   uint32_t kind = ASMREGKIND(reg);
-  lua_assert(r < RID_NUM_GPR);
+  lua_assert(r < RID_NUM_GPR || kind == REGKIND_FLAGBIT);
 
-  if (kind == REGKIND_GPRI32) {
+  if (kind == REGKIND_GPRI32 || kind == REGKIND_FLAGBIT) {
     Reg temp = intrinsic_scratch(as, RSET_FPR);
+
+    if (kind == REGKIND_FLAGBIT) {
+      r = intrinsic_scratch(as, RSET_GPR);
+    }
+
     emit_rmro(as, XO_MOVSDto, temp, base, ofs);
     emit_mrm(as, XO_CVTSI2SD, temp, r);
+    
+    if (kind == REGKIND_FLAGBIT) {
+      /* CF = 2, ZF = 4, */
+      emit_rr(as, XO_MOVZXb, r, r);
+      emit_rr(as, XO_SETCC + (ASMRID(reg) << 24), 0, r);
+    }
+
     return;
   }
 
-  if (kind == REGKIND_GPRU64 || kind == REGKIND_GPRI64) {
+  if (kind == REGKIND_GPR64) {
     r |= REX_64;
   }
 
