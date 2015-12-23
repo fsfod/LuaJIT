@@ -161,7 +161,70 @@ context("__mcode", function()
       return numptr[0]
     end)
   end)
+  
+  it("prefix and imm", function() 
 
+    ffi.cdef([[void atomicadd1(int32_t* nptr) __mcode("83MrwUP", 0xF0, 0x01);]])
+    
+    local function checker(i, jsum)
+      if(jsum ~= i) then 
+       return i, jsum
+      end
+    end
+    
+    local numptr = ffi.new("int32_t[1]", 0)
+    
+    assert(ffi.C.atomicadd1)
+  
+    assert_jitchecker(checker, function(i)
+      ffi.C.atomicadd1(numptr)
+      return numptr[0]
+    end)
+  end)
+  
+  it("prefix", function() 
+
+    ffi.cdef([[void atomicadd(int32_t* nptr, int32_t n) __mcode("01MwP", 0xF0);]])
+    
+    local sum = 0
+    
+    local function checker(i, jsum)
+      sum = sum+i
+      if(jsum ~= sum) then 
+       return jsum, sum
+      end
+    end
+    
+    local numptr = ffi.new("int32_t[1]", 0)    
+    assert(ffi.C.atomicadd)
+  
+    assert_jitchecker(checker, function(i)
+      ffi.C.atomicadd(numptr, i)
+      return numptr[0]
+    end)
+    
+    ffi.cdef([[void atomicinc(int32_t* nptr, float n2) __mcode("1MrwP", 0xF0);]])
+  end)
+  
+  if ffi.arch == "x64" then
+    it("prefix64", function()
+      ffi.cdef([[void atomicadd64(int64_t* nptr, int64_t n) __mcode("01mRP", 0xF0);]])
+      
+      local sum = 0
+      local function checker(i, jsum)
+        sum = sum+i
+        assert(jsum == sum)
+      end
+      
+      local numptr = ffi.new("int64_t[1]", 0)
+    
+      assert_jitchecker(checker, function(i)
+        ffi.C.atomicadd64(numptr, i)
+        return numptr[0]
+      end)
+      
+    end)
+  end
 end)
 
 context("nopinout", function()

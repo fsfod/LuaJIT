@@ -1151,6 +1151,18 @@ static void cp_decl_msvcattribute(CPState *cp, CPDecl *decl)
   cp_check(cp, ')');
 }
 
+static uint8_t getsignedbyte(CPState *cp)
+{
+  int32_t val = cp->val.i32;
+
+  if (cp->tok != CTOK_INTEGER)
+    cp_err_token(cp, CTOK_INTEGER);
+
+  /* Flatten negative values to a signed 8 bit number */
+  /* NYI: immediate values larger than 8 bits */
+  return (val < 0 ? (uint8_t)(int8_t)val : val);
+}
+
 /* TODO: Multiple return values along with there register and type */
 static void cp_decl_mcode(CPState *cp, CPDecl *decl)
 {
@@ -1172,18 +1184,15 @@ static void cp_decl_mcode(CPState *cp, CPDecl *decl)
   decl->redir = cp->str;
 
   cp_next(cp);
-  /* Check if we have an immediate byte value */
+  /* Check if we have immediate and prefix byte values */
   if (cp_opt(cp, ',')) {
-    decl->bits = 0;
-
-    if (cp->tok == CTOK_INTEGER) {
-      int32_t val = cp->val.i32;
-      /* Flatten negative values to a signed 8 bit number */
-      /* NYI: immediate values larger than 8 bits */
-      decl->bits = (CTSize)(val < 0 ? (uint8_t)(int8_t)val : val);
+    /* NYI: immediate values larger than 8 bits */
+    decl->bits = (CTSize)getsignedbyte(cp);
+    cp_next(cp);
+    
+    if (cp_opt(cp, ',')) {
+      decl->bits |= getsignedbyte(cp) << 8;
       cp_next(cp);
-    } else {
-      cp_err_token(cp, CTOK_INTEGER);
     }
   }
   cp_check(cp, ')');

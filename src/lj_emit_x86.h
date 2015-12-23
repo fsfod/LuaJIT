@@ -622,6 +622,11 @@ static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins, Reg r1, Reg r2)
       /*TODO: Vex encoded ops */
       lua_assert(0);
     }
+
+    if (intrins->flags & INTRINSFLAG_PREFIX) {
+      *--as->mcp = intrins->prefix;
+    }
+
     checkmclim(as);
     /* No code offset to save if were dynamically generating from an opcode */
     return NULL;

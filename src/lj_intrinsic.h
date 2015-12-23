@@ -61,6 +61,9 @@ typedef enum INTRINSFLAGs {
   /* opcode is larger than the emit system normally handles x86/x64(4 bytes) */
   INTRINSFLAG_LARGEOP = 0x80,
 
+  /* Append a user supplied prefixed before the opcode and its REX byte */
+  INTRINSFLAG_PREFIX = 0x400,
+  
   /* Force REX.w 64 bit size override bit tobe set for x64 */
   INTRINSFLAG_REXW  = 0x800,
   /* Don't fuse load into op */
@@ -83,6 +86,7 @@ typedef struct AsmIntrins{
       uint32_t opregs;
       uint8_t dyninsz; /* dynamic input register count */
       uint8_t immb;
+      uint8_t prefix;
     };
   };
   uint8_t out[LJ_INTRINS_MAXREG];

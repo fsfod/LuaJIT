@@ -341,6 +341,9 @@ static int parse_opmode(const char *op, MSize len)
       case 'X':
         flags |= INTRINSFLAG_REXW;
         break;
+      case 'P':
+        flags |= INTRINSFLAG_PREFIX;
+        break;
 
       default:
         /* return index of invalid flag */
@@ -350,8 +353,7 @@ static int parse_opmode(const char *op, MSize len)
 
   if ((r || m) & !(flags & INTRINSFLAG_REGMODEMASK)) {
     
-    
-    /* 'Rm' mem is left reg is right*/
+    /* 'Rm' mem is left reg is right */
     if (r == 2 && m == 1) {
       flags |= DYNREG_STORE;
     } else {
@@ -620,9 +622,18 @@ CTypeID intrinsic_toffi(CTState *cts, AsmIntrins* intrins, GCstr *opstr, CTypeID
 
   id = lj_ctype_new(cts, &ct);
   ctype_get(cts, anchor)->sib = id;
-  ct->info = CTINFO(CT_FIELD, intrins->immb);
+  ct->info = CTINFO(CT_FIELD, 0);
   ct->size = intrins->opcode;
   ct->sib = 0;
+
+  if (intrins->flags & INTRINSFLAG_IMMB) {
+    ct->info |= intrins->immb;
+  }
+  
+  if (intrins->flags & INTRINSFLAG_PREFIX) {
+    ct->info |= intrins->prefix << 8;
+  }
+
   /* save the opcode string for the display string and extra error checking */
   ctype_setname(ct, opstr);
 
@@ -648,6 +659,7 @@ AsmIntrins *lj_intrinsic_fromffi(CTState *cts, CType *func, AsmIntrins *intrins)
    */
   intrins->opcode = ct->size;
   intrins->immb = ct->info & 0xff;
+  intrins->prefix = (ct->info >> 8) & 0xff;
 
   /* opcode string contains raw machine code */
   if (intrin_regmode(intrins) == DYNREG_FIXED) {
@@ -798,9 +810,17 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode, uint32_t imm
     }
   }
 #endif
+  
+  if (intrins->flags & INTRINSFLAG_PREFIX) {
+    intrins->prefix = (uint8_t)imm;
+    /* Prefix values should be declared before an immediate value in the 
+    ** __mcode definition.
+    */
+    imm >>= 8;
+  }
 
   if (intrins->flags & INTRINSFLAG_IMMB) {
-    intrins->immb = (uint8_t)imm;
+    intrins->immb = (uint8_t)(imm & 0xff);
   }
   
   return intrinsic_toffi(cts, intrins, opcode, sib);
