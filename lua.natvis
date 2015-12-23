@@ -321,6 +321,16 @@
       </Expand>
     </Synthetic>
     
+    <Synthetic Name="IR Slots">
+      <DisplayString>[size] = {baseslot+maxslot,i}</DisplayString>
+      <Expand>
+        <IndexListItems>
+          <Size>baseslot+maxslot</Size>
+          <ValueNode>(IRType)((base[$i] &gt;&gt; 24) &amp; IRT_TYPE)</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
+
     <Synthetic Name="Traces">
       <DisplayString>[size] = {sizetrace,i}</DisplayString>
       <Expand>
@@ -401,9 +411,11 @@
 
 <Type Name="CType">
     <DisplayString Condition="((info &gt;&gt; 28) == 0) &amp;&amp; ((info &amp; 0x04000000u) == 0)">int: {size} {name}</DisplayString>
+    
     <DisplayString Condition="((info &gt;&gt; 28) == 0) &amp;&amp; ((info &amp; 0x04000000u) != 0)">float: {size} {name}</DisplayString>
     <DisplayString Condition="(info &gt;&gt; 28) == 1">struct: size={size} {name}</DisplayString>
     <DisplayString Condition="(info &gt;&gt; 28) == 2">ptr: {size} {name} cid: {info&amp;0xffff}</DisplayString>
+    <DisplayString Condition="((info &gt;&gt; 28) == 3) &amp;&amp; ((info &amp; 0x08000000u) != 0)"> vector &lt;{size,i}, cid:{info&amp;0xffff,i} &gt; {name}</DisplayString>
     <DisplayString Condition="(info &gt;&gt; 28) == 3">array: size={size} {name} cid: {info&amp;0xffff}</DisplayString>
     <DisplayString Condition="(info &gt;&gt; 28) == 4">void: {size} {name}</DisplayString>
     <DisplayString Condition="(info &gt;&gt; 28) == 5">enum: {name} {size}</DisplayString>
@@ -423,6 +435,11 @@
       <Item Name="info">info&amp;0xfff0000</Item>
       <Item Name="sib" Condition="sib != 0">sib,i</Item>
     </Expand>
+</Type>
+
+<Type Name="GCcdata">
+  <DisplayString Condition="((marked &amp; 0x80) != 0)">{ctypeid,i} VLA</DisplayString>
+  <DisplayString>{ctypeid,i}</DisplayString>
 </Type>
 
 <Type Name="CTState">
