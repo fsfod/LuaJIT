@@ -817,6 +817,9 @@ static void *setup_results(lua_State *L, AsmIntrins *intrins, CTypeID id) {
   CType *ctr = NULL;
   void *outcontext = L->top;
 
+  if (id == CTID_VOID)
+    return NULL;
+
   if (id) {
     CType *ret1;
     ctr = ctype_get(cts, id);
@@ -1008,7 +1011,8 @@ static int typed_call(CTState *cts, AsmIntrins *intrins, CType *ct)
     }
   }
   /* Pass in the return type chain so the results are typed */
-  setup_results(L, intrins, ctype_cid(ctype_child(cts, ctype_get(cts, funcid))->info));
+  outcontent = setup_results(L, intrins, ctype_cid(ctype_child(cts, 
+                                            ctype_get(cts, funcid))->info));
 
   /* Execute the intrinsic through the wrapper created on first lookup */
   return (*(IntrinsicWrapper*)cdataptr(cdataV(L->base)))(&context, outcontent);
