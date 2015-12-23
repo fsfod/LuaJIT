@@ -584,9 +584,9 @@ static void emit_addptr(ASMState *as, Reg r, int32_t ofs)
 #endif
 
 /* TODO: use shadow space/red zone on x64 to skip setting stack frame */
-#define SPILLSTART (3*SPILLSLOTSZ)
-#define TEMPSPILL (2*SPILLSLOTSZ)
-#define CONTEXTSPILL (1*SPILLSLOTSZ)
+#define SPILLSTART (2*SPILLSLOTSZ)
+#define TEMPSPILL (1*SPILLSLOTSZ)
+#define CONTEXTSPILL (0)
 
 
 static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins, Reg r1, Reg r2)
@@ -669,6 +669,8 @@ static void emit_prologue(ASMState *as, int spadj, RegSet modregs)
 #if LJ_64
     if (NEEDSFP)spadj += 8;
     spadj = align16(spadj);
+    /* No ebp pushed so the stack starts aligned to 8 bytes */
+    if (!NEEDSFP)spadj += 8;
 #endif
     emit_spsub(as, spadj);
   }
@@ -689,11 +691,15 @@ static void emit_epilogue(ASMState *as, int spadj, RegSet modregs, int32_t ret)
   if (NEEDSFP)
     emit_pop(as, RID_EBP);
   
+  if (spadj != 0) {
 #if LJ_64
-  if (NEEDSFP)spadj += 8;
-  spadj = align16(spadj);
+    if (NEEDSFP)spadj += 8;
+    spadj = align16(spadj);
+    /* No ebp pushed so the stack starts aligned to 8 bytes */
+    if (!NEEDSFP)spadj += 8;
 #endif
-  emit_spsub(as, -spadj);
+    emit_spsub(as, -spadj);
+  }
  
   as->mcp -= 4;
   *(int32_t *)as->mcp = ret;

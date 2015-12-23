@@ -2464,8 +2464,8 @@ restart:
     spadj = popcnt(as->modset & (RSET_GPR&~RSET_SCRATCH))*sizeof(intptr_t) +
             popcnt(as->modset & (RSET_FPR&~RSET_SCRATCH))*FPRSAVESZ;
 
-    /* add some extra space for context spill and temp spill*/
-    spadj += sizeof(intptr_t)*3;
+    /* add some extra space for context spill and temp spill */
+    spadj += sizeof(intptr_t)*2;
   }
 
   emit_epilogue(as, spadj, allmodregs, intrins->outsz);
