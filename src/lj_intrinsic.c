@@ -314,17 +314,16 @@ static int parse_opmode(const char *op, MSize len)
   for (; i < len; i++) {
 
     switch (op[i]) {
-      case 'm':
-        m = 1;
-        break;
       case 'M':
-        m = 2;
+      case 'm':
+        if (m) return -(int)i;
+        m = op[i] == 'm' ? 1 : 2;
         break;
       /* modrm register */
-      case 'r':
-        r = 1;
       case 'R':
-        r = 2;
+      case 'r':
+        if (r) return -(int)i;
+        r = op[i] == 'r' ? 1 : 2;
         break;
       case 'U':
       case 'S':
@@ -332,6 +331,9 @@ static int parse_opmode(const char *op, MSize len)
         break;
       case 's':
         flags |= INTRINSFLAG_MEMORYSIDE;
+        break;
+      case 'w':
+        flags |= DYNREG_STORE;
         break;
       case 'c':
         flags |= INTRINSFLAG_ISCOMM;
@@ -346,9 +348,16 @@ static int parse_opmode(const char *op, MSize len)
     }
   }
 
-  if (r || m) {
-    flags |= DYNREG_ONE;
-      
+  if ((r || m) & !(flags & INTRINSFLAG_REGMODEMASK)) {
+    
+    
+    /* 'Rm' mem is left reg is right*/
+    if (r == 2 && m == 1) {
+      flags |= DYNREG_STORE;
+    } else {
+      flags |= DYNREG_ONE;
+    }
+
     /* if neither of the operands is listed as memory disable trying to fuse a load in */
     if (r != 0 && m == 0) {
       flags |= INTRINSFLAG_NOFUSE;
@@ -779,6 +788,14 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode, uint32_t imm
     } else if(intrins->dyninsz == 0){
       intrins->dyninsz = 1;
     }
+  } else if (intrins->dyninsz == 0) {
+    if (intrin_regmode(intrins) == DYNREG_STORE) {
+      intrins->dyninsz = intrins->insz;
+
+      /* Store opcodes need at least an address the value could be an immediate */
+      if (intrins->insz == 0 || intrins->outsz != 0)
+        return 0;
+    }
   }
 #endif
 
@@ -1063,8 +1080,10 @@ static CTypeID lj_intrinsic_builtin(lua_State *L, const BuiltinIntrins* builtin)
   intrins->flags |= builtin->flags;
 
   /* The Second input register id is part of the opcode */
-  if (intrin_regmode(intrins) == DYNREG_ONEOPENC)
+  if (intrin_regmode(intrins) == DYNREG_ONEOPENC) {
     intrins->insz = 1;
+    intrins->dyninsz = 1;
+  }
 
   if (lj_asm_intrins(L, intrins) != 0) {
     lj_err_callermsg(L, "Failed to create interpreter wrapper for built-in intrinsic");

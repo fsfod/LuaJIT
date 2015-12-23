@@ -610,6 +610,12 @@ static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins, Reg r1, Reg r2)
       r2 |= OP4B;
     }
 
+    /* Store must always be indirect */
+    if (regmode == DYNREG_STORE && r1 != RID_MRM) {
+      as->mrm.base = r1;
+      r1 = RID_MRM;
+    }
+
     if (((int8_t)intrins->opcode) < 0 || (r2 & OP4B)) {
       emit_mrm(as, intrins->opcode, r2, r1);
     } else {

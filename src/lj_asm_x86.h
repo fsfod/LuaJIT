@@ -597,6 +597,11 @@ static void asm_asmins(ASMState *as, IRIns *ir)
     RegSet allow;
     IRRef lref = 0, rref = args[intrins->insz-1];
     right = IR(rref)->r;
+
+    if (intrins->dyninsz > 1) {
+      lref = args[intrins->insz-2];
+      dest = IR(lref)->r;
+    }
     
     as->mrm.idx = as->mrm.base = RID_NONE;
     as->mrm.scale = as->mrm.ofs = 0;
@@ -611,8 +616,6 @@ static void asm_asmins(ASMState *as, IRIns *ir)
     }
 
     if (dynreg == DYNREG_INOUT) {
-      lref = args[intrins->insz-2];
-
       if (lref == rref) {
         right = dest;
       } else if (ra_noreg(right)) {
@@ -643,9 +646,6 @@ static void asm_asmins(ASMState *as, IRIns *ir)
     } else {
       /* Part of the instruction encoding is in ModRM */
       if (dynreg == DYNREG_ONEOPENC) {
-        as->mrm.idx = as->mrm.base = RID_NONE;
-        as->mrm.scale = as->mrm.ofs = 0;
-
         if (ra_noreg(right)) {
           /* FIXME: doesn't fuse array(kupvalue)+i which is turned into  (i << 2) + IR_KPTR*/
           asm_fusexref(as, rref, rset_exclude(RSET_GPR, RID_EBP));
@@ -653,7 +653,20 @@ static void asm_asmins(ASMState *as, IRIns *ir)
           as->mrm.base = IR(rref)->r;
         }      
         right = RID_MRM;
+      } else if (dynreg == DYNREG_STORE) {
+        asm_fusexref(as, rref, RSET_GPR);
+        right = RID_MRM;
       }
+    }
+    
+    /* Handle second input reg for any two dynamic in register modes 
+    ** which isn't DYNREG_INOUT 
+    */
+    if (intrins->dyninsz > 1 && ra_noreg(dest)) {
+      allow = ASMRID(intrins->in[2]) < RID_MIN_FPR ? RSET_GPR : RSET_FPR;
+      if(ra_hasreg(right) && right != RID_MRM)
+        rset_clear(allow, right);
+      dest = ra_allocref(as, lref, allow);
     }
 
     if (ra_noreg(right)) {
@@ -673,8 +686,8 @@ static void asm_asmins(ASMState *as, IRIns *ir)
   }
   checkmclim(as);
 
-  if ((dynreg && intrins->insz == 1) ||
-      ((dynreg >= DYNREG_INOUT) && intrins->insz <= 2)) {
+  if ((dynreg && intrins->insz == 1) || 
+      (dynreg == DYNREG_INOUT && intrins->insz == 2)) {
     return;
   }
 
@@ -687,8 +700,11 @@ static void asm_asmins(ASMState *as, IRIns *ir)
     if (n == 0 && dynreg)
       continue;
     
-    if (n == 1 && dynreg >= DYNREG_INOUT)
-      continue;
+    if (n == 1 && dynreg && intrins->dyninsz > 1) {
+      if(dynreg == DYNREG_INOUT)
+        continue;
+      r = dest;
+    }
 
     if (r < RID_MAX_GPR && ref < ASMREF_TMP1) {
 #if LJ_64
@@ -698,13 +714,17 @@ static void asm_asmins(ASMState *as, IRIns *ir)
 #endif
         emit_loadi(as, r, ir->i);
     } else {
-      lua_assert(rset_test(as->freeset, r));
+      /* if we have fixed register it must of been evicted earlier */
+      lua_assert(r != ASMRID(intrins->in[n]) || rset_test(as->freeset, r));
 
       if (ra_hasreg(ir->r)) {
         ra_noweak(as, ir->r);
         if (r != ir->r)
           emit_movrr(as, ir, r, ir->r);
       } else {
+        /* Dynamic registers should never end up here */
+        lua_assert(r == ASMRID(intrins->in[n]) && 
+                  (dynreg == DYNREG_FIXED || n < intrins->dyninsz));
         ra_allocref(as, ref, RID2RSET(r));
       }
     }

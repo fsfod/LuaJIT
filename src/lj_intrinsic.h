@@ -36,6 +36,10 @@ typedef enum REGMODE {
   DYNREG_TWOIN,
   /* 2 in, 1 out */
   DYNREG_VEX3,
+  /* 2 in 0 out first must always be treated as indirect */
+  DYNREG_STORE,
+
+  DYNREG_HAS2IN = DYNREG_INOUT,
 }REGMODE;
 
 typedef enum INTRINSFLAGs {
@@ -49,7 +53,10 @@ typedef enum INTRINSFLAGs {
 
   /* Intrinsic should be emitted as a function that is called with all the 
    * input registers set beforehand both in the jit and the interpreter */
-  INTRINSFLAG_CALLED = 0x100, 
+  INTRINSFLAG_CALLED = 0x100,
+  
+  /* Opcode is a store to memory */
+  INTRINSFLAG_ISSTORE = 0x200,
 
   /* opcode is larger than the emit system normally handles x86/x64(4 bytes) */
   INTRINSFLAG_LARGEOP = 0x80,
@@ -147,6 +154,12 @@ CTypeID1 regkind_ct[16];
 #define rk_irt(rid, kind) ((rid) < RID_MAX_GPR ? rk_irtgpr(kind) : rk_irtfpr(kind))
 
 #define rk_isvec(kind) ((kind) >= REGKIND_VEC_START)
+
+#define reg_isgpr(reg) (ASMRID(reg) < RID_MAX_GPR)
+#define reg_isfp(reg) (ASMRID(reg) >= RID_MIN_FPR)
+#define reg_isvec(reg) (ASMRID(reg) >= RID_MIN_FPR && ASMREGKIND(reg) >= REGKIND_VEC_START)
+
+#define reg_isboxed(reg) (ASMREGKIND(reg) > 1)
 
 LJ_FUNC void lj_intrinsic_init(lua_State *L);
 LJ_FUNC void lj_intrinsic_asmlib(lua_State *L, GCtab* asmlib);

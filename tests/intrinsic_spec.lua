@@ -139,6 +139,28 @@ context("__mcode", function()
     assert_error(function() addss(1, 2, 3) end) 
     assert_error(function() addss(1, 2, 3, 4) end)
   end)
+  
+   it("mem store", function() 
+
+    ffi.cdef([[void memadd(int32_t* nptr, int32_t n) __mcode("01Mrw");]])
+    
+    local sum = 0
+    
+    local function checker(i, jsum)
+      sum = sum+i
+      if(jsum ~= sum) then 
+       return jsum, sum
+      end
+    end
+    
+    local numptr = ffi.new("int32_t[1]", 0)
+    assert(ffi.C.memadd)
+  
+    assert_jitchecker(checker, function(i)
+      ffi.C.memadd(numptr, i)
+      return numptr[0]
+    end)
+  end)
 
 end)
 
