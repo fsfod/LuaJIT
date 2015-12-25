@@ -2568,7 +2568,7 @@ restart:
         emit_savefpr(as, reg, outcontext, offset);
       }
     }
-
+    checkmclim(as);
     offset += sizeof(TValue);
   }
 
@@ -2668,6 +2668,7 @@ restart:
         offset += sizeof(intptr_t);
       }
     }
+    checkmclim(as);
 
     if(r != RID_CONTEXT)
       rset_set(as->freeset, r);
