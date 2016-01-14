@@ -59,6 +59,10 @@ enum {
   RID_MAX_FPR = RID_MAX,
   RID_NUM_GPR = RID_MAX_GPR - RID_MIN_GPR,
   RID_NUM_FPR = RID_MAX_FPR - RID_MIN_FPR,
+
+  /* Placeholder register ids for dynamic register entries in intrinsics */
+  RID_DYN_FPR = RID_MAX_FPR-1,
+  RID_DYN_GPR = RID_SP,
 };
 
 /* -- Register sets ------------------------------------------------------- */
