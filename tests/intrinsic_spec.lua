@@ -752,6 +752,34 @@ it("addss", function()
   assert_equal(0, addsd(0, 0))
 end)
 
+it("shufps", function()
+  assert_cdef([[float4 shufps(float4 v1, float4 v2) __mcode("0FC6rMU", 0);]], "shufps")
+  
+  local shufps = ffi.C.shufps
+   
+  local v = ffi.new("float4", 1.5, 2.25, 3.125, 4.0625)
+  local vzero = ffi.new("float4", 1)
+   
+  function test_shufps(v1, v2)
+    return (shufps(v1, v2))
+  end
+  
+  local vout = shufps(v, v)
+  assert_equal(vout[0], 1.5)
+  assert_equal(vout[1], 1.5)
+  assert_equal(vout[2], 1.5)
+  assert_equal(vout[3], 1.5)
+  
+  assert_cdef([[float4 shufpsrev(float4 v1, float4 v2) __mcode("0FC6rMU", 0x1b);]], "shufpsrev")
+  
+  local vout = ffi.C.shufpsrev(v, v)
+
+  assert_equal(vout[0], 4.0625)
+  assert_equal(vout[1], 3.125)
+  assert_equal(vout[2], 2.25)
+  assert_equal(vout[3], 1.5)
+end)
+
 context("mixed register type opcodes", function()
 
   it("cvttsd2s", function()  
@@ -804,7 +832,29 @@ context("mixed register type opcodes", function()
     assert_equal(0.5, test_cvtsi2sd(0, 0.5))
     assert_equal(1.25, test_cvtsi2sd(1.0, 0.25))
     assert_equal(-1.5, test_cvtsi2sd(-2, 0.5))
-  end) 
+  end)
+  
+  it("pextrw", function()
+    local v = ffi.new("byte16", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16)
+    
+    assert_cdef([[int32_t pextrw_0(byte16 v) __mcode("660FC5mRU", 0);]], "pextrw_0")
+    assert_equal(0x0201, ffi.C.pextrw_0(v))
+    
+    assert_cdef([[int32_t pextrw_7(byte16 v) __mcode("660FC5mRU", 7);]], "pextrw_7")
+    assert_equal(0x100f, ffi.C.pextrw_7(v))
+  end)
+  
+  it("pinsrw", function()
+    assert_cdef([[int4 pinsrw_0(byte16 v, int32_t word) __mcode("660FC4rMU", 0);]], "pinsrw_0")
+    
+    local v = ffi.new("byte16", 0)
+    local vout = ffi.C.pinsrw_0(v, 0xf0f1)   
+    assert_equal(0xf0f1, vout[0])
+    
+    assert_cdef([[int4 pinsrw_7(byte16 v, int32_t word) __mcode("660FC4rMU", 7);]], "pinsrw_7")
+    vout = ffi.C.pinsrw_0(v, 0xf0f1)  
+    assert_equal(0xf0f1, vout[0])
+  end)
 end)
 
 end)
