@@ -389,7 +389,7 @@ static void setopcode(lua_State *L, AsmIntrins *intrins, uint32_t opcode)
   if (len < 4) {
     opcode |= (uint8_t)(int8_t)-(len+1);
   } else {
-    lj_err_callermsg(L, "opcode too long");
+    intrins->flags |= INTRINSFLAG_LARGEOP;
   }
 
   if (intrin_regmode(intrins) == DYNREG_OPEXT) {
@@ -443,8 +443,7 @@ static void setopmcode(AsmIntrins *intrins, uint32_t *tempopptr)
   lua_assert(intrin_regmode(intrins) == DYNREG_FIXED);
 
   *tempopptr = intrins->opcode;
-  lua_assert(LJ_TARGET_X86ORX64);
-  intrins->asmsz = (-(int8_t)intrins->opcode)-1;
+  intrins->asmsz = intrin_oplen(intrins);
   intrins->mcode = ((char*)tempopptr) + 4-intrins->asmsz;
   intrins->asmofs = 0;
 }

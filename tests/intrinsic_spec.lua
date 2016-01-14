@@ -780,6 +780,25 @@ it("shufps", function()
   assert_equal(vout[3], 1.5)
 end)
 
+it("phaddd 4byte opcode", function()
+
+  ffi.cdef([[int4 phaddd(int4 v1, int4 v2) __mcode("660F3802rM");]])
+
+  local phaddd = ffi.C.phaddd
+
+  function hsum(v)
+    local result = phaddd(v, v)
+    result = phaddd(result, result)
+    return result[0]
+  end
+
+  local v = ffi.new("int4", 1, 2, 3, 4)
+  local vzero = ffi.new("int4", 0)
+
+  assert_equal(hsum(v), 10)
+  assert_equal(hsum(vzero), 0)
+end)
+
 context("mixed register type opcodes", function()
 
   it("cvttsd2s", function()  
