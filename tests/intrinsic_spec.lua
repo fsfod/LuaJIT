@@ -70,6 +70,12 @@ context("intrinsic errors", function()
     assert_error(function() asmfromstr(nop,  {mode = {}}) end)
     assert_error(function() asmfromstr(nop,  {mode = "1"}) end)
   end)
+  
+  it("base code size", function()
+    assert_error(function() ffi.intrinsic(nop, 0xffffff,  {}) end)
+    assert_error(function() ffi.intrinsic(nop, 0,  {}) end)
+    assert_error(function() ffi.intrinsic(nop, -1,  {}) end)
+  end)
 end)
 
 context("nop inout", function()

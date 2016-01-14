@@ -183,6 +183,7 @@ ERRDEF(FFI_BADREG,      "bad register(%s) " LUA_QS " found in list " LUA_QS)
 ERRDEF(FFI_REGOV,       "register count for list " LUA_QS " exceeds the max register limit of %d")
 ERRDEF(FFI_NYIPACKBIT,	"NYI: packed bit fields")
 ERRDEF(FFI_NYICALL,	"NYI: cannot call this C function (yet)")
+ERRDEF(FFI_INTRWRAP,    "Failed to create interpreter wrapper for intrinsic(%s)")
 #endif
 
 #undef ERRDEF
