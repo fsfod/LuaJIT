@@ -301,6 +301,31 @@ static void asm_fusexref(ASMState *as, IRRef ref, RegSet allow)
   }
 }
 
+static int asm_fusexload(ASMState *as, IRRef ref, RegSet xallow, int limit)
+{
+  IRIns *ir = IR(ref);
+  IRRef i = limit == -1 ? as->curins : (IRRef)limit;
+  lua_assert(ir->o == IR_XLOAD);
+
+  /* Generic fusion is not ok for 8/16 bit operands (but see asm_comp).
+  ** Fusing unaligned memory operands is ok on x86 (except for SIMD types).
+  */
+  if (irt_typerange(ir->t, IRT_I8, IRT_U16)) {
+    return 0;
+  }
+  if (i > ref + CONFLICT_SEARCH_LIM)
+    return 0;  /* Give up, ref is too far away. */
+  ir = as->ir;
+  while (--i > ref) {
+    if (ir[i].o == IR_XSTORE)
+      return 0;  /* Conflict found. */
+    else if ((ir[i].op1 == ref || ir[i].op2 == ref))
+      return 0;
+  }
+  asm_fusexref(as, IR(ref)->op1, xallow);
+  return 1;
+}
+
 /* Fuse load into memory operand. */
 static Reg asm_fuseload(ASMState *as, IRRef ref, RegSet allow)
 {
@@ -356,12 +381,7 @@ static Reg asm_fuseload(ASMState *as, IRRef ref, RegSet allow)
 	return RID_MRM;
       }
     } else if (ir->o == IR_XLOAD) {
-      /* Generic fusion is not ok for 8/16 bit operands (but see asm_comp).
-      ** Fusing unaligned memory operands is ok on x86 (except for SIMD types).
-      */
-      if ((!irt_typerange(ir->t, IRT_I8, IRT_U16)) &&
-	  noconflict(as, ref, IR_XSTORE, 0)) {
-	asm_fusexref(as, ir->op1, xallow);
+      if (asm_fusexload(as, ref, xallow, -1)) {
 	return RID_MRM;
       }
     } else if (ir->o == IR_VLOAD) {
@@ -526,6 +546,317 @@ static void asm_gencall(ASMState *as, const CCallInfo *ci, IRRef *args)
   if (patchnfpr) *patchnfpr = fpr - REGARG_FIRSTFPR;
 #endif
 }
+
+#if LJ_HASINTRINSICS
+
+typedef struct IntrinsInfo {
+  AsmIntrins *intrins;
+  IRRef args[LJ_INTRINS_MAXREG];
+  /* input register list that gets mutated for opcode intrinsics */
+  uint8_t inregs[LJ_INTRINS_MAXREG];
+  RegSet inset, outset;
+  /* First CARG ref used as limit for duplicate load checking when fusing */
+  IRRef a1; 
+} IntrinsInfo;
+
+static int asm_swaprefs(ASMState *as, IRIns *ir, IRRef lref, IRRef rref);
+
+static void asm_asmsetupargs(ASMState *as, IntrinsInfo *ininfo)
+{
+  MSize n;
+  AsmIntrins *intrins = ininfo->intrins;
+
+  /* move or load args into input registers */
+  for (n = 0; n < intrins->insz; n++) {
+    IRRef ref = ininfo->args[n];
+    IRIns *ir = IR(ref);
+    Reg r = reg_rid(ininfo->inregs[n]);
+
+    /* Skip any dynamic registers already setup by opcode intrinsics */
+    if (ininfo->inregs[n] == 0xff) {
+      lua_assert(n < intrins->dyninsz);
+      continue;
+    }
+
+    if (!ra_hasreg(ir->r) && r < RID_MAX_GPR && ref < ASMREF_TMP1) {
+#if LJ_64
+      if (ir->o == IR_KINT64)
+        emit_loadu64(as, r, ir_kint64(ir)->u64);
+      else
+#endif
+        emit_loadi(as, r, ir->i);
+    } else {
+      /* if we have fixed register it must of been evicted earlier */
+      lua_assert(rset_test(as->freeset, r) || n < intrins->dyninsz);
+
+      if (ra_hasreg(ir->r)) {
+        ra_noweak(as, ir->r);
+        if (r != ir->r) {
+          lua_assert(n >= intrins->dyninsz);
+          emit_movrr(as, ir, r, ir->r);
+        }
+      } else {
+        /* Dynamic registers should never end up here */
+        lua_assert(!intrin_regmode(intrins) || n >= intrins->dyninsz);
+        ra_allocref(as, ref, RID2RSET(r));
+      }
+    }
+    checkmclim(as);
+  }
+}
+
+static void asm_intrin_opcode(ASMState *as, IRIns *ir, IntrinsInfo *ininfo)
+{
+  AsmIntrins *intrins = ininfo->intrins;
+  IRRef *args = ininfo->args;
+  uint8_t *in = ininfo->inregs;
+  uint32_t dynreg = intrin_regmode(intrins);
+  RegSet allow;
+  IRRef lref = 0, rref = 0;
+  Reg right, dest = RID_NONE;
+  int dynrout = intrins->outsz > 0 && intrin_dynrout(intrins);
+
+  /* Swap to refs to native ordering */
+  if (dynreg >= DYNREG_SWAPREGS) {
+    IRRef temp = ininfo->args[0];
+    ininfo->args[0] = ininfo->args[1]; ininfo->args[1] = temp;
+  }
+
+  rref = args[0];
+  right = IR(rref)->r;
+
+  if (intrins->dyninsz > 1) {
+    lref = args[1];
+    dest = IR(lref)->r;
+
+    if (ra_hasreg(dest))
+      in[1] = reg_setrid(in[1], dest);
+  }
+
+  as->mrm.idx = as->mrm.base = RID_NONE;
+  as->mrm.scale = as->mrm.ofs = 0;
+
+  /* Allocate the dynamic output register if we have one */
+  if (dynrout) {
+    allow = reg_torset(intrins->out[0]);
+    if (ra_hasreg(right)) {
+      rset_clear(allow, right);
+      ra_noweak(as, right);
+    }
+    dest = ra_dest(as, ir, allow);
+    if (dynreg == DYNREG_OPEXT) {
+      /* Set input register the same as the output since the op is destructive */
+      right = dest;
+    }
+  }
+
+  if (intrins->dyninsz > 1 && dynreg != DYNREG_TWOSTORE) {
+    if (lref == rref) {
+      if (dynreg == DYNREG_INOUT) 
+        right = dest;
+      /* Only load/move the value to register once.
+      ** ra_left will do the move for INOUT.
+      */
+      in[0] = 0xff;
+    } else if (ra_noreg(right)) {
+      if (intrin_iscomm(intrins) && asm_swaprefs(as, ir, lref, rref)) {
+        IRRef tmp = lref; lref = rref; rref = tmp;
+        /* Must be same register kinds and RID register type ranges */
+        lua_assert(reg_isgpr(in[0]) == reg_isgpr(in[1]) &&
+                   reg_kind(in[0]) == reg_kind(in[1]));
+
+        args[0] = rref;
+        args[1] = lref;
+        /* lref(now swapped to rref) may already have a register set so update 
+        ** the right register to it in case we don't fuse a load.
+        */
+        right = IR(rref)->r;
+      }
+      if (!(intrins->flags & INTRINSFLAG_NOFUSE)) {
+        RegSet rallow = reg_torset(in[0]);
+        rset_clear(rallow, dest);
+        /* Handle XLOAD directly so we can tell noconflict to skip our IR_CARG
+        ** that holds the ref of the load were fusing.
+        */
+        if (IR(rref)->o == IR_XLOAD) {
+          if (mayfuse(as, rref) && asm_fusexload(as, rref, rallow, ininfo->a1)) {
+            right = RID_MRM;
+          }
+        } else {
+          right = asm_fuseload(as, rref, rallow);
+        }
+      }
+    }
+  } else if (intrins->flags & INTRINSFLAG_INDIRECT) {
+    /* force indirect MODRM mode. rref should always be a memory address */
+    if (ra_noreg(right)) {
+      allow = RSET_GPR & ~ininfo->inset;
+      /* If part of the opcode is encoded in ModRM avoid picking a register that
+      ** will corrupt it */
+      if (dynreg == DYNREG_OPEXT)
+        rset_clear(allow, RID_EBP);
+      asm_fusexref(as, rref, allow);
+    } else {
+      as->mrm.base = IR(rref)->r;
+    }
+    right = RID_MRM;
+  }
+
+  /* Handle second input reg for any two input dynamic in register modes
+  ** which isn't DYNREG_INOUT
+  */
+  if (intrins->dyninsz > 1 && ra_noreg(dest)) {
+    Reg r;
+    allow = reg_torset(in[1]) & ~ininfo->inset;
+    if (ra_hasreg(right) && right != RID_MRM)
+      rset_clear(allow, right);
+
+    r = ra_allocref(as, args[1], allow);
+    in[1] = reg_setrid(in[1], r);
+    dest = r;
+  }
+
+  if (right == RID_MRM) {
+    /* Skip trying to load what we fused into the instruction */
+    in[0] = 0xff;
+  } else {
+    if (ra_noreg(right)) {
+      lua_assert(ra_noreg(IR(rref)->r));
+      allow = reg_torset(in[0]);
+      rset_clear(allow, dest);
+      if(dynreg == DYNREG_OPEXT)
+        rset_clear(allow, RID_EBP);
+      right = ra_allocref(as, rref, allow);
+    }
+    in[0] = reg_setrid(in[0], right);
+  }
+
+  lua_assert(ra_hasreg(right) && (ra_hasreg(dest) || intrins->dyninsz < 2));
+  emit_intrins(as, intrins, right, dest);
+  
+  if (dynreg == DYNREG_INOUT) {
+    lua_assert(lref);
+    ra_left(as, dest, lref);
+    /* no need to load the register since ra_left already did */
+    in[1] = 0xff;
+  } else if (dynreg == DYNREG_OPEXT && dynrout) {
+    /* Handle destructive ONEOPEXT opcodes */
+    lua_assert(rref);
+    ra_left(as, dest, rref);
+    in[0] = 0xff;
+  }
+
+  checkmclim(as);
+}
+
+void asm_intrin_results(ASMState *as, IRIns *ir, AsmIntrins* intrins, IntrinsInfo* ininfo)
+{
+  RegSet evict = 0, outset = 0;
+  uint32_t i = intrin_regmode(intrins) ? intrins->dyninsz : 0;
+
+  for (; i < intrins->insz; i++) {
+    /* If the input arg has the same register as the input register we could
+    ** avoid evicting it if it wasn't overwritten in the intrinsic
+    */
+    evict |= RID2RSET(reg_rid(intrins->in[i]));
+  }
+  ininfo->inset = evict;
+
+  i = intrin_dynrout(intrins) ? 1 : 0;
+  for (size_t i = 0; i < intrins->outsz; i++) {
+    outset |= RID2RSET(reg_rid(intrins->out[i]));
+  }
+  ininfo->outset = outset;
+    
+  evict |= intrins->mod;
+
+  /* Evict any values in modified and input registers */
+  ra_evictset(as, evict);
+}
+
+static void asm_asmins(ASMState *as, IRIns *ir)
+{
+  CTState *cts = ctype_ctsG(J2G(as->J));
+  IntrinsInfo ininfo;
+  IRIns *ira = ir;
+  uintptr_t target = 0;
+  uint32_t n = 0;
+  AsmIntrins *intrins = lj_intrinsic_get(cts, ir->op2);
+  ininfo.intrins = intrins;
+
+  memcpy(ininfo.inregs, intrins->in, sizeof(ininfo.inregs));
+  asm_intrin_results(as, ir, intrins, &ininfo);
+
+  if (!intrins->wrapped) {
+    IRIns *kptr = IR(ira->op2);
+    if (LJ_64 && kptr->o == IR_KINT64) {
+      target = ir_k64(ira)->u64;
+    } else {
+      target = (uintptr_t)ir_kptr(ira);
+    }
+    ira = IR(ira->op1);
+  } else {
+    target = (uintptr_t)intrins->wrapped;
+  }
+
+  n = intrins->insz;
+  /* Collect the input register argument refs */
+  while (ira->op1 != REF_NIL) {
+    ira = IR(ira->op1);
+    lua_assert(ira->o == IR_CARG);
+    ininfo.args[--n] = ira->op2;
+    /* Save the ref of our first CARG so we can use it to skip the arg chain 
+    ** when looking for conflicts during when fusing a XLOAD.
+    */
+    if (n == 0)
+      ininfo.a1 = (IRRef)(ira-as->ir);
+  }
+  lua_assert(n == 0);
+
+  if (intrin_regmode(intrins)) {
+    asm_intrin_opcode(as, ir, &ininfo);
+  } else {
+    Reg r1 = 0;
+
+    if (intrins->flags & INTRINSFLAG_CALLED) {
+      AsmHeader *hdr = ((AsmHeader*)target)-1;
+      MCode *p;
+      target = intrins->flags & INTRINSFLAG_INDIRECT ?
+                hdr->target : (target+hdr->asmofs);
+      p = (MCode*)target;
+      if (LJ_64 && (p-as->mcp) != (int32_t)(p-as->mcp)) {
+        r1 = ra_scratch(as, RSET_GPR & ~(ininfo.inset | ininfo.outset));
+      }
+      emit_intrins(as, intrins, r1, target);
+    } else  {
+      emit_intrins(as, intrins, r1, target);
+    }
+  }
+
+  asm_asmsetupargs(as, &ininfo);
+}
+
+void asm_asmret(ASMState *as, IRIns *ir)
+{
+  if (ir->r != ir->op2) {
+    ra_evictset(as, RID2RSET(ir->op2));
+    ra_destreg(as, ir, ir->op2);
+  }else{
+    ra_destreg(as, ir, ir->op2);
+  }
+}
+#else
+static void asm_asmins(ASMState *as, IRIns *ir)
+{
+  UNUSED(as); UNUSED(ir);
+}
+
+void asm_asmret(ASMState *as, IRIns *ir)
+{
+  UNUSED(as); UNUSED(ir);
+}
+#endif
+
 
 /* Setup result reg/sp for call. Evict scratch regs. */
 static void asm_setupresult(ASMState *as, IRIns *ir, const CCallInfo *ci)
@@ -1208,7 +1539,7 @@ static void asm_fxload(ASMState *as, IRIns *ir)
     asm_fusefref(as, ir, RSET_GPR);
   else
     asm_fusexref(as, ir->op1, RSET_GPR);
-  /* ir->op2 is ignored -- unaligned loads are ok on x86. */
+  /* ir->op2 is ignored for non vectors -- unaligned loads are ok on x86. */
   switch (irt_type(ir->t)) {
   case IRT_I8: xo = XO_MOVSXb; break;
   case IRT_U8: xo = XO_MOVZXb; break;
@@ -1275,7 +1606,9 @@ static void asm_fxstore(ASMState *as, IRIns *ir)
       xo = XO_MOVto;
       break;
     }
+
     emit_mrm(as, xo, src, RID_MRM);
+
     if (!LJ_64 && src != osrc) {
       ra_noweak(as, osrc);
       emit_rr(as, XO_MOV, src, osrc);
@@ -1675,28 +2008,33 @@ static void asm_pow(ASMState *as, IRIns *ir)
     asm_fppowi(as, ir);
 }
 
-static int asm_swapops(ASMState *as, IRIns *ir)
+static int asm_swaprefs(ASMState *as, IRIns *ir, IRRef lref, IRRef rref)
 {
-  IRIns *irl = IR(ir->op1);
-  IRIns *irr = IR(ir->op2);
-  lua_assert(ra_noreg(irr->r));
-  if (!irm_iscomm(lj_ir_mode[ir->o]))
-    return 0;  /* Can't swap non-commutative operations. */
-  if (irref_isk(ir->op2))
+  IRIns *irl = IR(lref);
+  IRIns *irr = IR(rref);
+  lua_assert(ra_noreg(irr->r)); 
+  if (irref_isk(rref))
     return 0;  /* Don't swap constants to the left. */
   if (ra_hasreg(irl->r))
     return 1;  /* Swap if left already has a register. */
   if (ra_samehint(ir->r, irr->r))
     return 1;  /* Swap if dest and right have matching hints. */
   if (as->curins > as->loopref) {  /* In variant part? */
-    if (ir->op2 < as->loopref && !irt_isphi(irr->t))
+    if (rref < as->loopref && !irt_isphi(irr->t))
       return 0;  /* Keep invariants on the right. */
-    if (ir->op1 < as->loopref && !irt_isphi(irl->t))
+    if (lref < as->loopref && !irt_isphi(irl->t))
       return 1;  /* Swap invariants to the right. */
   }
   if (opisfusableload(irl->o))
     return 1;  /* Swap fusable loads to the right. */
   return 0;  /* Otherwise don't swap. */
+}
+
+static int asm_swapops(ASMState *as, IRIns *ir)
+{
+  if (!irm_iscomm(lj_ir_mode[ir->o]))
+    return 0;  /* Can't swap non-commutative operations. */
+  return asm_swaprefs(as, ir, ir->op1, ir->op2);
 }
 
 static void asm_fparith(ASMState *as, IRIns *ir, x86Op xo)

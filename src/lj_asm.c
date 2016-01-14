@@ -1258,6 +1258,53 @@ static uint32_t asm_callx_flags(ASMState *as, IRIns *ir)
   return (nargs | (ir->t.irt << CCI_OTSHIFT));
 }
 
+#if LJ_HASINTRINSICS
+static RegSet asm_intrinsichints(ASMState *as, IRIns *ir)
+{
+  AsmIntrins* intrins = lj_intrinsic_get(ctype_ctsG(J2G(as->J)), ir->op2);
+  RegSet mod = intrins->mod;
+  IRIns *ira = IR(ir->op1), *irval;
+  int i;
+  int dynreg = intrin_regmode(intrins);
+
+  /* Propagate the fixed registers of the arguments to refs passed in for them */
+  for (i = intrins->insz-1; i >= 0; i--) {
+    Reg r = reg_rid(intrins->in[i]);
+
+    if (dynreg && i < intrins->dyninsz) {
+      /* Dynamic register so no hint needed */
+      ira = IR(ira->op1);
+      continue;
+    }
+
+    rset_set(mod, r);
+    
+    if (!irref_isk(ira->op2)) {
+      irval = IR(ira->op2);
+      
+      /* Back propagate the register to the arguments value if it has no register set */
+      if (irval->prev == REGSP_INIT) {
+        irval->prev = REGSP_HINT(r);
+      }
+    }
+
+    ira = IR(ira->op1);
+  }
+
+  i = intrin_dynrout(intrins) ? 1 : 0;
+
+  for (; i < intrins->outsz; i++) {
+    mod |= 1 << reg_rid(intrins->out[i]);
+  }
+
+  if (intrin_dynrout(intrins) && intrins->outsz > 0) {
+    ir->prev = REGSP_INIT;
+  }
+
+  return mod;
+}
+#endif
+
 static void asm_callid(ASMState *as, IRIns *ir, IRCallID id)
 {
   const CCallInfo *ci = &lj_ir_callinfo[id];
@@ -1691,6 +1738,9 @@ static void asm_ir(ASMState *as, IRIns *ir)
   case IR_CALLN: case IR_CALLL: case IR_CALLS: asm_call(as, ir); break;
   case IR_CALLXS: asm_callx(as, ir); break;
   case IR_CARG: break;
+  
+  case IR_ASMINS: asm_asmins(as, ir); break;
+  case IR_ASMRET: asm_asmret(as, ir); break;
 
   default:
     setintV(&as->J->errinfo, ir->o);
@@ -2037,6 +2087,21 @@ static void asm_setup_regsp(ASMState *as)
 	as->modset |= RSET_SCRATCH;
       continue;
       }
+#if LJ_HASINTRINSICS
+    case IR_ASMINS: {
+      Reg mod = asm_intrinsichints(as, ir);
+      if (inloop)
+        as->modset |= mod;
+      continue;
+    }
+      
+    case IR_ASMRET: {
+      ir->prev = REGSP_HINT(ir->op2);
+      if (inloop)
+        as->modset |= 1 << reg_rid(ir->op2);
+      continue;
+    }
+#endif
     case IR_CALLN: case IR_CALLA: case IR_CALLL: case IR_CALLS: {
       const CCallInfo *ci = &lj_ir_callinfo[ir->op2];
       ir->prev = asm_setup_call_slots(as, ir, ci);

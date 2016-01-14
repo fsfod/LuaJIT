@@ -33,6 +33,7 @@
 #include "lj_dispatch.h"
 #include "lj_strfmt.h"
 #include "lj_intrinsic.h"
+#include "lj_target.h"
 
 /* Some local macros to save typing. Undef'd at the end. */
 #define IR(ref)			(&J->cur.ir[(ref)])
@@ -1144,6 +1145,8 @@ static void crec_snap_caller(jit_State *J)
   J->base[-1] = ftr; J->pc = pc;
 }
 
+void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *cts);
+
 /* Record function call. */
 static int crec_call(jit_State *J, RecordFFData *rd, GCcdata *cd)
 {
@@ -1155,7 +1158,8 @@ static int crec_call(jit_State *J, RecordFFData *rd, GCcdata *cd)
     ct = ctype_rawchild(cts, ct);
   }
   if (ctype_isintrinsic(ct->info)) {
-    lj_trace_err(J, LJ_TRERR_NYICALL);
+    crec_call_intrins(J, rd, ct);
+    return 1;
   }else if (ctype_isfunc(ct->info)) {
     TRef func = emitir(IRT(IR_FLOAD, tp), J->base[0], IRFL_CDATA_PTR);
     CType *ctr = ctype_rawchild(cts, ct);
@@ -1215,6 +1219,192 @@ static int crec_call(jit_State *J, RecordFFData *rd, GCcdata *cd)
   }
   return 0;
 }
+
+#if LJ_HASINTRINSICS
+
+static IRType intrins_retit(jit_State *J, CTState *cts, CType *arg)
+{
+  uint32_t reg = arg->size;
+
+  if (reg_isgpr(reg)) {
+    IRType irt = crec_ct2irt(cts, ctype_rawchild(cts, arg));
+    lua_assert(irt != IRT_CDATA);
+    return irt;
+  } else {
+    if (reg_isvec(reg)) {
+      /* NYI: support for vectors */
+      lj_trace_err(J, LJ_TRERR_NYIVEC);
+    }
+    return reg_irt(reg);
+  }
+}
+
+void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *func)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  TRef tintrins = ctype_typeid(cts, func), arg = TREF_NIL;
+  AsmIntrins *intrins = lj_intrinsic_get(cts, ctype_typeid(cts, func));
+  size_t i;
+  IRType it;
+  int argofs = 1, typed = 0, dynout = 0;
+  CTypeID sib = 0, retid = 0;
+
+  /* Typed intrinsics will have a return list set as the child id */
+  if (ctype_cid(func->info) != 0) {
+    typed = 1;
+    /* Fetch the parameter list chain */
+    sib = func->sib;
+    retid = ctype_cid(func->info);
+  }
+
+  /* Convert parameters and load them into the input registers */
+  if (sib) {
+    for (i = 0; i < intrins->insz; i++) {
+      CType *ct = ctype_get(cts, sib);
+      TRef tra = J->base[i+argofs];
+      CType *d = ctype_rawchild(cts, ct);
+      sib = ct->sib;
+
+      if (reg_isvec(ct->size)) {
+        /* NYI: support for vectors */
+        lj_trace_err(J, LJ_TRERR_NYIVEC);
+      }
+
+      tra = crec_ct_tv(J, d, 0, tra, &rd->argv[i+argofs]);
+      arg = emitir(IRT(IR_CARG, IRT_NIL), arg, tra);
+    }
+  } else {
+    /* untyped intrinsics always aggressively cast input arguments */
+    for (i = 0; i < intrins->insz; i++) {
+      TRef tr = 0, tra = J->base[i+argofs];
+      uint32_t reg = intrins->in[i];
+      CType *d = NULL;
+
+      /* Cast any value for gpr/vec to void* for untyped intrinsics */
+      if (reg_rid(reg) < RID_MAX_GPR) {
+        if (tref_isnumber(tra)) {
+          tr = lj_opt_narrow_toint(J, tra);
+        } else {
+          d = ctype_get(cts, CTID_P_VOID);
+        }
+      } else {
+        if (reg_isvec(reg)) {
+          /* NYI: support for vectors */
+          lj_trace_err(J, LJ_TRERR_NYIVEC);
+        } else {
+          d = ctype_get(cts, rk_ctypefpr(reg_kind(reg)));
+        }
+      }
+
+      if (!tr)
+        tr = crec_ct_tv(J, d, 0, tra, &rd->argv[i+argofs]);
+
+      arg = emitir(IRT(IR_CARG, IRT_NIL), arg, tr);
+    }
+  }
+
+  dynout = intrins->outsz > 0 && intrin_dynrout(intrins);
+
+  it = IRT_NIL;
+  /* Skip emitting IR_ASMREG for the first dynamic output register */
+  if (dynout) {
+    if (retid) {
+      it = intrins_retit(J, cts, ctype_get(cts, retid));
+    } else {
+      it = reg_irt(intrins->out[0]);
+    }
+  }
+
+  J->base[0] = tintrins = emitir(IRT(IR_ASMINS, it), arg, tintrins);
+
+  if (intrins->flags & INTRINSFLAG_MEMORYSIDE) {
+    emitir(IRT(IR_XBAR, IRT_NIL), 0, 0);
+  }
+
+  sib = retid;
+  for (i = 0; i < intrins->outsz; i++) {
+    uint32_t reg;
+    IRType irt = 0;
+
+    if (sib) {
+      CType *ct = ctype_get(cts, sib);
+      sib = ct->sib;
+      reg = ct->size;
+      
+      if (reg_isgpr(reg)) {
+        irt = intrins_retit(J, cts, ct);
+        lua_assert(irt != IRT_CDATA);
+      } else {
+        irt = reg_irt(reg);
+      }
+    } else {
+      reg = intrins->out[i];
+      irt = reg_irt(reg);
+    }
+
+    /* no IR_ASMREG for opcodes with dynamic registers */
+    if (i == 0 && dynout) {
+      continue;
+    }
+
+    J->base[i] = emitir(IRT(IR_ASMRET, irt), tintrins, reg_rid(reg));
+  }
+
+  sib = retid;
+  /* Second pass to box values after all ASMRET have run to shuffle/spill the
+   * output registers. 
+   */
+  for (i = 0; i < intrins->outsz; i++) {
+    CTypeID id = 0;
+    uint32_t reg;
+    uint32_t kind;
+
+    if (retid) {
+      CType *ct = ctype_get(cts, sib);
+      sib = ct->sib;
+      id = ctype_cid(ct->info);
+      reg = ct->size;
+    } else {
+      reg = intrins->out[i];
+    }
+    kind = reg_kind(reg);
+
+    if (reg_isgpr(reg)) {
+      CTypeID cid;
+      if (!retid) {
+        /* If no ctype is specified use the default type for the register kind */
+        if (kind == REGKIND_GPRI32)
+          continue;
+        id = rk_ctypegpr(kind);
+      }
+
+      cid = ctype_typeid(cts, ctype_raw(cts, id));
+      if (cid != CTID_INT32) {
+        /* Box the u32/64 bit value in the register */
+        J->base[i] = emitir(IRT(IR_CNEWI, IRT_CDATA), lj_ir_kint(J, id), J->base[i]);
+      }
+    } else {
+      if (kind == REGKIND_FPR32) {
+        J->base[i] = emitconv(J->base[i], IRT_NUM, IRT_FLOAT, 0);
+      } else if(rk_isvec(kind)) {
+        /* NYI: support for vectors */
+        lj_trace_err(J, LJ_TRERR_NYIVEC);
+      } else {
+        lua_assert(kind == REGKIND_FPR64);
+      }
+    }
+  }
+  
+  /* Intrinsics are assumed to always have side effects */
+  J->needsnap = 1;
+  rd->nres = intrins->outsz;
+}
+#else
+void crec_call_intrins(jit_State *J, RecordFFData *rd, CTypeID id)
+{
+  UNUSED(J);UNUSED(rd);UNUSED(id);
+}
+#endif
 
 void LJ_FASTCALL recff_cdata_call(jit_State *J, RecordFFData *rd)
 {
@@ -1512,9 +1702,16 @@ void LJ_FASTCALL recff_clib_index(jit_State *J, RecordFFData *rd)
     CLibrary *cl = (CLibrary *)uddata(udataV(&rd->argv[0]));
     GCstr *name = strV(&rd->argv[1]);
     CType *ct;
-    CTypeID id = lj_ctype_getname(cts, &ct, name, CLNS_INDEX);
+    CTypeID id;
     cTValue *tv = lj_tab_getstr(cl->cache, name);
-    rd->nres = rd->data;
+    rd->nres = rd->data > 0 ? 1 : 0;
+    if (rd->data < 2) {
+      id = lj_ctype_getname(cts, &ct, name, CLNS_INDEX);
+    } else {
+      /* set some dummy values for the intrinsic namespace */
+      id = CTID_VOID;
+      ct = ctype_get(cts, id);
+    }
     if (id && tv && !tvisnil(tv)) {
       /* Specialize to the symbol name and make the result a constant. */
       emitir(IRTG(IR_EQ, IRT_STR), J->base[1], lj_ir_kstr(J, name));
