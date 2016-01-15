@@ -613,7 +613,7 @@ static void asm_intrin_opcode(ASMState *as, IRIns *ir, IntrinsInfo *ininfo)
   uint32_t dynreg = intrin_regmode(intrins);
   RegSet allow;
   IRRef lref = 0, rref = 0;
-  Reg right, dest = RID_NONE;
+  Reg right, dest = RID_NONE, vvvv = RID_NONE;
   int dynrout = intrins->outsz > 0 && intrin_dynrout(intrins);
 
   /* Swap to refs to native ordering */
@@ -705,7 +705,9 @@ static void asm_intrin_opcode(ASMState *as, IRIns *ir, IntrinsInfo *ininfo)
   /* Handle second input reg for any two input dynamic in register modes
   ** which isn't DYNREG_INOUT
   */
-  if (intrins->dyninsz > 1 && ra_noreg(dest)) {
+  if (intrins->dyninsz > 1 &&
+      (dynreg != DYNREG_VEX3 && ra_noreg(dest)) ||
+      (dynreg == DYNREG_VEX3 && ra_noreg(IR(args[1])->r))) {
     Reg r;
     allow = reg_torset(in[1]) & ~ininfo->inset;
     if (ra_hasreg(right) && right != RID_MRM)
@@ -713,7 +715,13 @@ static void asm_intrin_opcode(ASMState *as, IRIns *ir, IntrinsInfo *ininfo)
 
     r = ra_allocref(as, args[1], allow);
     in[1] = reg_setrid(in[1], r);
-    dest = r;
+
+    if (dynreg != DYNREG_VEX3) {
+      dest = r;
+    } else if (lref == rref) {
+      /* update right for same ref */
+      right = r;
+    }
   }
 
   if (right == RID_MRM) {
@@ -731,8 +739,12 @@ static void asm_intrin_opcode(ASMState *as, IRIns *ir, IntrinsInfo *ininfo)
     in[0] = reg_setrid(in[0], right);
   }
 
+  if ((intrins->flags & INTRINSFLAG_VEX) && dynreg == DYNREG_VEX3) {
+    vvvv = reg_rid(in[1]);
+  }
+
   lua_assert(ra_hasreg(right) && (ra_hasreg(dest) || intrins->dyninsz < 2));
-  emit_intrins(as, intrins, right, dest);
+  emit_intrins(as, intrins, right, dest, vvvv);
   
   if (dynreg == DYNREG_INOUT) {
     lua_assert(lref);
@@ -827,9 +839,9 @@ static void asm_asmins(ASMState *as, IRIns *ir)
       if (LJ_64 && (p-as->mcp) != (int32_t)(p-as->mcp)) {
         r1 = ra_scratch(as, RSET_GPR & ~(ininfo.inset | ininfo.outset));
       }
-      emit_intrins(as, intrins, r1, target);
+      emit_intrins(as, intrins, r1, target, 0);
     } else  {
-      emit_intrins(as, intrins, r1, target);
+      emit_intrins(as, intrins, r1, target, 0);
     }
   }
 

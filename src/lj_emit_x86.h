@@ -35,7 +35,7 @@
                                         rid : (rid)-RID_MIN_FPR)) << 19))
 
 #define VEX_OP2(o, pp)	((uint32_t)(0x78c5c5 | (pp<<16) + (o<<24)))
-#define VEX_OP3(o, pp, mode) ((uint32_t)(0xe0c4 | (mode << 8) | (pp<<16) + (o<<24)))
+#define VEX_OP3(o, pp, mode) ((uint32_t)(0x78e0c4 | (mode << 8) | (pp<<16) + (o<<24)))
 /* extract and merge the opcode,vvv,L,pp and set VEXMAP_0F */
 #define VEX2TO3(op) ((op & 0xff7f0000) | 0xe1c4)
 
@@ -57,6 +57,52 @@ typedef enum VEXMAP {
   VEXMAP_0F38 = 2,
   VEXMAP_0F3A = 3,
 }VEXMAP;
+
+static int vexpp(uint32_t byte)
+{
+  switch (byte) {
+  case 0x66:
+    return VEXPP_66;
+  case 0xf3:
+    return VEXPP_f3;
+  case 0xf2:
+    return VEXPP_f2;
+  default:
+    return VEXPP_0f;
+  }
+}
+
+static int vexmap(uint32_t byte)
+{
+  switch (byte) {
+  case 0x380F:
+    return VEXMAP_0F38;
+  case 0x3a0f:
+    return VEXMAP_0F3A;
+  default:
+    lua_assert((byte & 0xff) == 0x0f);
+    return VEXMAP_0F;
+  }
+}
+
+uint32_t sse2vex(uint32_t op, uint32_t len)
+{
+  uint32_t shift = (4-len) * 8;
+  x86Op vo = op >> 24;
+  int32_t pp = (op >> ((4-len) * 8)) & 0xff;
+  pp = vexpp(pp);
+
+  if (len == 2 || (len == 3 && pp != VEXPP_0f)) {
+    vo = VEX_OP2(vo, pp);
+    vo |= VEX2_R;
+  } else {
+    uint32_t mode = op >> (shift + 8);
+    mode = vexmap(mode & 0xffff);
+    vo = VEX_OP3(vo, pp, mode);
+  }
+
+  return vo;
+}
 
 #define emit_i8(as, i)		(*--as->mcp = (MCode)(i))
 #define emit_i32(as, i)		(*(int32_t *)(as->mcp-4) = (i), as->mcp -= 4)
@@ -589,7 +635,8 @@ static void emit_addptr(ASMState *as, Reg r, int32_t ofs)
 #define CONTEXTSPILL (0)
 
 
-static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins, Reg r1, uintptr_t r2)
+static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins, Reg r1, 
+                           uintptr_t r2, Reg r3)
 {
   uint32_t regmode = intrin_regmode(intrins);
   if (regmode) {
@@ -610,7 +657,15 @@ static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins, Reg r1, uintptr_t 
       r2 |= OP4B;
     }
 
-    emit_mrm(as, intrins->opcode, (Reg)r2, r1);
+    if (intrins->flags & INTRINSFLAG_VEX) {
+      x86Op op = intrins->opcode;
+      if (r3 != RID_NONE) {
+        op = VEXOP_SETVVVV(op, r3);
+      } 
+      emit_mrm(as, op, (Reg)r2, r1);
+    } else {
+      emit_mrm(as, intrins->opcode, (Reg)r2, r1);
+    }
 
     if (intrins->flags & INTRINSFLAG_PREFIX) {
       *--as->mcp = intrins->prefix;

@@ -706,7 +706,7 @@ it("popcnt", function()
 end)
 
 it("addsd", function()
-  assert_cdef([[double addsd(double n1, double n2) __mcode("F20F58rM");]], "addsd")
+  assert_cdef([[double addsd(double n1, double n2) __mcode("F20F58rMv");]], "addsd")
   local addsd = ffi.C.addsd
   
   function test_addsd(n1, n2)
@@ -718,11 +718,23 @@ it("addsd", function()
   
   assert_jit(-3, test_addsd, -4.5, 1.5)
   assert_noexit(3, test_addsd, 4.5, -1.5)
+  
   --check dual num exit
-  assert_equal(5, test_addsd(3, 2))
+  assert_equal(5, test_addsd(3 , 2))
+  
+  --test same ref input
+  function test_addsd2(n)
+    return (addsd(n, n))
+  end
+  
+  assert_jit(3, test_addsd2, 1.5)
+  assert_noexit(-3, test_addsd2, -1.5)
+  
+  --check dual num exit
+  assert_equal(6, test_addsd2(3))
   
   --check unfused
-  ffi.cdef([[double addsduf(double n1, double n2) __mcode("F20F58rR");]])
+  ffi.cdef([[double addsduf(double n1, double n2) __mcode("F20F58rRv");]])
   addsd = ffi.C.addsduf
   
   assert_equal(3, addsd(1, 2))
@@ -730,13 +742,13 @@ it("addsd", function()
 end)
 
 it("addss", function()
-  assert_cdef([[float addss(float n1, float n2) __mcode("F30F58rM");]], "addss")
+  assert_cdef([[float addss(float n1, float n2) __mcode("F30F58rMv");]], "addss")
   local addsd = ffi.C.addss
    
   function test_addsd(n1, n2)
     return (addsd(n1, n2))
   end
-   
+  
   assert_equal(3, addsd(1, 2))
   assert_equal(0, addsd(0, 0))
   
@@ -745,8 +757,16 @@ it("addss", function()
   --check dual num exit
   assert_equal(5, test_addsd(3, 2))
   
+  --test same ref input
+  function test_addss2(n)
+    return (addsd(n, n))
+  end  
+  
+  assert_jit(-9, test_addss2, -4.5)
+  assert_noexit(3, test_addss2, 1.5)
+  
   --check unfused
-  ffi.cdef[[float addssuf(float n1, float n2) __mcode("F30F58rR");]]
+  ffi.cdef[[float addssuf(float n1, float n2) __mcode("F30F58rRv");]]
   addsd = ffi.C.addssuf
   
   assert_equal(3, addsd(1, 2))
@@ -779,6 +799,26 @@ it("shufps", function()
   assert_equal(vout[1], 3.125)
   assert_equal(vout[2], 2.25)
   assert_equal(vout[3], 1.5)
+end)
+
+it("vpermilps avx only", function()
+  assert_cdef([[float4 vpermilps(float4 v1, int4 control) __mcode("660F380CrMV");]], "vpermilps")
+ 
+  local v = ffi.new("float4", 1, 2, 3, 4)
+  local vout = ffi.C.vpermilps(v, ffi.new("int4", 0, 0, 0, 0))
+
+  assert_equal(vout[0], 1)
+  assert_equal(vout[1], 1)
+  assert_equal(vout[2], 1)
+  assert_equal(vout[3], 1)
+  
+  -- Revese the vector
+  vout = ffi.C.vpermilps(v, ffi.new("int4", 3, 2, 1, 0))
+  
+  assert_equal(vout[0], 4)
+  assert_equal(vout[1], 3)
+  assert_equal(vout[2], 2)
+  assert_equal(vout[3], 1)
 end)
 
 it("phaddd 4byte opcode", function()

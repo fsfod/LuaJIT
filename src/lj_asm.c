@@ -2572,7 +2572,7 @@ static void* wrap_intrins(jit_State *J, AsmIntrins *intrins, void* target, MSize
   uint8_t *in = info.in, *out = info.out;
   int spadj = LJ_64 ? 32 : 0;
   int dynreg = intrin_regmode(intrins);
-  Reg rout = RID_NONE, rin = RID_NONE;
+  Reg rout = RID_NONE, rin = RID_NONE, r3 = RID_NONE;
 
   lj_asm_setup_intrins(J, as);
   origtop = as->mctop;
@@ -2604,6 +2604,9 @@ static void* wrap_intrins(jit_State *J, AsmIntrins *intrins, void* target, MSize
       /* Merge in registers used for dynamic input registers */
       info.inset |= pickdynlist(in+inofs, intrins->dyninsz-inofs, scatch);
     }
+
+    if (dynreg == DYNREG_VEX3)
+      r3 = reg_rid(in[1]);
 
     if (rin == RID_NONE)
       rin = reg_rid(in[0]);
@@ -2736,10 +2739,10 @@ restart:
 
   if (intrins->flags & INTRINSFLAG_CALLED) {
     /* emit a call to the target which may be collocated after us */
-    emit_intrins(as, intrins, rin, (uintptr_t)target);
+    emit_intrins(as, intrins, rin, (uintptr_t)target, 0);
   } else if (dynreg) {
     /* Write an opcode to the wrapper */
-    asmofs = emit_intrins(as, intrins, rin, rout);
+    asmofs = emit_intrins(as, intrins, rin, rout, r3);
   } else {
     asmofs = asm_mcode(as, target, targetsz);
   }

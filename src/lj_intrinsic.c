@@ -330,6 +330,13 @@ static int parse_opmode(const char *op, MSize len)
       case 'E':
         flags |= INTRINSFLAG_EXPLICTREGS;
         break;
+      case 'V':
+        flags |= DYNREG_VEX3;
+      case 'v':
+        /* Use vex encoding of the op if avx/xv2 is supported */
+        flags |= INTRINSFLAG_VEX;
+        break;
+
       default:
         /* return index of invalid flag */
         return -(int)(i+1);
@@ -716,6 +723,8 @@ GCcdata *lj_intrinsic_createffi(CTState *cts, CType *func)
   return cd;
 }
 
+extern uint32_t sse2vex(uint32_t op, uint32_t len);
+
 int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
 {
   CTState *cts = ctype_cts(L);
@@ -838,7 +847,23 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
     if (intrins->dyninsz != 1)
       return 0;
   }
-  
+
+  if (intrins->flags & INTRINSFLAG_VEX) {
+    if (L2J(L)->flags & JIT_F_AVX1) {
+      intrins->opcode = sse2vex(intrins->opcode, intrin_oplen(intrins));
+      intrins->flags &= ~INTRINSFLAG_LARGEOP;
+      /* Switch to non destructive source if the sse reg mode is destructive */
+      if (intrin_regmode(intrins) == DYNREG_INOUT) {
+        intrin_setregmode(intrins, DYNREG_VEX3);
+      }
+    } else if(intrin_regmode(intrins) == DYNREG_INOUT) {
+      /* opcode is only valid in AVX */
+      intrins->opcode = 0;
+    } else {
+      /* Use opcode unmodified in its SSE form */
+      intrins->flags &= ~INTRINSFLAG_VEX;
+    }
+  }
 #endif
   
   if (intrins->flags & INTRINSFLAG_PREFIX) {
