@@ -23,6 +23,9 @@ LJ_ASMF_NORET void LJ_FASTCALL lj_vm_rtlunwind(void *cframe, void *excptrec,
 #endif
 LJ_ASMF void lj_vm_unwind_c_eh(void);
 LJ_ASMF void lj_vm_unwind_ff_eh(void);
+#if LJ_HASJIT && LJ_TARGET_X64 && LJ_ABI_WIN
+LJ_ASMF void lj_vm_unwind_trace_eh(void);
+#endif
 #if LJ_TARGET_X86ORX64
 LJ_ASMF void lj_vm_unwind_rethrow(void);
 #endif

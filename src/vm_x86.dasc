@@ -660,6 +660,15 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov FCARG2, [esp+4]		// errcode (for vm_unwind_c).
   |  ret				// Jump to unwinder.
   |.endif
+  |.if JIT and X64WIN
+  |->vm_unwind_trace_eh:		// Landing pad for external unwinder.
+  |  add rsp, rax
+  |  and rsp, CFRAME_RAWMASK
+  |  test eax, CFRAME_UNWIND_FF
+  |  jnz ->vm_unwind_ff_eh
+  |  mov eax, LUA_ERRRUN
+  |  jmp ->vm_unwind_c_eh
+  |.endif
   |
   |//-----------------------------------------------------------------------
   |//-- Grow stack for calls -----------------------------------------------

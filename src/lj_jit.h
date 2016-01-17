@@ -178,6 +178,11 @@ typedef uint32_t MCode;
 typedef struct MCLink {
   MCode *next;		/* Next area. */
   size_t size;		/* Size of current area. */
+#if LJ_ABI_WIN && LJ_TARGET_X64
+  char ehandler[6];	/* Stub which jumps to exception handler. */
+  uint16_t numunwind;	/* Length of MCUnwind chain. */
+  struct MCUnwind* unwind; /* Head of MCUnwind chain, one per trace. */
+#endif
 } MCLink;
 
 /* Stack snapshot header. */
@@ -495,6 +500,9 @@ typedef struct jit_State {
   MCode *mcbot;		/* Bottom of current mcode area. */
   size_t szmcarea;	/* Size of current mcode area. */
   size_t szallmcarea;	/* Total size of all allocated mcode areas. */
+#if LJ_ABI_WIN && LJ_TARGET_X64
+  MCode *win64tracexdata;
+#endif
 
   TValue errinfo;	/* Additional info element for trace errors. */
 
