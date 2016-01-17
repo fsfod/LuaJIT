@@ -72,6 +72,8 @@ typedef enum INTRINSFLAGS {
   
   /* Input parameters names explicitly declare input registers */
   INTRINSFLAG_EXPLICTREGS = 0x10000,
+  /* intrinsic is a template with no machine code set until instigated at runtime */
+  INTRINSFLAG_TEMPLATE    = 0x20000,
 
   INTRINSFLAG_CALLEDIND = INTRINSFLAG_CALLED | INTRINSFLAG_INDIRECT
 } INTRINSFLAGS;
