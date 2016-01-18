@@ -61,25 +61,30 @@ RegEntry reglut[] = {
   {"gpr64", REGFLAG_64BIT|REGFLAG_DYN|RID_DYN_GPR}
 };
 
-static CTypeID register_intrinsic(lua_State *L, AsmIntrins* src)
+static CTypeID register_intrinsic(lua_State *L, AsmIntrins* src, CType *func)
 {
   CTState *cts = ctype_cts(L);
   CType *ct;
-  CTypeID id = lj_ctype_new(cts, &ct);
-  GCcdata *cd;
+  CTypeID id;
   AsmIntrins *intrins;
 
-  ct->info = CTINFO(CT_FUNC, CTF_INTRINS);
-  ct->size = sizeof(AsmIntrins);
-  /*FIXME: use variable length for now */
-  cd = lj_cdata_newv(L, id, sizeof(AsmIntrins), 0);
-  intrins = (AsmIntrins*)cdataptr(cd);
-  setcdataV(L, lj_tab_setinth(L, cts->miscmap, -(int32_t)id), cd);
-  lj_gc_anybarriert(cts->L, cts->miscmap);
-  setcdataV(L, L->top++, cd);
+  if ((cts->intr.top+1) > cts->intr.sizetab) {
+    lj_mem_growvec(cts->L, cts->intr.tab, cts->intr.sizetab, 0xffff, AsmIntrins);
+  }
+  
+  if (func) {
+    lua_assert(ctype_isintrinsic(func->info));
+    id = ctype_typeid(cts, func);
+    ct = func;
+  } else {
+    id = lj_ctype_new(cts, &ct);
+    ct->info = CTINFO(CT_FUNC, CTF_INTRINS);
+  }
 
-  memcpy(intrins, src, sizeof(AsmIntrins));
+  ct->size = cts->intr.top;
+  intrins = &cts->intr.tab[cts->intr.top++];
   intrins->id = id;
+  memcpy(intrins, src, sizeof(AsmIntrins));
 
   return id;
 }
@@ -87,15 +92,14 @@ static CTypeID register_intrinsic(lua_State *L, AsmIntrins* src)
 AsmIntrins *lj_intrinsic_get(CTState *cts, CTypeID id)
 {
   CType *ct = ctype_get(cts, id);
-  cTValue *tv;
-  /* Check if this is a ffi defined intrinsic */
-  if (ctype_cid(ct->info) != CTID_NONE) {
-    ct = ctype_child(cts, ct);
-    id = ctype_get(cts, ct->sib)->sib;
-  }
+  lua_assert(ctype_isintrinsic(ct->info) && ct->size < cts->intr.sizetab);
+  return cts->intr.tab+ct->size;
+}
 
-  tv = lj_tab_getinth(cts->miscmap, -(int32_t)id);
-  return (AsmIntrins *)cdataptr(cdataV(tv));
+static AsmIntrins *lj_intrinsic_fromct(CTState *cts, CType* ct)
+{
+  lua_assert(ctype_isintrinsic(ct->info) && ct->size < cts->intr.sizetab);
+  return cts->intr.tab+ct->size;
 }
 
 static int parse_fprreg(const char *name, uint32_t len)
@@ -595,7 +599,7 @@ int lj_intrinsic_create(lua_State *L)
 
   if (!istemplate) {
     intrins->wrapped = intrinsmc;
-    register_intrinsic(L, intrins);
+    id = register_intrinsic(L, intrins, 0);
   } else {
     GCcdata *cd = lj_cdata_new(cts, id, CTSIZE_PTR);
     *(void **)cdataptr(cd) = intrinsmc;
@@ -653,83 +657,9 @@ static int inferreg(CTState *cts, CTypeID id) {
   return reg_make(rid, kind);
 }
 
-CTypeID intrinsic_toffi(CTState *cts, AsmIntrins* intrins, GCstr *opstr, CTypeID ret)
-{
-  CType *ct;
-  CTypeID id, anchor;
-
-  anchor = lj_ctype_new(cts, &ct);
-  ct->info = CTINFO(CT_FIELD, ret);
-  ct->size = (intrins->dyninsz << 29) | intrins->flags;
-
-  lua_assert(intrins->insz < 16 && intrins->outsz < 16);
-  ct->size |= (intrins->insz << 16) | (intrins->outsz << 20);
-
-  id = lj_ctype_new(cts, &ct);
-  ctype_get(cts, anchor)->sib = id;
-  ct->info = CTINFO(CT_FIELD, 0);
-  ct->size = intrins->opcode;
-  ct->sib = 0;
-
-  if (intrins->flags & INTRINSFLAG_IMMB) {
-    ct->info |= intrins->immb;
-  }
-  
-  if (intrins->flags & INTRINSFLAG_PREFIX) {
-    ct->info |= intrins->prefix << 8;
-  }
-
-  if (intrin_regmode(intrins) == DYNREG_OPEXT) {
-    ct->info |= intrin_getopextb(intrins) << 16;
-  }
-
-  /* save the opcode string for the display string and extra error checking */
-  ctype_setname(ct, opstr);
-
-  lua_assert(intrins->mod == 0);
-
-  return anchor;
-}
-
-AsmIntrins *lj_intrinsic_fromffi(CTState *cts, CType *func, AsmIntrins *intrins)
-{
-  CType *ct = ctype_child(cts, func);
-  lua_assert(ctype_isfunc(func->info) && ctype_isfield(ct->info));
-
-  intrins->flags = ct->size & 0xffff;
-  intrins->dyninsz = ct->size >> 29;
-  intrins->insz = (ct->size >> 16) & 0xf;
-  intrins->outsz = (ct->size >> 20) & 0xf;
-  intrins->mod = 0;
-
-  ct = ctype_get(cts, ct->sib);
-  /* Either a opcode formatted for what platform specific emitter expects or 
-   * the size of the machine code.
-   */
-  intrins->opcode = ct->size;
-  intrins->immb = ct->info & 0xff;
-  intrins->prefix = (ct->info >> 8) & 0xff;
-
-  if (intrin_regmode(intrins) == DYNREG_OPEXT) {
-    intrin_setopextb(intrins, (ct->info >> 16) & 0xff);
-  }
-  intrins->mcode = NULL;
-
-  return intrins;
-}
-
 static void buildffiwrapper(CTState *cts, CType *func, AsmIntrins *intrins) {
-  int i;
-  CTypeID sib = func->sib;
   uint32_t opcode;
   int regmode = intrin_regmode(intrins);
-  
-  for (i = 0; i < intrins->insz; i++) {
-    CType *ctarg = ctype_get(cts, sib);
-    lua_assert(sib && ctype_isfield(ctarg->info));
-    intrins->in[i] = ctarg->size & 0xff;
-    sib = ctarg->sib;
-  }
 
   /* swap the registers from there declared order to match how there
   ** processed 
@@ -739,16 +669,6 @@ static void buildffiwrapper(CTState *cts, CType *func, AsmIntrins *intrins) {
     intrins->in[0] = intrins->in[1]; intrins->in[1] = temp;
   }
 
-  /* Get the return type/register list */
-  sib = ctype_cid(ctype_child(cts, func)->info);
-
-  for (i = 0; i < intrins->outsz; i++) {
-    CType *ctarg = ctype_get(cts, sib);
-    lua_assert(sib && ctype_isfield(ctarg->info));
-    intrins->out[i] = ctarg->size & 0xff;
-    sib = ctarg->sib;
-  }
-  
   /* Build the interpreter wrapper */
   if (intrin_regmode(intrins) == DYNREG_FIXED) {
     setopmcode(intrins, &opcode);
@@ -762,18 +682,13 @@ static void buildffiwrapper(CTState *cts, CType *func, AsmIntrins *intrins) {
 GCcdata *lj_intrinsic_createffi(CTState *cts, CType *func)
 {
   GCcdata *cd;
-  AsmIntrins intrins = {0};
+  AsmIntrins *intrins = lj_intrinsic_fromct(cts, func);
   /* Save the id in case we cause a ctype reallocation */
   CTypeID id = ctype_typeid(cts, func); 
-
-  lj_intrinsic_fromffi(cts, func, &intrins);
-  buildffiwrapper(cts, func, &intrins);
-
-  /* TODO: dynamically rebuild this when needed instead */
-  ctype_get(cts, ctype_child(cts, ctype_get(cts, id))->sib)->sib = register_intrinsic(cts->L, &intrins);
+  buildffiwrapper(cts, func, intrins);
 
   cd = lj_cdata_new(cts, id, CTSIZE_PTR);
-  *(void **)cdataptr(cd) = intrins.wrapped;
+  *(void **)cdataptr(cd) = intrins->wrapped;
 
   return cd;
 }
@@ -934,8 +849,10 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
     intrins->immb = (uint8_t)(imm & 0xff);
   }
 
+  register_intrinsic(L, intrins, ctype_get(cts, fid));
+
   lua_assert(sib > 0 && sib < cts->top);
-  return intrinsic_toffi(cts, intrins, opstr, sib);
+  return sib;
 }
 
 /* Pre-create cdata for any output values that need boxing the wrapper will directly
@@ -1159,8 +1076,7 @@ static int typed_call(CTState *cts, AsmIntrins *intrins, CType *ct)
   }
 
   /* Pass in the return type chain so the results are typed */
-  outcontent = setup_results(L, intrins, ctype_cid(ctype_child(cts, 
-                                            ctype_get(cts, funcid))->info));
+  outcontent = setup_results(L, intrins, ctype_cid(ctype_get(cts, funcid)->info));
 
   /* Execute the intrinsic through the wrapper created on first lookup */
   return (*(IntrinsicWrapper*)cdataptr(cdataV(L->base)))(&context, outcontent);
@@ -1168,20 +1084,11 @@ static int typed_call(CTState *cts, AsmIntrins *intrins, CType *ct)
 
 int lj_intrinsic_call(CTState *cts, CType *ct)
 {
-  AsmIntrins *intrins;
+  AsmIntrins *intrins = lj_intrinsic_get(cts, ctype_typeid(cts, ct));
 
   if (ctype_cid(ct->info) == 0) {
-    intrins = lj_intrinsic_get(cts, ctype_typeid(cts, ct));
     return untyped_call(cts, intrins, ct);
   } else {
-    CType *cct = ctype_child(cts, ct);
-    AsmIntrins _intrins;
-
-    if (ctype_isfield(cct->info)) {
-      intrins = lj_intrinsic_fromffi(cts, ct, &_intrins);
-    }
-
-    intrins = lj_intrinsic_get(cts, ctype_typeid(cts, ct));
     return typed_call(cts, intrins, ct);
   }
 }
