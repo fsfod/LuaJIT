@@ -532,14 +532,11 @@ static IntrinsicWrapper lj_intrinsic_buildwrap(lua_State *L, AsmIntrins *intrins
   return (IntrinsicWrapper)target;
 }
 
-AsmIntrins *lj_intrinsic_fromffi(CTState *cts, CType *func, AsmIntrins *intrins);
-
 CTypeID lj_intrinsic_template(lua_State *L, GCstr *name, AsmIntrins* intrins)
 {
   CTState *cts = ctype_cts(L);
   CType *ct;
   CTypeID id = lj_ctype_getname(cts, &ct, name, 1u << CT_FUNC);
-  GCcdata *cd;
 
   if (!id) {
     lj_err_argv(L, 1, LJ_ERR_FFI_NODECL, name);
@@ -547,9 +544,7 @@ CTypeID lj_intrinsic_template(lua_State *L, GCstr *name, AsmIntrins* intrins)
     lj_err_arg(L, 1, LJ_ERR_FFI_INVTYPE);
   }
 
-  if (ctype_cid(ctype_child(cts, ct)->info) == 0) {
-    lj_intrinsic_fromffi(cts, ct, intrins);
-  }
+  intrins = lj_intrinsic_fromct(cts, ct);
 
   /* Can't be a template if it has an opcode or asmsize*/
   if (intrins->opcode)
@@ -601,9 +596,11 @@ int lj_intrinsic_create(lua_State *L)
     intrins->wrapped = intrinsmc;
     id = register_intrinsic(L, intrins, 0);
   } else {
-    GCcdata *cd = lj_cdata_new(cts, id, CTSIZE_PTR);
-    *(void **)cdataptr(cd) = intrinsmc;
   }
+  
+  GCcdata *cd = lj_cdata_new(cts, id, CTSIZE_PTR);
+  *(void **)cdataptr(cd) = intrinsmc;
+  setcdataV(L, L->top++, cd);
   
   return 1;
 }
