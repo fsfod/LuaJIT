@@ -17,13 +17,6 @@
 /* The max number of dynamic registers in each reglist(in/out)*/
 #define LJ_INTRINS_MAXDYNREG 2
 
-typedef struct LJ_ALIGN(16) RegContext {
-  intptr_t gpr[LJ_INTRINS_MAXREG];
-  double fpr[LJ_INTRINS_MAXREG];
-} RegContext;
-
-typedef int (LJ_FASTCALL *IntrinsicWrapper)(RegContext *context, void* outcontext);
-
 typedef enum REGMODE {
   DYNREG_FIXED = 0,
   /* one input register and optionally one output */
@@ -77,36 +70,6 @@ typedef enum INTRINSFLAGS {
 
   INTRINSFLAG_CALLEDIND = INTRINSFLAG_CALLED | INTRINSFLAG_INDIRECT
 } INTRINSFLAGS;
-
-typedef struct AsmIntrins {
-  union {
-    IntrinsicWrapper wrapped;
-    void* mcode; /* Raw unwrapped machine code temporally saved here */
-  };
-  union {
-    uint8_t in[LJ_INTRINS_MAXREG];
-    struct {
-      uint8_t opregs[5]; /* cmpxchg8b */
-      uint8_t immb; 
-      uint8_t prefix; /* prefix byte see INTRINSFLAG_PREFIX */
-      uint8_t dyninsz; /* dynamic input register count */
-    };
-  };
-  uint8_t out[LJ_INTRINS_MAXREG];
-  uint8_t insz;
-  uint8_t outsz;
-  CTypeID1 id;
-  uint16_t mod;
-  union {
-    struct {
-      uint16_t asmsz;
-      uint16_t asmofs;
-    };
-    uint32_t opcode;
-  };
-
-  uint16_t flags;
-} AsmIntrins;
 
 typedef struct AsmHeader {
   union{

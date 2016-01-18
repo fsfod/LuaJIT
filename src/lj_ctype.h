@@ -171,6 +171,44 @@ typedef LJ_ALIGN(8) struct CCallback {
   MSize slot;			/* Current callback slot. */
 } CCallback;
 
+typedef struct LJ_ALIGN(16) RegContext
+{
+  intptr_t gpr[8];
+  double fpr[8];
+} RegContext;
+
+typedef int (LJ_FASTCALL *IntrinsicWrapper)(RegContext *context, void* outcontext);
+
+typedef struct AsmIntrins {
+  union {
+    IntrinsicWrapper wrapped;
+    void* mcode; /* Raw unwrapped machine code temporally saved here */
+  };
+  union {
+    uint8_t in[8];
+    struct {
+      uint8_t opregs[5]; /* cmpxchg8b */
+      uint8_t immb;
+      uint8_t prefix; /* prefix byte see INTRINSFLAG_PREFIX */
+      uint8_t dyninsz; /* dynamic input register count */
+    };
+  };
+  uint8_t out[8];
+  uint8_t insz;
+  uint8_t outsz;
+  CTypeID1 id;
+  uint16_t mod;
+  union {
+    struct {
+      uint16_t asmsz;
+      uint16_t asmofs;
+    };
+    uint32_t opcode;
+  };
+
+  uint16_t flags;
+} AsmIntrins;
+
 typedef struct IntrinsicState {
   AsmIntrins* tab; /* Intrinsic descriptor table. */
   MSize sizetab;   /* Size of intrinsic table. */
