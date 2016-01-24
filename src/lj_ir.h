@@ -212,7 +212,9 @@ IRFPMDEF(FPMENUM)
   _(CDATA_PTR,	sizeof(GCcdata)) \
   _(CDATA_INT, sizeof(GCcdata)) \
   _(CDATA_INT64, sizeof(GCcdata)) \
-  _(CDATA_INT64_4, sizeof(GCcdata) + 4)
+  _(CDATA_INT64_4, sizeof(GCcdata) + 4) \
+  _(CDATA_V128, sizeof(GCcdata)) \
+  _(CDATA_V256, sizeof(GCcdata)) \
 
 typedef enum {
 #define FLENUM(name, ofs)	IRFL_##name,
@@ -233,6 +235,7 @@ IRFLDEF(FLENUM)
 #define IRXLOAD_READONLY	1	/* Load from read-only data. */
 #define IRXLOAD_VOLATILE	2	/* Load from volatile data. */
 #define IRXLOAD_UNALIGNED	4	/* Unaligned load. */
+#define IRXLOAD_INTDOMAIN       8       /* Use integer domain vector loads. */
 
 /* BUFHDR mode, stored in op2. */
 #define IRBUFHDR_RESET		0	/* Reset buffer. */
@@ -313,7 +316,8 @@ LJ_DATA const uint8_t lj_ir_mode[IR__MAX+1];
   _(UDATA, IRTSIZE_PGC) \
   _(FLOAT, 4) _(NUM, 8) _(I8, 1) _(U8, 1) _(I16, 2) _(U16, 2) \
   _(INT, 4) _(U32, 4) _(I64, 8) _(U64, 8) \
-  _(SOFTFP, 4)  /* There is room for 8 more types. */
+  _(V128, 16) _(V256, 32) \
+  _(SOFTFP, 4)  /* There is room for 6 more types. */
 
 /* IR result type and flags (8 bit). */
 typedef enum {
@@ -372,8 +376,12 @@ typedef struct IRType1 { uint8_t irt; } IRType1;
 #define irt_isu32(t)		(irt_type(t) == IRT_U32)
 #define irt_isi64(t)		(irt_type(t) == IRT_I64)
 #define irt_isu64(t)		(irt_type(t) == IRT_U64)
+#define irt_isv128(t)		(irt_type(t) == IRT_V128)
+#define irt_isv256(t)		(irt_type(t) == IRT_V256)
 
-#define irt_isfp(t)		(irt_isnum(t) || irt_isfloat(t))
+#define irt_isvec(t)		(irt_typerange((t), IRT_V128, IRT_V256))
+/*FIXME: should this be a separate isfprreg */
+#define irt_isfp(t)		(irt_isnum(t) || irt_isfloat(t) || irt_isvec(t))
 #define irt_isinteger(t)	(irt_typerange((t), IRT_I8, IRT_INT))
 #define irt_isgcv(t)		(irt_typerange((t), IRT_STR, IRT_UDATA))
 #define irt_isaddr(t)		(irt_typerange((t), IRT_LIGHTUD, IRT_UDATA))

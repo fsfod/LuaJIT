@@ -221,6 +221,7 @@ typedef struct IntrinWrapState {
 #define XO_f30f(o)	((uint32_t)(0x0ff3fc + (0x##o<<24)))
 
 #define XV_0f(o)	((uint32_t)(0xf8c5c5 + (0x##o<<24)))
+#define XV_f30f(o)	((uint32_t)(0xfac5c5 + (0x##o<<24)))
 #define XV_660f38(o)	((uint32_t)(0x79e2c4 + (0x##o<<24)))
 #define XV_f20f38(o)	((uint32_t)(0x7be2c4 + (0x##o<<24)))
 #define XV_f20f3a(o)	((uint32_t)(0x7be3c4 + (0x##o<<24)))
@@ -295,6 +296,8 @@ typedef enum {
 
   XV_MOVUPS =    XV_0f(10),
   XV_MOVUPSto =  XV_0f(11),
+  XV_MOVDQU   = XV_f30f(6f),
+  XV_MOVDQUto = XV_f30f(7f),
   XV_VZEROUPPER = XV_0f(77),
 
   /* Variable-length opcodes. XO_* prefix. */
@@ -340,6 +343,10 @@ typedef enum {
   XO_MOVAPSto = XO_0f(29),
   XO_MOVUPS   = XO_0f(10),
   XO_MOVUPSto = XO_0f(11),
+  XO_MOVDQA   = XO_660f(6f),
+  XO_MOVDQAto = XO_660f(7f),
+  XO_MOVDQU   = XO_f30f(6f),
+  XO_MOVDQUto = XO_f30f(7f),
   XO_XORPS =	XO_0f(57),
   XO_ANDPS =	XO_0f(54),
   XO_ADDSD =	XO_f20f(58),

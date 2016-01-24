@@ -391,6 +391,10 @@ static int32_t ra_spill(ASMState *as, IRIns *ir)
     if (irt_is64(ir->t)) {
       slot = as->evenspill;
       as->evenspill += 2;
+    }else if(irt_isvec(ir->t)) {
+      /* TODO: aligned stack and spill slots */
+      slot = as->evenspill;
+      as->evenspill += irt_isv128(ir->t) ? 4 : 8;
     } else if (as->oddspill) {
       slot = as->oddspill;
       as->oddspill = 0;
