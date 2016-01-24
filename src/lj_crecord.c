@@ -125,6 +125,8 @@ static IRType crec_ct2irt(CTState *cts, CType *ct)
       return IRT_NUM;
     else if (ct->size == 2*sizeof(float))
       return IRT_FLOAT;
+  } else if (ctype_isvector(ct->info)) {
+    return ct->size == 16 ? IRT_V128 : IRT_V256;
   }
   return IRT_CDATA;
 }
@@ -593,6 +595,13 @@ static TRef crec_tv_ct(jit_State *J, CType *s, CTypeID sid, TRef sp)
     emitir(IRT(IR_XSTORE, t), ptr, tr1);
     ptr = emitir(IRT(IR_ADD, IRT_PTR), dp, lj_ir_kintp(J, sizeof(GCcdata)+esz));
     emitir(IRT(IR_XSTORE, t), ptr, tr2);
+    return dp;
+  } else if (ctype_isvector(sinfo)) {
+    TRef ptr, tr1, tr2, dp;
+    dp = emitir(IRT(IR_CNEW, IRT_CDATA), lj_ir_kint(J, sid), lj_ir_kint(J, s->size));
+    tr1 = emitir(IRT(IR_XLOAD, t), sp, 0);
+    ptr = emitir(IRT(IR_ADD, IRT_PTR), dp, lj_ir_kintp(J, sizeof(GCcdata)));
+    emitir(IRT(IR_XSTORE, t), ptr, tr1);
     return dp;
   } else {
     /* NYI: copyval of vectors. */
