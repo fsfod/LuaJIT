@@ -762,6 +762,96 @@ end
     
     assert_jit(3, testdse)
   end)
+
+  it("xmm vector jit", function()
+    local asm = ffi.C
+    ffi.cdef[[
+      float4 addps(float4 v1, float4 v2) __mcode("0F58rM");
+      float4 subps(float4 v1, float4 v2) __mcode("0F5CrM");     
+      float4 mulps(float4 v1, float4 v2) __mcode("0F59rMc");
+      float4 divps(float4 v1, float4 v2) __mcode("0F5ErM");
+      float4 haddps(float4 v1, float4 v2) __mcode("F20F7CrMc");
+      float movss(float4 v1) __mcode("F30F10rM");
+      float sqrtss(float4 v1) __mcode("F30F51rM");
+    ]]
+
+    local vec = ffi.new("float4", 1, 2, 3, 4)
+    
+    assert_jit(10, function(v) 
+      local vout = asm.haddps(v, v)
+      return vout[0]+vout[1]
+    end, vec)
+
+    vec = ffi.new("float4", 2, 2, 2, 2)
+
+    local sqrt = math.sqrt
+    
+    local function vlength(vec)
+      local mag = asm.mulps(vec, vec)
+      local l = asm.haddps(mag, mag)
+      l = asm.haddps(l, l)
+      return (asm.sqrtss(l))
+    end
+    
+    assert_jit(4, vlength, vec)
+  end)
+  
+  it("prefixsum", function()
+    local asm = ffi.C
+    ffi.cdef[[
+      int4 padd(int4 v1, int4 v2) __mcode("660FFErMv");
+      int4 pslldq_8(int4 v1) __mcode("660F737mU", 8);
+      int4 pslldq_4(int4 v1) __mcode("660F737mU", 4);
+      int4 pshufd_ff(int4 v) __mcode("660F70rMUv", 0xff);
+      
+      void movdqu(void* dest, int4 v2) __mcode("F30F7FmRIvs");
+    ]]
+
+    local v = ffi.new("int4", 1, 1, 1, 1)
+    local vzero = ffi.new("int4", 0, 0, 0, 0)
+    
+    local function prefixsum(prev, curr)
+      local _tmp1 = asm.padd(asm.pslldq_8(curr), curr)
+      local _tmp2 = asm.padd(asm.pslldq_4(_tmp1), _tmp1)
+      return asm.padd(_tmp2, asm.pshufd_ff(prev))
+    end
+    
+    local ret = prefixsum(vzero, v)
+    
+    assert_equal(ret[0], 1)
+    assert_equal(ret[1], 2)
+    assert_equal(ret[2], 3)
+    assert_equal(ret[3], 4)
+    
+    local sum = 0
+    
+    local function checker(i, v)
+      assert(v[0] == sum+1)
+      assert(v[1] == sum+2)
+      assert(v[2] == sum+3)
+      assert(v[3] == sum+4)
+      sum = sum+4
+    end
+    
+    local count = 100
+    
+    local prev = vzero
+    local list = ffi.new("int4[?]", count, 1)
+    local prefixsum = ffi.new("int[?]", count*4, 0)
+    
+    for i=0,count-1 do
+      local curr = list[i]
+      local _tmp1 = asm.padd(asm.pslldq_8(curr), curr)
+      local _tmp2 = asm.padd(asm.pslldq_4(_tmp1), _tmp1)
+      prev = asm.padd(_tmp2, asm.pshufd_ff(prev))
+      asm.movdqu(prefixsum+(i*4), prev)
+    end
+    
+    for i=0,count-1 do
+      checker(i+1, prefixsum+(i*4))
+    end
+    
+  end)
 end)
 
 context("__reglist", function()
@@ -1015,8 +1105,8 @@ it("phaddd 4byte opcode", function()
   local v = ffi.new("int4", 1, 2, 3, 4)
   local vzero = ffi.new("int4", 0)
 
-  assert_equal(hsum(v), 10)
-  assert_equal(hsum(vzero), 0)
+  assert_jit(10, hsum, v)
+  assert_jit(0, hsum, vzero)
 end)
 
 context("mixed register type opcodes", function()

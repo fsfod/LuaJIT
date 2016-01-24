@@ -1243,12 +1243,39 @@ static IRType intrins_retit(jit_State *J, CTState *cts, CType *arg)
     lua_assert(irt != IRT_CDATA);
     return irt;
   } else {
-    if (reg_isvec(reg)) {
-      /* NYI: support for vectors */
-      lj_trace_err(J, LJ_TRERR_NYIVEC);
-    }
     return reg_irt(reg);
   }
+}
+
+static TRef vectorarg(jit_State *J, RecordFFData *rd, int i, CType *d, CType *arg)
+{
+  CTState *cts = ctype_ctsG(J2G(J));
+  TRef tr = 0, tra = J->base[i];
+  uint32_t flags = 0;
+  GCcdata *cd = tref_iscdata(tra) ? cdataV(&rd->argv[i]) : NULL;
+  CType *ct;
+
+  if (cd && (ct = ctype_raw(cts, cd->ctypeid)) && ctype_isvector(ct->info)) {
+    /* cdata vectors are intended tobe readonly */
+    flags |= IRXLOAD_READONLY;
+    /* TODO: better vector checking and using IRFL_CDATA_V128/ IRFL_CDATA_V256*/
+    tr = emitir(IRT(IR_ADD, IRT_INTP), tra, lj_ir_kint(J, sizeof(GCcdata)));
+  } else {
+    ct = ctype_get(cts, arg->size >> 16);
+    tr = crec_ct_tv(J, ct, 0, tra, &rd->argv[i]);
+  }
+
+  /* Most vector ops require aligned memory */
+  if (flags & IRXLOAD_READONLY) {
+    flags = IRXLOAD_UNALIGNED;
+  }
+
+  /* If the number type of the vector isn't float/double use int domain vector moves */
+  if (ctype_isvector(d->info) && ctype_isnum(ct->info) && !(ct->info & CTF_FP)) {
+    flags = IRXLOAD_INTDOMAIN;
+  }
+
+  return emitir(IRT(IR_XLOAD, reg_irt(arg->size & 0xff)), tr, flags);
 }
 
 void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *func)
@@ -1278,11 +1305,11 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *func)
     sib = ct->sib;
 
     if (reg_isvec(ct->size)) {
-      /* NYI: support for vectors */
-      lj_trace_err(J, LJ_TRERR_NYIVEC);
+      tra = vectorarg(J, rd, i+argofs, d, ct);
+    } else {
+      tra = crec_ct_tv(J, d, 0, tra, &rd->argv[i+argofs]);
     }
 
-    tra = crec_ct_tv(J, d, 0, tra, &rd->argv[i+argofs]);
     arg = emitir(IRT(IR_CARG, IRT_NIL), arg, tra);
   }
 
@@ -1345,8 +1372,12 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *func)
       if (kind == REGKIND_FPR32) {
         J->base[i] = emitconv(J->base[i], IRT_NUM, IRT_FLOAT, 0);
       } else if(rk_isvec(kind)) {
-        /* NYI: support for vectors */
-        lj_trace_err(J, LJ_TRERR_NYIVEC);
+        TRef v = J->base[i];
+        TRef tr = emitir(IRT(IR_CNEW, IRT_CDATA), lj_ir_kint(J, id),
+                         lj_ir_kint(J, rk_irtfpr(kind) == REGKIND_V128 ? 16 : 32));
+        J->base[i] = tr;
+        tr = emitir(IRT(IR_ADD, IRT_INTP), tr, lj_ir_kint(J, sizeof(GCcdata)));
+        emitir(IRT(IR_XSTORE, rk_irtfpr(kind)), tr, v);
       } else {
         lua_assert(kind == REGKIND_FPR64);
       }
