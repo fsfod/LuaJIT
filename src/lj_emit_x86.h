@@ -630,8 +630,20 @@ static void emit_loadofsirt(ASMState *as, IRType irt, Reg r, Reg base, int32_t o
     emit_rmro(as, XO_MOV, r | ((LJ_64 && ((IRT_IS64 >> irt) & 1)) ? REX_64 : 0),
               base, ofs);
   } else {
-    emit_rmro(as, irt == IRT_NUM ? XO_MOVSD : XO_MOVSS, r, base, ofs);
-  }
+    x86Op xo;
+
+    if (irt != IRT_V128 && irt != IRT_V256) {
+      xo = irt == IRT_NUM ? XO_MOVSD : XO_MOVSS;
+    } else {
+      if (as->flags & JIT_F_AVX1) {
+        xo = XV_MOVUPS;
+        if (irt == IRT_V256)r |= VEX_256;
+      } else {
+        xo = XO_MOVUPS;
+      }
+    }
+    emit_rmro(as, xo, r, base, ofs);
+  }   
 }
 
 #define emit_storeofs(as, ir, r, base, ofs) \
@@ -644,8 +656,21 @@ static void emit_storeofsirt(ASMState *as, IRType irt, Reg r, Reg base, int32_t 
     emit_rmro(as, XO_MOVto, r | ((LJ_64 && ((IRT_IS64 >> irt) & 1)) ? REX_64 : 0),
               base, ofs);
   } else {
-    emit_rmro(as, irt == IRT_NUM ? XO_MOVSDto : XO_MOVSSto, r, base, ofs);
+    x86Op xo;
+
+    if (irt != IRT_V128 && irt != IRT_V256) {
+      xo = irt == IRT_NUM ? XO_MOVSDto : XO_MOVSSto;
+    } else {
+      if (as->flags & JIT_F_AVX1) {
+        xo = XV_MOVUPSto;
+        if (irt == IRT_V256)r |= VEX_256;
+      } else {
+        xo = XO_MOVUPSto;
+      }
+    }
+    emit_rmro(as, xo, r, base, ofs);
   }
+  
 }
 
 /* Add offset to pointer. */

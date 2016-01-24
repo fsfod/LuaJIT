@@ -1798,6 +1798,15 @@ static void asm_fxload(ASMState *as, IRIns *ir)
   case IRT_U16: xo = XO_MOVZXw; break;
   case IRT_NUM: xo = XO_MOVSD; break;
   case IRT_FLOAT: xo = XO_MOVSS; break;
+  case IRT_V128:
+  case IRT_V256:
+    if (ir->op2 & IRXLOAD_INTDOMAIN) {
+      xo = (as->flags & JIT_F_AVX1) ? XV_MOVDQU : XO_MOVDQU;
+    } else {
+      xo = (as->flags & JIT_F_AVX1) ? XV_MOVUPS : XO_MOVUPS;
+    }
+    if (irt_type(ir->t) == IRT_V256) xo |= VEX_256;
+    break;
   default:
     if (LJ_64 && irt_is64(ir->t))
       dest |= REX_64;
@@ -1806,6 +1815,7 @@ static void asm_fxload(ASMState *as, IRIns *ir)
     xo = XO_MOV;
     break;
   }
+
   emit_mrm(as, xo, dest, RID_MRM);
 }
 
@@ -1846,6 +1856,13 @@ static void asm_fxstore(ASMState *as, IRIns *ir)
     case IRT_I16: case IRT_U16: xo = XO_MOVtow; break;
     case IRT_NUM: xo = XO_MOVSDto; break;
     case IRT_FLOAT: xo = XO_MOVSSto; break;
+      /* FIXME: need some way flag stores to be aligned */
+    case IRT_V128:
+      xo = (as->flags & JIT_F_AVX1) ? XV_MOVUPSto : XO_MOVUPSto;
+      break;
+    case IRT_V256:
+      xo = XV_MOVUPSto | VEX_256;
+      break;
 #if LJ_64 && !LJ_GC64
     case IRT_LIGHTUD: lua_assert(0);  /* NYI: mask 64 bit lightuserdata. */
 #endif
@@ -1857,6 +1874,7 @@ static void asm_fxstore(ASMState *as, IRIns *ir)
       xo = XO_MOVto;
       break;
     }
+
 
     emit_mrm(as, xo, src, RID_MRM);
 
