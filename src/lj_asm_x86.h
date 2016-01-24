@@ -406,7 +406,8 @@ static int asm_fusexload(ASMState *as, IRRef ref, RegSet xallow, IRRef skip)
   /* Generic fusion is not ok for 8/16 bit operands (but see asm_comp).
   ** Fusing unaligned memory operands is ok on x86 (except for SIMD types).
   */
-  if (irt_typerange(ir->t, IRT_I8, IRT_U16)) {
+  if (irt_typerange(ir->t, IRT_I8, IRT_U16) ||
+      (irt_isvec(ir->t) && (ir->op2 & IRXLOAD_UNALIGNED))) {
     return 0;
   }
   if (i > ref + CONFLICT_SEARCH_LIM)
