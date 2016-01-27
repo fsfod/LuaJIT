@@ -870,18 +870,16 @@ static void asm_intrinsic(ASMState *as, IRIns *ir, IRIns *asmend)
   memcpy(ininfo.inregs, intrins->in, sizeof(ininfo.inregs));
 
   if (!intrins->wrapped) {
-    IRIns *kptr = IR(ira->op2);
-
+    /* Last CARG in the chain is the wrapper pointer */
+    ira = IR(ira->op1);
 #if LJ_64
     if (IR(ira->op2)->o == IR_KINT64) {
       target = (uintptr_t)ir_k64(IR(ira->op2))->u64;
     }
 #endif
     if (!target) {
-      target = (uintptr_t)ir_kptr(kptr);
+      target = (uintptr_t)IR(ira->op2)->i;
     }
-    
-    ira = IR(ira->op1);
   } else {
     target = (uintptr_t)intrins->wrapped;
   }
@@ -919,10 +917,8 @@ static void asm_intrinsic(ASMState *as, IRIns *ir, IRIns *asmend)
       if (LJ_64 && (p-as->mcp) != (int32_t)(p-as->mcp)) {
         r1 = ra_scratch(as, RSET_GPR & ~(ininfo.inset | ininfo.outset));
       }
-      emit_intrins(as, intrins, r1, target, 0);
-    } else  {
-      emit_intrins(as, intrins, r1, target, 0);
     }
+    emit_intrins(as, intrins, r1, target, 0);
   }
 
   asm_asmsetupargs(as, &ininfo);

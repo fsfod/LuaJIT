@@ -427,21 +427,27 @@ static int parse_opstr(lua_State *L, GCstr *opstr, AsmIntrins *intrins, int* bui
   uint32_t i;
   int flags;
 
-  for (i = 0; i < opstr->len && lj_char_isxdigit((uint8_t)op[i]); i++) {
-  }
+  /* Parse the opcode number if this is not a template */
+  if (op[0] != '?') {
+    for (i = 0; i < opstr->len && lj_char_isxdigit((uint8_t)op[i]); i++) {
+    }
 
-  if (i == 0 || i > 8) {
-    /* invalid or no hex number */
-    lj_err_callerv(L, LJ_ERR_FFI_BADOPSTR, op, "invalid opcode number");
-  }
+    if (i == 0 || i > 8) {
+      /* invalid or no hex number */
+      lj_err_callerv(L, LJ_ERR_FFI_BADOPSTR, op, "invalid opcode number");
+    }
 
-  /* Scan hex digits. */
-  for (; i; i--, op++) {
-    uint32_t d = *op; if (d > '9') d += 9;
-    opcode = (opcode << 4) + (d & 15);
-  }
+    /* Scan hex digits. */
+    for (; i; i--, op++) {
+      uint32_t d = *op; if (d > '9') d += 9;
+      opcode = (opcode << 4) + (d & 15);
+    }
 
-  if (*op == '_') op++;
+    if (*op == '_') op++;
+  } else {
+    *buildflags |= INTRINSFLAG_TEMPLATE;
+    op++;
+  }
 
   flags = parse_opmode(op, opstr->len - (MSize)(op-strdata(opstr)));
 
@@ -523,33 +529,73 @@ static IntrinsicWrapper lj_intrinsic_buildwrap(lua_State *L, AsmIntrins *intrins
   return (IntrinsicWrapper)target;
 }
 
+CTypeID lj_intrinsic_template(lua_State *L, int narg)
+{
+  CTState *cts = ctype_cts(L);
+  CType *ct;
+  CTypeID id;
+  AsmIntrins* intrins;
+  GCstr *name = lj_lib_checkstr(L, narg);
+
+  id = lj_ctype_getname(cts, &ct, name, 1u << CT_FUNC);
+
+  if (!id) {
+    lj_err_argv(L, narg, LJ_ERR_FFI_NODECL, name);
+  } else if (!ctype_isintrinsic(ct->info)) {
+    lj_err_arg(L, narg, LJ_ERR_FFI_INVTYPE);
+  }
+
+  intrins = lj_intrinsic_get(cts, id);
+
+  /* Can't be a template if it an opcode */
+  if (intrin_regmode(intrins) != DYNREG_FIXED || (intrins->opcode && intrins->outsz <= 4) || 
+      intrins->wrapped)
+    lj_err_arg(L, narg, LJ_ERR_FFI_INVTYPE);
+
+  return id;
+}
+
 int lj_intrinsic_create(lua_State *L)
 {
   CTState *cts = ctype_cts(L);
+  int istemplate = 0;  
+  TValue *base = L->base;
   CTypeID id;
   void *intrinsmc;
   MSize asmsz;
   AsmIntrins _intrins;
   AsmIntrins* intrins = &_intrins;
   memset(intrins, 0, sizeof(AsmIntrins));
-
-  if (!tviscdata(L->base) && !tvisstr(L->base)) {
-    lj_err_argtype(L, 1, "string or cdata");
+  
+  /* intrinsic name, mcptr, mcsz */
+  if (tvisstr(L->base) && tvisnumber(L->base+2) && (L->top-L->base) > 2) {
+    id = lj_intrinsic_template(L, 1);
+    intrins = lj_intrinsic_get(cts, id);
+    istemplate = 1;
+  } else {
+    if (!tviscdata(L->base) && !tvisstr(L->base)) {
+      lj_err_argtype(L, 1, "string or cdata");
+    }
   }
 
   lj_cconv_ct_tv(cts, ctype_get(cts, CTID_P_CVOID), (uint8_t *)&intrinsmc,
-                 L->base, CCF_ARG(1));
-  asmsz = lj_lib_checkint(L, 2);
+                 base+istemplate, CCF_ARG(1+istemplate));
+  asmsz = lj_lib_checkint(L, 2+istemplate);
   if (asmsz <= 0 || asmsz > 0xffff ||
     asmsz > (MSize)(L2J(L)->param[JIT_P_sizemcode] << 10)) {
     lj_err_callermsg(L, "bad code size");
   }
 
-  buildregs(L, lj_lib_checktab(L, 3), intrins);
+  if (!istemplate) {
+    buildregs(L, lj_lib_checktab(L, 3), intrins);
+  }
 
   intrinsmc = lj_intrinsic_buildwrap(L, intrins, intrinsmc, asmsz);
-  intrins->wrapped = (IntrinsicWrapper)intrinsmc;
-  id = register_intrinsic(L, intrins, NULL);
+  
+  if (!istemplate) {
+    intrins->wrapped = (IntrinsicWrapper)intrinsmc;
+    id = register_intrinsic(L, intrins, NULL);
+  }
 
   lj_intrinsic_new(L, id, intrinsmc);
   return 1;
@@ -610,6 +656,15 @@ GCcdata *lj_intrinsic_createffi(CTState *cts, CType *func)
   AsmIntrins *intrins = lj_intrinsic_fromct(cts, func);
   CTypeID id = ctype_typeid(cts, func); 
   
+  if (intrins->opcode == 0) {
+    if (intrin_regmode(intrins) == DYNREG_FIXED) {
+      lj_err_callermsg(cts->L, "expected non template intrinsic");
+    } else {
+      /* Opcode gets set to 0 during parsing if the cpu feature missing */
+      lj_err_callermsg(cts->L, "Intrinsic not support by cpu");
+    }
+  }
+
   /* Build the interpreter wrapper */
   if (intrin_regmode(intrins) == DYNREG_FIXED) {
     uint32_t op = intrins->opcode;
@@ -617,10 +672,6 @@ GCcdata *lj_intrinsic_createffi(CTState *cts, CType *func)
     intrins->wrapped = lj_intrinsic_buildwrap(cts->L, intrins, mcode,
                                               intrin_oplen(intrins));
   } else {
-    /* Opcode is gets set to 0 during parsing if the cpu feature missing */
-    if (intrins->opcode == 0) {
-      lj_err_callermsg(cts->L, "Intrinsic not support by cpu");
-    }
     intrins->wrapped = lj_intrinsic_buildwrap(cts->L, intrins, NULL, 0);
   }   
 
@@ -646,7 +697,7 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
   
   opcode = parse_opstr(L, opstr, intrins, &buildflags);
 
-  if (!opcode) {
+  if (!opcode && !(buildflags & INTRINSFLAG_TEMPLATE)) {
     return 0;
   }
 
@@ -715,7 +766,10 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
     sib = retid;
   }
 
-  setopcode(L, intrins, opcode);
+  /* If were a template theres no opcode to set */
+  if (opcode) {
+    setopcode(L, intrins, opcode);
+  } 
 
   if (intrin_iscomm(intrins) && 
       (intrins->insz < 2 || intrins->in[0] != intrins->in[1])) {

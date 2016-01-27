@@ -552,6 +552,37 @@ context("__mcode", function()
     end)
   end)
   
+  it("idiv template", function()
+    assert_cdef([[void idivT(int32_t eax, int32_t ecx) __mcode("?E") __reglist(out, int32_t eax, int32_t edx)]])
+    --trying to create template intrinsic through C library should always fail
+    assert_error(function() return ffi.C.idivT end)
+    
+    local idiv = ffi.intrinsic("idivT", "\x99\xF7\xF9", 3)
+
+    local function checker(i, result, remainder)
+      local rem = i%2
+    
+      if rem ~= remainder then
+        return rem, remainder
+      end
+    
+      local expected = (i-rem)/2
+      
+      if expected ~= result then
+        return expected, result
+      end
+    end
+    
+    local function test_idiv(value, divisor)
+      local result, remainder = idiv(value, divisor)
+      return result, remainder
+    end
+  
+    assert_jitchecker(checker, test_idiv, 2)
+    
+    idiv = ffi.intrinsic("idivT", "\x99\xF7\xF9", 3)
+  end)
+  
   it("prefetch", function()
     assert_cdef([[void prefetch0(void* mem) __mcode("0F181mIs")]], "prefetch0")
     assert_cdef([[void prefetch1(void* mem) __mcode("0F182mIs")]], "prefetch1")

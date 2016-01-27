@@ -72,6 +72,10 @@ typedef enum INTRINSFLAGS {
   INTRINSFLAG_EXPLICTREGS = 0x10000,
   /* Opcode is only supported if the CPU supports AVX */
   INTRINSFLAG_AVXREQ     = 0x20000,
+  /* Intrinsic is a template with no machine code set until instantiate at runtime with
+  ** user supplied code.
+  */
+  INTRINSFLAG_TEMPLATE    = 0x40000,
 
   INTRINSFLAG_CALLEDIND = INTRINSFLAG_CALLED | INTRINSFLAG_INDIRECT
 } INTRINSFLAGS;

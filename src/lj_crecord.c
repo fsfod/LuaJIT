@@ -1302,6 +1302,13 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *func)
     }
   }
 
+  /* Append the wrapper pointer if were created from a template */
+  if (intrins->wrapped == NULL) {
+    GCcdata *cd = cdataV(&rd->argv[0]);
+    TRef tr = lj_ir_kintp(J, (uintptr_t)*(void**)cdataptr(cd));
+    arg = emitir(IRT(IR_CARG, IRT_NIL), arg, tr);
+  }
+
   it = IRT_NIL;
   if (intrins->outsz > 0) {
     if (retid) {
