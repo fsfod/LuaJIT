@@ -343,6 +343,13 @@ static int parse_opmode(const char *op, MSize len)
       case 'E':
         flags |= INTRINSFLAG_EXPLICTREGS;
         break;
+      case 'V':
+        flags |= INTRINSFLAG_AVXREQ;
+      case 'v':
+        /* Use vex encoding of the op if avx/xv2 is supported */
+        flags |= INTRINSFLAG_VEX;
+        break;
+
       default:
         /* return index of invalid flag */
         return -(int)(i+1);
@@ -610,6 +617,10 @@ GCcdata *lj_intrinsic_createffi(CTState *cts, CType *func)
     intrins->wrapped = lj_intrinsic_buildwrap(cts->L, intrins, mcode,
                                               intrin_oplen(intrins));
   } else {
+    /* Opcode is gets set to 0 during parsing if the cpu feature missing */
+    if (intrins->opcode == 0) {
+      lj_err_callermsg(cts->L, "Intrinsic not support by cpu");
+    }
     intrins->wrapped = lj_intrinsic_buildwrap(cts->L, intrins, NULL, 0);
   }   
 
@@ -618,6 +629,8 @@ GCcdata *lj_intrinsic_createffi(CTState *cts, CType *func)
 
   return cd;
 }
+
+extern uint32_t sse2vex(uint32_t op, uint32_t len);
 
 int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
 {
@@ -747,6 +760,23 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
   if (intrin_regmode(intrins) >= DYNREG_SWAPREGS) {
     uint8_t temp = intrins->in[0];
     intrins->in[0] = intrins->in[1]; intrins->in[1] = temp;
+  }
+
+  if (intrins->flags & INTRINSFLAG_VEX) {
+    if (L2J(L)->flags & JIT_F_AVX1) {
+      intrins->opcode = sse2vex(intrins->opcode, intrin_oplen(intrins));
+      intrins->flags &= ~INTRINSFLAG_LARGEOP;
+      /* Switch to non destructive source if the sse reg mode is destructive */
+      if (intrin_regmode(intrins) == DYNREG_INOUT) {
+        intrin_setregmode(intrins, DYNREG_VEX3);
+      }
+    } else if(buildflags & INTRINSFLAG_AVXREQ) {
+      /* Disable instantiation of the intrinsic since AVX is not support by CPU */
+      intrins->opcode = 0;
+    } else {
+      /* Use opcode unmodified in its SSE form */
+      intrins->flags &= ~INTRINSFLAG_VEX;
+    }
   }
 #endif
   

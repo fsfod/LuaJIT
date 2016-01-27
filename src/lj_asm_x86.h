@@ -615,8 +615,10 @@ static void asm_intrin_opcode(ASMState *as, IRIns *ir, IntrinsInfo *ininfo)
   uint32_t dynreg = intrin_regmode(intrins);
   RegSet allow;
   IRRef lref = 0, rref = 0;
-  Reg right, dest = RID_NONE;
+  Reg right, dest = RID_NONE, vvvv = RID_NONE;
   int dynrout = intrins->outsz > 0 && intrin_dynrout(intrins);
+  int vex3 = dynreg == DYNREG_VEX3;
+  int vexop = intrins->flags & INTRINSFLAG_VEX;
 
   /* Swap to refs to native ordering */
   if (dynreg >= DYNREG_SWAPREGS) {
@@ -647,8 +649,12 @@ static void asm_intrin_opcode(ASMState *as, IRIns *ir, IntrinsInfo *ininfo)
     }
     dest = ra_dest(as, ir, allow);
     if (dynreg == DYNREG_OPEXT) {
-      /* Set input register the same as the output since the op is destructive */
-      right = dest;
+      if (vexop) {
+        vvvv = dest;
+      } else {
+        /* Set input register the same as the output since the op is destructive */
+        right = dest;
+      }
     }
   }
 
@@ -707,7 +713,8 @@ static void asm_intrin_opcode(ASMState *as, IRIns *ir, IntrinsInfo *ininfo)
   /* Handle second input reg for any two input dynamic in register modes
   ** which isn't DYNREG_INOUT
   */
-  if (intrins->dyninsz > 1 && ra_noreg(dest)) {
+  if (intrins->dyninsz > 1 && ((!vex3 && ra_noreg(dest)) ||
+                               (vex3 && ra_noreg(IR(args[1])->r)))) {
     Reg r;
     allow = reg_torset(in[1]) & ~ininfo->inset;
     if (ra_hasreg(right) && right != RID_MRM)
@@ -715,7 +722,13 @@ static void asm_intrin_opcode(ASMState *as, IRIns *ir, IntrinsInfo *ininfo)
 
     r = ra_allocref(as, args[1], allow);
     in[1] = reg_setrid(in[1], r);
-    dest = r;
+
+    if (!vex3) {
+      dest = r;
+    } else if (lref == rref) {
+      /* update right for same ref */
+      right = r;
+    }
   }
 
   if (right == RID_MRM) {
@@ -733,15 +746,19 @@ static void asm_intrin_opcode(ASMState *as, IRIns *ir, IntrinsInfo *ininfo)
     in[0] = reg_setrid(in[0], right);
   }
 
+  if (vexop && vex3) {
+    vvvv = reg_rid(in[1]);
+  }
+
   lua_assert(ra_hasreg(right) && (ra_hasreg(dest) || intrins->dyninsz < 2));
-  emit_intrins(as, intrins, right, dest);
+  emit_intrins(as, intrins, right, dest, vvvv);
   
   if (dynreg == DYNREG_INOUT) {
     lua_assert(lref);
     ra_left(as, dest, lref);
     /* no need to load the register since ra_left already did */
     in[1] = 0xff;
-  } else if (dynreg == DYNREG_OPEXT && dynrout) {
+  } else if (dynreg == DYNREG_OPEXT && dynrout && !vexop) {
     /* Handle destructive ONEOPEXT opcodes */
     lua_assert(rref);
     ra_left(as, dest, rref);
@@ -902,9 +919,9 @@ static void asm_intrinsic(ASMState *as, IRIns *ir, IRIns *asmend)
       if (LJ_64 && (p-as->mcp) != (int32_t)(p-as->mcp)) {
         r1 = ra_scratch(as, RSET_GPR & ~(ininfo.inset | ininfo.outset));
       }
-      emit_intrins(as, intrins, r1, target);
+      emit_intrins(as, intrins, r1, target, 0);
     } else  {
-      emit_intrins(as, intrins, r1, target);
+      emit_intrins(as, intrins, r1, target, 0);
     }
   }
 

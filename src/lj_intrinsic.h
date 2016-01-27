@@ -52,6 +52,9 @@ typedef enum INTRINSFLAGS {
   INTRINSFLAG_CALLED = 0x20,
   /* MODRM should always be set as indirect mode */
   INTRINSFLAG_INDIRECT = 0x40,
+
+  /* Vex encoded opcode vvvv may not be used though */
+  INTRINSFLAG_VEX = 0x100,
   /* opcode is larger than the emit system normally handles x86/x64(4 bytes) */
   INTRINSFLAG_LARGEOP = 0x200,
   /* Append a user supplied prefixed before the opcode and its REX byte */
@@ -67,6 +70,8 @@ typedef enum INTRINSFLAGS {
   
   /* Input parameters names explicitly declare input registers */
   INTRINSFLAG_EXPLICTREGS = 0x10000,
+  /* Opcode is only supported if the CPU supports AVX */
+  INTRINSFLAG_AVXREQ     = 0x20000,
 
   INTRINSFLAG_CALLEDIND = INTRINSFLAG_CALLED | INTRINSFLAG_INDIRECT
 } INTRINSFLAGS;
