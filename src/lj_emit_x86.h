@@ -564,11 +564,33 @@ static void emit_addptr(ASMState *as, Reg r, int32_t ofs)
 
 static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins, Reg r1, uintptr_t r2)
 {
-  if (intrins->flags & INTRINSFLAG_CALLED) {
+  uint32_t regmode = intrin_regmode(intrins);
+  if (regmode) {
+    if (regmode == DYNREG_OPEXT) {
+      r2 = intrin_getopextb(intrins);
+    }
+
+    /* force 64 bit operands */
+    if (intrins->flags & INTRINSFLAG_REXW) {
+      r2 |= REX_64;
+    }
+
+    if (intrins->flags & INTRINSFLAG_IMMB) {
+      *--as->mcp = intrins->immb;
+    }
+
+    emit_mrm(as, intrins->opcode, (Reg)r2, r1);
+
+    if (intrins->flags & INTRINSFLAG_PREFIX) {
+      *--as->mcp = intrins->prefix;
+    }
+
+    checkmclim(as);
+    /* No code offset to save if were dynamically generating from an opcode */
+    
+  } else if (intrins->flags & INTRINSFLAG_CALLED) {
     lua_assert(r2);
     emit_call_(as, (MCode*)r2, r1);
-  } else {
-    lua_assert(0);
   }
 
   return as->mcp;

@@ -9,8 +9,9 @@ telescope.make_assertion("jit", "", function(expect, func, ...)
   return true 
 end)
 
-telescope.make_assertion("jitchecker", "", function(checker, func, ...) 
-  assert(checker(1, func(1, ...)) == nil) 
+telescope.make_assertion("jitchecker", "", function(checker, func, ...)
+  local expected, result = checker(1, func(1, ...))
+  assert(expected == result, tostring(expected).." "..tostring(result)) 
   return true 
 end)
 

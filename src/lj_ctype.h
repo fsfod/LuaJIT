@@ -175,20 +175,27 @@ typedef int (LJ_FASTCALL *IntrinsicWrapper)(void *incontext, void* outcontext);
 
 typedef struct AsmIntrins {
   IntrinsicWrapper wrapped;
-  uint8_t in[8];
-  uint8_t out[8];
+  union {
+    uint8_t in[8];
+    struct {
+      uint8_t opregs[5]; /* cmpxchg8b */
+      uint8_t immb;
+      uint8_t prefix; /* prefix byte see INTRINSFLAG_PREFIX */
+      uint8_t dyninsz; /* dynamic input register count */
+    };
+  };
+  union {
+    uint8_t out[8];
+    struct {
+      uint8_t oregs[4];
+      uint32_t opcode;
+    };
+  };
   uint8_t insz;
   uint8_t outsz;
   uint16_t mod;
   uint16_t flags;
-  CTypeID1 id;
-  union {
-    struct {
-      uint16_t asmsz;
-      uint16_t asmofs;
-    };
-    uint32_t opcode;
-  };
+  CTypeID1 id; 
 } AsmIntrins;
 
 typedef struct IntrinsicState {
@@ -375,7 +382,7 @@ CTTYDEF(CTTYIDDEF)
   CDSDEF(_) _(EXTENSION) _(ASM) _(ATTRIBUTE) \
   _(DECLSPEC) _(CCDECL) _(PTRSZ) \
   _(STRUCT) _(UNION) _(ENUM) \
-  _(SIZEOF) _(ALIGNOF)
+  _(SIZEOF) _(MCODE) _(REGLIST) _(ALIGNOF)
 
 /* C token numbers. */
 enum {

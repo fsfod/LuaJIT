@@ -59,7 +59,6 @@ enum {
   RID_MAX_FPR = RID_MAX,
   RID_NUM_GPR = RID_MAX_GPR - RID_MIN_GPR,
   RID_NUM_FPR = RID_MAX_FPR - RID_MIN_FPR,
-
 #if LJ_64
 #if LJ_ABI_WIN
   RID_CONTEXT = RID_ECX,
@@ -73,6 +72,9 @@ enum {
   RID_CONTEXT = RID_ECX,
   RID_OUTCONTEXT = RID_EDX,
 #endif
+  /* Placeholder register ids for dynamic register entries in intrinsics */
+  RID_DYN_FPR = RID_MAX_FPR-1,
+  RID_DYN_GPR = RID_SP,
 };
 
 /* -- Register sets ------------------------------------------------------- */
