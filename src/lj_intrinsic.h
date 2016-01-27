@@ -137,6 +137,7 @@ CTypeID1 regkind_ct[16];
 #define reg_isvec(reg) (reg_rid(reg) >= RID_MIN_FPR && reg_kind(reg) >= REGKIND_VEC_START)
 #define reg_isdyn(reg) (reg_rid(reg) == RID_DYN_GPR || reg_rid(reg) == RID_DYN_FPR)
 #define reg_isboxed(reg) (reg_kind(reg) > 1)
+#define reg_torset(reg) (reg_isgpr(reg) ? RSET_GPR : RSET_FPR)
 
 #define reg_irt(reg) (reg_isgpr(reg) ? rk_irtgpr(reg_kind(reg)) : rk_irtfpr(reg_kind(reg)))
 #define rk_irtgpr(kind) ((IRType)regkind_it[(kind)])

@@ -145,6 +145,9 @@
   _(CALLS,	S , ref, lit) \
   _(CALLXS,	S , ref, ref) \
   _(CARG,	N , ref, ref) \
+  _(ASMRET,	S,  ref, lit) \
+  _(ASMINS,	S,  ref, lit) \
+  _(ASMEND,	S,  ref, ref) \
   \
   /* End of list. */
 

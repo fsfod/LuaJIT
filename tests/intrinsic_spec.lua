@@ -434,6 +434,7 @@ context("__mcode", function()
     assert_equal(ptr[0], string.byte(s))
     
     local function checker(i, sptr)
+      assert(tostring(sptr), tostring(ptr+i))
       assert(sptr == ptr+i)
     end
     
