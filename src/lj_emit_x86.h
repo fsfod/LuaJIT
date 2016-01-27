@@ -28,6 +28,7 @@
 #define VEX2_RVVV (VEX2_R | VEXOP_VVV)
 
 #define VEX_256 0x40000
+#define OP4B 0x4000
 
 /*vvvv bits in the opcode are assumed tobe set */
 #define VEXOP_SETVVVV(o, rid) ((o) ^ (((rid < RID_MIN_FPR ? \
@@ -97,8 +98,9 @@ static LJ_AINLINE MCode *emit_op(x86Op xo, Reg rr, Reg rb, Reg rx,
   int n = (int8_t)xo;
   if ((n + 58) <= 0) {
     return emit_vop(xo, rr, rb, rx, p, delta);
+  } else if (rr & OP4B) {
+    n = -5;
   }
-
 #if defined(__GNUC__)
   if (__builtin_constant_p(xo) && n == -2)
     p[delta-2] = (MCode)(xo >> 24);
@@ -114,6 +116,7 @@ static LJ_AINLINE MCode *emit_op(x86Op xo, Reg rr, Reg rb, Reg rx,
     if (rex != 0x40) {
       rex |= (rr >> 16);
       if (n == -4) { *p = (MCode)rex; rex = (MCode)(xo >> 8); }
+      else if (n == -5) { *p = (MCode)rex; rex = (MCode)(xo); }
       else if ((xo & 0xffffff) == 0x6600fd) { *p = (MCode)rex; rex = 0x66; }
       *--p = (MCode)rex;
     }
@@ -577,6 +580,10 @@ static MCode* emit_intrins(ASMState *as, AsmIntrins *intrins, Reg r1, uintptr_t 
 
     if (intrins->flags & INTRINSFLAG_IMMB) {
       *--as->mcp = intrins->immb;
+    }
+    /* Tell emit_op the opcode is 4 bytes long */
+    if (intrins->flags & INTRINSFLAG_LARGEOP) {
+      r2 |= OP4B;
     }
 
     emit_mrm(as, intrins->opcode, (Reg)r2, r1);
