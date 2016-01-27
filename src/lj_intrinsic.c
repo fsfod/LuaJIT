@@ -961,7 +961,7 @@ static int typed_call(CTState *cts, AsmIntrins *intrins, CType *ct)
       dp = &context.fpr[nfpr++];
     }
 
-    lj_cconv_ct_tv(cts, d, (uint8_t *)dp, o, CCF_ARG(narg+1));
+    lj_cconv_ct_tv(cts, d, (uint8_t *)dp, o, CCF_ARG(narg+1)|CCF_INTRINS_ARG);
 
     /* Extend passed signed integers to 32 bits at least. */
     if (ctype_isinteger_or_bool(d->info) && sz < sizeof(intptr_t) && 
