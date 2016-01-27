@@ -4,6 +4,7 @@ local nop = "\x90"
 
 ffi.cdef[[
 typedef float float4 __attribute__((__vector_size__(16)));
+typedef float float8 __attribute__((__vector_size__(32)));
 typedef int int4 __attribute__((__vector_size__(16)));
 typedef uint8_t byte16 __attribute__((__vector_size__(16)));
 ]]
@@ -203,6 +204,19 @@ if ffi.arch == "x64" then
     
     assert_jit(444.575, testrex, 123.075, 321.5)
   end)
+ 
+  it("vex rex fpr", function()
+    local array = ffi.new("float[8]", 0, 1, 2, 3, 4, 5, 6, 7)
+    --force a Vex.B base register
+    local ymmtest = asmfromstr(nop, {rin = {"ymm14", "eax", "ecx", "edx", "esi", "edi", "ebx", "ebp"}, 
+                                     rout = {"ymm14"},
+                                     mod = {"ymm1", "ymm7"}})
+    local ymmout = ymmtest(array, 1, 2, 3, 4, 5, 6 , 7)
+    
+    for i=0,7 do
+      assert_equal(ymmout[i], i)
+    end
+  end)
 end
   
   it("fpr_vec", function()
@@ -217,6 +231,39 @@ end
     xmmout = xmmtest(v1)   
     for i=1,4 do
       assert_equal(xmmout[i-1], i)
+    end
+  end)
+  
+  it("fpr_vec(ymm)", function()
+    --test using plain array in place of a vector 
+    local v1 = ffi.new("float[8]", 0, 1, 2, 3, 4, 5, 6, 7)
+    local ymmtest = asmfromstr(nop, {rin = {"ymm7"}, rout = {"ymm7"}})
+    local ymmout = ymmtest(v1)
+    
+    for i=0,7 do
+      assert_equal(ymmout[i], i)
+    end
+  
+    local v2 = ffi.new("float[8]", 0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5) 
+    local ymmtest2 = asmfromstr(nop, {rin = {"ymm0", "ymm7"}, rout = {"ymm7", "ymm0"}})
+    local ymm7, ymm0 = ymmtest2(v1, v2)
+    
+    for i=0,7 do
+      assert_equal(ymm0[i], i)
+    end    
+    for i=0,7 do
+      assert_equal(ymm7[i], i+0.5)
+    end
+    
+    --test using a cdata vector
+    v2 = ffi.new("float8", 0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5) 
+    ymm7, ymm0 = ymmtest2(v1, v2)
+    
+    for i=0,7 do
+      assert_equal(ymm0[i], i)
+    end 
+    for i=0,7 do
+      assert_equal(ymm7[i], i+0.5)
     end
   end)
   

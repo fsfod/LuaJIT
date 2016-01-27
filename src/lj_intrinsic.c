@@ -21,6 +21,7 @@
 #include "lj_target.h"
 
 typedef enum RegFlags {
+  REGFLAG_YMM = REGKIND_V256 << 6,
   REGFLAG_64BIT = REGKIND_GPR64 << 6, /* 64 bit override */
   REGFLAG_BLACKLIST = 1 << 17,
 }RegFlags;
@@ -106,7 +107,7 @@ static int parse_fprreg(const char *name, uint32_t len)
   uint32_t rid = 0, kind = REGKIND_FPR64;
   uint32_t pos = 3;
 
-  if (len < 3 || name[0] != 'x')
+  if (len < 3 || (name[0] != 'x' && name[0] != 'y'))
     return -1;
 
   if (lj_char_isdigit((uint8_t)name[3])) {
@@ -127,15 +128,19 @@ static int parse_fprreg(const char *name, uint32_t len)
     return -1;
   }
 
-  if (pos < len) {
-    if (name[pos] == 'f') {
-      kind = REGKIND_FPR32;
-      pos++;
-    } else if (name[pos] == 'v') {
-      kind = REGKIND_V128;
-      pos++;
-    } else {
-      kind = REGKIND_FPR64;
+  if (name[0] == 'y') {
+    kind = REGKIND_V256;
+  } else {
+    if (pos < len) {
+      if (name[pos] == 'f') {
+        kind = REGKIND_FPR32;
+        pos++;
+      } else if (name[pos] == 'v') {
+        kind = REGKIND_V128;
+        pos++;
+      } else {
+        kind = REGKIND_FPR64;
+      }
     }
   }
 
@@ -191,7 +196,7 @@ static uint32_t buildregset(lua_State *L, GCtab *regs, AsmIntrins *intrins, int 
 
     name = strVdata(slot);
 
-    if (name[0] == 'x') {
+    if (name[0] == 'x' || name[0] == 'y') {
       reg = parse_fprreg(name, strV(slot)->len);
     } else {
       reginfotv = lj_tab_getstr(reglookup, strV(slot));
@@ -352,8 +357,9 @@ static void *setup_results(lua_State *L, AsmIntrins *intrins) {
     CType *ct;
 
     if (reg_isvec(intrins->out[i])) {
+      int sz = kind == REGKIND_V128 ? 1 : 2;
       rawid = retid = lj_ctype_intern(cts, CTINFO(CT_ARRAY,
-                                      CTF_VECTOR|CTALIGN(4)|CTID_FLOAT), 16);
+                                      CTF_VECTOR|CTALIGN(4*sz)|CTID_FLOAT), 16*sz);
     } else {
       rawid = retid = rk_ctype(r, kind);
     }

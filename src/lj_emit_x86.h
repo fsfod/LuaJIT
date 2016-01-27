@@ -19,6 +19,44 @@
 #define REX_64			0
 #endif
 
+/* msb is also set to c5 so we can spot a vex op in op_emit */
+#define VEX2 0xc5c5
+
+#define VEX3_RBX 0xe000
+#define VEXOP_VVV 0x780000
+#define VEX2_R 0x800000
+#define VEX2_RVVV (VEX2_R | VEXOP_VVV)
+
+#define VEX_256 0x40000
+
+/*vvvv bits in the opcode are assumed tobe set */
+#define VEXOP_SETVVVV(o, rid) ((o) ^ (((rid < RID_MIN_FPR ? \
+                                        rid : (rid)-RID_MIN_FPR)) << 19))
+
+#define VEX_OP2(o, pp)	((uint32_t)(0x78c5c5 | ((pp<<16) + (o<<24))))
+#define VEX_OP3(o, pp, mode) ((uint32_t)(0x78e0c4 | (mode << 8) | ((pp<<16) + (o<<24))))
+/* extract and merge the opcode,vvv,L,pp and set VEXMAP_0F */
+#define VEX2TO3(op) ((op & 0xff7f0000) | 0xe1c4)
+
+#define VEX_R(vex, rr) (vex & ~((rr<<4)&0x80))
+#define VEX_RBX(rr, rb, rx, map) ((0xe0 & ~(((rr<<4)&0x80) | ((rx<<3)&0x40) | \
+                                  ((rb<<2)&0x20))) | (map))
+
+#define VEX_VVLPP(vv, l, pp) ((0x78 & ~((vv) << 3)) | ((l) << 2) | (pp))
+
+typedef enum VEXPP {
+  VEXPP_0f = 0,
+  VEXPP_66 = 1,
+  VEXPP_f3 = 2,
+  VEXPP_f2 = 3,
+}VEXPP;
+
+typedef enum VEXMAP {
+  VEXMAP_0F   = 1,
+  VEXMAP_0F38 = 2,
+  VEXMAP_0F3A = 3,
+}VEXMAP;
+
 #define emit_i8(as, i)		(*--as->mcp = (MCode)(i))
 #define emit_i32(as, i)		(*(int32_t *)(as->mcp-4) = (i), as->mcp -= 4)
 #define emit_u32(as, u)		(*(uint32_t *)(as->mcp-4) = (u), as->mcp -= 4)
@@ -26,11 +64,41 @@
 #define emit_x87op(as, xo) \
   (*(uint16_t *)(as->mcp-2) = (uint16_t)(xo), as->mcp -= 2)
 
+/* VEX op */
+static  MCode *emit_vop(x86Op xo, Reg rr, Reg rb, Reg rx,
+                        MCode *p, int delta)
+{
+  int n = ((int8_t)xo)+55;
+#if LJ_64
+  if ((uint8_t)xo == 0xc5 && !((rb|rx) & 8)) {
+    xo &= ~((rr & 8) << 20);
+  } else {
+    if ((uint8_t)xo == 0xc5) {
+      xo = VEX2TO3(xo);
+      n--;
+    }
+    xo &= ~((((rr<<4)&0x80) | ((rx<<3)&0x40) | ((rb<<2)&0x20)) << 8);
+  }
+#else
+  UNUSED(rb); UNUSED(rx);
+  xo |= (uint8_t)xo == 0xc5 ? VEX2_R : VEX3_RBX;
+#endif
+  xo |= rr & VEX_256;
+
+  *(uint32_t *)(p+delta-5) = (uint32_t)xo;
+  p += n + delta;
+  return p;
+}
+
 /* op */
 static LJ_AINLINE MCode *emit_op(x86Op xo, Reg rr, Reg rb, Reg rx,
 				 MCode *p, int delta)
 {
   int n = (int8_t)xo;
+  if ((n + 58) <= 0) {
+    return emit_vop(xo, rr, rb, rx, p, delta);
+  }
+
 #if defined(__GNUC__)
   if (__builtin_constant_p(xo) && n == -2)
     p[delta-2] = (MCode)(xo >> 24);
@@ -701,12 +769,15 @@ static void emit_loadfpr(ASMState *as, uint32_t reg, Reg base, int ofs)
   case REGKIND_V128:
     op = XO_MOVUPS;
     break;
+  case REGKIND_V256:
+    op = VEX_OP2(0x10, VEXPP_0f);
+    r |= VEX_256;
+    break;
   }
 
   if (!rk_isvec(kind)) {
     emit_rmro(as, op, r, base, ofs);
   } else {
-
     Reg temp = intrinsic_scratch(as, RSET_GPR);
     emit_rmro(as, op, r, temp, 0);
 
@@ -731,6 +802,10 @@ static void emit_savefpr(ASMState *as, Reg reg, Reg base, int ofs)
     break;
   case REGKIND_V128:
     op = XO_MOVUPSto;
+    break;
+  case REGKIND_V256:
+    op = VEX_OP2(0x11, VEXPP_0f);
+    r |= VEX_256;
     break;
   }
 

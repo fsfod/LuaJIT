@@ -46,7 +46,7 @@ typedef struct AsmHeader {
   _(FPR64, IRT_NUM,   CTID_DOUBLE) \
   _(FPR32, IRT_FLOAT, CTID_FLOAT) \
   _(V128,  0,         0) \
-  _(FPR5,  0,         0) \
+  _(V256,  0,         0) \
   _(FPR6,  0,         0) \
   _(FPR7,  0,         0) \
 
