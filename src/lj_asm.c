@@ -31,6 +31,7 @@
 #include "lj_asm.h"
 #include "lj_dispatch.h"
 #include "lj_vm.h"
+#include "lj_err.h"
 #include "lj_target.h"
 
 #ifdef LUA_USE_ASSERT
@@ -2439,7 +2440,7 @@ static void intrins_saveregs(ASMState *as, AsmIntrins *intrins, IntrinsState *in
 ** Vector are assumed tobe always unaligned for now when emitting load/stores
 */
 
-void* lj_asm_intrins(jit_State *J, AsmIntrins *intrins, void* target, MSize targetsz)
+static void* wrap_intrins(jit_State *J, AsmIntrins *intrins, void* target, MSize targetsz)
 {
   ASMState as_;
   ASMState *as = &as_;
@@ -2571,6 +2572,53 @@ restart:
   /* Return a pointer to the start of the wrapper */
   return hdr+1;
 }
+
+typedef struct IntrWrapState {
+  AsmIntrins *intrins;
+  void* target;
+  MSize size;
+  void** outwrapper;
+}IntrWrapState;
+
+static TValue *wrap_intrins_cp(lua_State *L, lua_CFunction dummy, void *ud)
+{
+  IntrWrapState *state = (IntrWrapState*)ud;
+  UNUSED(dummy);
+  *state->outwrapper = wrap_intrins(L2J(L), state->intrins, state->target, state->size);
+  return NULL;
+}
+
+int lj_asm_intrins(lua_State *L, AsmIntrins *intrins, void** target, MSize size)
+{
+  int errcode = 0;
+  IntrWrapState state = {intrins, *target, size, target};
+
+  while ((errcode = lj_vm_cpcall(L, NULL, (void *)&state, wrap_intrins_cp)) != 0) {
+    jit_State *J = L2J(L);
+
+    lj_mcode_abort(J);
+    J->curmcarea = &J->mcarea;
+
+    if (errcode == LUA_ERRRUN){
+      if (tvisnumber(L->top-1)) {  /* Trace error? */
+        TraceError trerr = (TraceError)numberVint(L->top-1);
+        if (trerr == LJ_TRERR_MCODELM) {
+          /* mcarea reallocation try again */
+          L->top--;
+          continue;
+        }
+        return -(trerr+2);
+      } else {
+        return -1;
+      }
+    } else {
+      lj_err_throw(L, errcode);
+    }
+  }
+
+  return 0;
+}
+
 #endif
 
 #undef IR

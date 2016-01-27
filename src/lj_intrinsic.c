@@ -17,6 +17,7 @@
 #include "lj_cdata.h"
 #include "lj_cconv.h"
 #include "lj_jit.h"
+#include "lj_trace.h"
 #include "lj_dispatch.h"
 #include "lj_target.h"
 
@@ -307,7 +308,29 @@ static int buildregs(lua_State *L, GCtab *regs, AsmIntrins *intrins)
   return flags;
 }
 
-extern void* lj_asm_intrins(jit_State *J, AsmIntrins *intrins, void* target, MSize targetsz);
+extern int lj_asm_intrins(lua_State *J, AsmIntrins *intrins, void** target, MSize targetsz);
+
+static IntrinsicWrapper lj_intrinsic_buildwrap(lua_State *L, AsmIntrins *intrins,
+                                               void* target, MSize targetsz)
+{
+  int err = lj_asm_intrins(L, intrins, &target, targetsz);
+
+  if (err != 0) {
+    const char* reason = "unknown error";
+
+    if (err == -(LJ_TRERR_BADRA+2)) {
+      reason = "too many live registers";
+    } else if (err == -(LJ_TRERR_MCODEOV+2)) {
+      reason = "code too large for mcode area";
+    } else if(err == -1 && tvisstr(L->top-1)) {
+      reason = strVdata(L->top-1);
+    }
+
+    lj_err_callerv(L, LJ_ERR_FFI_INTRWRAP, reason);
+  }
+
+  return (IntrinsicWrapper)target;
+}
 
 int lj_intrinsic_create(lua_State *L)
 {
@@ -333,7 +356,7 @@ int lj_intrinsic_create(lua_State *L)
 
   buildregs(L, lj_lib_checktab(L, 3), intrins);
 
-  intrinsmc = lj_asm_intrins(L2J(L), intrins, intrinsmc, asmsz);
+  intrinsmc = lj_intrinsic_buildwrap(L, intrins, intrinsmc, asmsz);
   intrins->wrapped = (IntrinsicWrapper)intrinsmc;
   id = register_intrinsic(L, intrins);
 
