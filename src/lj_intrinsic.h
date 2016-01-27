@@ -46,7 +46,7 @@ typedef enum INTRINSFLAGS {
   INTRINSFLAG_REGMODEMASK = 7,
 
   INTRINSFLAG_MEMORYSIDE   = 0x08, /* has memory side effects so needs an IR memory barrier */
-  INTRINSFLAG_SAVETOSTRUCT = 0x10, /* Output values are saved to a user supplied struct */
+  INTRINSFLAG_HASSIDE = 0x10, /* instruction has non obvious side effects */
 
   /* Intrinsic should be emitted as a naked function that is called */
   INTRINSFLAG_CALLED = 0x20,
@@ -86,6 +86,8 @@ typedef struct AsmHeader {
 #define intrin_setregmode(intrins, mode) \
   (intrins)->flags = ((intrins)->flags & ~INTRINSFLAG_REGMODEMASK)|(mode)
 #define intrin_iscomm(intrins) ((intrins)->flags & INTRINSFLAG_ISCOMM)
+/* Has side effects that may not be to memory */
+#define intrin_sideeff(intrins) ((intrins)->flags & INTRINSFLAG_HASSIDE)
 
 #define intrin_getopextb(intrins) ((intrins)->out[3])
 #define intrin_setopextb(intrins, opext) \

@@ -498,7 +498,7 @@ context("__mcode", function()
   end)
   
   it("prefix byte", function() 
-    assert_cdef([[void atomicadd(int32_t* nptr, int32_t n) __mcode("01mRIPs", 0xF0);]], "atomicadd")
+    assert_cdef([[void atomicadd(int32_t* nptr, int32_t n) __mcode("01mRIPS", 0xF0);]], "atomicadd")
     
     local sum = 0   
     local function checker(i, jsum)
@@ -518,7 +518,7 @@ context("__mcode", function()
   
   if ffi.arch == "x64" then
     it("prefix64", function()
-      assert_cdef([[void atomicadd64(int64_t* nptr, int64_t n) __mcode("01mRIPs", 0xF0);]], "atomicadd64")
+      assert_cdef([[void atomicadd64(int64_t* nptr, int64_t n) __mcode("01mRIPS", 0xF0);]], "atomicadd64")
       
       local sum = 0
       local function checker(i, jsum)
@@ -536,7 +536,7 @@ context("__mcode", function()
   end
 
   it("prefix and imm byte", function() 
-    assert_cdef([[void atomicadd1(int32_t* nptr) __mcode("830mIUPs", 0xF0, 0x01);]], "atomicadd1")
+    assert_cdef([[void atomicadd1(int32_t* nptr) __mcode("830mIUPS", 0xF0, 0x01);]], "atomicadd1")
     
     local function checker(i, jsum)
       if(jsum ~= i) then 
@@ -553,10 +553,10 @@ context("__mcode", function()
   end)
   
   it("prefetch", function()
-    assert_cdef([[void prefetch0(void* mem) __mcode("0F181mI")]], "prefetch0")
-    assert_cdef([[void prefetch1(void* mem) __mcode("0F182mI")]], "prefetch1")
-    assert_cdef([[void prefetch2(void* mem) __mcode("0F183mI")]], "prefetch2")
-    assert_cdef([[void prefetchnta(void* mem) __mcode("0F180mI")]], "prefetchnta")
+    assert_cdef([[void prefetch0(void* mem) __mcode("0F181mIs")]], "prefetch0")
+    assert_cdef([[void prefetch1(void* mem) __mcode("0F182mIs")]], "prefetch1")
+    assert_cdef([[void prefetch2(void* mem) __mcode("0F183mIs")]], "prefetch2")
+    assert_cdef([[void prefetchnta(void* mem) __mcode("0F180mIs")]], "prefetchnta")
 
     local asm = ffi.C
     local kmem = ffi.new("int[4]")
@@ -734,7 +734,7 @@ context("__reglist", function()
   end)
   
   it("rdtsc", function()
-    assert_cdef([[void rdtsc() __mcode("0f31") __reglist(out, int32_t eax, int32_t edx);]], "rdtsc")
+    assert_cdef([[void rdtsc() __mcode("0f31s") __reglist(out, int32_t eax, int32_t edx);]], "rdtsc")
 
     local rdtsc = ffi.C.rdtsc
     

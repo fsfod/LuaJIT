@@ -758,12 +758,13 @@ static int ra_reflive(ASMState *as, IRIns *ir)
   return ra_hasreg(r) && !rset_test(as->freeset, r) && regcost_ref(as->cost[r]) == ref;
 }
 
-void asm_intrin_results(ASMState *as, IRIns *ir, AsmIntrins* intrins, IntrinsInfo* ininfo)
+int asm_intrin_results(ASMState *as, IRIns *ir, AsmIntrins* intrins, IntrinsInfo* ininfo)
 {
   IRRef results[LJ_INTRINS_MAXREG];
   RegSet evict = 0, outset = 0, aout = 0;
   uint32_t i = intrin_regmode(intrins) ? intrins->dyninsz : 0;
   int32_t dynout = intrin_dynrout(intrins) ? 1 : 0;
+  int used = 0;
 
   /* Gather the output register IR instructions and check if any are used */
   if (intrins->outsz > 0) {
@@ -780,6 +781,7 @@ void asm_intrin_results(ASMState *as, IRIns *ir, AsmIntrins* intrins, IntrinsInf
             regcost_ref(as->cost[r]) == results[n+1]) {
           rset_set(aout, r);
         }
+        used++;
       }
 
       if (irret->o == IR_ASMINS) {
@@ -789,6 +791,10 @@ void asm_intrin_results(ASMState *as, IRIns *ir, AsmIntrins* intrins, IntrinsInf
     }
   }
   
+  if (!used && !intrin_sideeff(intrins)) {
+    /* IR is dead code */
+    return 0;
+  }
   evict = intrins->mod;
 
   i = intrin_regmode(intrins) ? intrins->dyninsz : 0;
@@ -807,6 +813,7 @@ void asm_intrin_results(ASMState *as, IRIns *ir, AsmIntrins* intrins, IntrinsInf
     outset |= RID2RSET(reg_rid(intrins->out[i]));
   }
   ininfo->outset = outset;
+
   
   /* Don't evict register that currently have our output values live in them */
   evict &= ~aout;
@@ -828,6 +835,8 @@ void asm_intrin_results(ASMState *as, IRIns *ir, AsmIntrins* intrins, IntrinsInf
       ra_destreg(as, irr, r);
     }
   }
+
+  return 1;
 }
 
 static void asm_intrinsic(ASMState *as, IRIns *ir, IRIns *asmend)
@@ -875,7 +884,9 @@ static void asm_intrinsic(ASMState *as, IRIns *ir, IRIns *asmend)
   lua_assert(n == 0);
 
   /* If there is no users of our results skip emitting */
-  asm_intrin_results(as, ir, intrins, &ininfo);
+  if (!asm_intrin_results(as, ir, intrins, &ininfo)) {
+    goto exit;
+  }
 
   if (intrin_regmode(intrins)) {
     asm_intrin_opcode(as, ir, &ininfo);
@@ -898,6 +909,7 @@ static void asm_intrinsic(ASMState *as, IRIns *ir, IRIns *asmend)
   }
 
   asm_asmsetupargs(as, &ininfo);
+exit:
   if (ininfo.asmend) {
     /* Skip over our IR_ASMINS since were emitting from the tail */
     as->curins = (IRRef)(ir - as->ir);
