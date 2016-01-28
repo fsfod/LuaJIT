@@ -80,8 +80,8 @@ static CTypeID register_intrinsic(lua_State *L, AsmIntrins* src, CType *func)
     id = lj_ctype_new(cts, &ct);
     ct->info = CTINFO(CT_FUNC, CTF_INTRINS);
   }
-
-  ct->size = cts->intr.top;
+  /* Upper bits of size are used for modified link */
+  ct->size |= cts->intr.top;
   intrins = &cts->intr.tab[cts->intr.top++];
   memcpy(intrins, src, sizeof(AsmIntrins));
   intrins->id = id;
@@ -164,6 +164,21 @@ static int parse_fprreg(const char *name, uint32_t len)
   return reg_make(rid, kind) | dynreg;
 }
 
+int lj_intrinsic_getreg(CTState *cts, GCstr *name) {
+
+  if (strdata(name)[0] == 'x' || strdata(name)[0] == 'y') {
+    return parse_fprreg(strdata(name), name->len);
+  } else {
+    cTValue *reginfotv = lj_tab_getstr(cts->miscmap, name);
+
+    if (reginfotv && !tvisnil(reginfotv)) {
+      return (uint32_t)(uintptr_t)lightudV(reginfotv);
+    }
+  }
+
+  return -1;
+}
+
 enum IntrinsRegSet {
   REGSET_IN,
   REGSET_OUT,
@@ -180,7 +195,6 @@ static uint32_t process_reglist(lua_State *L, AsmIntrins *intrins, int regsetid,
                                 GCtab *regs, CTypeID liststart)
 {
   CTState *cts = ctype_cts(L);
-  GCtab *reglookup = cts->miscmap;
   uint32_t i, count = 0, dyncount = 0;
   RegSet rset = 0;
   const char *listname;
@@ -233,15 +247,7 @@ static uint32_t process_reglist(lua_State *L, AsmIntrins *intrins, int regsetid,
       lj_err_callerv(L, LJ_ERR_FFI_REGOV, listname, LJ_INTRINS_MAXREG);
     }
 
-    if (name[0] == 'x' || name[0] == 'y') {
-      reg = parse_fprreg(name, str->len);
-    } else {
-      cTValue *reginfotv = lj_tab_getstr(reglookup, str);
-
-      if (reginfotv && !tvisnil(reginfotv)) {
-        reg = (uint32_t)(uintptr_t)lightudV(reginfotv);
-      }
-    }
+    reg = lj_intrinsic_getreg(cts, str);
 
     if (reg < 0) {
       /* Unrecognized register name */

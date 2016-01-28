@@ -1220,23 +1220,44 @@ static void cp_reglist(CPState *cp, CPDecl *decl)
   if (cp->tok != CTOK_IDENT)
     cp_err_token(cp, CTOK_IDENT);
 
-  if (strcmp(strdata(cp->str), "in") == 0) {
+  if (strcmp(strdata(cp->str), "mod") == 0) {
     listid = 1;
-  } else if (strcmp(strdata(cp->str), "mod") == 0) {
-    listid = 2;
   } else if (strcmp(strdata(cp->str), "out") == 0) {
-    listid = 3;
+    listid = 2;
   } else {
     cp_errmsg(cp, CTOK_STRING, LJ_ERR_FFI_INVTYPE);
   }
 
   cp_next(cp);
   cp_check(cp, ',');
-  do {
-    CPDecl decl;
-    CTypeID ctypeid = 0, fieldid;
+  
+  if (listid == 1) {
+    uint32_t rset = 0;
+    do {
+      if (cp->tok != CTOK_IDENT)
+        cp_err_token(cp, CTOK_IDENT);
 
-    if (listid == 3) {
+      int reg = lj_intrinsic_getreg(cp->cts, cp->str);
+
+      if (reg == -1) {
+        /* TODO: register error */
+        cp_errmsg(cp, 0, LJ_ERR_FFI_INVTYPE);
+      }
+
+      rset |= 1 << reg_rid(reg);
+      cp_next(cp);
+    } while (cp_opt(cp, ','));
+
+    lastid = lj_ctype_new(cp->cts, &ct);
+    ct->info = CTINFO(CT_ATTRIB, 0);
+    ct->size = rset;
+    
+    decl->stack[decl->top-1].size |= lastid << 16;
+  } else {
+    do {
+      CPDecl decl;
+      CTypeID ctypeid = 0, fieldid;
+
       cp_decl_spec(cp, &decl, CDF_REGISTER);
       decl.mode = CPARSE_MODE_DIRECT|CPARSE_MODE_ABSTRACT;
       cp_declarator(cp, &decl);
@@ -1249,29 +1270,22 @@ static void cp_reglist(CPState *cp, CPDecl *decl)
         ctypeid = lj_ctype_intern(cp->cts,
           CTINFO(CT_PTR, CTALIGN_PTR|ctype_cid(ct->info)), CTSIZE_PTR);
       }
-    } else {
-      if (cp->tok != CTOK_IDENT)
-        cp_err_token(cp, CTOK_IDENT);
-    }
 
-    /* Add new parameter. */
-    fieldid = lj_ctype_new(cp->cts, &ct);
-    if (listid == 3) {
+      /* Add new parameter. */
+      fieldid = lj_ctype_new(cp->cts, &ct);
       /* Type must have a register name after it */
       if (!decl.name) cp_err_token(cp, CTOK_IDENT);
       ctype_setname(ct, decl.name);
-    } else {
-      ctype_setname(ct, cp->str);
-    }
-    ct->info = CTINFO(CT_FIELD, ctypeid);
-    ct->size = 0;
+      ct->info = CTINFO(CT_FIELD, ctypeid);
+      ct->size = 0;
 
-    if (anchor)
-      ctype_get(cp->cts, lastid)->sib = fieldid;
-    else
-      anchor = fieldid;
-    lastid = fieldid;
-  } while (cp_opt(cp, ','));
+      if (anchor)
+        ctype_get(cp->cts, lastid)->sib = fieldid;
+      else
+        anchor = fieldid;
+      lastid = fieldid;
+    } while (cp_opt(cp, ','));
+  }
 
   decl->stack[decl->top-1].info = (decl->stack[decl->top-1].info & 0xffff0000) | anchor;
 

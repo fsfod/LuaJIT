@@ -167,5 +167,7 @@ LJ_FUNC int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opcode, uint
 LJ_FUNC AsmIntrins *lj_intrinsic_get(CTState *cts, CTypeID id);
 LJ_FUNC int lj_intrinsic_call(CTState *cts, CType *ct);
 
+int lj_intrinsic_getreg(CTState *cts, GCstr *name);
+
 #endif
 
