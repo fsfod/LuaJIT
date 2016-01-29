@@ -194,6 +194,14 @@ typedef struct {
   uint8_t scale;	/* Index scale (XM_SCALE1 .. XM_SCALE8). */
 } x86ModRM;
 
+typedef struct IntrinWrapState {
+  struct AsmIntrins *intrins;
+  RegSet mod;
+  void* target;
+  MSize targetsz;
+  void* wrapper;
+}IntrinWrapState;
+
 /* -- Opcodes ------------------------------------------------------------- */
 
 /* Macros to construct variable-length x86 opcodes. -(len+1) is in LSB. */

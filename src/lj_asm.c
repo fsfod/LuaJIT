@@ -2389,15 +2389,15 @@ static void lj_asm_setup_intrins(jit_State *J, ASMState *as)
   GPRIns.o = IR_NOP;
 }
 
-typedef struct IntrinsState {
+typedef struct IntrinBuildState {
   uint8_t in[LJ_INTRINS_MAXREG], out[LJ_INTRINS_MAXREG];
   RegSet inset, outset, modregs;
   uint32_t spadj, contexspill, contexofs;
   uint8_t outcontext;
   char fuse;
-}IntrinsState;
+}IntrinBuildState;
 
-static void intrins_setup(AsmIntrins *intrins, IntrinsState *info)
+static void intrins_setup(AsmIntrins *intrins, IntrinBuildState *info)
 {
   MSize offset = 0, i;
   int dynreg = intrin_regmode(intrins);
@@ -2437,10 +2437,10 @@ static void intrins_setup(AsmIntrins *intrins, IntrinsState *info)
 
   /* TODO: dynamic output context register selection */
   info->outcontext = RID_OUTCONTEXT;
-  info->modregs |= info->outset|info->inset|intrins->mod;
+  info->modregs |= info->outset|info->inset;
 }
 
-static void intrins_loadregs(ASMState *as, AsmIntrins *intrins, IntrinsState *info)
+static void intrins_loadregs(ASMState *as, AsmIntrins *intrins, IntrinBuildState *info)
 {
   uint32_t gpr = 0, fpr = 0, i;
 
@@ -2489,7 +2489,7 @@ static void intrins_loadregs(ASMState *as, AsmIntrins *intrins, IntrinsState *in
   }
 }
 
-static void intrins_saveregs(ASMState *as, AsmIntrins *intrins, IntrinsState *info)
+static void intrins_saveregs(ASMState *as, AsmIntrins *intrins, IntrinBuildState *info)
 {
   MSize offset = 0, i;
   Reg outcontext = info->outcontext;
@@ -2554,13 +2554,14 @@ static RegSet pickdynlist(uint8_t *list, MSize sz, RegSet freeset)
 ** Vector are assumed tobe always unaligned for now when emitting load/stores
 */
 
-static void* wrap_intrins(jit_State *J, AsmIntrins *intrins, void* target, MSize targetsz)
+static void wrap_intrins(jit_State *J, AsmIntrins *intrins, IntrinWrapState *state)
 {
   ASMState as_;
   ASMState *as = &as_;
-  IntrinsState info;
+  IntrinBuildState info;
   AsmHeader *hdr;
   MCode *asmofs = NULL, *origtop;
+  void* target = state->target;
   uint8_t *in = info.in, *out = info.out;
   int spadj = 0;
   int dynreg = intrin_regmode(intrins);
@@ -2570,6 +2571,7 @@ static void* wrap_intrins(jit_State *J, AsmIntrins *intrins, void* target, MSize
   origtop = as->mctop;
 
   memset(&info, 0, sizeof(info));
+  info.modregs = state->mod;
   intrins_setup(intrins, &info);
 
   /* Pick some ABI specific scratch registers for the opcode's input/output registers */
@@ -2642,9 +2644,9 @@ static void* wrap_intrins(jit_State *J, AsmIntrins *intrins, void* target, MSize
   }
 
   /* Embed the mcode after the wrapper */
-  if ((intrins->flags & INTRINSFLAG_CALLED) && targetsz) {
+  if ((intrins->flags & INTRINSFLAG_CALLED) && state->targetsz) {
     *--as->mcp = XI_RET;
-    target = asmofs = asm_mcode(as, target, targetsz);
+    target = asmofs = asm_mcode(as, target, state->targetsz);
   }
 
 restart:
@@ -2734,7 +2736,7 @@ restart:
     /* Write an opcode to the wrapper */
     asmofs = emit_intrins(as, intrins, rin, rout, r3);
   } else {
-    asmofs = asm_mcode(as, target, targetsz);
+    asmofs = asm_mcode(as, state->target, state->targetsz);
   }
   
   /* Move values out the context into there respective input registers */
@@ -2755,7 +2757,7 @@ restart:
     as->mcp = origtop;
     /* Have to restart so we can emit the epilogue with the missing reg saves */
     goto restart;
-  } 
+  }
 
   hdr = ((AsmHeader*)as->mcp)-1;
   memset(hdr, 0, sizeof(AsmHeader));
@@ -2767,7 +2769,7 @@ restart:
   } else if (asmofs){
     lua_assert((asmofs-as->mcp) < 0xffff);
     hdr->asmofs = (uint16_t)(asmofs-as->mcp);
-    hdr->asmsz = targetsz;
+    hdr->asmsz = state->targetsz;
   }
 
   as->mcp = (MCode*)hdr;
@@ -2779,30 +2781,22 @@ restart:
   J->curmcarea = &J->mcarea;
 
   /* Return a pointer to the start of the wrapper */
-  return hdr+1;
+  state->wrapper = (hdr+1);
 }
-
-typedef struct IntrWrapState {
-  AsmIntrins *intrins;
-  void* target;
-  MSize size;
-  void** outwrapper;
-}IntrWrapState;
 
 static TValue *wrap_intrins_cp(lua_State *L, lua_CFunction dummy, void *ud)
 {
-  IntrWrapState *state = (IntrWrapState*)ud;
+  IntrinWrapState *state = (IntrinWrapState*)ud;
   UNUSED(dummy);
-  *state->outwrapper = wrap_intrins(L2J(L), state->intrins, state->target, state->size);
+  wrap_intrins(L2J(L), state->intrins, state);
   return NULL;
 }
 
-int lj_asm_intrins(lua_State *L, AsmIntrins *intrins, void** target, MSize size)
+int lj_asm_intrins(lua_State *L, IntrinWrapState *state)
 {
   int errcode = 0;
-  IntrWrapState state = {intrins, *target, size, target};
 
-  while ((errcode = lj_vm_cpcall(L, NULL, (void *)&state, wrap_intrins_cp)) != 0) {
+  while ((errcode = lj_vm_cpcall(L, NULL, state, wrap_intrins_cp)) != 0) {
     jit_State *J = L2J(L);
 
     lj_mcode_abort(J);

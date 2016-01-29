@@ -191,7 +191,7 @@ enum IntrinsRegSet {
 ** together into a uint8_t that is saved into one of the register lists of the 
 ** AsmIntrins passed in.
 */
-static uint32_t process_reglist(lua_State *L, AsmIntrins *intrins, int regsetid,
+static RegSet process_reglist(lua_State *L, AsmIntrins *intrins, int regsetid,
                                 GCtab *regs, CTypeID liststart)
 {
   CTState *cts = ctype_cts(L);
@@ -294,8 +294,6 @@ static uint32_t process_reglist(lua_State *L, AsmIntrins *intrins, int regsetid,
     }
   } else if (regsetid == REGSET_OUT) {
     intrins->outsz = (uint8_t)count;
-  } else {
-    intrins->mod = (uint16_t)rset;
   }
 
   return rset;
@@ -474,11 +472,12 @@ static GCtab* getopttab(lua_State *L, GCtab *t, const char* key)
   return (tv && tvistab(tv)) ? tabV(tv) : NULL;
 }
 
-static int buildregs(lua_State *L, GCtab *regs, AsmIntrins *intrins)
+static RegSet buildregs(lua_State *L, GCtab *regs, AsmIntrins *intrins)
 {
   GCtab *t;
   cTValue *tv;
   int flags = 0;
+  RegSet mod = 0;
   
   tv = lj_tab_getstr(regs, lj_str_newz(L, "mode"));
   if (tv && !tvisnil(tv)) {
@@ -505,18 +504,25 @@ static int buildregs(lua_State *L, GCtab *regs, AsmIntrins *intrins)
 
   t = getopttab(L, regs, "mod");
   if (t) {
-    process_reglist(L, intrins, REGSET_MOD, t, 0);
+    mod = process_reglist(L, intrins, REGSET_MOD, t, 0);
   }
 
-  return flags;
+  return mod;
 }
 
-extern int lj_asm_intrins(lua_State *J, AsmIntrins *intrins, void** target, MSize targetsz);
+extern int lj_asm_intrins(lua_State *L, IntrinWrapState *state);
 
 static IntrinsicWrapper lj_intrinsic_buildwrap(lua_State *L, AsmIntrins *intrins,
-                                               void* target, MSize targetsz)
+                                               void* target, MSize targetsz, RegSet mod)
 {
-  int err = lj_asm_intrins(L, intrins, &target, targetsz);
+  IntrinWrapState state = { 0 };
+  state.intrins = intrins;
+  state.target = target;
+  state.targetsz = targetsz;
+  state.mod = mod;
+  state.wrapper = 0;
+
+  int err = lj_asm_intrins(L, &state);
 
   if (err != 0) {
     const char* reason = "unknown error";
@@ -532,7 +538,7 @@ static IntrinsicWrapper lj_intrinsic_buildwrap(lua_State *L, AsmIntrins *intrins
     lj_err_callerv(L, LJ_ERR_FFI_INTRWRAP, reason);
   }
 
-  return (IntrinsicWrapper)target;
+  return (IntrinsicWrapper)state.wrapper;
 }
 
 CTypeID lj_intrinsic_template(lua_State *L, int narg)
@@ -569,6 +575,7 @@ int lj_intrinsic_create(lua_State *L)
   CTypeID id;
   void *intrinsmc;
   MSize asmsz;
+  RegSet mod = 0;
   AsmIntrins _intrins;
   AsmIntrins* intrins = &_intrins;
   memset(intrins, 0, sizeof(AsmIntrins));
@@ -593,10 +600,10 @@ int lj_intrinsic_create(lua_State *L)
   }
 
   if (!istemplate) {
-    buildregs(L, lj_lib_checktab(L, 3), intrins);
+    mod = buildregs(L, lj_lib_checktab(L, 3), intrins);
   }
 
-  intrinsmc = lj_intrinsic_buildwrap(L, intrins, intrinsmc, asmsz);
+  intrinsmc = lj_intrinsic_buildwrap(L, intrins, intrinsmc, asmsz, mod);
   
   if (!istemplate) {
     intrins->wrapped = (IntrinsicWrapper)intrinsmc;
@@ -676,9 +683,9 @@ GCcdata *lj_intrinsic_createffi(CTState *cts, CType *func)
     uint32_t op = intrins->opcode;
     void* mcode = ((char*)&op) + (4-intrin_oplen(intrins));
     intrins->wrapped = lj_intrinsic_buildwrap(cts->L, intrins, mcode,
-                                              intrin_oplen(intrins));
+                                              intrin_oplen(intrins), 0);
   } else {
-    intrins->wrapped = lj_intrinsic_buildwrap(cts->L, intrins, NULL, 0);
+    intrins->wrapped = lj_intrinsic_buildwrap(cts->L, intrins, NULL, 0, 0);
   }   
 
   cd = lj_cdata_new(cts, id, CTSIZE_PTR);
