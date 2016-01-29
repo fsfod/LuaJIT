@@ -80,8 +80,9 @@ static CTypeID register_intrinsic(lua_State *L, AsmIntrins* src, CType *func)
     id = lj_ctype_new(cts, &ct);
     ct->info = CTINFO(CT_FUNC, CTF_INTRINS);
   }
-  /* Upper bits of size are used for modified link */
-  ct->size |= cts->intr.top;
+
+  /* Upper bits of size are used for modified registers link link */
+  ct->size = (ct->size & 0xffff0000) | cts->intr.top;
   intrins = &cts->intr.tab[cts->intr.top++];
   memcpy(intrins, src, sizeof(AsmIntrins));
   intrins->id = id;
@@ -92,14 +93,15 @@ static CTypeID register_intrinsic(lua_State *L, AsmIntrins* src, CType *func)
 AsmIntrins *lj_intrinsic_get(CTState *cts, CTypeID id)
 {
   CType *ct = ctype_get(cts, id);
-  lua_assert(ctype_isintrinsic(ct->info) && ct->size < cts->intr.sizetab);
-  return cts->intr.tab+ct->size;
+  lua_assert(ctype_isintrinsic(ct->info) && 
+             (ct->size & 0xffff) < cts->intr.sizetab);
+  return cts->intr.tab + (ct->size & 0xffff);
 }
 
 static AsmIntrins *lj_intrinsic_fromct(CTState *cts, CType* ct)
 {
-  lua_assert(ctype_isintrinsic(ct->info) && ct->size < cts->intr.sizetab);
-  return cts->intr.tab+ct->size;
+  lua_assert(ctype_isintrinsic(ct->info) && (ct->size & 0xffff) < cts->intr.sizetab);
+  return cts->intr.tab + (ct->size & 0xffff);
 }
 
 static void lj_intrinsic_new(lua_State *L, CTypeID id, void* wrapmc)

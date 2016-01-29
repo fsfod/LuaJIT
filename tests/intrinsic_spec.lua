@@ -739,11 +739,12 @@ context("__reglist", function()
     assert_cdeferr([[int test2() __reglist(]])
     assert_cdeferr([[int test3() __reglist();]])
     assert_cdeferr([[int test4() __reglist(,);]])
-    assert_cdeferr([[int test5() __reglist("in", eax);]])
-    assert_cdeferr([[int test6() __reglist(in, ]])
+    assert_cdeferr([[int test5() __reglist(in, eax);]])
+    assert_cdeferr([[int test6() __reglist(out, ]])
+    assert_cdeferr([[int test6() __reglist(mod, ]])
   
-    assert_cdeferr([[int test7() __reglist(in, eax, ]])
-    assert_cdeferr([[int test8() __reglist("in, ]])
+    assert_cdeferr([[int test7() __reglist(mod, eax, ]])
+    assert_cdeferr([[int test8() __reglist("out, ]])
     assert_cdeferr([[int test9() __reglist(o]])
     assert_cdeferr([[int test10() __reglist(ou]])
     assert_cdeferr([[int invalid_reglist4() __reglist(out, int)]])
@@ -762,6 +763,18 @@ context("__reglist", function()
     --exceeded max register list size
     assert_cdeferr([[int invalid_reglist5() __mcode("90") __reglist(out, int eax, int ebx, 
                       int ecx, int edx, int esi, int edi, float xmm0, float xmm1, float xmm2)]])
+  end)
+  
+  it("mod list", function()
+  
+    assert_cdef([[void nop_mod1() __mcode("90") __reglist(mod, esi, edi, ebx)]], nop_mod1)
+    
+    ffi.C.nop_mod1()
+    
+    assert_cdef([[void nop_mod2() __mcode("90") __reglist(mod, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7)]], nop_mod2)
+    
+    assert_cdef([[void nop_mod3() __mcode("90") __reglist(mod, xmm1, esi)]], nop_mod3)
+    
   end)
   
   it("rdtsc", function()
