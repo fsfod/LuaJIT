@@ -28,6 +28,7 @@
 #include "lj_asm.h"
 #include "lj_dispatch.h"
 #include "lj_vm.h"
+#include "lj_vmevent.h"
 #include "lj_target.h"
 
 #ifdef LUA_USE_ASSERT
@@ -89,6 +90,7 @@ typedef struct ASMState {
   MCode *invmcp;	/* Points to invertible loop branch (or NULL). */
   MCode *flagmcp;	/* Pending opportunity to merge flag setting ins. */
   MCode *realign;	/* Realign loop if not NULL. */
+  IRRef fuseirnum;
 
 #ifdef RID_NUM_KREF
   int32_t krefk[RID_NUM_KREF];
@@ -2196,9 +2198,20 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
   ASMState *as = &as_;
   MCode *origtop;
 
+  int offsetcount = -1;
+
+  if(J2G(J)->vmevmask & VMEVENT_MASK(LJ_VMEVENT_TRACE)){
+    if(J->iroffsets == NULL){
+      J->iroffsets = lj_mem_newvec(J->L, 20, IRCodeOffset);
+      J->iroffsets_capacity = 20;
+    }
+    offsetcount = 0;
+  }
+
   /* Ensure an initialized instruction beyond the last one for HIOP checks. */
   J->cur.nins = lj_ir_nextins(J);
   J->cur.ir[J->cur.nins].o = IR_NOP;
+
 
   /* Setup initial state. Copy some fields to reduce indirections. */
   as->J = J;
@@ -2233,9 +2246,16 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
     as->gcsteps = 0;
     as->sectref = as->loopref;
     as->fuseref = (as->flags & JIT_F_OPT_FUSE) ? as->loopref : FUSE_DISABLED;
+    as->fuseirnum = 0;
     asm_setup_regsp(as);
     if (!as->loopref)
       asm_tail_link(as);
+
+    if(offsetcount != -1){
+      offsetcount = 0;
+      J->iroffset_mcpstart = as->mcp;
+    }
+    
 
     /* Assemble a trace in linear backwards order. */
     for (as->curins--; as->curins > as->stopins; as->curins--) {
@@ -2248,8 +2268,25 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
       RA_DBG_REF();
       checkmclim(as);
       asm_ir(as, ir);
+
+      //skip sinked value
+      if(offsetcount != -1 && (ir->o != IR_XSTORE || ir->r != RID_SINK)){
+        J->iroffsets[offsetcount].offset = as->mcp;
+        J->iroffsets[offsetcount].ins = as->curins;
+        J->iroffsets[offsetcount].fuseirnum = as->fuseirnum;
+        as->fuseirnum = 0;
+        offsetcount++;
+
+        if(offsetcount == J->iroffsets_capacity){
+          lj_mem_growvec(J->L, J->iroffsets, J->iroffsets_capacity, 0xfffff, IRCodeOffset); 
+        }
+      }
+
     }
   } while (as->realign);  /* Retry in case the MCode needs to be realigned. */
+
+  J->cur.iroffset_count = offsetcount == -1 ? 0 : offsetcount;
+  J->iroffset_mcpend = as->mcp;
 
   /* Emit head of trace. */
   RA_DBG_REF();

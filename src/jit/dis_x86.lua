@@ -396,6 +396,9 @@ local map_sz2prefix = {
 
 -- Output a nicely formatted line with an opcode and operands.
 local function putop(ctx, text, operands)
+  
+  CheckPrintIR(ctx)
+  
   local code, pos, hex = ctx.code, ctx.pos, ""
   local hmax = ctx.hexdump
   if hmax > 0 then
@@ -872,6 +875,68 @@ local function disass_block(ctx, ofs, len)
   while ctx.pos <= stop do dispatchmap(ctx, ctx.map1) end
   if ctx.pos ~= ctx.start then incomplete(ctx) end
 end
+
+local ffi = ffi or require("ffi")
+
+ffi.cdef([[
+  typedef struct IROffsetRecord{
+    int offset;
+    uint16_t ins;
+    uint16_t fuseirnum;
+  }IROffsetRecord;
+]])
+
+local traceiroffsets = require("jit.util").traceiroffsets
+
+function setup_iroffsets(ctx, tr, outstream)
+  local count, offsets = traceiroffsets(tr)
+
+  if(count == 0) then
+      ctx.next_iroffset = nil
+    return
+  end
+
+  ctx.outstream = outstream
+  ctx.tr = tr
+  ctx.iroffsets = ffi.cast("IROffsetRecord*", offsets)
+  ctx.iroffset_count = count
+  ctx.iroffset_pos = 0
+
+  assert(ctx.iroffsets ~= 0)
+
+  ctx.next_iroffset = ctx.iroffsets[0].offset
+end
+
+function CheckPrintIR(ctx)
+
+  if(ctx.next_iroffset and (not ctx.lastpos or ctx.lastpos-1 >= ctx.next_iroffset)) then
+  
+    repeat
+      local entry = ctx.iroffsets[ctx.iroffset_pos]
+    
+      if(entry.fuseirnum ~= 0) then
+        dump_singleir(ctx.tr, ctx.outstream, entry.fuseirnum, true, true)
+      end
+    
+      dump_singleir(ctx.tr, ctx.outstream, entry.ins, true, true)
+    
+      ctx.iroffset_pos = ctx.iroffset_pos+1
+    
+      if(ctx.iroffset_pos < ctx.iroffset_count) then     
+        ctx.next_iroffset = ctx.iroffsets[ctx.iroffset_pos].offset
+      else
+        ctx.next_iroffset = nil
+        break
+      end
+    until not ctx.lastpos  or ctx.lastpos-1 < ctx.next_iroffset
+  end
+  
+  ctx.lastpos = ctx.pos
+  
+  return false
+end
+
+
 
 -- Extended API: create a disassembler context. Then call ctx:disass(ofs, len).
 local function create(code, addr, out)

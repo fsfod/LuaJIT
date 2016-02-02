@@ -207,6 +207,7 @@ static void asm_fusefref(ASMState *as, IRIns *ir, RegSet allow)
   lua_assert(ir->o == IR_FLOAD || ir->o == IR_FREF);
   as->mrm.ofs = field_ofs[ir->op2];
   as->mrm.idx = RID_NONE;
+  as->fuseirnum = ir->op1;
   if (irref_isk(ir->op1)) {
     as->mrm.ofs += IR(ir->op1)->i;
     as->mrm.base = RID_NONE;
@@ -295,6 +296,7 @@ static void asm_fusexref(ASMState *as, IRRef ref, RegSet allow)
       r = ra_alloc1(as, idx, allow);
       rset_clear(allow, r);
       as->mrm.idx = (uint8_t)r;
+      as->fuseirnum = idx;
     }
   noadd:
     as->mrm.base = (uint8_t)ra_alloc1(as, ref, allow);
@@ -305,8 +307,10 @@ static void asm_fusexref(ASMState *as, IRRef ref, RegSet allow)
 static Reg asm_fuseload(ASMState *as, IRRef ref, RegSet allow)
 {
   IRIns *ir = IR(ref);
+  as->fuseirnum = ref;
   if (ra_hasreg(ir->r)) {
     if (allow != RSET_EMPTY) {  /* Fast path. */
+      as->fuseirnum = 0;
       ra_noweak(as, ir->r);
       return ir->r;
     }
@@ -372,6 +376,7 @@ static Reg asm_fuseload(ASMState *as, IRRef ref, RegSet allow)
   if (!(as->freeset & allow) && !irref_isk(ref) &&
       (allow == RSET_EMPTY || ra_hasspill(ir->s) || iscrossref(as, ref)))
     goto fusespill;
+  as->fuseirnum = 0;
   return ra_allocref(as, ref, allow);
 }
 

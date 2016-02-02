@@ -69,6 +69,8 @@
 #define JIT_F_OPT_SINK		0x01000000
 #define JIT_F_OPT_FUSE		0x02000000
 
+#define JIT_F_RECORD_IROFFSETS 0x40000000
+
 /* Optimizations names for -O. Must match the order above. */
 #define JIT_F_OPT_FIRST		JIT_F_OPT_FOLD
 #define JIT_F_OPTSTRING	\
@@ -207,6 +209,18 @@ typedef enum {
   LJ_TRLINK_STITCH		/* Trace stitching. */
 } TraceLink;
 
+typedef struct IROffsetRecord{
+  int offset;
+  uint16_t ins;
+  uint16_t fuseirnum;
+}IROffsetRecord;
+
+typedef struct IRCodeOffset{
+  MCode* offset;
+  uint16_t ins;
+  uint16_t fuseirnum;
+}IRCodeOffset;
+
 /* Trace object. */
 typedef struct GCtrace {
   GCHeader;
@@ -241,6 +255,9 @@ typedef struct GCtrace {
 #ifdef LUAJIT_USE_GDBJIT
   void *gdbjit_entry;	/* GDB JIT entry. */
 #endif
+
+  MSize iroffset_count;
+  IROffsetRecord* iroffsets;
 } GCtrace;
 
 #define gco2trace(o)	check_exp((o)->gch.gct == ~LJ_TTRACE, (GCtrace *)(o))
@@ -416,6 +433,11 @@ typedef struct jit_State {
   MCode *mcbot;		/* Bottom of current mcode area. */
   size_t szmcarea;	/* Size of current mcode area. */
   size_t szallmcarea;	/* Total size of all allocated mcode areas. */
+
+  IRCodeOffset* iroffsets;
+  MSize iroffsets_capacity;
+  MCode *iroffset_mcpstart;
+  MCode *iroffset_mcpend;
 
   TValue errinfo;	/* Additional info element for trace errors. */
 

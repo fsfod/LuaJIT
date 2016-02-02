@@ -424,6 +424,16 @@ LJLIB_CF(jit_util_ircalladdr)
   return 0;
 }
 
+/* local offsetcount, offsetlistptr(lightuserdata) = jit.util.traceiroffsets(tr) */
+LJLIB_CF(jit_util_traceiroffsets){
+  GCtrace *T = jit_checktrace(L);
+
+  setnumV(L->top++, T->iroffset_count);
+  setlightudV(L->top++, T->iroffsets);
+
+  return 2;
+}
+
 #endif
 
 #include "lj_libdef.h"

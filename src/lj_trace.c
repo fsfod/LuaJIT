@@ -123,11 +123,11 @@ static GCtrace *trace_save_alloc(jit_State *J)
   size_t sztr = ((sizeof(GCtrace)+7)&~7);
   size_t szins = (J->cur.nins-J->cur.nk)*sizeof(IRIns);
   size_t sz = sztr + szins +
-	      J->cur.nsnap*sizeof(SnapShot) +
-	      J->cur.nsnapmap*sizeof(SnapEntry);
+	      J->cur.nsnapmap*sizeof(SnapEntry)+
+          (J->cur.iroffset_count != 0 ? J->cur.iroffset_count+1 : 0)*sizeof(IROffsetRecord);
   return lj_mem_newt(J->L, (MSize)sz, GCtrace);
 }
-
+	      
 /* Save current trace by copying and compacting it. */
 static void trace_save(jit_State *J, GCtrace *T)
 {
@@ -144,10 +144,41 @@ static void trace_save(jit_State *J, GCtrace *T)
   p += szins;
   TRACE_APPENDVEC(snap, nsnap, SnapShot)
   TRACE_APPENDVEC(snapmap, nsnapmap, SnapEntry)
+
+  if(T->iroffset_count != 0) {
+    int i = T->iroffset_count-2;
+    IROffsetRecord* list = (IROffsetRecord*)p;
+
+    list[0].offset = 0;
+    list[0].ins = 0;
+    list[0].fuseirnum = 0;
+
+    list[1].offset = J->iroffset_mcpend-T->mcode;
+    list[1].ins = J->iroffsets[T->iroffset_count-1].ins-REF_BIAS;
+    list[1].fuseirnum = 0;
+    
+    if(J->cur.iroffset_count > 1){
+      //reverse the offset list that was built up in reverse order
+      for(; i != -1 ;--i){
+        int index = J->cur.iroffset_count-i;
+
+        list[index].ins = J->iroffsets[i].ins-REF_BIAS;
+        list[index].offset = J->iroffsets[i].offset-T->mcode;
+        list[index].fuseirnum = J->iroffsets[i].fuseirnum > REF_BIAS ? J->iroffsets[i].fuseirnum-REF_BIAS : 0;
+      }
+    }
+
+    T->iroffsets = list;
+    T->iroffset_count++;
+  }else{
+    T->iroffsets = NULL;
+  }
+
   J->cur.traceno = 0;
   setgcrefp(J->trace[T->traceno], T);
   lj_gc_barriertrace(J2G(J), T->traceno);
   lj_gdbjit_addtrace(J, T);
+
 #ifdef LUAJIT_USE_PERFTOOLS
   perftools_addtrace(T);
 #endif
@@ -164,7 +195,8 @@ void LJ_FASTCALL lj_trace_free(global_State *g, GCtrace *T)
   }
   lj_mem_free(g, T,
     ((sizeof(GCtrace)+7)&~7) + (T->nins-T->nk)*sizeof(IRIns) +
-    T->nsnap*sizeof(SnapShot) + T->nsnapmap*sizeof(SnapEntry));
+    T->nsnap*sizeof(SnapShot) + T->nsnapmap*sizeof(SnapEntry)
+    + T->iroffset_count*sizeof(IROffsetRecord));
 }
 
 /* Re-enable compiling a prototype by unpatching any modified bytecode. */
@@ -323,6 +355,7 @@ void lj_trace_freestate(global_State *g)
   lj_mem_freevec(g, J->snapbuf, J->sizesnap, SnapShot);
   lj_mem_freevec(g, J->irbuf + J->irbotlim, J->irtoplim - J->irbotlim, IRIns);
   lj_mem_freevec(g, J->trace, J->sizetrace, GCRef);
+  lj_mem_freevec(g, J->iroffsets, J->iroffsets_capacity, IRCodeOffset);
 }
 
 /* -- Penalties and blacklisting ------------------------------------------ */
