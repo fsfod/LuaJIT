@@ -509,6 +509,111 @@ CTypeID lj_intrinsic_template(lua_State *L, int narg)
   return id;
 }
 
+AsmIntrins *lj_intrinsic_fromname(lua_State *L, GCstr *name)
+{
+  CTState *cts = ctype_cts(L);
+  CType *ct;
+  CTypeID id;
+  AsmIntrins* intrins;
+
+  id = lj_ctype_getname(cts, &ct, name, 1u << CT_FUNC);
+
+  if (!id) {
+    lj_err_msg(L, LJ_ERR_FFI_INVTYPE);
+  } else if (!ctype_isintrinsic(ct->info)) {
+    lj_err_msg(L, LJ_ERR_FFI_INVTYPE);
+  }
+
+  return lj_intrinsic_get(cts, ct->size);
+}
+
+typedef struct AsmEntry {
+  uint16_t intrinId;
+  uint8_t reg[];
+} AsmEntry;
+
+uint16_t insarray[200] = { 0 };
+AsmEntry* instempl = (AsmEntry*)&insarray;
+
+static void parse_templateins(lua_State *L, GCtab *ins, AsmIntrins *intrins)
+{
+  CTState *cts = ctype_cts(L);
+  uint32_t i;
+  RegSet fixedset = 0;
+
+
+  for (i = 1; i < ins->asize; i++) {
+    cTValue *slot = arrayslot(ins, i);
+    int32_t reg = -1;
+
+    if (!tvisstr(slot)) {
+      if (tvisnil(slot)) {
+        /* End of array */
+        break;
+      } else {
+        lj_err_callermsg(L, "expected op name string");
+      }
+    }
+
+    AsmIntrins *op = lj_intrinsic_fromname(L, strV(slot));
+    instempl->intrinId = (uint16_t)(op-cts->intr.tab);
+
+    if (op->dyninsz < op->insz) {
+      for (size_t j = op->dyninsz; j < op->insz; j++) {
+        rset_set(fixedset, reg_rid(op->in[j]));
+      }
+    }
+
+    int dynout = intrin_dynrout(op) ? 1 : 0;
+
+    if (op->outsz > dynout) {
+      for (size_t j = dynout; j < op->outsz; j++) {
+        rset_set(fixedset, reg_rid(op->out[j]));
+      }
+    }
+
+    MSize count = (op->dyninsz + dynout);
+
+    for (size_t j = 0; j < count; j++) {
+      GCstr *regname;
+      
+      if (tvisnil(slot+j) || !tvisstr(slot+j)) {
+        break;
+      }
+
+      regname = strV(slot+j);
+
+      if (strdata(regname)[0] == '[') {
+        const char* start = strdata(regname)+1;
+        const char *end = strchr(start, ']');
+        const char *plus = strchr(start, '+');
+        lua_assert(end);
+        /* Flag indirect */
+        instempl->intrinId |= 1 << 15;
+
+        regname = lj_str_new(L, start, (plus ? plus : end) - start);
+      }
+
+      reg = lj_intrinsic_getreg(cts, regname);
+
+      if (reg == -1) {
+        lua_assert(0);
+      }
+
+      instempl->reg[j] = reg_rid(reg);
+    }
+    /* Check if there is an immediate number for the opcode */
+    if (tvisnumber(slot+count)) {
+      instempl->reg[count] = (uint8_t)(int8_t)numberVint(slot + count);
+      count++;
+    }
+
+    instempl = (AsmEntry*)&instempl->reg[count];
+    i += count;
+  }
+
+}
+
 int lj_intrinsic_create(lua_State *L)
 {
   CTState *cts = ctype_cts(L);  
@@ -517,13 +622,17 @@ int lj_intrinsic_create(lua_State *L)
   MSize asmsz;
   CIntrinsic* intrins = lj_intrinsic_get(cts, ctype_get(cts, id)->size);
   
-  lj_cconv_ct_tv(cts, ctype_get(cts, CTID_P_CVOID), (uint8_t *)&intrinsmc,
-                 L->base+1, CCF_ARG(2));
+  if (tvistab(L->base+1)) {
+    parse_templateins(L, tabV(L->base+1), intrins);
+  } else {
+    lj_cconv_ct_tv(cts, ctype_get(cts, CTID_P_CVOID), (uint8_t *)&intrinsmc,
+                   L->base+1, CCF_ARG(2));
 
-  asmsz = lj_lib_checkint(L, 3);
-  if (asmsz <= 0 || asmsz > 0xffff ||
+    asmsz = lj_lib_checkint(L, 3);
+    if (asmsz <= 0 || asmsz > 0xffff ||
       asmsz > (MSize)(L2J(L)->param[JIT_P_sizemcode] << 10)) {
-    lj_err_callermsg(L, "bad code size");
+      lj_err_callermsg(L, "bad code size");
+    }
   }
 
   intrinsmc = lj_intrinsic_buildwrap(L, intrins, intrinsmc, asmsz, 
