@@ -264,6 +264,26 @@ CType *lj_ctype_getfieldq(CTState *cts, CType *ct, GCstr *name, CTSize *ofs,
   return NULL;  /* Not found. */
 }
 
+/* Create a named struct CType and pre-create a ref CType for it the id of the ref type will
+** always be 1 less then the returned typeid.
+*/
+CTypeID lj_ctype_newstruct(lua_State *L, const char* name, CTSize size)
+{
+  CTState* cts = ctype_cts(L);
+  CType* ct;
+  CTypeID structid;
+
+  /* Intern a ref type first */
+  lj_ctype_intern(cts, CTINFO_REF(cts->top+1), CTSIZE_PTR);
+  structid = lj_ctype_new(cts, &ct);
+  ctype_setname(ct, lj_str_newz(L, name));
+  lj_ctype_addname(cts, ct, structid);
+
+  ct->info = CTINFO(CT_STRUCT, 0);
+  ct->size = size;
+  return structid;
+}
+
 /* -- C type information -------------------------------------------------- */
 
 /* Follow references and get raw type for a C type ID. */

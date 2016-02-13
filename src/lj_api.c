@@ -25,6 +25,8 @@
 #include "lj_vm.h"
 #include "lj_strscan.h"
 #include "lj_strfmt.h"
+#include "lj_ctype.h"
+#include "lj_cdata.h"
 
 /* -- Common helper functions --------------------------------------------- */
 
@@ -1211,3 +1213,57 @@ LUA_API void lua_setallocf(lua_State *L, lua_Alloc f, void *ud)
   g->allocf = f;
 }
 
+LUA_API int lua_register_ctype(lua_State *L, const char* name)
+{
+  CTState* cts = ctype_cts(L);
+  CType* ct;
+  /* Check if the existing struct has been registered already */
+  CTypeID id = lj_ctype_getname(cts, &ct, lj_str_newz(L, name), (1u<<CT_STRUCT));
+
+  if (id != 0) {
+    return id;/* Return the existing id */
+  }
+  return lj_ctype_newstruct(L, name, CTSIZE_INVALID);
+}
+
+LUA_API void *lua_newcdata(lua_State *L, int ctypeid)
+{
+  CTState* cts = ctype_cts(L);
+  CType* ct = ctype_get(cts, ctypeid);
+  GCcdata* cd = NULL;
+
+  if (ctype_isstruct(ct->info)) {
+    if (ct->size == CTSIZE_INVALID) {
+      lj_err_callermsg(L, "cannot create an incomplete struct ctype");
+    }
+    cd = lj_cdata_new(cts, ctypeid, ct->size);
+  } else if (ctype_isref(ct->info)) {
+    cd = lj_cdata_new(cts, ctypeid, ct->size);
+  } else {
+    lj_err_callermsg(L, "can only create cdata struct refs and cdata structs");
+  }
+
+  setcdataV(L, L->top++, cd);
+  return cdataptr(cd);
+}
+
+LUA_API void *lua_tocdata(lua_State *L, int idx, int ctypeid)
+{
+  CTState *cts = ctype_cts(L);
+  cTValue *o = index2adr(L, idx);
+  GCcdata* cdata = cdataV(o);
+
+  if (!tviscdata(o)) {
+    return NULL;
+  }
+
+  if (ctypeid != cdata->ctypeid && cdata->ctypeid != (ctypeid-1)) {
+    return NULL;
+  }
+
+  if (!cdataisv(cdata) && ctype_isptr(ctype_get(cts, cdata->ctypeid)->info)) {
+    return *(void **)cdataptr(cdata);
+  } else {
+    return cdataptr(cdata);
+  }
+}
