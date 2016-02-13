@@ -201,13 +201,19 @@ typedef struct {
   uint8_t scale;	/* Index scale (XM_SCALE1 .. XM_SCALE8). */
 } x86ModRM;
 
+typedef struct AsmEntry {
+  uint16_t intrinId;
+  uint8_t reg[];
+} AsmEntry;
+
 typedef struct IntrinWrapState {
   struct CIntrinsic *intrins;
   RegSet mod;
   void* target;
   MSize targetsz;
   void* wrapper;
-}IntrinWrapState;
+  AsmEntry *dynasm;
+} IntrinWrapState;
 
 /* -- Opcodes ------------------------------------------------------------- */
 
