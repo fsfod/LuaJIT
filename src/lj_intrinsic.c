@@ -509,12 +509,12 @@ CTypeID lj_intrinsic_template(lua_State *L, int narg)
   return id;
 }
 
-AsmIntrins *lj_intrinsic_fromname(lua_State *L, GCstr *name)
+CIntrinsic *lj_intrinsic_fromname(lua_State *L, GCstr *name)
 {
   CTState *cts = ctype_cts(L);
   CType *ct;
   CTypeID id;
-  AsmIntrins* intrins;
+  CIntrinsic* intrins;
 
   id = lj_ctype_getname(cts, &ct, name, 1u << CT_FUNC);
 
@@ -527,24 +527,22 @@ AsmIntrins *lj_intrinsic_fromname(lua_State *L, GCstr *name)
   return lj_intrinsic_get(cts, ct->size);
 }
 
-typedef struct AsmEntry {
-  uint16_t intrinId;
-  uint8_t reg[];
-} AsmEntry;
-
-uint16_t insarray[200] = { 0 };
+uint16_t insarray[2000] = { 0 };
+uintptr_t asmconstants[255] = { 0 };
 AsmEntry* instempl = (AsmEntry*)&insarray;
 
-static void parse_templateins(lua_State *L, GCtab *ins, AsmIntrins *intrins)
+static int parse_templateins(lua_State *L, GCtab *ins, CIntrinsic *intrins)
 {
   CTState *cts = ctype_cts(L);
   uint32_t i;
   RegSet fixedset = 0;
+  int inscount = 0;
+  int kcount = 0;
 
-
-  for (i = 1; i < ins->asize; i++) {
+  for (i = 1; i < ins->asize; inscount++) {
     cTValue *slot = arrayslot(ins, i);
     int32_t reg = -1;
+    int dynreg = 0;
 
     if (!tvisstr(slot)) {
       if (tvisnil(slot)) {
@@ -555,7 +553,7 @@ static void parse_templateins(lua_State *L, GCtab *ins, AsmIntrins *intrins)
       }
     }
 
-    AsmIntrins *op = lj_intrinsic_fromname(L, strV(slot));
+    CIntrinsic *op = lj_intrinsic_fromname(L, strV(slot));
     instempl->intrinId = (uint16_t)(op-cts->intr.tab);
 
     if (op->dyninsz < op->insz) {
@@ -571,8 +569,16 @@ static void parse_templateins(lua_State *L, GCtab *ins, AsmIntrins *intrins)
         rset_set(fixedset, reg_rid(op->out[j]));
       }
     }
+    
+    dynreg = intrin_regmode(op);
 
-    MSize count = (op->dyninsz + dynout);
+    MSize count = op->dyninsz + (dynreg != DYNREG_OPEXT ? dynout : 0);
+
+    if (dynreg == DYNREG_INOUT) {
+      /* Second input register input skipped */
+      count--;
+    }
+    slot++;
 
     for (size_t j = 0; j < count; j++) {
       GCstr *regname;
@@ -603,15 +609,24 @@ static void parse_templateins(lua_State *L, GCtab *ins, AsmIntrins *intrins)
       instempl->reg[j] = reg_rid(reg);
     }
     /* Check if there is an immediate number for the opcode */
-    if (tvisnumber(slot+count)) {
-      instempl->reg[count] = (uint8_t)(int8_t)numberVint(slot + count);
+    if ((slot+count) < L->top && tvisnumber(slot+count)) {
+      int32_t n = numberVint(slot + count);
+
+      if (abs(n) > 60) {
+        asmconstants[kcount] = n;
+        instempl->reg[count] = kcount++;
+      } else {
+        instempl->reg[count] = RID_MAX+n;
+      }
+
       count++;
     }
 
     instempl = (AsmEntry*)&instempl->reg[count];
-    i += count;
+    i += count+1;
   }
 
+  return inscount;
 }
 
 int lj_intrinsic_create(lua_State *L)
@@ -623,7 +638,16 @@ int lj_intrinsic_create(lua_State *L)
   CIntrinsic* intrins = lj_intrinsic_get(cts, ctype_get(cts, id)->size);
   
   if (tvistab(L->base+1)) {
-    parse_templateins(L, tabV(L->base+1), intrins);
+    int count = parse_templateins(L, tabV(L->base+1), intrins);
+
+    IntrinWrapState state = { 0 };
+    state.intrins = intrins;
+    state.wrapper = 0;
+    state.dynasm = (AsmEntry*)&insarray;
+    state.targetsz = count;
+
+    lj_asm_intrins(L, &state);
+    intrinsmc = state.wrapper;
   } else {
     lj_cconv_ct_tv(cts, ctype_get(cts, CTID_P_CVOID), (uint8_t *)&intrinsmc,
                    L->base+1, CCF_ARG(2));
@@ -633,10 +657,10 @@ int lj_intrinsic_create(lua_State *L)
       asmsz > (MSize)(L2J(L)->param[JIT_P_sizemcode] << 10)) {
       lj_err_callermsg(L, "bad code size");
     }
+    intrinsmc = lj_intrinsic_buildwrap(L, intrins, intrinsmc, asmsz, 
+                                       intrin_getmodrset(cts, intrins));
   }
 
-  intrinsmc = lj_intrinsic_buildwrap(L, intrins, intrinsmc, asmsz, 
-                                     intrin_getmodrset(cts, intrins));
   lj_intrinsic_new(L, id, intrinsmc);
   return 1;
 }
