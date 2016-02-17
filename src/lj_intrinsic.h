@@ -69,6 +69,9 @@ typedef enum INTRINSFLAGS {
  
   /* Opcode uses ymm registers */
   INTRINSFLAG_VEX256   = 0x4000,
+
+  INTRINSFLAG_IMM32 = 0x8000,
+
   /* Input parameters names explicitly declare input registers */
   INTRINSFLAG_EXPLICTREGS = 0x10000,
   /* Intrinsic is a template with no machine code set until instantiate at runtime with
