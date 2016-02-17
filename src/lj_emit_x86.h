@@ -1041,5 +1041,55 @@ static void emit_savefpr(ASMState *as, Reg reg, Reg base, int ofs)
   }
 }
 
+void emit_dyntemplate(ASMState *as, CIntrinsic *intrins, uint8_t *reglut, AsmEntry *ins, MSize inslen)
+{
+  CTState *cts = ctype_ctsG(J2G(as->J));
+  MCode *prevmcp = as->mcp;
+  RegSet inset = 0;
+  AsmEntry *end = (AsmEntry *)(((char*)ins) + inslen);
+
+  RegSet outwritten = 0;
+
+  for (; ins < end; ) {
+    CIntrinsic *op = lj_intrinsic_get(cts, ins->intrinId);
+    int regcount = 2;
+    int dynreg = intrin_regmode(op);
+    Reg rout = 0, rin = 0, r3 = RID_NONE;
+
+    if (dynreg == DYNREG_INOUT || dynreg == DYNREG_TWOIN || dynreg == DYNREG_TWOSTORE) {
+      rout = ins->reg[0];
+      rin = ins->reg[1];
+    } else if (dynreg == DYNREG_VEX3) {
+      rout = ins->reg[0];
+      rin = ins->reg[2];
+      r3 = reglut[ins->reg[1]];
+      regcount = 3;
+    } else if (dynreg == DYNREG_OPEXT) {
+      rin = ins->reg[0];
+      regcount = 1;
+    }
+
+    if (rset_test(inset, rin) && 1) {
+
+    } else {
+      
+    }
+
+    emit_intrins(as, op, reglut[rin], reglut[rout], r3);
+
+    if (op->flags & INTRINSFLAG_IMMB) {
+      if (op->flags & INTRINSFLAG_IMM32) {
+        ((uint32_t*)prevmcp)[-1] = ins->reg[regcount];
+      } else {
+        ((uint8_t*)prevmcp)[-1] = ins->reg[regcount];
+      }
+      regcount++;
+    }
+
+    ins = (AsmEntry *)&ins->reg[regcount];
+    prevmcp = as->mcp;
+  }
+}
+
 #endif
 

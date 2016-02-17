@@ -90,6 +90,7 @@ typedef struct AsmHeader {
     struct {
       uint16_t asmsz;
       uint16_t asmofs;
+      uint16_t dynsz;
     };
   };
   uint32_t totalzs;

@@ -670,10 +670,12 @@ typedef struct IntrinsInfo {
   IRRef args[LJ_INTRINS_MAXREG];
   /* input register list that gets mutated for opcode intrinsics */
   uint8_t inregs[LJ_INTRINS_MAXREG];
+  uint8_t reglut[RID_MAX];
   RegSet inset, outset, modset;
   /* First CARG ref used as limit for duplicate load checking when fusing */
-  IRRef a1; 
+  IRRef a1;
   int32_t indisp; /* Input register that overwrites the dispatch register */
+  char dyntemplate;
 } IntrinsInfo;
 
 static int asm_swaprefs(ASMState *as, IRIns *ir, IRRef lref, IRRef rref);
@@ -706,6 +708,10 @@ static void asm_asmsetupargs(ASMState *as, IntrinsInfo *ininfo)
     IRRef ref = ininfo->args[n];
     IRIns *ir = IR(ref);
     Reg r = reg_rid(ininfo->inregs[n]);
+
+    if (ininfo->dyntemplate) {
+      r = ininfo->reglut[r];
+    }
 
     /* Skip any dynamic registers already setup by opcode intrinsics */
     if (ininfo->inregs[n] == 0xff) {
@@ -918,7 +924,7 @@ int asm_intrin_results(ASMState *as, IRIns *ir, CIntrinsic* intrins, IntrinsInfo
   int32_t i = intrin_regmode(intrins) ? intrins->dyninsz : 0;
   int32_t dynout = intrin_dynrout(intrins) ? 1 : 0;
   int32_t gc64disp = -1;
-  int used = 0;
+  int used = 0, dynasm = 1;
 
   /* Gather the output register IR instructions */
   if (intrins->outsz > 0) {
@@ -931,7 +937,8 @@ int asm_intrin_results(ASMState *as, IRIns *ir, CIntrinsic* intrins, IntrinsInfo
 
       if (ra_used(irret)) {
         used++;
-        if (n >= dynout && irret->r == reg_rid(ininfo->inregs[n])) {
+        if ((n >= dynout && irret->r == reg_rid(ininfo->inregs[n])) || 
+            (dynasm && ra_hasreg(irret->r))) {
           rset_set(aout, irret->r);
         }
       }
@@ -949,40 +956,83 @@ int asm_intrin_results(ASMState *as, IRIns *ir, CIntrinsic* intrins, IntrinsInfo
   }
   evict = ininfo->modset;
 
-  /* Check what registers need evicting for fixed input registers */
-  i = intrin_regmode(intrins) ? intrins->dyninsz : 0;
-  for (; i < intrins->insz; i++) {
-    Reg r = reg_rid(intrins->in[i]);
-    IRIns *arg = IR(ininfo->args[i]);
+  if (!ininfo->dyntemplate) {
+    /* Check what registers need evicting for fixed input registers */
+    i = intrin_regmode(intrins) ? intrins->dyninsz : 0;
+    for (; i < intrins->insz; i++) {
+      Reg r = reg_rid(intrins->in[i]);
+      IRIns *arg = IR(ininfo->args[i]);
 
-    ininfo->inset |= RID2RSET(r);
-    /* Don't evict if the arg was allocated the correct register */
-    if (!rset_test(as->freeset, r) && arg->r != r && !ra_regbl(r)) {
-      evict |= RID2RSET(r);
-    } else if(ra_regbl(r)) {
-      ininfo->indisp = i;
+      ininfo->inset |= RID2RSET(r);
+      /* Don't evict if the arg was allocated the correct register */
+      if (!rset_test(as->freeset, r) && arg->r != r && !ra_regbl(r)) {
+        evict |= RID2RSET(r);
+      } else if(ra_regbl(r)) {
+      	ininfo->indisp = i;
+      }
+    }
+
+    for (i = dynout; i < intrins->outsz; i++) {
+       Reg r = reg_rid(intrins->out[i]);
+      if(!ra_regbl(r)){
+        outset |= RID2RSET(r);
+      } else {
+        gc64disp = i;
+      }
+    }
+    ininfo->outset = outset;
+    /* Don't evict register that currently have our output values live in them */
+    evict &= ~aout;
+  } else {
+    for (i = 0; i < intrins->insz; i++) {
+      IRIns *arg = IR(ininfo->args[i]);
+
+      if (ra_hasreg(arg->r)) {
+        ininfo->inset |= RID2RSET(arg->r);
+        ininfo->reglut[reg_rid(intrins->in[i])] = arg->r;
+      }
     }
   }
-
-  for (i = dynout; i < intrins->outsz; i++) {
-    Reg r = reg_rid(intrins->out[i]);
-    if(!ra_regbl(r)){
-      outset |= RID2RSET(r);
-    } else {
-      gc64disp = i;
-    }
-  }
-  ininfo->outset = outset;
-  /* Don't evict register that currently have our output values live in them */
-  evict &= ~aout;
 
   /* Evict any values in input and modified registers and any fixed out registers
   ** that are unused or didn't get allocated the same register as there fixed one.
   */
   ra_evictset(as, evict);
 
-  /* Handle any fixed output registers */
-  if (intrins->outsz > dynout) {
+  if (ininfo->dyntemplate) {
+    RegSet rsused = aout | ininfo->inset;
+
+    for (i = intrins->outsz-1; i >= 0; i--) {
+      IRIns *irret = IR(results[i]);
+      Reg r = reg_rid(intrins->out[i]);
+
+      ininfo->reglut[r] = ra_dest(as, irret, reg_torset(intrins->out[i]) & ~rsused);
+      rset_set(rsused, ininfo->reglut[r]);
+    }
+
+    /* Allocate registers for input parameters */
+    for (i = 0; i < intrins->insz; i++) {
+      IRIns *arg = IR(ininfo->args[i]);
+      Reg r = reg_rid(intrins->in[i]);
+
+      /* FIXME: what happens if it causes evictions */
+      if (!ra_hasreg(arg->r)) {
+        RegSet allow = reg_torset(intrins->in[i]) & ~rsused;
+        Reg arg;
+
+        if (tref_isk(ininfo->args[i])) {
+          arg = ra_scratch(as, allow);
+        } else {
+          arg = ra_alloc1(as, ininfo->args[i], allow);
+        }
+
+        ininfo->reglut[r] = arg;
+        rset_set(rsused, arg);
+      }
+    }
+
+  } else if (intrins->outsz > dynout) {
+    /* Handle any fixed output registers */
     int32_t stop = dynout;
     for (i = intrins->outsz-1; i >= stop; i--) {
       IRIns *irret = IR(results[i]);
@@ -1041,6 +1091,7 @@ static void asm_intrinsic(ASMState *as, IRIns *ir, IRIns *asmend)
     if (!target) {
       target = (uintptr_t)IR(ira->op2)->i;
     }
+    ininfo.dyntemplate = (((AsmHeader*)target)-1)->dynsz != 0;
   } else {
     target = (uintptr_t)intrins->wrapped;
   }
@@ -1067,19 +1118,23 @@ static void asm_intrinsic(ASMState *as, IRIns *ir, IRIns *asmend)
   if (intrin_regmode(intrins)) {
     asm_intrin_opcode(as, ir, &ininfo);
   } else {
+    AsmHeader *hdr = ((AsmHeader*)target)-1;
     Reg r1 = 0;
 
-    if (intrins->flags & INTRINSFLAG_CALLED) {
-      AsmHeader *hdr = ((AsmHeader*)target)-1;
-      MCode *p;
-      target = intrins->flags & INTRINSFLAG_INDIRECT ?
-                hdr->target : (target+hdr->asmofs);
-      p = (MCode*)target;
-      if (LJ_64 && (p-as->mcp) != (int32_t)(p-as->mcp)) {
-        r1 = ra_scratch(as, RSET_GPR & ~(ininfo.inset | ininfo.outset));
+    if (ininfo.dyntemplate) {
+      emit_dyntemplate(as, intrins, ininfo.reglut, (AsmEntry*)(((char*)hdr)-hdr->dynsz), hdr->dynsz);
+    } else {
+      if (intrins->flags & INTRINSFLAG_CALLED) {
+        MCode *p;
+        target = intrins->flags & INTRINSFLAG_INDIRECT ? hdr->target :
+                                                  (target+hdr->asmofs);
+        p = (MCode*)target;
+        if (LJ_64 && (p-as->mcp) != (int32_t)(p-as->mcp)) {
+          r1 = ra_scratch(as, RSET_GPR & ~(ininfo.inset | ininfo.outset));
+        }
       }
+      emit_intrins(as, intrins, r1, target, 0);
     }
-    emit_intrins(as, intrins, r1, target, 0);
   }
 
   asm_asmsetupargs(as, &ininfo);

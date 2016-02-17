@@ -2885,7 +2885,11 @@ restart:
 #endif
 
   if (state->dynasm) {
-    asm_dyntemplate(as, intrins, state);
+    uint8_t reglut[RID_MAX] = { 0 };
+    for (size_t i = 0; i < RID_MAX; i++) {
+      reglut[i] = (uint8_t)i;
+    }
+    emit_dyntemplate(as, intrins, reglut, state->dynasm, state->targetsz);
   } else if (intrins->flags & INTRINSFLAG_CALLED) {
     /* emit a call to the target which may be collocated after us */
     emit_intrins(as, intrins, rin, (uintptr_t)target, 0);
@@ -2929,8 +2933,15 @@ restart:
     hdr->asmofs = (uint16_t)(asmofs-as->mcp);
     hdr->asmsz = state->targetsz;
   }
-
+  
   as->mcp = (MCode*)hdr;
+
+  /* Append dynamic instruction list Before the code for the JIT */
+  if (state->dynasm) {
+    asm_mcode(as, state->dynasm, state->targetsz);
+    hdr->totalzs = (uint32_t)(origtop-as->mcp);
+    hdr->dynsz = state->targetsz;
+  }
 
   lj_mcode_sync(as->mcp, origtop);
   lj_mcode_commit(J, as->mcp);
@@ -2940,43 +2951,6 @@ restart:
 
   /* Return a pointer to the start of the wrapper */
   state->wrapper = (hdr+1);
-}
-
-static void asm_dyntemplate(ASMState *as, CIntrinsic *intrins, IntrinWrapState *state)
-{
-  CTState *cts = ctype_ctsG(J2G(as->J));
-  AsmEntry *ins = state->dynasm;
-  MCode *prev = as->mcp;
-
-  for (size_t i = 0; i < state->targetsz; i++) {
-    CIntrinsic *op = lj_intrinsic_get(cts, ins->intrinId);
-    int count = 2;
-    int dynreg = intrin_regmode(op);
-    Reg rout = RID_NONE, rin = RID_NONE, r3 = RID_NONE;
-
-    if (dynreg == DYNREG_INOUT || dynreg == DYNREG_TWOIN) {
-      rout = ins->reg[0];
-      rin = ins->reg[1];
-    } else if (dynreg == DYNREG_VEX3) {
-      rout = ins->reg[0];
-      rin = ins->reg[2];
-      r3 = ins->reg[1];
-      count = 3;
-    } else if (dynreg == DYNREG_OPEXT) {
-      rin = ins->reg[0];
-      count = 1;
-    }
-
-    emit_intrins(as, op, rin, rout, r3);
-
-    if (op->flags & INTRINSFLAG_IMMB) {
-      *((uint8_t*)prev) = ins->reg[count];
-      count++;
-    }
-
-    ins = (AsmEntry *)&ins->reg[count];
-    prev = as->mcp;
-  }
 }
 
 static TValue *wrap_intrins_cp(lua_State *L, lua_CFunction dummy, void *ud)

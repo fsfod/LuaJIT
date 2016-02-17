@@ -533,16 +533,18 @@ uint16_t insarray[2000] = { 0 };
 uintptr_t asmconstants[255] = { 0 };
 AsmEntry* instempl = (AsmEntry*)&insarray;
 
-static int parse_templateins(lua_State *L, GCtab *ins, CIntrinsic *intrins)
+static MSize parse_templateins(lua_State *L, GCtab *inslist, CIntrinsic *intrins)
 {
   CTState *cts = ctype_cts(L);
   uint32_t i;
   RegSet fixedset = 0;
   int inscount = 0;
   int kcount = 0;
+  AsmEntry* ins = (AsmEntry*)&insarray;
+  TValue *tabend = arrayslot(inslist, inslist->asize);
 
-  for (i = 1; i < ins->asize; inscount++) {
-    cTValue *slot = arrayslot(ins, i);
+  for (i = 1; i < inslist->asize; inscount++) {
+    cTValue *slot = arrayslot(inslist, i);
     int32_t reg = -1;
     int dynreg = 0;
 
@@ -556,7 +558,7 @@ static int parse_templateins(lua_State *L, GCtab *ins, CIntrinsic *intrins)
     }
 
     CIntrinsic *op = lj_intrinsic_fromname(L, strV(slot));
-    instempl->intrinId = (uint16_t)(op-cts->intr.tab);
+    ins->intrinId = (uint16_t)(op-cts->intr.tab);
 
     if (op->dyninsz < op->insz) {
       for (size_t j = op->dyninsz; j < op->insz; j++) {
@@ -597,7 +599,7 @@ static int parse_templateins(lua_State *L, GCtab *ins, CIntrinsic *intrins)
         const char *plus = strchr(start, '+');
         lua_assert(end);
         /* Flag indirect */
-        instempl->intrinId |= 1 << 15;
+        ins->intrinId |= 1 << 15;
 
         regname = lj_str_new(L, start, (plus ? plus : end) - start);
       }
@@ -608,27 +610,27 @@ static int parse_templateins(lua_State *L, GCtab *ins, CIntrinsic *intrins)
         lua_assert(0);
       }
 
-      instempl->reg[j] = reg_rid(reg);
+      ins->reg[j] = reg_rid(reg);
     }
     /* Check if there is an immediate number for the opcode */
-    if ((slot+count) < L->top && tvisnumber(slot+count)) {
+    if ((slot+count) < tabend && tvisnumber(slot+count)) {
       int32_t n = numberVint(slot + count);
 
       if (abs(n) > 60) {
         asmconstants[kcount] = n;
-        instempl->reg[count] = kcount++;
+        ins->reg[count] = kcount++;
       } else {
-        instempl->reg[count] = RID_MAX+n;
+        ins->reg[count] = (n & 63);
       }
 
       count++;
     }
 
-    instempl = (AsmEntry*)&instempl->reg[count];
+    ins = (AsmEntry*)&ins->reg[count];
     i += count+1;
   }
 
-  return inscount;
+  return ((char*)ins)-(char*)&insarray;
 }
 
 int lj_intrinsic_create(lua_State *L)
