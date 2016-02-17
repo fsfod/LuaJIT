@@ -307,6 +307,8 @@ static int parse_opmode(const char *op, MSize len)
       case 'R':
         r = r == 0 ? 2 : 3;
         break;
+      case 'i':
+        flags |= INTRINSFLAG_IMM32;
       case 'U':
         flags |= INTRINSFLAG_IMMB;
         break;

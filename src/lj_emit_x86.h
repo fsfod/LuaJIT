@@ -692,7 +692,11 @@ static MCode* emit_intrins(ASMState *as, CIntrinsic *intrins, Reg r1,
     }
 
     if (intrins->flags & INTRINSFLAG_IMMB) {
-      *--as->mcp = intrins->immb;
+      if (intrins->flags & INTRINSFLAG_IMM32) {
+        emit_i32(as, intrins->immb);
+      } else {
+        *--as->mcp = intrins->immb;
+      }
     }
     /* Tell emit_op the opcode is 4 bytes long */
     if (intrins->flags & INTRINSFLAG_LARGEOP) {
