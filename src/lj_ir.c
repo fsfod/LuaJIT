@@ -129,7 +129,7 @@ TRef LJ_FASTCALL lj_ir_emit(jit_State *J)
 /* Emit call to a C function. */
 TRef lj_ir_call(jit_State *J, IRCallID id, ...)
 {
-  const CCallInfo *ci = &lj_ir_callinfo[id];
+  const CCallInfo *ci = lj_ir_getcallinfo(J, id);
   uint32_t n = CCI_NARGS(ci);
   TRef tr = TREF_NIL;
   va_list argp;
@@ -143,6 +143,21 @@ TRef lj_ir_call(jit_State *J, IRCallID id, ...)
   if (CCI_OP(ci) == IR_CALLS)
     J->needsnap = 1;  /* Need snapshot after call with side effect. */
   return emitir(CCI_OPTYPE(ci), tr, id);
+}
+
+int32_t lj_register_userci(jit_State *J, const UserCCallInfo *cilist, MSize count)
+{
+  MSize top = J->citop;
+  lua_assert(count > 0 && count < 0xffff);
+
+  if ((J->citop+count) > J->citabsz) {
+    lj_mem_growvec(J->L, J->usercitab, J->citabsz, 0xffff, UserCCallInfo);
+  }
+
+  memcpy(J->usercitab+J->citop, cilist, sizeof(UserCCallInfo) * count);
+  J->citop += count;
+
+  return top + IRCALL__MAX;
 }
 
 /* -- Interning of constants ---------------------------------------------- */

@@ -237,6 +237,24 @@ LJ_FUNC TRef lj_ir_call(jit_State *J, IRCallID id, ...);
 
 LJ_DATA const CCallInfo lj_ir_callinfo[IRCALL__MAX+1];
 
+typedef struct UserCCallInfo {
+  ASMFunction func;		/* Function pointer. */
+  uint32_t flags;		/* Number of arguments and flags. */
+  const char* name;
+} UserCCallInfo;
+
+int32_t lj_register_userci(jit_State *J, const UserCCallInfo *cilist, MSize count);
+
+static const CCallInfo *lj_ir_getcallinfo(jit_State *J, IRCallID id)
+{
+  if (id < IRCALL__MAX) {
+    return &lj_ir_callinfo[id];
+  } else {
+    lua_assert(((MSize)(id-IRCALL__MAX)) < J->citop);
+    return (CCallInfo*)&J->usercitab[id-IRCALL__MAX];
+  }
+}
+
 /* Soft-float declarations. */
 #if LJ_SOFTFP
 #if LJ_TARGET_ARM

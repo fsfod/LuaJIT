@@ -1244,7 +1244,7 @@ static uint32_t asm_callx_flags(ASMState *as, IRIns *ir)
 
 static void asm_callid(ASMState *as, IRIns *ir, IRCallID id)
 {
-  const CCallInfo *ci = &lj_ir_callinfo[id];
+  const CCallInfo *ci = lj_ir_getcallinfo(as->J, ir->op2);
   IRRef args[2];
   args[0] = ir->op1;
   args[1] = ir->op2;
@@ -1255,7 +1255,7 @@ static void asm_callid(ASMState *as, IRIns *ir, IRCallID id)
 static void asm_call(ASMState *as, IRIns *ir)
 {
   IRRef args[CCI_NARGS_MAX];
-  const CCallInfo *ci = &lj_ir_callinfo[ir->op2];
+  const CCallInfo *ci = lj_ir_getcallinfo(as->J, ir->op2);
   asm_collectargs(as, ir, ci, args);
   asm_setupresult(as, ir, ci);
   asm_gencall(as, ci, args);
@@ -2022,7 +2022,7 @@ static void asm_setup_regsp(ASMState *as)
       continue;
       }
     case IR_CALLN: case IR_CALLA: case IR_CALLL: case IR_CALLS: {
-      const CCallInfo *ci = &lj_ir_callinfo[ir->op2];
+      const CCallInfo *ci = lj_ir_getcallinfo(as->J, ir->op2);
       ir->prev = asm_setup_call_slots(as, ir, ci);
       if (inloop)
 	as->modset |= (ci->flags & CCI_NOFPRCLOBBER) ?

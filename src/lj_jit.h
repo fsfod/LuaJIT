@@ -419,6 +419,10 @@ typedef struct jit_State {
 
   TValue errinfo;	/* Additional info element for trace errors. */
 
+  struct UserCCallInfo *usercitab;
+  MSize citabsz;
+  MSize citop;
+
 #if LJ_HASPROFILE
   GCproto *prev_pt;	/* Previous prototype. */
   BCLine prev_line;	/* Previous line. */
