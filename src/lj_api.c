@@ -626,6 +626,32 @@ LUA_API void lua_pushcclosure(lua_State *L, lua_CFunction f, int n)
   incr_top(L);
 }
 
+void lua_pushcfastfunc(lua_State* L, lua_CFunction f, int n, lua_TraceRecorder recorder, uint32_t record_data, const char* name){
+
+  GCfunc *fn;
+  RecorderInfo* recinfo;
+  lj_gc_check(L);
+  api_checknelems(L, n);
+
+  fn = lj_func_newfastC(L, (MSize)n);
+  fn->c.f = f;
+
+  recinfo = lj_recorderinfo(fn);
+  recinfo->record_data = record_data;
+  recinfo->tracerecorder = recorder;
+  recinfo->name = name;
+
+  L->top -= n;
+  while (n--){
+    copyTV(L, &fn->c.upvalue[n], L->top+n);
+  }
+
+  setfuncV(L, L->top, fn);
+
+  lua_assert(iswhite(obj2gco(fn)));
+  incr_top(L);
+}
+
 LUA_API void lua_pushboolean(lua_State *L, int b)
 {
   setboolV(L->top, (b != 0));

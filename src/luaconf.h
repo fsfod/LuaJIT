@@ -153,4 +153,12 @@
 #define luai_apicheck(L, o)	{ (void)L; }
 #endif
 
+#if defined(__GNUC__) && defined(__i386__)
+  #define LUA_FASTCALL __attribute__((fastcall))
+#elif defined(_MSC_VER) && defined(_M_IX86)
+  #define LUA_FASTCALL __fastcall
+#else
+  #define LUA_FASTCALL
+#endif
+
 #endif

@@ -465,6 +465,20 @@ typedef union GCfunc {
 #define sizeCfunc(n)	(sizeof(GCfuncC)-sizeof(TValue)+sizeof(TValue)*(n))
 #define sizeLfunc(n)	(sizeof(GCfuncL)-sizeof(GCRef)+sizeof(GCRef)*(n))
 
+typedef struct RecorderInfo{
+  lua_TraceRecorder tracerecorder;
+  unsigned int record_data;
+  unsigned int offset;
+  const char* name;
+}RecorderInfo;
+
+#define hasrecorderinfo(fn) (fn->c.ffid == 255)
+
+static LJ_AINLINE RecorderInfo* lj_recorderinfo(GCfunc *fn)
+{
+  lua_assert(fn->c.ffid == 255);
+  return (RecorderInfo*)&fn->c.upvalue[fn->c.nupvalues];
+}
 /* -- Table object -------------------------------------------------------- */
 
 /* Hash node. */

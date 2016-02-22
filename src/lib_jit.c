@@ -207,13 +207,18 @@ LJLIB_CF(jit_util_funcinfo)
   } else {
     GCfunc *fn = funcV(L->base);
     GCtab *t;
-    lua_createtable(L, 0, 4);  /* Increment hash size if fields are added. */
+    lua_createtable(L, 0, 5);  /* Increment hash size if fields are added. */
     t = tabV(L->top-1);
     if (!iscfunc(fn))
       setintfield(L, t, "ffid", fn->c.ffid);
     setintptrV(lj_tab_setstr(L, t, lj_str_newlit(L, "addr")),
 	       (intptr_t)(void *)fn->c.f);
     setintfield(L, t, "upvalues", fn->c.nupvalues);
+
+    if(hasrecorderinfo(fn)){
+      lua_pushstring(L, lj_recorderinfo(fn)->name);
+      lua_setfield(L, -2, "name");
+    }
   }
   return 1;
 }

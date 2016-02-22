@@ -116,6 +116,18 @@ GCfunc *lj_func_newC(lua_State *L, MSize nelems, GCtab *env)
   return fn;
 }
 
+GCfunc* lj_func_newfastC(lua_State* L, MSize nelems){
+
+  GCfunc *fn = (GCfunc *)lj_mem_newgco(L, sizeCfunc(nelems)+sizeof(RecorderInfo));
+  fn->c.gct = ~LJ_TFUNC;
+  fn->c.ffid = 255;
+  fn->c.nupvalues = (uint8_t)nelems;
+  setmref(fn->c.pc, &G(L)->bc_cfunc_ext);
+  setgcref(fn->c.env, obj2gco(tabref(L->env)));
+
+  return fn;
+}
+
 static GCfunc *func_newL(lua_State *L, GCproto *pt, GCtab *env)
 {
   uint32_t count;
@@ -178,8 +190,15 @@ GCfunc *lj_func_newL_gc(lua_State *L, GCproto *pt, GCfuncL *parent)
 
 void LJ_FASTCALL lj_func_free(global_State *g, GCfunc *fn)
 {
-  MSize size = isluafunc(fn) ? sizeLfunc((MSize)fn->l.nupvalues) :
-			       sizeCfunc((MSize)fn->c.nupvalues);
+  MSize size; 
+
+  if(isluafunc(fn)){
+    size = sizeLfunc((MSize)fn->l.nupvalues);
+  }else{
+    size = sizeCfunc((MSize)fn->c.nupvalues);
+    if(hasrecorderinfo(fn))size += sizeof(RecorderInfo);
+  }
+
   lj_mem_free(g, fn, size);
 }
 

@@ -1199,12 +1199,25 @@ static uint32_t recdef_lookup(GCfunc *fn)
 void lj_ffrecord_func(jit_State *J)
 {
   RecordFFData rd;
-  uint32_t m = recdef_lookup(J->fn);
-  rd.data = m & 0xff;
+  GCfunc* func = J->fn;
+
   rd.nres = 1;  /* Default is one result. */
   rd.argv = J->L->base;
   J->base[J->maxslot] = 0;  /* Mark end of arguments. */
-  (recff_func[m >> 8])(J, &rd);  /* Call recff_* handler. */
+
+  if(!hasrecorderinfo(func)){
+    uint32_t m = recdef_lookup(func);
+
+    rd.data = m & 0xff;
+    (recff_func[m >> 8])(J, &rd);  /* Call recff_* handler. */
+  }else{
+
+    RecorderInfo* recorder = lj_recorderinfo(func);
+
+    rd.data = recorder->record_data;
+    recorder->tracerecorder(J, &rd);
+  }
+
   if (rd.nres >= 0) {
     if (J->postproc == LJ_POST_NONE) J->postproc = LJ_POST_FFRETRY;
     lj_record_ret(J, 0, rd.nres);

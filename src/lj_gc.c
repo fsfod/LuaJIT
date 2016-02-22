@@ -312,8 +312,14 @@ static size_t propagatemark(global_State *g)
   } else if (LJ_LIKELY(gct == ~LJ_TFUNC)) {
     GCfunc *fn = gco2func(o);
     gc_traverse_func(g, fn);
-    return isluafunc(fn) ? sizeLfunc((MSize)fn->l.nupvalues) :
-			   sizeCfunc((MSize)fn->c.nupvalues);
+
+    if(isluafunc(fn)) {
+      return sizeLfunc((MSize)fn->l.nupvalues);
+    } else {
+      size_t size = sizeCfunc((MSize)fn->c.nupvalues);
+      if(hasrecorderinfo(fn))size += sizeof(RecorderInfo);
+      return size;
+    }
   } else if (LJ_LIKELY(gct == ~LJ_TPROTO)) {
     GCproto *pt = gco2pt(o);
     gc_traverse_proto(g, pt);
