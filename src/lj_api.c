@@ -1211,3 +1211,11 @@ LUA_API void lua_setallocf(lua_State *L, lua_Alloc f, void *ud)
   g->allocf = f;
 }
 
+LUA_API int lua_getcurtrace(lua_State *L)
+{
+  if (L2J(L)->state != LJ_TRACE_IDLE) {
+    return L2J(L)->cur.traceno;
+  }
+
+  return G(L)->vmstate < 0 ?  0 : G(L)->vmstate;
+}
