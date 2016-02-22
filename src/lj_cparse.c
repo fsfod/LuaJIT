@@ -1848,6 +1848,60 @@ static void cp_decl_single(CPState *cp)
   if (cp->tok != CTOK_EOF) cp_err_token(cp, CTOK_EOF);
 }
 
+static void cp_decl_singledirect(CPState *cp)
+{
+  int first = 1;
+  while (cp->tok != CTOK_EOF) {
+    CPDecl decl;
+    CPscl scl;
+
+    scl = cp_decl_spec(cp, &decl, CDF_TYPEDEF|CDF_EXTERN|CDF_STATIC);
+    if ((cp->tok == ';' || cp->tok == CTOK_EOF) && ctype_istypedef(decl.stack[0].info)) {
+      CTInfo info = ctype_rawchild(cp->cts, &decl.stack[0])->info;
+
+      if (ctype_isstruct(info) || ctype_isenum(info))
+	goto decl_end;  /* Accept empty declaration of struct/union/enum. */
+    }
+
+    for (;;) {
+      CTypeID ctypeid;
+      cp_declarator(cp, &decl);
+      ctypeid = cp_decl_intern(cp, &decl);
+      if (decl.name && !decl.nameid) {  /* NYI: redeclarations are ignored. */
+	CType *ct;
+	CTypeID id;
+	
+        if(!ctype_isfunc(ctype_get(cp->cts, ctypeid)->info)) {
+          cp->val.id = 0;
+          lua_assert(0 && "definition is not a function");
+          return;
+        }
+
+	/* Treat both static and extern function declarations as extern. */
+	ct = ctype_get(cp->cts, ctypeid);
+	/* We always get new anonymous functions (typedefs are copied). */
+	lua_assert(gcref(ct->name) == NULL);
+	id = ctypeid;  /* Just name it. */
+        
+        cp->val.id = id;
+
+	ctype_setname(ct, decl.name);
+	lj_ctype_addname(cp->cts, ct, id);
+      }else{
+        cp->val.id = 0;
+        lua_assert(0 && "function already declared");
+        return;
+      }
+      if (!cp_opt(cp, ',')) break;
+      cp_decl_reset(&decl);
+    }
+  decl_end:
+    if (cp->tok == CTOK_EOF && first) break;  /* May omit ';' for 1 decl. */
+    first = 0;
+    cp_check(cp, ';');
+  }
+}
+
 #undef H_
 
 /* ------------------------------------------------------------------------ */
@@ -1861,8 +1915,14 @@ static TValue *cpcparser(lua_State *L, lua_CFunction dummy, void *ud)
   cp_init(cp);
   if ((cp->mode & CPARSE_MODE_MULTI))
     cp_decl_multi(cp);
-  else
-    cp_decl_single(cp);
+  else{
+    if(cp->mode & CPARSE_MODE_DIRECT){
+      cp_decl_singledirect(cp);
+    }else{
+      cp_decl_single(cp);
+    }
+  }
+
   if (cp->param && cp->param != cp->L->top)
     cp_err(cp, LJ_ERR_FFI_NUMPARAM);
   lua_assert(cp->depth == 0);

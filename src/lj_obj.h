@@ -561,6 +561,7 @@ typedef enum {
   GCROOT_MMNAME_LAST = GCROOT_MMNAME + MM__MAX-1,
   GCROOT_BASEMT,	/* Metatables for base types. */
   GCROOT_BASEMT_NUM = GCROOT_BASEMT + ~LJ_TNUMX,
+  GCROOT_FFI_CLIBMT,
   GCROOT_IO_INPUT,	/* Userdata for default I/O input file. */
   GCROOT_IO_OUTPUT,	/* Userdata for default I/O output file. */
   GCROOT_MAX

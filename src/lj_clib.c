@@ -17,6 +17,7 @@
 #include "lj_cdata.h"
 #include "lj_clib.h"
 #include "lj_strfmt.h"
+#include "lj_cparse.h"
 
 /* -- OS-specific functions ----------------------------------------------- */
 
@@ -328,7 +329,20 @@ static const char *clib_extsym(CTState *cts, CType *ct, GCstr *name)
 /* Index a C library by name. */
 TValue *lj_clib_index(lua_State *L, CLibrary *cl, GCstr *name)
 {
-  TValue *tv = lj_tab_setstr(L, cl->cache, name);
+  TValue *tv;
+  /* Don't try to lookup exported symbols for readonly C libraries */
+  if(cl->readonly == 1){
+    tv = (TValue*)lj_tab_getstr(cl->cache, name);
+
+    if(tv == NULL || tvisnil(tv)){
+      lj_err_callerv(L, LJ_ERR_FFI_NODECL, strdata(name));
+    }
+
+    return tv;
+  }else{
+    tv = lj_tab_setstr(L, cl->cache, name);
+  }
+
   if (LJ_UNLIKELY(tvisnil(tv))) {
     CTState *cts = ctype_cts(L);
     CType *ct;
@@ -380,12 +394,14 @@ TValue *lj_clib_index(lua_State *L, CLibrary *cl, GCstr *name)
 /* -- C library management ------------------------------------------------ */
 
 /* Create a new CLibrary object and push it on the stack. */
-static CLibrary *clib_new(lua_State *L, GCtab *mt)
+CLibrary *clib_new(lua_State *L, GCtab *mt)
 {
   GCtab *t = lj_tab_new(L, 0, 0);
   GCudata *ud = lj_udata_new(L, sizeof(CLibrary), t);
   CLibrary *cl = (CLibrary *)uddata(ud);
+  cl->handle = NULL;
   cl->cache = t;
+  cl->readonly = 0;
   ud->udtype = UDTYPE_FFI_CLIB;
   /* NOBARRIER: The GCudata is new (marked white). */
   setgcref(ud->metatable, obj2gco(mt));
@@ -413,6 +429,50 @@ void lj_clib_default(lua_State *L, GCtab *mt)
 {
   CLibrary *cl = clib_new(L, mt);
   cl->handle = CLIB_DEFHANDLE;
+}
+
+/* binds a list of function definitions to a corresponding function pointer and inserts the function into the provided clib*/
+void lj_clib_bindfunctions(lua_State *L, CLibrary *cl, clib_functions* functions)
+{
+  CTState *cts = ctype_cts(L);
+  GCcdata* cd;
+  CPState cp;
+  GCstr* name = NULL;
+
+  cp.L = L;
+  cp.cts = cts;
+  cp.mode = CPARSE_MODE_ABSTRACT|CPARSE_MODE_NOIMPLICIT|CPARSE_MODE_DIRECT;
+
+  lj_gc_anybarriert(L, cl->cache);
+
+  for (; functions->def ; functions++){    
+    int errcode;
+ 
+    cp.srcname = functions->def;
+    cp.p = functions->def;
+    cp.param = NULL;
+    errcode = lj_cparse(&cp);
+    if (errcode){
+      lj_err_throw(L, errcode);  /* Propagate errors. */   
+    }
+
+    if(cp.val.id == 0){
+      lua_assert(0 && "failed to parse function declaration");
+      //just skip to the next one
+      continue;
+    }
+
+    cd = lj_cdata_new(cts, cp.val.id, CTSIZE_PTR);
+    *(void **)cdataptr(cd) = functions->address;
+
+    name = strref(ctype_get(cts, cp.val.id)->name);
+
+    if(name == NULL){
+      lj_err_callermsg(L, "function definition has no name");
+    }
+
+    setcdataV(L, lj_tab_setstr(L, cl->cache, name), cd);
+  }
 }
 
 #endif

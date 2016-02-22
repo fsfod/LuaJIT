@@ -473,20 +473,25 @@ LJLIB_PUSH(top-1) LJLIB_SET(__index)
 
 #define LJLIB_MODULE_ffi
 
-LJLIB_CF(ffi_cdef)
+void ffi_cdef(lua_State* L, const char* cdef)
 {
-  GCstr *s = lj_lib_checkstr(L, 1);
   CPState cp;
   int errcode;
   cp.L = L;
   cp.cts = ctype_cts(L);
-  cp.srcname = strdata(s);
-  cp.p = strdata(s);
+  cp.srcname = cdef;
+  cp.p = cdef;
   cp.param = L->base+1;
   cp.mode = CPARSE_MODE_MULTI|CPARSE_MODE_DIRECT;
   errcode = lj_cparse(&cp);
   if (errcode) lj_err_throw(L, errcode);  /* Propagate errors. */
   lj_gc_check(L);
+}
+
+LJLIB_CF(ffi_cdef)
+{
+  GCstr *s = lj_lib_checkstr(L, 1);
+  ffi_cdef(L, strdata(s));
   return 0;
 }
 
@@ -857,6 +862,8 @@ LUALIB_API int luaopen_ffi(lua_State *L)
   LJ_LIB_REG(L, NULL, ffi_callback);
   /* NOBARRIER: the key is new and lj_tab_newkey() handles the barrier. */
   settabV(L, lj_tab_setstr(L, cts->miscmap, &cts->g->strempty), tabV(L->top-1));
+  /* save away the clib metatable for lua_push_ffi_lib*/
+  setgcref(G(L)->gcroot[GCROOT_FFI_CLIBMT], obj2gco(tabV(L->top-2)));
   L->top--;
   lj_clib_default(L, tabV(L->top-1));  /* Create ffi.C default namespace. */
   lua_pushliteral(L, LJ_OS_NAME);

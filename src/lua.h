@@ -171,6 +171,17 @@ LUA_API void  (lua_pushboolean) (lua_State *L, int b);
 LUA_API void  (lua_pushlightuserdata) (lua_State *L, void *p);
 LUA_API int   (lua_pushthread) (lua_State *L);
 
+typedef struct{
+  void* address;
+  const char* def;
+}clib_functions;
+
+/* creates and pushes onto the stack a ffi c lib by binding a list of function pointers to function definitions */
+LUA_API int (lua_push_ffi_lib) (lua_State *L, clib_functions* funcs);
+
+/* the return value is a pcall result so if there are parse errors*/
+LUA_API int (lua_fficdef) (lua_State *L, const char* cdef);
+
 
 /*
 ** get functions (Lua -> stack)

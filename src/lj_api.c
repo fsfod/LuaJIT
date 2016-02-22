@@ -27,6 +27,7 @@
 #include "lj_strfmt.h"
 #include "lj_ctype.h"
 #include "lj_cdata.h"
+#include "lj_clib.h"
 
 /* -- Common helper functions --------------------------------------------- */
 
@@ -1266,4 +1267,37 @@ LUA_API void *lua_tocdata(lua_State *L, int idx, int ctypeid)
   } else {
     return cdataptr(cdata);
   }
+}
+
+static int bindfunctions(lua_State* L)
+{
+  void* funcs = lua_touserdata(L, 1);
+  CLibrary* cl = clib_new(L, tabref(G(L)->gcroot[GCROOT_FFI_CLIBMT]));
+  /* prevent looking up non existing symbols in the default dlls and exes */
+  cl->readonly = 1;
+
+  lj_clib_bindfunctions(L, cl, (clib_functions*)funcs);
+  return 1;
+}
+
+LUA_API int lua_push_ffi_lib(lua_State *L, clib_functions* funcs)
+{
+  lua_pushcfunction(L, bindfunctions);
+  lua_pushlightuserdata(L, funcs);
+  return lua_pcall(L, 1, 1, 0);
+}
+
+extern void ffi_cdef(lua_State* L, const char* cdef);
+
+int call_cdef(lua_State* L)
+{
+  ffi_cdef(L, lua_tostring(L, 1));
+  return 0;
+}
+
+LUA_API int lua_fficdef(lua_State *L, const char* cdef)
+{
+  lua_pushcfunction(L, call_cdef);
+  lua_pushstring(L, cdef);
+  return lua_pcall(L, 1, 0, 0);
 }
