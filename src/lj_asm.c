@@ -1697,6 +1697,7 @@ static void asm_head_root(ASMState *as)
 {
   int32_t spadj;
   asm_head_root_base(as);
+  asm_tracestart(as, 0);
   emit_setvmstate(as, (int32_t)as->T->traceno);
   spadj = asm_stack_adjust(as);
   as->T->spadjust = (uint16_t)spadj;
@@ -1799,6 +1800,7 @@ static void asm_head_side(ASMState *as)
     }
   }
 
+  asm_tracestart(as, 1);
   /* Store trace number and adjust stack frame relative to the parent. */
   emit_setvmstate(as, (int32_t)as->T->traceno);
   emit_spsub(as, spdelta);

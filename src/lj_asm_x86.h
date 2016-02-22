@@ -2423,6 +2423,64 @@ static void asm_gc_check(ASMState *as)
   checkmclim(as);
 }
 
+extern void* getcountaddress(jit_State* J, int traceNum);
+
+#if 1
+static uint32_t counts[3000] = { 0 };
+
+static void* getcountaddress(jit_State* J, int traceNum)
+{
+  return &counts[traceNum];
+}
+#endif
+
+__declspec(naked) void count_overflow(jit_State* J)
+{
+  int traceNum;
+  uint32_t* count;
+
+  __asm {
+    push ebp
+    mov ebp, esp
+    sub esp, __LOCAL_SIZE
+    push eax
+    push ecx
+    push edx
+    push esi
+    push edi
+  }
+
+  traceNum = J2G(J)->vmstate;
+  count = (uint32_t*)getcountaddress(J, traceNum);
+  lua_assert(*count == 0);
+  count = 0;
+
+  __asm {
+    pop edi
+    pop esi
+    pop edx
+    pop ecx
+    pop eax
+    
+    mov esp, ebp
+    pop ebp
+    ret 4
+  }
+}
+
+static void asm_tracestart(ASMState *as, int issidetrace)
+{
+  MCLabel l_end = emit_label(as);
+  uint32_t address = (uint32_t)(getcountaddress(as->J, as->J->cur.traceno));
+
+  emit_call(as, &count_overflow);
+  emit_i32(as, (int)as->J);
+  *--as->mcp = 0x68;
+
+  emit_sjcc(as, CC_NC, l_end);
+  emit_gmroi(as, XG_ARITHi(XOg_ADD), RID_NONE, address, 1);
+}
+
 /* -- Loop handling ------------------------------------------------------- */
 
 /* Fixup the loop branch. */
