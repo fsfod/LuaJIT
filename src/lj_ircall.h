@@ -9,6 +9,7 @@
 #include "lj_obj.h"
 #include "lj_ir.h"
 #include "lj_jit.h"
+#include "lj_udata.h"
 
 /* C call info for CALL* instructions. */
 typedef struct CCallInfo {
@@ -162,6 +163,7 @@ typedef struct CCallInfo {
   _(ANY,	lj_gc_step_jit,		2,  FS, NIL, CCI_L) \
   _(ANY,	lj_gc_barrieruv,	2,  FS, NIL, 0) \
   _(ANY,	lj_mem_newgco,		2,  FS, P32, CCI_L) \
+  _(ANY,	lj_udata_new_jit,		2,  FS, UDATA, CCI_L) \
   _(ANY,	lj_math_random_step, 1, FS, NUM, CCI_CASTU64|CCI_RANDFPR)\
   _(ANY,	lj_vm_modi,		2,  FN, INT, 0) \
   _(ANY,	sinh,			1,   N, NUM, XA_FP) \

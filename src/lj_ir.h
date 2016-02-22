@@ -204,6 +204,7 @@ IRFPMDEF(FPMENUM)
   _(TAB_NOMM,	offsetof(GCtab, nomm)) \
   _(UDATA_META,	offsetof(GCudata, metatable)) \
   _(UDATA_UDTYPE, offsetof(GCudata, udtype)) \
+  _(UDATA_ENV, offsetof(GCudata, env)) \
   _(UDATA_FILE,	sizeof(GCudata)) \
   _(CDATA_CTYPEID, offsetof(GCcdata, ctypeid)) \
   _(CDATA_PTR,	sizeof(GCcdata)) \

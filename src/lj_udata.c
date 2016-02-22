@@ -32,3 +32,23 @@ void LJ_FASTCALL lj_udata_free(global_State *g, GCudata *ud)
   lj_mem_free(g, ud, sizeudata(ud));
 }
 
+GCudata* LJ_FASTCALL lj_udata_new_jit(lua_State *L, MSize sz)
+{
+  GCudata *ud = lj_mem_newt(L, sizeof(GCudata) + sz, GCudata);
+  global_State *g = G(L);
+  newwhite(g, ud);  /* Not finalized. */
+  ud->gct = ~LJ_TUDATA;
+  ud->udtype = UDTYPE_USERDATA;
+  ud->len = sz;
+  
+  /* The JITed code should fill these in after we return */
+  setgcrefnull(ud->metatable);
+  setgcrefnull(ud->env);
+
+  /* Chain to userdata list (after main thread). */
+  setgcrefr(ud->nextgc, mainthread(g)->nextgc);
+  setgcref(mainthread(g)->nextgc, obj2gco(ud));
+  
+  return ud;
+}
+
