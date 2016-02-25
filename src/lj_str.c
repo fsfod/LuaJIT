@@ -11,6 +11,7 @@
 #include "lj_err.h"
 #include "lj_str.h"
 #include "lj_char.h"
+#include "lj_gcarena.h"
 
 /* -- String helpers ------------------------------------------------------ */
 
@@ -171,7 +172,7 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
     }
   }
   /* Nope, create a new string. */
-  s = lj_mem_newt(L, sizeof(GCstr)+len+1, GCstr);
+  s = lj_mem_newt_arena(L, sizeof(GCstr)+len+1, GCstr);
   newwhite(g, s);
   s->gct = ~LJ_TSTR;
   s->len = len;
@@ -192,6 +193,6 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
 void LJ_FASTCALL lj_str_free(global_State *g, GCstr *s)
 {
   g->strnum--;
-  lj_mem_free(g, s, sizestring(s));
+  lj_mem_free_arena(g, s, sizestring(s));
 }
 

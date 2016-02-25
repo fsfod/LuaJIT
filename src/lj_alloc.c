@@ -31,6 +31,7 @@
 #include "lj_def.h"
 #include "lj_arch.h"
 #include "lj_alloc.h"
+#include "lj_gcarena.h"
 
 #ifndef LUAJIT_USE_SYSMALLOC
 
@@ -393,6 +394,23 @@ static void *CALL_MREMAP_(void *ptr, size_t osz, size_t nsz, int flags)
 #ifndef CALL_MREMAP
 #define CALL_MREMAP(addr, osz, nsz, mv) ((void)osz, MFAIL)
 #endif
+
+void *lj_allocpages(size_t minsize)
+{
+  void* mem = DIRECT_MMAP(ArenaSize);
+
+  if ((((uintptr_t)mem) & (ArenaSize-1)) != 0) {
+    lua_assert(0);
+    mem = DIRECT_MMAP(ArenaSize);
+  }
+
+  return mem;
+}
+
+void lj_freeepages(void* p, size_t size)
+{
+  CALL_MUNMAP(p, size);
+}
 
 /* -----------------------  Chunk representations ------------------------ */
 

@@ -27,6 +27,7 @@
 #include "lj_vm.h"
 #include "lj_lex.h"
 #include "lj_alloc.h"
+#include "lj_gcarena.h"
 #include "luajit.h"
 
 /* -- Stack handling ------------------------------------------------------ */
@@ -200,6 +201,7 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
   g->strempty.gct = ~LJ_TSTR;
   g->allocf = f;
   g->allocd = ud;
+  g->arena = arena_create(L);
   setgcref(g->mainthref, obj2gco(L));
   setgcref(g->uvhead.prev, obj2gco(&g->uvhead));
   setgcref(g->uvhead.next, obj2gco(&g->uvhead));

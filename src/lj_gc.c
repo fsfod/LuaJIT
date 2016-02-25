@@ -554,6 +554,8 @@ void lj_gc_freeall(global_State *g)
   strmask = g->strmask;
   for (i = 0; i <= strmask; i++)  /* Free all string hash chains. */
     gc_fullsweep(g, &g->strhash[i]);
+
+  arena_destroy(g, g->arena);
 }
 
 /* -- Collector ----------------------------------------------------------- */

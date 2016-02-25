@@ -590,6 +590,7 @@ typedef struct GCState {
   MSize pause;		/* Pause between successive GC cycles. */
 } GCState;
 
+
 /* Global state, shared by all threads of a Lua universe. */
 typedef struct global_State {
   GCRef *strhash;	/* String hash table (hash chain anchors). */
@@ -598,6 +599,7 @@ typedef struct global_State {
   lua_Alloc allocf;	/* Memory allocator. */
   void *allocd;		/* Memory allocator data. */
   GCState gc;		/* Garbage collector. */
+  void *arena;
   volatile int32_t vmstate;  /* VM state or current JIT code trace number. */
   SBuf tmpbuf;		/* Temporary string buffer. */
   GCstr strempty;	/* Empty string. */
