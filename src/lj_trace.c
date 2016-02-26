@@ -125,7 +125,7 @@ static GCtrace *trace_save_alloc(jit_State *J)
   size_t sz = sztr + szins +
 	      J->cur.nsnap*sizeof(SnapShot) +
 	      J->cur.nsnapmap*sizeof(SnapEntry);
-  return lj_mem_newt(J->L, (MSize)sz, GCtrace);
+  return lj_mem_newtgco(J->L, (MSize)sz, GCtrace);
 }
 
 /* Save current trace by copying and compacting it. */
@@ -162,7 +162,7 @@ void LJ_FASTCALL lj_trace_free(global_State *g, GCtrace *T)
       J->freetrace = T->traceno;
     setgcrefnull(J->trace[T->traceno]);
   }
-  lj_mem_free(g, T,
+  lj_mem_freegco(g, T,
     ((sizeof(GCtrace)+7)&~7) + (T->nins-T->nk)*sizeof(IRIns) +
     T->nsnap*sizeof(SnapShot) + T->nsnapmap*sizeof(SnapEntry));
 }

@@ -238,9 +238,9 @@ void LJ_FASTCALL lj_tab_free(global_State *g, GCtab *t)
   if (t->asize > 0 && LJ_MAX_COLOSIZE != 0 && t->colo <= 0)
     lj_mem_freevec(g, tvref(t->array), t->asize, TValue);
   if (LJ_MAX_COLOSIZE != 0 && t->colo)
-    lj_mem_free(g, t, sizetabcolo((uint32_t)t->colo & 0x7f));
+    lj_mem_freegco(g, t, sizetabcolo((uint32_t)t->colo & 0x7f));
   else
-    lj_mem_freet(g, t);
+    lj_mem_freetgco(g, t);
 }
 
 /* -- Table resizing ------------------------------------------------------ */

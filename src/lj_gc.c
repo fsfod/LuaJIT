@@ -822,10 +822,21 @@ void *lj_mem_realloc(lua_State *L, void *p, GCSize osz, GCSize nsz)
 void * LJ_FASTCALL lj_mem_newgco(lua_State *L, GCSize size)
 {
   global_State *g = G(L);
-  GCobj *o = (GCobj *)g->allocf(g->allocd, NULL, 0, size);
+  GCobj *o = (GCobj*)arena_alloc(G(L)->travarena, size);
   if (o == NULL)
     lj_err_mem(L);
   lua_assert(checkptrGC(o));
+  g->gc.total += size;
+  setgcrefr(o->gch.nextgc, g->gc.root);
+  setgcref(g->gc.root, o);
+  newwhite(g, o);
+  return o;
+}
+
+void * LJ_FASTCALL lj_mem_newcd(lua_State *L, GCSize size)
+{
+  global_State *g = G(L);
+  GCobj *o = (GCobj*)arena_alloc(G(L)->arena, size);
   g->gc.total += size;
   setgcrefr(o->gch.nextgc, g->gc.root);
   setgcref(g->gc.root, o);

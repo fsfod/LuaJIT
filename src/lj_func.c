@@ -19,7 +19,7 @@
 
 void LJ_FASTCALL lj_func_freeproto(global_State *g, GCproto *pt)
 {
-  lj_mem_free(g, pt, pt->sizept);
+  lj_mem_freegco(g, pt, pt->sizept);
 }
 
 /* -- Upvalues ------------------------------------------------------------ */
@@ -49,7 +49,7 @@ static GCupval *func_finduv(lua_State *L, TValue *slot)
     pp = &p->nextgc;
   }
   /* No matching upvalue found. Create a new one. */
-  uv = lj_mem_newt(L, sizeof(GCupval), GCupval);
+  uv = lj_mem_newt_arena(L, sizeof(GCupval), GCupval);
   newwhite(g, uv);
   uv->gct = ~LJ_TUPVAL;
   uv->closed = 0;  /* Still open. */
@@ -99,7 +99,7 @@ void LJ_FASTCALL lj_func_freeuv(global_State *g, GCupval *uv)
 {
   if (!uv->closed)
     unlinkuv(uv);
-  lj_mem_freet(g, uv);
+  lj_mem_freetgco(g, uv);
 }
 
 /* -- Functions (closures) ------------------------------------------------ */
@@ -180,6 +180,6 @@ void LJ_FASTCALL lj_func_free(global_State *g, GCfunc *fn)
 {
   MSize size = isluafunc(fn) ? sizeLfunc((MSize)fn->l.nupvalues) :
 			       sizeCfunc((MSize)fn->c.nupvalues);
-  lj_mem_free(g, fn, size);
+  lj_mem_freegco(g, fn, size);
 }
 

@@ -31,7 +31,7 @@ GCcdata *lj_cdata_newv(lua_State *L, CTypeID id, CTSize sz, CTSize align)
   global_State *g;
   MSize extra = sizeof(GCcdataVar) + sizeof(GCcdata) +
 		(align > CT_MEMALIGN ? (1u<<align) - (1u<<CT_MEMALIGN) : 0);
-  char *p = lj_mem_newt(L, extra + sz, char);
+  char *p = (char*)lj_mem_newcd(L, extra + sz);
   uintptr_t adata = (uintptr_t)p + sizeof(GCcdataVar) + sizeof(GCcdata);
   uintptr_t almask = (1u << align) - 1u;
   GCcdata *cd = (GCcdata *)(((adata + almask) & ~almask) - sizeof(GCcdata));
@@ -78,9 +78,9 @@ void LJ_FASTCALL lj_cdata_free(global_State *g, GCcdata *cd)
     CTSize sz = ctype_hassize(ct->info) ? ct->size : CTSIZE_PTR;
     lua_assert(ctype_hassize(ct->info) || ctype_isfunc(ct->info) ||
 	       ctype_isextern(ct->info));
-    lj_mem_free(g, cd, sizeof(GCcdata) + sz);
+    lj_mem_freegco(g, cd, sizeof(GCcdata) + sz);
   } else {
-    lj_mem_free(g, memcdatav(cd), sizecdatav(cd));
+    lj_mem_freegco(g, memcdatav(cd), sizecdatav(cd));
   }
 }
 
