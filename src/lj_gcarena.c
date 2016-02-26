@@ -23,7 +23,7 @@ GCArena* arena_init(GCArena* arena)
   return arena;
 }
 
-GCArena* arena_create(lua_State *L)
+GCArena* arena_create(lua_State *L, int internalptrs)
 {
   GCArena* arena = (GCArena*)lj_allocpages(ArenaSize);
   lua_assert((((uintptr_t)arena) & (ArenaSize-1)) == 0);
@@ -33,6 +33,16 @@ GCArena* arena_create(lua_State *L)
 void arena_destroy(global_State *g, GCArena* arena)
 {
   lj_freeepages(arena, ArenaSize);
+}
+
+static CellState arena_cellstate(GCArena *arena, GCCellID cell)
+{
+  GCBlockword blockbit = arena_blockbit(cell);
+  int32_t shift = arena_blockbitidx(cell);
+  GCBlockword mark = ((blockbit & arena_mark(arena, cell)) >> (shift));
+  GCBlockword block = lj_ror((blockbit & arena_block(arena, cell)), BlocksetBits + shift - 1);
+
+  return mark | block;
 }
 
 static void arena_freecell(GCArena *arena, GCCellID cell)
@@ -51,20 +61,17 @@ void* arena_alloc(GCArena *arena, MSize size)
 {
   MSize numblocks = arena_roundcells(size);
   uint32_t cellid = ptr2cell(arena->celltop);
-  GCBlockword blockmask = arena_blockbit(cellid);
 
   /* Check we have space left */
   if ((arena->celltop + numblocks) > (arena->cells + arena_maxcellid(arena))) {
     lua_assert(0);
     return NULL;
   }
-  
-  arena_block(arena, cellid) |= arena_blockbit(cellid);
+  lua_assert(arena_cellstate(arena, cellid) < CellState_White);
 
+  arena_block(arena, cellid) |= arena_blockbit(cellid);
   arena->celltop += numblocks;
   arena->freecount -= numblocks;
-
-  lua_assert(ptr2cell(arena_cell(arena, cellid)) == cellid);
 
   return arena_cell(arena, cellid);
 }
@@ -75,7 +82,7 @@ void arena_free(GCArena *arena, void* mem, MSize size)
   MSize numcells = arena_roundcells(size);
   GCBlockword freecells = arena_mark(arena, cell) & ~arena_block(arena, cell);
   CellState state = arena_cellstate(arena, cell);
-  lua_assert(state == CellState_Black || state == CellState_White);
+  lua_assert(state > CellState_Allocated);
   lua_assert(numcells > 0 && (cell + numcells) < MAXCELLS);
   lua_assert(numcells == arena_cellextent(arena, cell));
  
@@ -123,6 +130,7 @@ MSize arena_cellextent(GCArena *arena, MSize cell)
     cell = (cell + BlocksetBits) & ~BlocksetMask;
   }
 
+  /* Don't follow extent blocks past the bump allocator top */
   for (; cell < ptr2cell(arena->celltop) ;) {
     extents = arena_mark(arena, cell) | arena_block(arena, cell);
     /* Check if all cells are extents */
@@ -143,7 +151,7 @@ MSize arena_cellextent(GCArena *arena, MSize cell)
       bitshift = 0;
     }
   }
-
+  /* The last allocation will have no tail to stop us follow unused extent cells */
   return ptr2cell(arena->celltop)-start;
 }
 
@@ -179,7 +187,6 @@ void arena_majorsweep(GCArena *arena)
     arena->block[i] = block & mark;
     arena->mark[i] = block ^ mark;
   }
-
 }
 
 

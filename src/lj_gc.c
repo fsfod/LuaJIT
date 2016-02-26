@@ -556,6 +556,7 @@ void lj_gc_freeall(global_State *g)
     gc_fullsweep(g, &g->strhash[i]);
 
   arena_destroy(g, g->arena);
+  arena_destroy(g, g->travarena);
 }
 
 /* -- Collector ----------------------------------------------------------- */
@@ -843,5 +844,18 @@ void *lj_mem_grow(lua_State *L, void *p, MSize *szp, MSize lim, MSize esz)
   p = lj_mem_realloc(L, p, (*szp)*esz, sz*esz);
   *szp = sz;
   return p;
+}
+
+GCobj *lj_mem_newgcoraw(lua_State * L, size_t osize)
+{
+  GCobj *o = (GCobj*)arena_alloc(G(L)->travarena, osize);
+  G(L)->gc.total += (GCSize)osize;
+  return o;
+}
+
+void lj_mem_freegco(global_State * g, void * p, size_t osize)
+{
+  g->gc.total -= (GCSize)osize;
+  arena_free(ptr2arena(p), p, osize);
 }
 

@@ -201,7 +201,8 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
   g->strempty.gct = ~LJ_TSTR;
   g->allocf = f;
   g->allocd = ud;
-  g->arena = arena_create(L);
+  g->arena = arena_create(L, 0);
+  g->travarena = arena_create(L, 1);
   setgcref(g->mainthref, obj2gco(L));
   setgcref(g->uvhead.prev, obj2gco(&g->uvhead));
   setgcref(g->uvhead.next, obj2gco(&g->uvhead));

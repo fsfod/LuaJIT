@@ -7,6 +7,7 @@
 #define _LJ_GC_H
 
 #include "lj_obj.h"
+#include "lj_gcarena.h"
 
 /* Garbage collector states. Order matters. */
 enum {
@@ -109,6 +110,7 @@ static LJ_AINLINE void lj_gc_barrierback(global_State *g, GCtab *t)
 /* Allocator. */
 LJ_FUNC void *lj_mem_realloc(lua_State *L, void *p, GCSize osz, GCSize nsz);
 LJ_FUNC void * LJ_FASTCALL lj_mem_newgco(lua_State *L, GCSize size);
+LJ_FUNC void * LJ_FASTCALL lj_mem_newcd(lua_State *L, GCSize size);
 LJ_FUNC void *lj_mem_grow(lua_State *L, void *p,
 			  MSize *szp, MSize lim, MSize esz);
 
@@ -130,5 +132,12 @@ static LJ_AINLINE void lj_mem_free(global_State *g, void *p, size_t osize)
 #define lj_mem_newobj(L, t)	((t *)lj_mem_newgco(L, sizeof(t)))
 #define lj_mem_newt(L, s, t)	((t *)lj_mem_new(L, (s)))
 #define lj_mem_freet(g, p)	lj_mem_free(g, (p), sizeof(*(p)))
+
+GCobj *lj_mem_newgcoraw(lua_State *L, size_t osize);
+void lj_mem_freegco(global_State *g, void *p, size_t osize);
+
+#define lj_mem_newtgco(L, s, t)	((t *)lj_mem_newgcoraw(L, (s)))
+#define lj_mem_freetgco(g, p)	lj_mem_freegco(g, (p), sizeof(*(p)))
+
 
 #endif

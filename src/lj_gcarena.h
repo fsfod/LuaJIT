@@ -26,6 +26,8 @@ typedef enum CellState {
   CellState_Free = 1,
   CellState_White = 2,
   CellState_Black = 3,
+
+  CellState_Allocated = CellState_Free,
 } CellState;
 
 typedef uint32_t GCBlockword;
@@ -65,9 +67,11 @@ LJ_STATIC_ASSERT((offsetof(GCArena, cellsstart) & 15) == 0);
 #define arena_blockbitidx(cell) (cell & BlocksetMask)
 #define arena_blockbit(cell) (((GCBlockword)1) << ((cell-MinCell) & BlocksetMask))
 
-GCArena* arena_create(lua_State *L);
+GCArena* arena_create(lua_State *L, int internalptrs);
 void arena_destroy(global_State *g, GCArena *arena);
-void arena_sweep(GCArena *arena);
+void arena_minorsweep(GCArena *arena);
+void arena_majorsweep(GCArena *arena);
+
 void* arena_alloc(GCArena *arena, MSize size);
 void arena_free(GCArena *arena, void* mem, MSize size);
 MSize arena_cellextent(GCArena *arena, MSize cell);
@@ -81,21 +85,6 @@ MSize arena_cellextent(GCArena *arena, MSize cell);
 #define arena_checkptr(p) lua_assert(p != NULL && (((uintptr_t)p) & 0xf) == 0)
 
 static GCArena *ptr2arena(void* ptr);
-
-static CellState arena_cellstate(GCArena *arena, GCCellID cell)
-{
-  GCBlockword blockbit = arena_blockbit(cell);
-
-  if (blockbit & arena_block(arena, cell)) {
-    if (blockbit & arena_mark(arena, cell)) {
-      return CellState_Black;
-    } else {
-      return CellState_White;
-    }
-  } else {
-    return (blockbit & arena_mark(arena, cell)) ? CellState_Free : CellState_Extent;
-  }
-}
 
 static GCCellID ptr2cell(void* ptr) 
 {
@@ -112,7 +101,7 @@ static GCArena *ptr2arena(void* ptr)
   return arena;
 }
 
-static GCArena *arena_markptr(void* p)
+static LJ_AINLINE void arena_markptr(void* p)
 {
   GCArena *arena = ptr2arena(p);
   GCCellID cell = ptr2cell(p);
