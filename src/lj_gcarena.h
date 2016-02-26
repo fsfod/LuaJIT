@@ -8,6 +8,7 @@ enum GCOffsets {
   MarkSize = 500,
   CellSize = 16,
   MinCell = 64,
+  MaxCell = 4000,
   BlocksetBits = 32,
   BlocksetMask = BlocksetBits - 1,
 };
@@ -58,7 +59,7 @@ LJ_STATIC_ASSERT((offsetof(GCArena, cellsstart) & 15) == 0);
 
 #define arena_roundcells(size) (round_alloc(size) / CellSize)
 
-#define arena_cell(arena, cellidx) (&(arena)->cells[cellidx])
+#define arena_cell(arena, cellidx) (&(arena)->cells[(cellidx)])
 #define arena_maxcellid(arena) (arena->cellmax)
 
 #define arena_blockidx(cell) (((cell) & ~BlocksetMask) >> 5)
@@ -69,6 +70,8 @@ LJ_STATIC_ASSERT((offsetof(GCArena, cellsstart) & 15) == 0);
 
 GCArena* arena_create(lua_State *L, int internalptrs);
 void arena_destroy(global_State *g, GCArena *arena);
+
+size_t arena_traversegrey(global_State *g, GCArena *arena, int limit);
 void arena_minorsweep(GCArena *arena);
 void arena_majorsweep(GCArena *arena);
 
@@ -101,9 +104,27 @@ static GCArena *ptr2arena(void* ptr)
   return arena;
 }
 
+static CellState arena_cellstate(GCArena *arena, GCCellID cell)
+{
+  GCBlockword blockbit = arena_blockbit(cell);
+  int32_t shift = arena_blockbitidx(cell);
+  GCBlockword mark = ((blockbit & arena_mark(arena, cell)) >> (shift));
+  GCBlockword block = lj_ror((blockbit & arena_block(arena, cell)), BlocksetBits + shift - 1);
+
+  return mark | block;
+}
+
 static LJ_AINLINE void arena_markptr(void* p)
 {
   GCArena *arena = ptr2arena(p);
   GCCellID cell = ptr2cell(p);
+  lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
+
+  /* Only really needed for traversable objects */
+  if (1) {
+    *arena->greylist = cell;
+    arena->greylist++;
+  }
+
   arena_mark(arena, cell) |= arena_blockbit(cell);
 }

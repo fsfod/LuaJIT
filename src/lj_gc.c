@@ -52,11 +52,16 @@
 #define gc_mark_str(s)		((s)->marked &= (uint8_t)~LJ_GC_WHITES)
 
 /* Mark a white GCobj. */
-static void gc_mark(global_State *g, GCobj *o)
+void gc_mark(global_State *g, GCobj *o)
 {
   int gct = o->gch.gct;
   lua_assert(iswhite(o) && !isdead(g, o));
   white2gray(o);
+  /* Don't try to mark GG_State.L or global_State.strempty */
+  if ((void*)o < (void*)G2GG(g) || (void*)o > (void*)(&G2GG(g)->dispatch)) {
+    arena_markptr(o);
+  }
+
   if (LJ_UNLIKELY(gct == ~LJ_TUDATA)) {
     GCtab *mt = tabref(gco2ud(o)->metatable);
     gray2black(o);  /* Userdata are never gray. */
@@ -295,14 +300,10 @@ static void gc_traverse_thread(global_State *g, lua_State *th)
   lj_state_shrinkstack(th, gc_traverse_frames(g, th));
 }
 
-/* Propagate one gray object. Traverse it and turn it black. */
-static size_t propagatemark(global_State *g)
+size_t gc_traverse(global_State *g, GCobj *o)
 {
-  GCobj *o = gcref(g->gc.gray);
   int gct = o->gch.gct;
-  lua_assert(isgray(o));
-  gray2black(o);
-  setgcrefr(g->gc.gray, o->gch.gclist);  /* Remove from gray list. */
+
   if (LJ_LIKELY(gct == ~LJ_TTAB)) {
     GCtab *t = gco2tab(o);
     if (gc_traverse_tab(g, t) > 0)
@@ -336,6 +337,16 @@ static size_t propagatemark(global_State *g)
     return 0;
 #endif
   }
+}
+
+/* Propagate one gray object. Traverse it and turn it black. */
+static size_t propagatemark(global_State *g)
+{
+  GCobj *o = gcref(g->gc.gray);
+  lua_assert(isgray(o));
+  gray2black(o);
+  setgcrefr(g->gc.gray, o->gch.gclist);  /* Remove from gray list. */
+  return gc_traverse(g, o);
 }
 
 /* Propagate all gray objects. */
@@ -565,6 +576,7 @@ void lj_gc_freeall(global_State *g)
 static void atomic(global_State *g, lua_State *L)
 {
   size_t udsize;
+  //arena_traversegrey(g, g->travarena, -1);
 
   gc_mark_uv(g);  /* Need to remark open upvalues (the thread may be dead). */
   gc_propagate_gray(g);  /* Propagate any left-overs. */
@@ -580,6 +592,7 @@ static void atomic(global_State *g, lua_State *L)
   setgcrefr(g->gc.gray, g->gc.grayagain);  /* Empty the 2nd chance list. */
   setgcrefnull(g->gc.grayagain);
   gc_propagate_gray(g);  /* Propagate it. */
+  //arena_traversegrey(g, g->travarena, -1);
 
   udsize = lj_gc_separateudata(g, 0);  /* Separate userdata to be finalized. */
   gc_mark_mmudata(g);  /* Mark them. */

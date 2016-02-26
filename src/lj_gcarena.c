@@ -19,13 +19,16 @@ GCArena* arena_init(GCArena* arena)
   arena->cellmax = 4000;
   arena->freecount = arena->cellmax - ptr2cell(arena->celltop);
   arena->firstfree = arena->cellmax;
+ 
+  arena->greybase = (GCCellID1*)&arena->cells[arena->cellmax];
+  arena->greylist = arena->greybase;
   
   return arena;
 }
 
 GCArena* arena_create(lua_State *L, int internalptrs)
 {
-  GCArena* arena = (GCArena*)lj_allocpages(ArenaSize);
+  GCArena* arena = (GCArena*)lj_allocpages(ArenaSize + ((MaxCell-MinCell) * 2));
   lua_assert((((uintptr_t)arena) & (ArenaSize-1)) == 0);
   return arena_init(arena);
 }
@@ -33,16 +36,6 @@ GCArena* arena_create(lua_State *L, int internalptrs)
 void arena_destroy(global_State *g, GCArena* arena)
 {
   lj_freeepages(arena, ArenaSize);
-}
-
-static CellState arena_cellstate(GCArena *arena, GCCellID cell)
-{
-  GCBlockword blockbit = arena_blockbit(cell);
-  int32_t shift = arena_blockbitidx(cell);
-  GCBlockword mark = ((blockbit & arena_mark(arena, cell)) >> (shift));
-  GCBlockword block = lj_ror((blockbit & arena_block(arena, cell)), BlocksetBits + shift - 1);
-
-  return mark | block;
 }
 
 static void arena_freecell(GCArena *arena, GCCellID cell)
@@ -161,6 +154,31 @@ static MSize arena_findfree(GCArena *arena, MSize numcells)
   for (MSize i = 0; i < 6; i++) {
 
   }
+}
+
+extern size_t gc_traverse(global_State *g, GCobj *o);
+
+size_t arena_traversegrey(global_State *g, GCArena *arena, int limit)
+{
+  GCCellID1 *cellid = arena->greybase;
+  size_t total = 0;
+
+  for (; cellid < arena->greylist; cellid++) {
+    GCCell* cell = arena_cell(arena, *cellid);
+    
+    if (cell->gct != ~LJ_TUDATA) {
+      total += gc_traverse(g, (GCobj*)cell);
+    } else {
+      /* FIXME: do these still need tobe deferred */
+    }
+
+    if (limit != -1 && (cellid-arena->greybase) > limit) {
+      break;
+    }
+  }
+
+  arena->greylist = arena->greybase;
+  return total;
 }
 
 void arena_minorsweep(GCArena *arena)
