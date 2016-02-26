@@ -54,7 +54,7 @@ typedef union GCArena {
 
 LJ_STATIC_ASSERT((offsetof(GCArena, cellsstart) & 15) == 0);
 
-#define round_alloc(size) ((size + CellSize) & ~(CellSize-1))
+#define round_alloc(size) ((size + CellSize-1) & ~(CellSize-1))
 
 #define arena_roundcells(size) (round_alloc(size) / CellSize)
 
