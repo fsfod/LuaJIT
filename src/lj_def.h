@@ -116,6 +116,8 @@ typedef unsigned int uintptr_t;
 #define lj_rol(x, n)	(((x)<<(n)) | ((x)>>(-(int)(n)&(8*sizeof(x)-1))))
 #define lj_ror(x, n)	(((x)<<(-(int)(n)&(8*sizeof(x)-1))) | ((x)>>(n)))
 
+#define lj_round(size, roundzs) (((size) + ((roundzs)-1)) & ~((roundzs)-1))
+
 /* A really naive Bloom filter. But sufficient for our needs. */
 typedef uintptr_t BloomFilter;
 #define BLOOM_MASK	(8*sizeof(BloomFilter) - 1)
