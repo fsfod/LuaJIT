@@ -8,18 +8,21 @@
 
 #define idx2bit(i)		((uint32_t)(1) << (i))
 #define bitset_range(lo, hi)	((idx2bit((hi)-(lo))-1) << (lo))
-#define left_bits(x)		((x<<1) | (~(x<<1)+1))
+#define left_bits(x)		(((x) << 1) | (~((x) << 1)+1))
+
+static int st = ((offsetof(GCArena, cellsstart)) / 16);
+GCCellID arena_findfree(GCArena *arena, MSize mincells);
 
 GCArena* arena_init(GCArena* arena)
 {
   /* Make sure block and mark bits are clear*/
   memset(arena, 0, sizeof(GCArena));
 
-  arena->celltop = arena->cellsstart;
+  setmref(arena->celltop, arena->cells+MinCellId);
   arena->freecount = 0;
-  arena->firstfree = MaxCellId;
- 
-  arena->greybase = (GCCellID1*)&arena->cells[MaxCellId];
+  arena->firstfree = MaxCellId-1;
+  /* FIXME: Dynamically sized grey list */
+  setmref(arena->greybase, &arena->cells[MaxCellId]);
   arena->greylist = arena->greybase;
   
   return arena;
@@ -37,35 +40,54 @@ void arena_destroy(global_State *g, GCArena* arena)
   lj_freeepages(arena, ArenaSize);
 }
 
-static void arena_freecell(GCArena *arena, GCCellID cell)
+static void arena_setfreecell(GCArena *arena, GCCellID cell)
 {
+  arena_checkid(cell);
   arena_getmark(arena, cell) |= arena_blockbit(cell);
   arena_getblock(arena, cell) &= ~arena_blockbit(cell);
 }
 
 static void arena_setextent(GCArena *arena, GCCellID cell)
 {
+  arena_checkid(cell);
+  lua_assert(arena_cellstate(arena, cell) == CellState_Free);
   arena_getmark(arena, cell) &= ~arena_blockbit(cell);
   arena_getblock(arena, cell) &= ~arena_blockbit(cell);
+}
+
+static int arena_isextent(GCArena *arena, GCCellID cell)
+{
+  arena_checkid(cell);
+  return arena_blockbit(cell) & ~(arena_getblock(arena, cell) | arena_getmark(arena, cell));
 }
 
 void* arena_alloc(GCArena *arena, MSize size)
 {
   MSize numblocks = arena_roundcells(size);
-  uint32_t cellid = ptr2cell(arena->celltop);
+  GCCellID cell;
+  lua_assert(numblocks != 0 && numblocks < MaxCellId);
 
   /* Check we have space left */
-  if ((arena->celltop + numblocks) >= (arena->cells + MaxCellId)) {
-    lua_assert(0);
-    return NULL;
+  if ((arena_celltop(arena) + numblocks) >= (arena->cells + MaxCellId)) {
+    cell = arena_findfree(arena, numblocks);
+    /* TODO: failed to find a free range large enough */
+    lua_assert(cell);
+    arena_getmark(arena, cell) &= ~arena_blockbit(cell);
+    if (arena_isextent(arena, cell+numblocks)) {
+      arena_setfreecell(arena, cell+numblocks);
+    }
+  } else {
+    cell = ptr2cell(arena_celltop(arena));
+    setmref(arena->celltop, arena_celltop(arena)+numblocks);
+    lua_assert(ptr2cell(mref(arena->celltop, GCCell)) < MaxCellId);
+    arena_checkid(cell);
+    lua_assert(arena_cellstate(arena, cell) < CellState_White);
   }
-  lua_assert(arena_cellstate(arena, cellid) < CellState_White);
 
-  arena_getblock(arena, cellid) |= arena_blockbit(cellid);
-  arena->celltop += numblocks;
+  arena_getblock(arena, cell) |= arena_blockbit(cell);
   arena->freecount -= numblocks;
 
-  return arena_cell(arena, cellid);
+  return arena_cell(arena, cell);
 }
 
 void arena_free(GCArena *arena, void* mem, MSize size)
@@ -74,28 +96,32 @@ void arena_free(GCArena *arena, void* mem, MSize size)
   MSize numcells = arena_roundcells(size);
   GCBlockword freecells = arena_getmark(arena, cell) & ~arena_getblock(arena, cell);
   CellState state = arena_cellstate(arena, cell);
+  lua_assert(cell < arena_topcellid(arena) && cell >= MinCellId);
   lua_assert(state > CellState_Allocated);
-  lua_assert(numcells > 0 && (cell + numcells) < MAXCELLS);
+  lua_assert(numcells > 0 && (cell + numcells) < MaxCellId);
   lua_assert(numcells == arena_cellextent(arena, cell));
  
-  arena_freecell(arena, cell);
+  arena_setfreecell(arena, cell);
 
   if (freecells) {
    // MSize bit = arena_blockbitidx(cell);
 
     if (arena_cellstate(arena, cell+numcells) == CellState_Free) {
       arena_setextent(arena, cell+numcells);
+
+      if ((cell+numcells+32) >= arena_topcellid(arena)) {
+      //  lua_assert(0);
+      }
     }
     //
     //GCBlockword blockmask = bitset_range(bit, bit+numcells);
   }
 
-  if (((GCCell*)mem + numcells) == arena->celltop) {
-    arena->celltop -= numcells;
-  } else {
-    arena->firstfree = min(arena->firstfree, cell);
+  if (((GCCell*)mem + numcells) == arena_celltop(arena)) {
+  //  arena->celltop -= numcells;
   }
 
+  arena->firstfree = min(arena->firstfree, cell);
   arena->freecount += numcells;
 }
 
@@ -111,8 +137,8 @@ MSize arena_cellextent(GCArena *arena, MSize cell)
       return 1;
   } else {
     extents = arena_getmark(arena, cell+1) | arena_getblock(arena, cell+1);
-    if (extents & 1) 
-      return 2;
+    if (extents != 0)
+      return lj_ffs(extents)+1;
   }
 
   bitshift = arena_blockbitidx(cell)+1;
@@ -123,7 +149,7 @@ MSize arena_cellextent(GCArena *arena, MSize cell)
   }
 
   /* Don't follow extent blocks past the bump allocator top */
-  for (; cell < ptr2cell(arena->celltop) ;) {
+  for (; cell < arena_topcellid(arena) ;) {
     extents = arena_getmark(arena, cell) | arena_getblock(arena, cell);
     /* Check if all cells are extents */
     if (extents == 0) {
@@ -144,29 +170,56 @@ MSize arena_cellextent(GCArena *arena, MSize cell)
     }
   }
   /* The last allocation will have no tail to stop us follow unused extent cells */
-  return ptr2cell(arena->celltop)-start;
+  return arena_topcellid(arena)-start;
 }
 
 static GCCellID arena_findfree(GCArena *arena, MSize mincells)
 {
   MSize i, maxblock = MaxBlockWord;
+  GCCellID startcell = 0;
 
   for (i = 0; i < maxblock; i++) {
     GCBlockword freecells = arena_getfree(arena, i);
 
-    if (freecells) {
-      uint32_t freecell = lj_ffs(freecells);
-      for (; freecell < BlocksetBits;) {
-        GCBlockword extents = (arena->mark[i] | arena->block[i]) >> freecell;
-        MSize freeext = lj_ffs(extents); /* Scan for the first non zero(extent) cell */
-
-        if ((freeext+1) >= mincells) {
-          return freecell;
-        }
-        freecell = lj_ffs(freecells >> freecell) + freecell;
-      }
+    if (!freecells) {
+      continue;
     }
+
+    uint32_t freecell = lj_ffs(freecells);
+    GCBlockword mask = ((GCBlockword)0xffffffff) << (freecell+1);
+
+    for (; freecell < (BlocksetBits-1);) {
+      GCBlockword extents = (arena->mark[i] | arena->block[i]) & mask;
+      MSize extend; 
+
+      if (extents == 0) {
+        /* Try to skip trying to find the end if we already have enough cells */
+        extend = freecell + (BlocksetBits - freecell);
+        startcell = (i * BlocksetBits) + freecell + MinCellId;
+      } else {
+        /* Scan for the first non zero(extent) cell */
+        extend = lj_ffs(extents);
+      }
+
+      if ((extend-freecell) >= mincells) {
+        return (i * BlocksetBits) + freecell + MinCellId;
+      }
+
+      /* Create a mask to remove the bits to the LSB backwards the end of the free segment */
+      mask = ((GCBlockword)0xffffffff) << (extend);
+
+      /* Don't try to bit scan an empty mask */
+      if ((extend+1) >= BlocksetBits  || !(extents & mask) || !(freecells & mask)) {
+        break;
+      }
+
+      freecell = lj_ffs(freecells & mask);
+      mask = ((GCBlockword)0xffffffff) << (freecell+1);
+    }
+
+    startcell = 0;
   }
+  
 
   return 0;
 }
@@ -203,10 +256,10 @@ extern size_t gc_traverse(global_State *g, GCobj *o);
 
 size_t arena_traversegrey(global_State *g, GCArena *arena, int limit)
 {
-  GCCellID1 *cellid = arena->greybase;
+  GCCellID1 *cellid = mref(arena->greybase, GCCellID1);
   size_t total = 0;
 
-  for (; cellid < arena->greylist; cellid++) {
+  for (; cellid < mref(arena->greylist, GCCellID1); cellid++) {
     GCCell* cell = arena_cell(arena, *cellid);
     
     if (cell->gct != ~LJ_TUDATA) {
@@ -215,7 +268,7 @@ size_t arena_traversegrey(global_State *g, GCArena *arena, int limit)
       /* FIXME: do these still need tobe deferred */
     }
 
-    if (limit != -1 && (cellid-arena->greybase) > limit) {
+    if (limit != -1 && (cellid-mref(arena->greybase, GCCellID1)) > limit) {
       break;
     }
   }
@@ -250,5 +303,7 @@ void arena_majorsweep(GCArena *arena)
   }
 }
 
+void arena_sweep(global_State *g, GCArena *arena)
+{
 
-
+}

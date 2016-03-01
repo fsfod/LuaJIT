@@ -4,16 +4,18 @@
 #include "lj_obj.h"
 
 enum GCOffsets {
-  MinArenaSize = 1 << 16,
-  ArenaSize = 1 << 18,
-  MarkSize = 500,
+  MinArenaSize = 1 << 20,
   CellSize = 16,
-  MinCellId = (ArenaSize / 64) / CellSize,
-  MaxCellId = ArenaSize / 16,
+  ArenaSize = 1 << 20,
+  ArenaCellMask = (ArenaSize-1),
+  MetadataSize = (ArenaSize / 64),
+  MinCellId = MetadataSize / CellSize,
+  MaxCellId = ArenaSize / CellSize,
+
   BlocksetBits = 32,
   BlocksetMask = BlocksetBits - 1,
-
-  MaxBlockWord = (MaxCellId - MinCellId)/BlocksetBits,
+  ArenaExtraData = 16,
+  MaxBlockWord = ((ArenaSize - MetadataSize) / 16 / BlocksetBits) ,
 };
 
 LJ_STATIC_ASSERT(((MaxCellId - MinCellId) & BlocksetMask) == 0);
@@ -54,10 +56,10 @@ typedef union FreeCellRange {
 typedef union GCArena {
   GCCell cells[0];
   struct {
-    GCCellID1* greylist;
-    GCCellID1* greybase;
+    MRef greylist;
+    MRef greybase;
     GCBlockword block[MaxBlockWord];
-    GCCell* celltop;
+    MRef celltop;
     GCCellID1 freecount;
     GCCellID1 firstfree;
     GCBlockword mark[MaxBlockWord];
@@ -65,24 +67,26 @@ typedef union GCArena {
   };
 } GCArena;
 
-#define MAXCELLS ((ArenaSize - sizeof(GCArena))/sizeof(GCCell))
-
 LJ_STATIC_ASSERT((offsetof(GCArena, cellsstart) & 15) == 0);
+LJ_STATIC_ASSERT((MinCellId * 16) >= offsetof(GCArena, cellsstart));
+
+//LJ_STATIC_ASSERT(((offsetof(GCArena, cellsstart)) / 16) == MinCellId);
 
 #define round_alloc(size) lj_round(size, CellSize)
 #define arena_roundcells(size) (round_alloc(size) >> 4)
 
 #define arena_cell(arena, cellidx) (&(arena)->cells[(cellidx)])
-#define arena_maxcellid(arena) (arena->cellmax)
+#define arena_celltop(arena) (mref((arena)->celltop, GCCell))
+#define arena_topcellid(arena) (ptr2cell(mref((arena)->celltop, GCCell)))
 
-#define arena_blockidx(cell) (((cell) & ~BlocksetMask) >> 5)
+#define arena_blockidx(cell) (((cell-MinCellId) & ~BlocksetMask) >> 5)
 #define arena_getblock(arena, cell) (arena->block)[(arena_blockidx(cell))]
 #define arena_getmark(arena, cell) (arena->mark)[(arena_blockidx(cell))]
 
 #define arena_blockbitidx(cell) (cell & BlocksetMask)
 #define arena_blockbit(cell) (((GCBlockword)1) << ((cell-MinCellId) & BlocksetMask))
 
-#define arena_getfree(arena, blockidx) (arena->block[(blockidx)] & ~arena->block[(blockidx)]) 
+#define arena_getfree(arena, blockidx) (arena->mark[(blockidx)] & ~arena->block[(blockidx)]) 
 
 GCArena* arena_create(lua_State *L, int internalptrs);
 void arena_destroy(global_State *g, GCArena *arena);
@@ -102,21 +106,30 @@ MSize arena_cellextent(GCArena *arena, MSize cell);
 
 /* Must be at least 16 byte aligned */
 #define arena_checkptr(p) lua_assert(p != NULL && (((uintptr_t)p) & 0xf) == 0)
+#define arena_checkid(id) lua_assert(id >= MinCellId && id <= MaxCellId)
+
+#define arena_freespace(arena) ((((arena)->cell+MaxCellId)-(arena)->celltop) * CellSize)
 
 static GCArena *ptr2arena(void* ptr);
 
 static LJ_AINLINE GCCellID ptr2cell(void* ptr)
 {
-  GCCellID cell = ((uintptr_t)ptr) & 0xffff;
+  GCCellID cell = ((uintptr_t)ptr) & ArenaCellMask;
   arena_checkptr(ptr);
   return cell >> 4;
 }
 
+static LJ_AINLINE MSize ptr2blockword(void* ptr)
+{
+  GCCellID cell = ptr2cell(ptr);
+  return arena_blockidx(cell);
+}
+
 static LJ_AINLINE GCArena *ptr2arena(void* ptr)
 {
-  GCArena *arena = (GCArena*)(((uintptr_t)ptr) & ~(uintptr_t)0xffff);
+  GCArena *arena = (GCArena*)(((uintptr_t)ptr) & ~(uintptr_t)ArenaCellMask);
   arena_checkptr(ptr);
-  lua_assert(ptr2cell(arena->celltop) <= MaxCellId && ((GCCell*)ptr) < arena->celltop);
+  lua_assert(ptr2cell(mref(arena->celltop, GCCell)) <= MaxCellId && ((GCCell*)ptr) < mref(arena->celltop, GCCell));
   return arena;
 }
 
@@ -146,8 +159,9 @@ static LJ_AINLINE void arena_markptr(void* o)
 
   /* Only really needed for traversable objects */
   if (((GCCell*)o)->gct != ~LJ_TSTR && ((GCCell*)o)->gct != ~LJ_TCDATA) {
-    *arena->greylist = cell;
-    arena->greylist++;
+    GCCellID1* greylist = mref(arena->greylist, GCCellID1);
+    *greylist = cell;
+    //setmref(arena->greylist, greylist+1);
   }
 
   arena_getmark(arena, cell) |= arena_blockbit(cell);
