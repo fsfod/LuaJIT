@@ -566,8 +566,31 @@ void lj_gc_freeall(global_State *g)
   for (i = 0; i <= strmask; i++)  /* Free all string hash chains. */
     gc_fullsweep(g, &g->strhash[i]);
 
-  arena_destroy(g, g->arena);
-  arena_destroy(g, g->travarena);
+  for (MSize i = 0; i < g->gc.arenas.top; i++) {
+    arena_destroy(g, g->gc.arenas.tab[i]);
+  }
+
+  lj_mem_freevec(g, g->gc.arenas.tab, g->gc.arenas.tabsz, GCArena*);
+}
+
+void lj_gc_init(global_State *g, lua_State *L)
+{
+  GCArena** arenas;
+
+  g->gc.state = GCSpause;
+  setgcref(g->gc.root, obj2gco(L));
+  setmref(g->gc.sweep, &g->gc.root);
+  g->gc.total = sizeof(GG_State);
+  g->gc.pause = LUAI_GCPAUSE;
+  g->gc.stepmul = LUAI_GCMUL;
+  
+  arenas = lj_mem_newvec(L, 16, GCArena*);
+  g->gc.arenas.tab = arenas;
+  g->gc.arenas.tabsz = 16;
+  g->gc.arenas.top = 2;
+
+  arenas[0] = g->arena = arena_create(L, 0);
+  arenas[1] = g->travarena = arena_create(L, 1);
 }
 
 /* -- Collector ----------------------------------------------------------- */

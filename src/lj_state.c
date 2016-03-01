@@ -201,8 +201,6 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
   g->strempty.gct = ~LJ_TSTR;
   g->allocf = f;
   g->allocd = ud;
-  g->arena = arena_create(L, 0);
-  g->travarena = arena_create(L, 1);
   setgcref(g->mainthref, obj2gco(L));
   setgcref(g->uvhead.prev, obj2gco(&g->uvhead));
   setgcref(g->uvhead.next, obj2gco(&g->uvhead));
@@ -214,12 +212,8 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
   setmref(g->nilnode.freetop, &g->nilnode);
 #endif
   lj_buf_init(NULL, &g->tmpbuf);
-  g->gc.state = GCSpause;
-  setgcref(g->gc.root, obj2gco(L));
-  setmref(g->gc.sweep, &g->gc.root);
-  g->gc.total = sizeof(GG_State);
-  g->gc.pause = LUAI_GCPAUSE;
-  g->gc.stepmul = LUAI_GCMUL;
+
+  lj_gc_init(g, L);
   lj_dispatch_init((GG_State *)L);
   L->status = LUA_ERRERR+1;  /* Avoid touching the stack upon memory error. */
   if (lj_vm_cpcall(L, NULL, NULL, cpluaopen) != 0) {
