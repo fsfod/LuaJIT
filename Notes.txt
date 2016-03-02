@@ -1,0 +1,26 @@
+
+
+How to handle aligned\varible length cdata  the gc header will be negative of the pointer causeing the incorrect cell tobe marked turning it from an extent.
+
+How to allocated aligned pages for an arena on Linux without massive over allocation since we don't get the same allignment garantees as windows with VirtualAlloc
+
+How should __gc for cdata be handled
+Reddit thread comment says in a unrolled linked list(of cell ids?) remarked grey so there not freeded before the gc runs
+
+alot of the bit primitives used are duplicates of ones used for register sets of the JIT maybe build a shared set
+
+Could pointers for huge gc objects not in an arena be aligned on a non 16 byte boundry for fast way to skip trying access there arena metadata
+Overview implys the base adddres of huge objects is aligned to the same as an arena so its masked cell id will be 0?
+
+An idea to handle avoid trying to mark GG_State.L or global_State.strempty that are not in arena would be allocating GG_State aligned to the same alignment as arenas which 
+will cause the computed a cell id from there addresses tobe an id less than MinCellId that we can check for. Maybe this can just be turned into a mask check
+
+The global allocated string table should be switched from chained to open addressing to play nice with the new arenas and avoid having load the memory of dead strings just to 
+follow the next string in a linked list
+
+Could bitwise and the pointer of the graylist pointer with some -1 of power of 2 to check if it needs reallocating avoiding the need to also have the greybase pointer before 
+the block words. The allocated size of the list could be negative of the greybase pointer
+
+The memory of tables still needs tobe accessed after it is dead to free its array and hash memory unlike cdata and userdata how best to handle this
+
+How should the grey list work when stuff is refs other stuff in the same gc arena 
