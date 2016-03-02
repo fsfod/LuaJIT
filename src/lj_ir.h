@@ -28,6 +28,7 @@
   _(NE,		C , ref, ref) \
   \
   _(ABC,	N , ref, ref) \
+  _(VTEST,      C , ref, ref) \
   _(RETF,	S , ref, ref) \
   \
   /* Miscellaneous ops. */ \

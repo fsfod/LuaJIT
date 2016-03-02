@@ -25,6 +25,7 @@ LJ_FUNC void LJ_FASTCALL recff_ffi_istype(jit_State *J, RecordFFData *rd);
 LJ_FUNC void LJ_FASTCALL recff_ffi_abi(jit_State *J, RecordFFData *rd);
 LJ_FUNC void LJ_FASTCALL recff_ffi_xof(jit_State *J, RecordFFData *rd);
 LJ_FUNC void LJ_FASTCALL recff_ffi_gc(jit_State *J, RecordFFData *rd);
+LJ_FUNC void LJ_FASTCALL recff_ffi_vtest(jit_State *J, RecordFFData *rd);
 
 LJ_FUNC void LJ_FASTCALL recff_bit64_tobit(jit_State *J, RecordFFData *rd);
 LJ_FUNC int LJ_FASTCALL recff_bit64_unary(jit_State *J, RecordFFData *rd);

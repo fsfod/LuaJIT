@@ -3017,6 +3017,15 @@ static void asm_comp(ASMState *as, IRIns *ir)
 
 #define asm_equal(as, ir)	asm_comp(as, ir)
 
+static void asm_vtest(ASMState *as, IRIns *ir)
+{
+  IRRef lref = ir->op1, rref = ir->op2;
+  Reg left = ra_alloc1(as, lref, RSET_FPR);
+  Reg right = asm_fuseload(as, rref, rset_exclude(RSET_FPR, left));
+  asm_guardcc(as, irt_type(ir->t) == IRT_TRUE ? CC_Z : CC_NZ);
+  emit_mrm(as, XV_PTEST | VEX_256IR(ir), left, right);
+}
+
 #if LJ_32 && LJ_HASFFI
 /* 64 bit integer comparisons in 32 bit mode. */
 static void asm_comp_int64(ASMState *as, IRIns *ir)

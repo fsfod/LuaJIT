@@ -597,7 +597,7 @@ static TRef crec_tv_ct(jit_State *J, CType *s, CTypeID sid, TRef sp)
     emitir(IRT(IR_XSTORE, t), ptr, tr2);
     return dp;
   } else if (ctype_isvector(sinfo)) {
-    TRef ptr, tr1, tr2, dp;
+    TRef ptr, tr1, dp;
     dp = emitir(IRT(IR_CNEW, IRT_CDATA), lj_ir_kint(J, sid), lj_ir_kint(J, s->size));
     tr1 = emitir(IRT(IR_XLOAD, t), sp, 0);
     ptr = emitir(IRT(IR_ADD, IRT_PTR), dp, lj_ir_kintp(J, sizeof(GCcdata)));
@@ -1927,6 +1927,51 @@ void LJ_FASTCALL recff_ffi_gc(jit_State *J, RecordFFData *rd)
   if (!J->base[1])
     lj_trace_err(J, LJ_TRERR_BADTYPE);
   crec_finalizer(J, J->base[0], J->base[1], &rd->argv[1]);
+}
+
+static TRef loadvector(jit_State *J, RecordFFData *rd, int arg)
+{ 
+  CTState *cts = ctype_ctsG(J2G(J));
+  CType *ct;
+  GCcdata *cd = argv2cdata(J, J->base[arg], &rd->argv[arg]);
+  int flags = 0;
+  TRef tr;
+  MSize sz = 0;
+
+  if (cd && (ct = ctype_raw(cts, cd->ctypeid)) && ctype_isvector(ct->info)) {
+    /* cdata vectors are intended tobe readonly */
+    flags |= IRXLOAD_READONLY;
+    /* TODO: better vector checking and using IRFL_CDATA_V128/ IRFL_CDATA_V256*/
+    tr = emitir(IRT(IR_ADD, IRT_INTP), J->base[arg], lj_ir_kint(J, sizeof(GCcdata)));
+    sz = ct->size;
+  } else {
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
+    //ct = ctype_get(cts, CT);
+    //tr = crec_ct_tv(J, ct, 0, tra, &rd->argv[i]);
+  }
+
+  /* Most vector ops require aligned memory */
+  if (!(flags & IRXLOAD_READONLY)) {
+    flags = IRXLOAD_UNALIGNED;
+  }
+
+  ct = ctype_rawchild(cts, ct);
+
+  /* If the number type of the vector isn't float/double use int domain vector moves */
+  if (ctype_isnum(ct->info) && !(ct->info & CTF_FP)) {
+    flags = IRXLOAD_INTDOMAIN;
+  }
+
+  return emitir(IRT(IR_XLOAD, sz == 32 ? IRT_V256 : IRT_V128), tr, flags);
+}
+
+void LJ_FASTCALL recff_ffi_vtest(jit_State *J, RecordFFData *rd)
+{
+  TRef tr1 = loadvector(J, rd, 0);
+  TRef tr2 = loadvector(J, rd, 1);
+  lj_ir_set(J, IRTG(IR_VTEST, IRT_TRUE), tr1, tr2);
+  J->postproc = LJ_POST_FIXGUARD;
+  J->base[0] = TREF_TRUE;
 }
 
 /* -- 64 bit bit.* library functions -------------------------------------- */

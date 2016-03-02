@@ -825,6 +825,58 @@ LJLIB_CF(ffi_load)
   return 1;
 }
 
+#include <intrin.h>
+
+static MSize getcdvecsz(CTState *cts, CType *ct)
+{
+  if(ctype_ispointer(ct->info) && !ctype_isvector(ct->info)){
+    ct = ctype_rawchild(cts, ct);
+  } 
+
+  if (ctype_isvector(ct->info)) {
+    return ct->size;
+  } else if (ctype_isarray(ct->info) && (ct->size == 16 || ct->size == 32)) {
+    return ct->size;
+  }
+
+  return 0;
+}
+
+LJLIB_CF(ffi_vtest)	LJLIB_REC(.)
+{
+  CTState *cts = ctype_cts(L);
+  GCcdata *cd1 = ffi_checkcdata(L, 1);
+  GCcdata *cd2 = ffi_checkcdata(L, 2);
+  CType *ct1 = ctype_raw(cts, cd1->ctypeid);
+  CType *ct2 = ctype_raw(cts, cd2->ctypeid);
+  void* v1, *v2;
+  MSize vecsz = 0;
+  int result;
+
+  vecsz = getcdvecsz(cts, ct1);
+
+  if (vecsz == 0) {
+    vecsz = getcdvecsz(cts, ct2);
+  }
+
+  lj_cconv_ct_tv(cts, ctype_get(cts, CTID_P_CVOID), (uint8_t *)&v1, L->base,
+                 CCF_ARG(1)| CCF_INTRINS_ARG);
+
+  lj_cconv_ct_tv(cts, ctype_get(cts, CTID_P_CVOID), (uint8_t *)&v2, L->base+1,
+                 CCF_ARG(2)| CCF_INTRINS_ARG);
+
+  if (vecsz == 16) {
+    result = _mm_testz_si128(_mm_loadu_si128((__m128i*)v1), _mm_loadu_si128((__m128i*)v2));
+  } else {
+    result = _mm256_testz_si256(_mm256_castps_si256(_mm256_loadu_ps((float*)v1)), 
+                                _mm256_castps_si256(_mm256_loadu_ps((float*)v2)));
+  }
+
+  setboolV(&G(L)->tmptv2, !result);
+  setboolV(L->top++, !result);
+  return 1;
+}
+
 LJLIB_PUSH(top-4) LJLIB_SET(C)
 LJLIB_PUSH(top-3) LJLIB_SET(os)
 LJLIB_PUSH(top-2) LJLIB_SET(arch)

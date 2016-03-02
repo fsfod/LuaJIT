@@ -1716,6 +1716,9 @@ static void asm_ir(ASMState *as, IRIns *ir)
       asm_equal(as, ir);
     }
     break;
+  case IR_VTEST:
+    asm_vtest(as, ir);
+    break;
 
   case IR_RETF: asm_retf(as, ir); break;
 
