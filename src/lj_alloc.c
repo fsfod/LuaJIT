@@ -397,13 +397,30 @@ static void *CALL_MREMAP_(void *ptr, size_t osz, size_t nsz, int flags)
 
 void *lj_allocpages(size_t minsize)
 {
-  void* mem = DIRECT_MMAP(ArenaSize);
+  void* mem = DIRECT_MMAP(minsize*2);
+  VirtualFree(mem, 0, MEM_RELEASE);
+
+  uintptr_t minbase = lj_round((uintptr_t)mem, ArenaSize);
+  mem = VirtualAlloc(minbase, minsize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 
   if ((((uintptr_t)mem) & (ArenaSize-1)) != 0) {
-    lua_assert(0);
-    mem = DIRECT_MMAP(ArenaSize);
+
+    for (size_t i = 0; i < 20; i++) {
+      VirtualFree(mem, 0, MEM_RELEASE);
+
+      mem = DIRECT_MMAP(minsize*(i+1));
+      VirtualFree(mem, 0, MEM_RELEASE);
+
+      minbase = lj_round((uintptr_t)mem, ArenaSize);
+      mem = VirtualAlloc(minbase, minsize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+
+      if (mem) {
+        break;
+      }
+    }
   }
 
+  lua_assert((((uintptr_t)mem) & (ArenaSize-1)) == 0);
   return mem;
 }
 

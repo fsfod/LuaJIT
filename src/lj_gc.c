@@ -599,7 +599,7 @@ void lj_gc_init(global_State *g, lua_State *L)
 static void atomic(global_State *g, lua_State *L)
 {
   size_t udsize;
-  //arena_traversegrey(g, g->travarena, -1);
+ // arena_traversegrey(g, g->travarena, -1);
 
   gc_mark_uv(g);  /* Need to remark open upvalues (the thread may be dead). */
   gc_propagate_gray(g);  /* Propagate any left-overs. */
@@ -631,6 +631,15 @@ static void atomic(global_State *g, lua_State *L)
   g->strempty.marked = g->gc.currentwhite;
   setmref(g->gc.sweep, &g->gc.root);
   g->gc.estimate = g->gc.total - (GCSize)udsize;  /* Initial estimate. */
+}
+
+static void sweep_arenas(global_State *g)
+{
+  /*TODO: handling of multiple arenas */
+
+  for (MSize i = 0; i < g->gc.arenas.top; i++) {
+   // arena_majorsweep(g->gc.arenas.tab[i]);
+  }
 }
 
 /* GC state machine. Returns a cost estimate for each step performed. */
@@ -665,6 +674,7 @@ static size_t gc_onestep(lua_State *L)
   case GCSsweep: {
     GCSize old = g->gc.total;
     setmref(g->gc.sweep, gc_sweep(g, mref(g->gc.sweep, GCRef), GCSWEEPMAX));
+    sweep_arenas(g);
     lua_assert(old >= g->gc.total);
     g->gc.estimate -= old - g->gc.total;
     if (gcref(*mref(g->gc.sweep, GCRef)) == NULL) {
