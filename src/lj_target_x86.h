@@ -295,6 +295,7 @@ typedef enum {
   XV_MOVUPSto =  XV_0f(11),
   XV_MOVDQU   = XV_f30f(6f),
   XV_MOVDQUto = XV_f30f(7f),
+  XV_PTEST    = XV_660f38(17),
   XV_VZEROUPPER = XV_0f(77),
 
   /* Variable-length opcodes. XO_* prefix. */

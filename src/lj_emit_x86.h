@@ -43,6 +43,8 @@
 /* extract and merge the opcode,vvv,L,pp, W and set VEXMAP_0F */
 #define VEX2TO3(op) ((op & 0xff7f0000) | 0xe1c4 | ((op & 0x800000) >> 8))
 
+#define VEX_256IR(ir) (irt_isv256(IR((ir)->op1)->t) ? VEX_256 : 0)
+
 static int vexpp(uint32_t byte)
 {
   switch (byte) {

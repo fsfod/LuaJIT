@@ -796,6 +796,29 @@ end
     assert_jit(4, vlength, vec)
   end)
   
+  it("vtest", function()
+    local vneg = ffi.new("int4", -1, -1, -1, -1)
+    local vmixed1 = ffi.new("int4", 0, 1, 0, 1)
+    local vz = ffi.new("int4", 0, 0, 0, 0)
+    
+    assert_true(ffi.vtest(vneg, vneg))
+    assert_true(ffi.vtest(vneg, vmixed1))
+    assert_true(ffi.vtest(vmixed1, vmixed1))
+    assert_false(ffi.vtest(vz, vz))
+    
+    local function vtest(v1, v2)
+      return (ffi.vtest(v1, v2))
+    end
+    
+    assert_jit(true, vtest, vneg, vneg)
+    assert_noexit(true, vtest, vneg, vmixed1)
+    assert_exit(false, vtest, vz, vz)
+    
+    assert_jit(false, vtest, vz, vz)
+    assert_exit(true, vtest, vneg, vneg)
+    assert_exit(true, vtest, vneg, vmixed1)
+  end)
+  
   it("prefixsum", function()
     local asm = ffi.C
     ffi.cdef[[

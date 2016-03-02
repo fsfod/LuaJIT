@@ -1975,7 +1975,12 @@ void lj_record_ins(jit_State *J)
     case LJ_POST_FIXGUARD:  /* Fixup and emit pending guard. */
     case LJ_POST_FIXGUARDSNAP:  /* Fixup and emit pending guard and snapshot. */
       if (!tvistruecond(&J2G(J)->tmptv2)) {
-	J->fold.ins.o ^= 1;  /* Flip guard to opposite. */
+        if (J->fold.ins.o <= IR_NE) {
+          J->fold.ins.o ^= 1;  /* Flip guard to opposite. */
+        } else {
+          J->fold.ins.t.irt = (J->fold.ins.t.irt & ~IRT_TYPE) | IRT_FALSE;
+        }
+
 	if (J->postproc == LJ_POST_FIXGUARDSNAP) {
 	  SnapShot *snap = &J->cur.snap[J->cur.nsnap-1];
 	  J->cur.snapmap[snap->mapofs+snap->nent-1]--;  /* False -> true. */
