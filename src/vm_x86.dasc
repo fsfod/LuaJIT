@@ -2839,25 +2839,25 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov [DISPATCH+DISPATCH_J(parent)], RA
   |.if X64
   |.if X64WIN
-  |  sub rsp, 16*8+4*8			// Room for SSE regs + save area.
+  |  sub rsp, 16*16+4*8			// Room for SSE regs + save area.
   |.else
-  |  sub rsp, 16*8			// Room for SSE regs.
+  |  sub rsp, 16*16			// Room for SSE regs.
   |.endif
   |  add rbp, -128
-  |  movsd qword [rbp-8],   xmm15; movsd qword [rbp-16],  xmm14
-  |  movsd qword [rbp-24],  xmm13; movsd qword [rbp-32],  xmm12
-  |  movsd qword [rbp-40],  xmm11; movsd qword [rbp-48],  xmm10
-  |  movsd qword [rbp-56],  xmm9;  movsd qword [rbp-64],  xmm8
-  |  movsd qword [rbp-72],  xmm7;  movsd qword [rbp-80],  xmm6
-  |  movsd qword [rbp-88],  xmm5;  movsd qword [rbp-96],  xmm4
-  |  movsd qword [rbp-104], xmm3;  movsd qword [rbp-112], xmm2
-  |  movsd qword [rbp-120], xmm1;  movsd qword [rbp-128], xmm0
+  |  movups oword [rbp-16], xmm15; movups oword [rbp-32], xmm14
+  |  movups oword [rbp-48], xmm13; movups oword [rbp-64], xmm12
+  |  movups oword [rbp-80], xmm11; movups oword [rbp-96], xmm10
+  |  movups oword [rbp-112], xmm9; movups oword [rbp-128], xmm8
+  |  movups oword [rbp-144], xmm7; movups oword [rbp-160], xmm6
+  |  movups oword [rbp-176], xmm5; movups oword [rbp-192], xmm4
+  |  movups oword [rbp-208], xmm3; movups oword [rbp-224], xmm2
+  |  movups oword [rbp-240], xmm1; movups oword [rbp-256], xmm0
   |.else
-  |  sub esp, 8*8+16			// Room for SSE regs + args.
-  |  movsd qword [ebp-40], xmm7; movsd qword [ebp-48], xmm6
-  |  movsd qword [ebp-56], xmm5; movsd qword [ebp-64], xmm4
-  |  movsd qword [ebp-72], xmm3; movsd qword [ebp-80], xmm2
-  |  movsd qword [ebp-88], xmm1; movsd qword [ebp-96], xmm0
+  |  sub esp, 8*16+16			// Room for SSE regs + args.
+  |  movups oword [ebp-48], xmm7; movups oword [ebp-64], xmm6
+  |  movups oword [ebp-80], xmm5; movups oword [ebp-96], xmm4
+  |  movups oword [ebp-112], xmm3; movups oword [ebp-128], xmm2
+  |  movups oword [ebp-144], xmm1; movups oword [ebp-160], xmm0
   |.endif
   |  // Caveat: RB is ebp.
   |  mov L:RB, [DISPATCH+DISPATCH_GL(cur_L)]

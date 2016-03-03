@@ -659,7 +659,7 @@ static void snap_restoreval(jit_State *J, GCtrace *T, ExitState *ex,
       setintV(o, (int32_t)ex->gpr[r-RID_MIN_GPR]);
 #if !LJ_SOFTFP
     } else if (irt_isnum(t)) {
-      setnumV(o, ex->fpr[r-RID_MIN_FPR]);
+      setnumV(o, ex->fpr[r-RID_MIN_FPR].n);
 #elif LJ_64  /* && LJ_SOFTFP */
     } else if (irt_isnum(t)) {
       o->u64 = ex->gpr[r-RID_MIN_GPR];
@@ -672,6 +672,7 @@ static void snap_restoreval(jit_State *J, GCtrace *T, ExitState *ex,
     } else if (irt_ispri(t)) {
       setpriV(o, irt_toitype(t));
     } else {
+      lua_assert(!irt_isvec(t));
       setgcV(J->L, o, (GCobj *)ex->gpr[r-RID_MIN_GPR], irt_toitype(t));
     }
   }
@@ -731,10 +732,14 @@ static void snap_restoredata(GCtrace *T, ExitState *ex,
       if (LJ_64 && LJ_BE && sz == 4) src++;
     }
   }
-  lua_assert(sz == 1 || sz == 2 || sz == 4 || sz == 8);
+  lua_assert(sz == 1 || sz == 2 || sz == 4 || sz == 8 || sz == 16 || sz == 32);
   if (sz == 4) *(int32_t *)dst = *src;
   else if (sz == 8) *(int64_t *)dst = *(int64_t *)src;
   else if (sz == 1) *(int8_t *)dst = (int8_t)*src;
+  else if (sz == 16) {
+    ((double *)dst)[0] = ((double *)src)[0];
+    ((double *)dst)[1] = ((double *)src)[1];
+  } else if (sz == 32) memcpy(dst, src, 32);
   else *(int16_t *)dst = (int16_t)*src;
 }
 #endif
@@ -775,6 +780,8 @@ static void snap_unsink(jit_State *J, GCtrace *T, ExitState *ex,
 	  if (irt_is64(irs->t)) szs = 8;
 	  else if (irt_isi8(irs->t) || irt_isu8(irs->t)) szs = 1;
 	  else if (irt_isi16(irs->t) || irt_isu16(irs->t)) szs = 2;
+	  else if (irt_isv128(irs->t)) szs = 16;
+	  else if (irt_isv256(irs->t)) szs = 32;
 	  else szs = 4;
 	  if (LJ_64 && iro->o == IR_KINT64)
 	    p += (int64_t)ir_k64(iro)->u64;
