@@ -362,6 +362,7 @@ typedef struct GCproto {
   uint32_t unused_gc64;
 #endif
   GCRef gclist;
+  MSize rawstacksize;
   MRef k;		/* Split constant array (points to the middle). */
   MRef uv;		/* Upvalue list. local slot|0x8000 or parent uv idx. */
   MSize sizekgc;	/* Number of collectable constants. */

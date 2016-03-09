@@ -266,14 +266,31 @@ static void gc_traverse_proto(global_State *g, GCproto *pt)
 /* Traverse the frame structure of a stack. */
 static MSize gc_traverse_frames(global_State *g, lua_State *th)
 {
-  TValue *frame, *top = th->top-1, *bot = tvref(th->stack);
+  TValue *frame, *prevframe = th->top, *top = th->top-1, *bot = tvref(th->stack);
   /* Note: extra vararg frame not skipped, marks function twice (harmless). */
   for (frame = th->base-1; frame > bot+LJ_FR2; frame = frame_prev(frame)) {
     GCfunc *fn = frame_func(frame);
     TValue *ftop = frame;
-    if (isluafunc(fn)) ftop += funcproto(fn)->framesize;
+    TValue *o = frame+1+LJ_FR2;
+    if (isluafunc(fn)) {
+      GCproto *pt = funcproto(fn);
+      TValue *end = prevframe;
+      /* FIXME: L->top is not set to the pt->framesize when the function is entered it
+      ** is grown and shrunk by the bc as its run, i think.
+      */
+      if (pt->rawstacksize) {
+        end = o + pt->framesize-pt->rawstacksize;
+      }
+      for (; o < end; o++)
+        gc_marktv(g, o);
+      ftop += pt->framesize;
+    } else {
+      for (; o < prevframe; o++)
+        gc_marktv(g, o);
+    }
     if (ftop > top) top = ftop;
     if (!LJ_FR2) gc_markobj(g, fn);  /* Need to mark hidden function (or L). */
+    prevframe = frame;
   }
   top++;  /* Correct bias of -1 (frame == base-1). */
   if (top > tvref(th->maxstack)) top = tvref(th->maxstack);
@@ -284,9 +301,13 @@ static MSize gc_traverse_frames(global_State *g, lua_State *th)
 static void gc_traverse_thread(global_State *g, lua_State *th)
 {
   TValue *o, *top = th->top;
+
+  /*
   for (o = tvref(th->stack)+1+LJ_FR2; o < top; o++)
     gc_marktv(g, o);
+  */
   if (g->gc.state == GCSatomic) {
+    o = top;
     top = tvref(th->stack) + th->stacksize;
     for (; o < top; o++)  /* Clear unmarked slots. */
       setnilV(o);

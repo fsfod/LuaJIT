@@ -344,6 +344,7 @@ GCproto *lj_bcread_proto(LexState *ls)
   pt->gct = ~LJ_TPROTO;
   pt->numparams = (uint8_t)numparams;
   pt->framesize = (uint8_t)framesize;
+  pt->rawstacksize = 0;
   pt->sizebc = sizebc;
   setmref(pt->k, (char *)pt + ofsk);
   setmref(pt->uv, (char *)pt + ofsuv);
