@@ -69,9 +69,18 @@ static CTypeID ffi_checkctype(lua_State *L, CTState *cts, TValue *param)
 static GCcdata *ffi_checkcdata(lua_State *L, int narg)
 {
   TValue *o = L->base + narg-1;
-  if (!(o < L->top && tviscdata(o)))
+  if (!(o < L->top && (tviscdata(o) || tvisudata(o))))
     lj_err_argt(L, narg, LUA_TCDATA);
-  return cdataV(o);
+
+  if (tviscdata(o)) {
+    return cdataV(o);
+  } else {
+    GCudata *ud = udataV(o);
+    if (ud->udtype != UDTYPE_CDATA)
+      lj_err_argt(L, narg, LUA_TCDATA);
+
+    return ucdata(ud);
+  }
 }
 
 /* Convert argument to C pointer. */
@@ -350,6 +359,49 @@ LJLIB_CF(ffi_meta___ipairs)
 }
 
 LJLIB_PUSH("ffi") LJLIB_SET(__metatable)
+
+#include "lj_libdef.h"
+
+/* -- C library metamethods ----------------------------------------------- */
+
+#define LJLIB_MODULE_ucdata_meta
+
+LJLIB_CF(ucdata_meta___index)	LJLIB_REC(cdata_index 2)
+{
+  CTState *cts = ctype_cts(L);
+  CTInfo qual = 0;
+  CType *ct;
+  uint8_t *p;
+  TValue *o = L->base;
+  if (!(o+1 < L->top && tvisudata(o)))  /* Also checks for presence of key. */
+    lj_err_argt(L, 1, LUA_TUSERDATA);
+
+  ct = lj_cdata_index(cts, ucdata(udataV(o)), o+1, &p, &qual);
+  if ((qual & 1))
+    return ffi_index_meta(L, cts, ct, MM_index);
+  if (lj_cdata_get(cts, ct, L->top-1, p))
+    lj_gc_check(L);
+  return 1;
+}
+
+LJLIB_CF(ucdata_meta___newindex)	LJLIB_REC(cdata_index 3)
+{
+  CTState *cts = ctype_cts(L);
+  CTInfo qual = 0;
+  CType *ct;
+  uint8_t *p;
+  TValue *o = L->base;
+  if (!(o+2 < L->top && tvisudata(o)))  /* Also checks for key and value. */
+    lj_err_argt(L, 1, LUA_TUSERDATA);
+  ct = lj_cdata_index(cts, ucdata(udataV(o)), o+1, &p, &qual);
+  if ((qual & 1)) {
+    if ((qual & CTF_CONST))
+      lj_err_caller(L, LJ_ERR_FFI_WRCONST);
+    return ffi_index_meta(L, cts, ct, MM_newindex);
+  }
+  lj_cdata_set(cts, ct, p, o+2, qual);
+  return 0;
+}
 
 #include "lj_libdef.h"
 
@@ -850,6 +902,11 @@ LUALIB_API int luaopen_ffi(lua_State *L)
   CTState *cts = lj_ctype_init(L);
   settabV(L, L->top++, (cts->miscmap = lj_tab_new(L, 0, 1)));
   cts->finalizer = ffi_finalizer(L);
+
+  LJ_LIB_REG(L, NULL, ucdata_meta);
+  setgcref(G(L)->gcroot[GCROOT_UCDATA], obj2gco(tabV(L->top-1)));
+  L->top--;
+
   LJ_LIB_REG(L, NULL, ffi_meta);
   /* NOBARRIER: basemt is a GC root. */
   setgcref(basemt_it(G(L), LJ_TCDATA), obj2gco(tabV(L->top-1)));

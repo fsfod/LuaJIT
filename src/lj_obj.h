@@ -320,10 +320,12 @@ enum {
   UDTYPE_USERDATA,	/* Regular userdata. */
   UDTYPE_IO_FILE,	/* I/O library FILE. */
   UDTYPE_FFI_CLIB,	/* FFI C library namespace. */
+  UDTYPE_CDATA,
   UDTYPE__MAX
 };
 
 #define uddata(u)	((void *)((u)+1))
+#define ucdata(u)	(GCcdata *)(uddata(u))
 #define sizeudata(u)	(sizeof(struct GCudata)+(u)->len)
 
 /* -- C data object ------------------------------------------------------- */
@@ -563,6 +565,7 @@ typedef enum {
   GCROOT_BASEMT_NUM = GCROOT_BASEMT + ~LJ_TNUMX,
   GCROOT_IO_INPUT,	/* Userdata for default I/O input file. */
   GCROOT_IO_OUTPUT,	/* Userdata for default I/O output file. */
+  GCROOT_UCDATA,
   GCROOT_MAX
 } GCRootID;
 

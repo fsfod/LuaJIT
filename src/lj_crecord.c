@@ -48,9 +48,24 @@ static GCcdata *argv2cdata(jit_State *J, TRef tr, cTValue *o)
 {
   GCcdata *cd;
   TRef trtypeid;
-  if (!tref_iscdata(tr))
+
+  if (tref_isudata(tr)) {
+    GCudata *ud = udataV(o);
+    TRef trid;
+    if (ud->udtype != UDTYPE_CDATA) {
+      lj_trace_err(J, LJ_TRERR_BADTYPE);
+    }
+    trid = emitir(IRT(IR_FLOAD, IRT_U8), tr, IRFL_UDATA_UDTYPE);
+    emitir(IRTGI(IR_EQ), tr, lj_ir_kint(J, UDTYPE_CDATA));
+    cd = ucdata(ud);
+    /* Adjust the ref to the cdata embedded in the userdata */
+    tr = emitir(IRT(IR_ADD, IRT_CDATA), tr, lj_ir_kintp(J, sizeof(GCudata)));
+  } else if (tref_iscdata(tr)) {
+    cd = cdataV(o);
+  } else {
     lj_trace_err(J, LJ_TRERR_BADTYPE);
-  cd = cdataV(o);
+  }
+  
   /* Specialize to the CTypeID. */
   trtypeid = emitir(IRT(IR_FLOAD, IRT_U16), tr, IRFL_CDATA_CTYPEID);
   emitir(IRTG(IR_EQ, IRT_INT), trtypeid, lj_ir_kint(J, (int32_t)cd->ctypeid));
@@ -748,6 +763,11 @@ void LJ_FASTCALL recff_cdata_index(jit_State *J, RecordFFData *rd)
   CType *ct = ctype_raw(cts, cd->ctypeid);
   CTypeID sid = 0;
 
+  /* Adjust the pointer to the cdata embedded in the userdata */
+  if (rd->data > 1) {
+    ptr = emitir(IRT(IR_ADD, IRT_CDATA), ptr, lj_ir_kintp(J, sizeof(GCudata)));
+  }
+
   /* Resolve pointer or reference for cdata object. */
   if (ctype_isptr(ct->info)) {
     IRType t = (LJ_64 && ct->size == 8) ? IRT_P64 : IRT_P32;
@@ -869,7 +889,7 @@ again:
   while (ctype_isattrib(ct->info))
     ct = ctype_child(cts, ct);  /* Skip attributes. */
 
-  if (rd->data == 0) {  /* __index metamethod. */
+  if ((rd->data&1) == 0) {  /* __index metamethod. */
     J->base[0] = crec_tv_ct(J, ct, sid, ptr);
   } else {  /* __newindex metamethod. */
     rd->nres = 0;

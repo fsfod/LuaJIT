@@ -13,6 +13,7 @@
 #include "lj_ctype.h"
 #include "lj_cconv.h"
 #include "lj_cdata.h"
+#include "lj_udata.h"
 
 /* -- C data allocation --------------------------------------------------- */
 
@@ -56,6 +57,26 @@ GCcdata *lj_cdata_newx(CTState *cts, CTypeID id, CTSize sz, CTInfo info)
     return lj_cdata_new(cts, id, sz);
   else
     return lj_cdata_newv(cts->L, id, sz, ctype_align(info));
+}
+
+/* Allocate fixed-size C data object. */
+static GCcdata *lj_cdata_newu(CTState *cts, CTypeID id, CTSize sz)
+{
+  GCcdata *cd;
+#ifdef LUA_USE_ASSERT
+  CType *ct = ctype_raw(cts, id);
+  lua_assert((ctype_hassize(ct->info) ? ct->size : CTSIZE_PTR) == sz);
+#endif
+
+  GCudata* ud = lj_udata_new(cts->L, sizeof(GCcdata) + sz, NULL);
+  ud->udtype = UDTYPE_CDATA;
+  ud->metatable = cts->g->gcroot[GCROOT_UCDATA];
+  /* Nest a cdata object inside the userdata */
+  cd = (GCcdata*)uddata(ud);
+  cd->gct = ~LJ_TCDATA;
+  setgcrefp(cd->nextgc, ud);
+  cd->ctypeid = ctype_check(cts, id);
+  return cd;
 }
 
 /* Free a C data object. */

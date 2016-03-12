@@ -530,9 +530,10 @@ LUA_API lua_CFunction lua_tocfunction(lua_State *L, int idx)
 LUA_API void *lua_touserdata(lua_State *L, int idx)
 {
   cTValue *o = index2adr(L, idx);
-  if (tvisudata(o))
-    return uddata(udataV(o));
-  else if (tvislightud(o))
+  if (tvisudata(o)) {
+    GCudata *ud = udataV(o);
+    return ud->udtype != UDTYPE_CDATA ? uddata(ud) : cdataptr(ucdata(ud));
+  } else if (tvislightud(o))
     return lightudV(o);
   else
     return NULL;

@@ -35,8 +35,14 @@ static int carith_checkarg(lua_State *L, CTState *cts, CDArith *ca)
   if (o+1 >= L->top)
     lj_err_argt(L, 1, LUA_TCDATA);
   for (i = 0; i < 2; i++, o++) {
+    GCcdata *cd = NULL;
     if (tviscdata(o)) {
-      GCcdata *cd = cdataV(o);
+      cd = cdataV(o);
+    } else if (tvisudata(o) && udataV(o)->udtype == UDTYPE_CDATA) {
+      cd = ucdata(udataV(o));
+    }
+
+    if (cd) {
       CTypeID id = (CTypeID)cd->ctypeid;
       CType *ct = ctype_raw(cts, id);
       uint8_t *p = (uint8_t *)cdataptr(cd);
