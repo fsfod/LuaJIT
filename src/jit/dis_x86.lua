@@ -888,7 +888,7 @@ ffi.cdef([[
 
 local traceiroffsets = require("jit.util").traceiroffsets
 
-function setup_iroffsets(ctx, tr, outstream)
+function setup_iroffsets(ctx, tr, dump_singleir)
   local count, offsets = traceiroffsets(tr)
 
   if(count == 0) then
@@ -896,12 +896,12 @@ function setup_iroffsets(ctx, tr, outstream)
     return
   end
 
-  ctx.outstream = outstream
   ctx.tr = tr
   ctx.iroffsets = ffi.cast("IROffsetRecord*", offsets)
   ctx.iroffset_count = count
   ctx.iroffset_pos = 0
-
+  ctx.dump_singleir = dump_singleir
+  
   assert(ctx.iroffsets ~= 0)
 
   ctx.next_iroffset = ctx.iroffsets[0].offset
@@ -915,10 +915,9 @@ function CheckPrintIR(ctx)
       local entry = ctx.iroffsets[ctx.iroffset_pos]
     
       if(entry.fuseirnum ~= 0) then
-        dump_singleir(ctx.tr, ctx.outstream, entry.fuseirnum, true, true)
+        ctx.dump_singleir(ctx.tr, entry.fuseirnum, true, true)
       end
-    
-      dump_singleir(ctx.tr, ctx.outstream, entry.ins, true, true)
+      ctx.dump_singleir(ctx.tr, entry.ins, true, true)
     
       ctx.iroffset_pos = ctx.iroffset_pos+1
     

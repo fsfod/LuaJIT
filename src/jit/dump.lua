@@ -134,6 +134,8 @@ local function dumpwrite(s)
   out:write(s)
 end
 
+local dump_irins
+
 -- Disassemble machine code.
 local function dump_mcode(tr)
   local info = traceinfo(tr)
@@ -144,6 +146,7 @@ local function dump_mcode(tr)
   if addr < 0 then addr = addr + 2^32 end
   out:write("---- TRACE ", tr, " mcode ", #mcode, "\n")
   local ctx = disass.create(mcode, addr, dumpwrite)
+  setup_iroffsets(ctx, tr, dump_irins)
   ctx.hexdump = 0
   ctx.symtab = fillsymtab(tr, info.nexit)
   if loop ~= 0 then
@@ -431,6 +434,71 @@ local function dumpcallargs(tr, ins)
   end
 end
 
+local irnames = vmdef.irnames
+
+function dump_irins(tr, ins, dumpreg)
+  local m, ot, op1, op2, ridsp = traceir(tr, ins)
+  local oidx, t = 6*shr(ot, 8), band(ot, 31)
+  local op = sub(irnames, oidx+1, oidx+6)
+  if op == "LOOP  " then
+    if dumpreg then
+      out:write(format("%04d ------------ LOOP ------------\n", ins))
+    else
+      out:write(format("%04d ------ LOOP ------------\n", ins))
+    end
+  elseif op ~= "NOP   " and op ~= "CARG  " and (dumpreg or op ~= "RENAME") then
+    local rid = band(ridsp, 255)
+    if dumpreg then
+      out:write(format("%04d %-6s", ins, ridsp_name(ridsp, ins)))
+    else
+      out:write(format("%04d ", ins))
+    end
+    out:write(format("%s%s %s %s ",
+              (rid == 254 or rid == 253) and "}" or
+              (band(ot, 128) == 0 and " " or ">"),
+              band(ot, 64) == 0 and " " or "+",
+              irtype[t], op))
+    local m1, m2 = band(m, 3), band(m, 3*4)
+    if sub(op, 1, 4) == "CALL" then
+    local ctype
+    if m2 == 1*4 then -- op2 == IRMlit
+      out:write(format("%-10s  (", vmdef.ircall[op2]))
+    else
+      ctype = dumpcallfunc(tr, op2)
+    end
+    if op1 ~= -1 then dumpcallargs(tr, op1) end
+    out:write(")")
+    if ctype then out:write(" ctype ", ctype) end
+    elseif op == "CNEW  " and op2 == -1 then
+      out:write(formatk(tr, op1))
+    elseif m1 ~= 3 then -- op1 != IRMnone
+      if op1 < 0 then
+        out:write(formatk(tr, op1))
+      else
+        out:write(format(m1 == 0 and "%04d" or "#%-3d", op1))
+      end
+    
+      if m2 ~= 3*4 then -- op2 != IRMnone
+        if m2 == 1*4 then -- op2 == IRMlit
+          local litn = litname[op]
+          if litn and litn[op2] then
+            out:write("  ", litn[op2])
+          elseif op == "UREFO " or op == "UREFC " then
+            out:write(format("  #%-3d", shr(op2, 8)))
+          else
+            out:write(format("  #%-3d", op2))
+          end
+        elseif op2 < 0 then
+          out:write("  ", formatk(tr, op2))
+        else
+          out:write(format("  %04d", op2))
+        end
+      end
+    end
+  end
+  out:write("\n")
+end
+
 -- Dump IR and interleaved snapshots.
 local function dump_ir(tr, dumpsnap, dumpreg)
   local info = traceinfo(tr)
@@ -457,66 +525,7 @@ local function dump_ir(tr, dumpsnap, dumpreg)
       snap = tracesnap(tr, snapno)
       snapref = snap and snap[0] or 65536
     end
-    local m, ot, op1, op2, ridsp = traceir(tr, ins)
-    local oidx, t = 6*shr(ot, 8), band(ot, 31)
-    local op = sub(irnames, oidx+1, oidx+6)
-    if op == "LOOP  " then
-      if dumpreg then
-	out:write(format("%04d ------------ LOOP ------------\n", ins))
-      else
-	out:write(format("%04d ------ LOOP ------------\n", ins))
-      end
-    elseif op ~= "NOP   " and op ~= "CARG  " and
-	   (dumpreg or op ~= "RENAME") then
-      local rid = band(ridsp, 255)
-      if dumpreg then
-	out:write(format("%04d %-6s", ins, ridsp_name(ridsp, ins)))
-      else
-	out:write(format("%04d ", ins))
-      end
-      out:write(format("%s%s %s %s ",
-		       (rid == 254 or rid == 253) and "}" or
-		       (band(ot, 128) == 0 and " " or ">"),
-		       band(ot, 64) == 0 and " " or "+",
-		       irtype[t], op))
-      local m1, m2 = band(m, 3), band(m, 3*4)
-      if sub(op, 1, 4) == "CALL" then
-	local ctype
-	if m2 == 1*4 then -- op2 == IRMlit
-	  out:write(format("%-10s  (", vmdef.ircall[op2]))
-	else
-	  ctype = dumpcallfunc(tr, op2)
-	end
-	if op1 ~= -1 then dumpcallargs(tr, op1) end
-	out:write(")")
-	if ctype then out:write(" ctype ", ctype) end
-      elseif op == "CNEW  " and op2 == -1 then
-	out:write(formatk(tr, op1))
-      elseif m1 ~= 3 then -- op1 != IRMnone
-	if op1 < 0 then
-	  out:write(formatk(tr, op1))
-	else
-	  out:write(format(m1 == 0 and "%04d" or "#%-3d", op1))
-	end
-	if m2 ~= 3*4 then -- op2 != IRMnone
-	  if m2 == 1*4 then -- op2 == IRMlit
-	    local litn = litname[op]
-	    if litn and litn[op2] then
-	      out:write("  ", litn[op2])
-	    elseif op == "UREFO " or op == "UREFC " then
-	      out:write(format("  #%-3d", shr(op2, 8)))
-	    else
-	      out:write(format("  #%-3d", op2))
-	    end
-	  elseif op2 < 0 then
-	    out:write("  ", formatk(tr, op2))
-	  else
-	    out:write(format("  %04d", op2))
-	  end
-	end
-      end
-      out:write("\n")
-    end
+    dump_irins(tr, ins, dumpreg)
   end
   if snap then
     if dumpreg then
@@ -547,7 +556,9 @@ local function dump_trace(what, tr, func, pc, otr, oex)
   if what == "stop" or (what == "abort" and dumpmode.a) then
     if dumpmode.i then dump_ir(tr, dumpmode.s, dumpmode.r and what == "stop")
     elseif dumpmode.s then dump_snap(tr) end
-    if dumpmode.m then dump_mcode(tr) end
+    if dumpmode.m then 
+      dump_mcode(tr) 
+    end
   end
   if what == "start" then
     if dumpmode.H then out:write('<pre class="ljdump">\n') end
