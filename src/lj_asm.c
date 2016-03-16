@@ -2191,6 +2191,21 @@ static void asm_setup_regsp(ASMState *as)
 
 /* -- Assembler core ------------------------------------------------------ */
 
+int32_t lj_asm_irofs(ASMState *as, IRRef ir, MSize offsetcount)
+{
+  jit_State *J = as->J;
+
+  if (!J->iroffsets) {
+    return -1;
+  }
+
+  J->iroffsets[offsetcount].offset = as->mcp;
+  J->iroffsets[offsetcount].ins = ir;
+  J->iroffsets[offsetcount].fuseirnum = as->fuseirnum;
+  as->fuseirnum = 0;
+  return offsetcount+1;
+}
+
 /* Assemble a trace. */
 void lj_asm_trace(jit_State *J, GCtrace *T)
 {
@@ -2248,14 +2263,16 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
     as->fuseref = (as->flags & JIT_F_OPT_FUSE) ? as->loopref : FUSE_DISABLED;
     as->fuseirnum = 0;
     asm_setup_regsp(as);
-    if (!as->loopref)
-      asm_tail_link(as);
 
     if(offsetcount != -1){
       offsetcount = 0;
       J->iroffset_mcpstart = as->mcp;
     }
-    
+
+    if (!as->loopref) {
+      asm_tail_link(as);
+      lj_asm_irofs(as, 5, offsetcount++);
+    }
 
     /* Assemble a trace in linear backwards order. */
     for (as->curins--; as->curins > as->stopins; as->curins--) {
@@ -2269,24 +2286,17 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
       checkmclim(as);
       asm_ir(as, ir);
 
-      //skip sinked value
+      /* Skip sinked values */
       if(offsetcount != -1 && (ir->o != IR_XSTORE || ir->r != RID_SINK)){
-        J->iroffsets[offsetcount].offset = as->mcp;
-        J->iroffsets[offsetcount].ins = as->curins;
-        J->iroffsets[offsetcount].fuseirnum = as->fuseirnum;
-        as->fuseirnum = 0;
-        offsetcount++;
+        lj_asm_irofs(as, as->curins, offsetcount++);
 
-        if(offsetcount == J->iroffsets_capacity){
+        if((offsetcount+4) > J->iroffsets_capacity){
           lj_mem_growvec(J->L, J->iroffsets, J->iroffsets_capacity, 0xfffff, IRCodeOffset); 
         }
       }
 
     }
   } while (as->realign);  /* Retry in case the MCode needs to be realigned. */
-
-  J->cur.iroffset_count = offsetcount == -1 ? 0 : offsetcount;
-  J->iroffset_mcpend = as->mcp;
 
   /* Emit head of trace. */
   RA_DBG_REF();
@@ -2295,6 +2305,8 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
     as->curins = as->T->snap[0].ref;
     asm_snap_prep(as);  /* The GC check is a guard. */
     asm_gc_check(as);
+
+    lj_asm_irofs(as, 2, offsetcount++);
   }
   ra_evictk(as);
   if (as->parent)
@@ -2302,6 +2314,9 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
   else
     asm_head_root(as);
   asm_phi_fixup(as);
+
+  J->cur.iroffset_count = offsetcount == -1 ? 0 : offsetcount;
+  J->iroffset_mcpend = as->mcp;
 
   RA_DBGX((as, "===== START ===="));
   RA_DBG_FLUSH();

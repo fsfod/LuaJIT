@@ -898,13 +898,12 @@ function setup_iroffsets(ctx, tr, dump_singleir)
 
   ctx.tr = tr
   ctx.iroffsets = ffi.cast("IROffsetRecord*", offsets)
-  ctx.iroffset_count = count
-  ctx.iroffset_pos = 0
+  ctx.iroffset_pos = count-1
   ctx.dump_singleir = dump_singleir
   
   assert(ctx.iroffsets ~= 0)
 
-  ctx.next_iroffset = ctx.iroffsets[0].offset
+  ctx.next_iroffset = ctx.iroffsets[ctx.iroffset_pos].offset
 end
 
 function CheckPrintIR(ctx)
@@ -917,11 +916,18 @@ function CheckPrintIR(ctx)
       if(entry.fuseirnum ~= 0) then
         ctx.dump_singleir(ctx.tr, entry.fuseirnum, true, true)
       end
-      ctx.dump_singleir(ctx.tr, entry.ins, true, true)
+      
+      if entry.ins < 0x8000 then
+        ctx.dump_singleir(ctx.tr, entry.ins, true, true)
+      elseif entry.ins == 0x8002 then
+        ctx.out("GCSTEP\n")
+       elseif entry.ins == 0x8005 then
+        ctx.out("TAIL\n")
+      end
     
-      ctx.iroffset_pos = ctx.iroffset_pos+1
+      ctx.iroffset_pos = ctx.iroffset_pos-1
     
-      if(ctx.iroffset_pos < ctx.iroffset_count) then     
+      if(ctx.iroffset_pos >= 0) then     
         ctx.next_iroffset = ctx.iroffsets[ctx.iroffset_pos].offset
       else
         ctx.next_iroffset = nil

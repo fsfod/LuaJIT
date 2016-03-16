@@ -210,7 +210,7 @@ typedef enum {
 } TraceLink;
 
 typedef struct IROffsetRecord{
-  int offset;
+  int32_t offset;
   uint16_t ins;
   uint16_t fuseirnum;
 }IROffsetRecord;
