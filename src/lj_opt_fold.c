@@ -2283,10 +2283,12 @@ LJFOLDF(fload_cdata_typeid_cnew)
   return NEXTFOLD;
 }
 
-/* Pointer, int and int64 cdata objects are immutable. */
+/* Pointer, int, int64 and vector cdata objects are immutable. */
 LJFOLD(FLOAD CNEWI IRFL_CDATA_PTR)
 LJFOLD(FLOAD CNEWI IRFL_CDATA_INT)
 LJFOLD(FLOAD CNEWI IRFL_CDATA_INT64)
+LJFOLD(FLOAD CNEWI IRFL_CDATA_V128)
+LJFOLD(FLOAD CNEWI IRFL_CDATA_V256)
 LJFOLDF(fload_cdata_ptr_int64_cnew)
 {
   if (LJ_LIKELY(J->flags & JIT_F_OPT_FOLD))
@@ -2301,6 +2303,8 @@ LJFOLD(FLOAD any IRFL_CDATA_CTYPEID)
 LJFOLD(FLOAD any IRFL_CDATA_PTR)
 LJFOLD(FLOAD any IRFL_CDATA_INT)
 LJFOLD(FLOAD any IRFL_CDATA_INT64)
+LJFOLD(FLOAD any IRFL_CDATA_V128)
+LJFOLD(FLOAD any IRFL_CDATA_V256)
 LJFOLD(VLOAD any any)  /* Vararg loads have no corresponding stores. */
 LJFOLDX(lj_opt_cse)
 

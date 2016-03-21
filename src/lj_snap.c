@@ -761,7 +761,7 @@ static void snap_unsink(jit_State *J, GCtrace *T, ExitState *ex,
     setcdataV(J->L, o, cd);
     if (ir->o == IR_CNEWI) {
       uint8_t *p = (uint8_t *)cdataptr(cd);
-      lua_assert(sz == 4 || sz == 8);
+      lua_assert(sz == 4 || sz == 8 || sz == 16 || sz == 32);
       if (LJ_32 && sz == 8 && ir+1 < T->ir + T->nins && (ir+1)->o == IR_HIOP) {
 	snap_restoredata(T, ex, snapno, rfilt, (ir+1)->op2, LJ_LE?p+4:p, 4);
 	if (LJ_BE) p += 4;
