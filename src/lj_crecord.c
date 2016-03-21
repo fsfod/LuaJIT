@@ -514,8 +514,17 @@ static TRef crec_ct_ct(jit_State *J, CType *d, CType *s, TRef dp, TRef sp,
   case CCX(V, I):
   case CCX(V, F):
   case CCX(V, C):
-  case CCX(V, V):
     goto err_nyi;
+  case CCX(V, V):
+    if(s == d) {
+      goto xstore;
+    } else if (ssize == dsize && (ssize == 16 || ssize == 32)) {
+      /* FIXME: is this a nop on all platforms */
+      goto xstore;
+    } else {
+      goto err_nyi;
+    }
+    break;
 
   /* Destination is a pointer. */
   case CCX(P, P):
