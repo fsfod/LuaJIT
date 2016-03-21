@@ -9,6 +9,8 @@
 #include "lj_obj.h"
 #include "lj_gc.h"
 #include "lj_ctype.h"
+#include <xmmintrin.h>
+#include <immintrin.h>
 
 #if LJ_HASFFI
 
@@ -60,6 +62,10 @@ static LJ_AINLINE GCcdata *lj_cdata_new_(lua_State *L, CTypeID id, CTSize sz)
 LJ_FUNC GCcdata *lj_cdata_newref(CTState *cts, const void *pp, CTypeID id);
 LJ_FUNC GCcdata *lj_cdata_newv(lua_State *L, CTypeID id, CTSize sz,
 			       CTSize align);
+LJ_FUNC GCcdata *LJ_VECTORCALL lj_cdata_newv128(lua_State *L, CTypeID id,
+                                                __m128 v);
+LJ_FUNC GCcdata *LJ_VECTORCALL lj_cdata_newv256(lua_State *L, CTypeID id,
+                                                __m256 v);
 LJ_FUNC GCcdata *lj_cdata_newx(CTState *cts, CTypeID id, CTSize sz,
 			       CTInfo info);
 

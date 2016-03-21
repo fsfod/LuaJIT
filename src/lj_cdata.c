@@ -13,6 +13,7 @@
 #include "lj_ctype.h"
 #include "lj_cconv.h"
 #include "lj_cdata.h"
+#include <intrin.h>
 
 /* -- C data allocation --------------------------------------------------- */
 
@@ -46,6 +47,20 @@ GCcdata *lj_cdata_newv(lua_State *L, CTypeID id, CTSize sz, CTSize align)
   cd->marked |= 0x80;
   cd->gct = ~LJ_TCDATA;
   cd->ctypeid = id;
+  return cd;
+}
+
+GCcdata *LJ_VECTORCALL lj_cdata_newv128(lua_State *L, CTypeID id, __m128 v)
+{
+  GCcdata *cd = lj_cdata_newv(L, id, 16, 4);
+  _mm_store_ps((float*)cdataptr(cd), v);
+  return cd;
+}
+
+GCcdata *LJ_VECTORCALL lj_cdata_newv256(lua_State *L, CTypeID id, __m256 v)
+{
+  GCcdata *cd = lj_cdata_newv(L, id, 32, 5);
+  _mm256_storeu_ps((float*)cdataptr(cd), v);
   return cd;
 }
 

@@ -597,12 +597,8 @@ static TRef crec_tv_ct(jit_State *J, CType *s, CTypeID sid, TRef sp)
     emitir(IRT(IR_XSTORE, t), ptr, tr2);
     return dp;
   } else if (ctype_isvector(sinfo)) {
-    TRef ptr, tr1, dp;
-    dp = emitir(IRT(IR_CNEW, IRT_CDATA), lj_ir_kint(J, sid), lj_ir_kint(J, s->size));
-    tr1 = emitir(IRT(IR_XLOAD, t), sp, 0);
-    ptr = emitir(IRT(IR_ADD, IRT_PTR), dp, lj_ir_kintp(J, sizeof(GCcdata)));
-    emitir(IRT(IR_XSTORE, t), ptr, tr1);
-    return dp;
+    TRef tr1 = emitir(IRT(IR_XLOAD, t), sp, 0);
+    return emitir(IRT(IR_CNEWI, IRT_CDATA), lj_ir_kint(J, sid), tr1);
   } else {
     /* NYI: copyval of vectors. */
   err_nyi:
@@ -694,6 +690,9 @@ static TRef crec_ct_tv(jit_State *J, CType *d, TRef dp, TRef sp, cTValue *sval)
     } else if (t == IRT_INT || t == IRT_U32) {
       if (ctype_isenum(s->info)) s = ctype_child(cts, s);
       sp = emitir(IRT(IR_FLOAD, t), sp, IRFL_CDATA_INT);
+      goto doconv;
+    } else if (t == IRT_V128 || t == IRT_V256) {
+      sp = emitir(IRT(IR_FLOAD, t), sp, t == IRT_V128 ? IRFL_CDATA_V128 : IRFL_CDATA_V256);
       goto doconv;
     } else {
       sp = emitir(IRT(IR_ADD, IRT_PTR), sp, lj_ir_kintp(J, sizeof(GCcdata)));
@@ -1268,7 +1267,7 @@ static TRef vectorarg(jit_State *J, RecordFFData *rd, int i, CType *d, CType *ar
     /* cdata vectors are intended tobe readonly */
     flags |= IRXLOAD_READONLY;
     /* TODO: better vector checking and using IRFL_CDATA_V128/ IRFL_CDATA_V256*/
-    tr = emitir(IRT(IR_ADD, IRT_INTP), tra, lj_ir_kint(J, sizeof(GCcdata)));
+    return emitir(IRT(IR_FLOAD, reg_irt(arg->size & 0xff)), tra, IRFL_CDATA_V128);
   } else {
     ct = ctype_get(cts, arg->size >> 16);
     tr = crec_ct_tv(J, ct, 0, tra, &rd->argv[i]);
@@ -1382,11 +1381,18 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *func)
         J->base[i] = emitconv(J->base[i], IRT_NUM, IRT_FLOAT, 0);
       } else if(rk_isvec(kind)) {
         TRef v = J->base[i];
-        TRef tr = emitir(IRT(IR_CNEW, IRT_CDATA), lj_ir_kint(J, id),
-                         lj_ir_kint(J, rk_irtfpr(kind) == REGKIND_V128 ? 16 : 32));
-        J->base[i] = tr;
-        tr = emitir(IRT(IR_ADD, IRT_INTP), tr, lj_ir_kint(J, sizeof(GCcdata)));
-        emitir(IRT(IR_XSTORE, rk_irtfpr(kind)), tr, v);
+        TRef tr;
+        CType *ct = ctype_raw(cts, id);
+
+        if (ctype_isvector(ct->info)) {
+          J->base[i] = emitir(IRT(IR_CNEWI, IRT_CDATA), lj_ir_kint(J, id), v);
+        } else {
+          tr = emitir(IRT(IR_CNEW, IRT_CDATA), lj_ir_kint(J, id),
+            lj_ir_kint(J, rk_irtfpr(kind) == REGKIND_V128 ? 16 : 32));
+          J->base[i] = tr;
+          tr = emitir(IRT(IR_ADD, IRT_INTP), tr, lj_ir_kint(J, sizeof(GCcdata)));
+          emitir(IRT(IR_XSTORE, rk_irtfpr(kind)), tr, v);
+        }
       } else {
         lua_assert(kind == REGKIND_FPR64);
       }

@@ -2202,7 +2202,7 @@ static void asm_cnew(ASMState *as, IRIns *ir)
   asm_setupresult(as, ir, ci);  /* GCcdata * */
 
   /* Initialize immutable cdata object. */
-  if (ir->o == IR_CNEWI) {
+  if (ir->o == IR_CNEWI && !irt_isvec(IR(ir->op2)->t)) {
     RegSet allow = (RSET_GPR & ~RSET_SCRATCH);
 #if LJ_64
     Reg r64 = sz == 8 ? REX_64 : 0;
@@ -2240,7 +2240,14 @@ static void asm_cnew(ASMState *as, IRIns *ir)
     } while (1);
 #endif
     lua_assert(sz == 4 || sz == 8);
-  } else if (ir->op2 != REF_NIL) {  /* Create VLA/VLS/aligned cdata. */
+  } else if (ir->o == IR_CNEWI) {  /* Create aligned vector cdata. */
+    ci = &lj_ir_callinfo[irt_t(ir->t) == IRT_V128 ? IRCALL_lj_cdata_newv128 : IRCALL_lj_cdata_newv256];
+    args[0] = ASMREF_L;     /* lua_State *L */
+    args[1] = ir->op1;      /* CTypeID id   */
+    args[2] = ir->op2;      /* Vector */
+    asm_gencall(as, ci, args);
+    return;
+  } else if (ir->op2 != REF_NIL || ir->o == IR_CNEWI) {  /* Create VLA/VLS/aligned cdata. */
     ci = &lj_ir_callinfo[IRCALL_lj_cdata_newv];
     args[0] = ASMREF_L;     /* lua_State *L */
     args[1] = ir->op1;      /* CTypeID id   */

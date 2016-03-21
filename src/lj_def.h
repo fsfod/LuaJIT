@@ -258,6 +258,7 @@ static LJ_AINLINE uint32_t lj_getu32(const void *p)
 #define LJ_NOINLINE	__declspec(noinline)
 #if defined(_M_IX86)
 #define LJ_FASTCALL	__fastcall
+#define LJ_VECTORCALL __vectorcall
 #endif
 
 #ifdef _M_PPC
@@ -317,6 +318,9 @@ static LJ_AINLINE uint32_t lj_getu32(const void *v)
 /* Optional defines. */
 #ifndef LJ_FASTCALL
 #define LJ_FASTCALL
+#endif
+#ifndef LJ_VECTORCALL
+#define LJ_VECTORCALL __vectorcall
 #endif
 #ifndef LJ_NORET
 #define LJ_NORET
