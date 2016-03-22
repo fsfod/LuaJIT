@@ -63,6 +63,11 @@ LJ_FUNC int LJ_FASTCALL lj_gc_step_jit(global_State *g, MSize steps);
 #endif
 LJ_FUNC void lj_gc_fullgc(lua_State *L);
 
+/* GC Arena */
+union GCArena *lj_gc_newarena(lua_State *L, int travobjs);
+void lj_gc_freearena(global_State *g, union GCArena *arena);
+union GCArena *lj_gc_setactive_arena(lua_State *L, union GCArena *arena, int travobjs);
+
 /* GC check: drive collector forward if the GC threshold has been reached. */
 #define lj_gc_check(L) \
   { if (LJ_UNLIKELY(G(L)->gc.total >= G(L)->gc.threshold)) \

@@ -98,7 +98,10 @@ void arena_majorsweep(GCArena *arena);
 void* arena_alloc(GCArena *arena, MSize size);
 void arena_free(GCArena *arena, void* mem, MSize size);
 MSize arena_cellextent(GCArena *arena, MSize cell);
+
 GCCellID arena_firstallocated(GCArena *arena);
+MSize arena_objcount(GCArena *arena);
+MSize arena_totalobjmem(GCArena *arena);
 
 #define lj_mem_new_arena(L, size) arena_alloc((GCArena*)G(L)->arena, size)
 #define lj_mem_newt_arena(L, size, t) (t*)arena_alloc((GCArena*)G(L)->arena, size)

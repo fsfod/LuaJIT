@@ -592,6 +592,22 @@ GCArena* lj_gc_newarena(lua_State *L, int travobjs)
   return arena;
 }
 
+GCArena *lj_gc_setactive_arena(lua_State *L, GCArena *arena, int travobjs)
+{
+  global_State *g = G(L);
+  GCArena *old;
+  lua_assert(lj_gc_getarenaid(g, arena) != -1);
+
+  if (travobjs) {
+    old = g->travarena;
+    g->travarena = arena;
+  } else {
+    old = g->arena;
+    g->arena = arena;
+  }
+  return old;
+}
+
 int lj_gc_getarenaid(global_State *g, void* arena)
 {
   for (MSize i = 0; i < g->gc.arenas.top; i++)

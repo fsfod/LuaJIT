@@ -426,10 +426,28 @@ LJLIB_CF(dofile)
 
 /* -- Base library: GC control -------------------------------------------- */
 
+static GCArena *checkarg_arena(lua_State *L, int narg)
+{
+  TValue *o = L->base + narg-1;
+
+  if (!tvisgcv(o)) {
+    lj_err_argtype(L, 1, "gc object");
+  }
+
+  return ptr2arena(gcV(o));
+}
+
 LJLIB_CF(gcinfo)
 {
-  setintV(L->top++, (int32_t)(G(L)->gc.total >> 10));
-  return 1;
+  if ((L->top-L->base) > 0) {
+    GCArena *arena = checkarg_arena(L, 1);
+    lua_pushinteger(L, arena_objcount(arena));
+    lua_pushinteger(L, arena_totalobjmem(arena));
+    return 2;
+  } else {
+    setintV(L->top++, (int32_t)(G(L)->gc.total >> 10));
+    return 1;
+  }
 }
 
 LJLIB_CF(collectgarbage)
@@ -448,6 +466,46 @@ LJLIB_CF(collectgarbage)
   }
   L->top++;
   return 1;
+}
+
+LJLIB_CF(createarena)
+{
+  int travobjs = 1;
+  GCArena *arena = lj_gc_newarena(L, travobjs);
+  GCArena *oldarena = lj_gc_setactive_arena(L, arena, travobjs);
+  if (travobjs) {
+    lua_newuserdata(L, 0);
+  }
+  lj_gc_setactive_arena(L, oldarena, travobjs);
+  return 1;
+}
+
+LJLIB_CF(setarena)
+{
+  TValue *tv = lj_lib_checkany(L, 1);
+  GCArena *arena;
+  TValue *atypetv = (L->base + 1) < L->top ? L->base + 1 : NULL;
+  int arenatype = -1;
+
+  if (!tvisgcv(tv)) {
+    lj_err_argtype(L, 1, "gc object");
+  }
+  arena = ptr2arena(gcV(tv));
+
+  if (atypetv && tvisnum(atypetv)) {
+    arenatype = lj_lib_checkint(L, 2);
+    if(arenatype != 0 && arenatype != 1 && arenatype != -1)
+      lj_err_callermsg(L, "arena type must be 0(non traversable objects), 1(traversable objects) or -1(both)");
+  }
+
+  if (arenatype != -1) {
+    lj_gc_setactive_arena(L, arena, arenatype);
+  } else {
+    lj_gc_setactive_arena(L, arena, 0);
+    lj_gc_setactive_arena(L, arena, 1);
+  }
+
+  return 0;
 }
 
 /* -- Base library: miscellaneous functions ------------------------------- */
