@@ -105,7 +105,7 @@ static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
   if (LJ_MAX_COLOSIZE != 0 && asize > 0 && asize <= LJ_MAX_COLOSIZE) {
     Node *nilnode;
     lua_assert((sizeof(GCtab) & 7) == 0);
-    t = (GCtab *)lj_mem_newgco(L, sizetabcolo(asize));
+    t = lj_mem_newgcot(L, sizetabcolo(asize), GCtab);
     t->gct = ~LJ_TTAB;
     t->nomm = (uint8_t)~0;
     t->colo = (int8_t)asize;
@@ -120,7 +120,7 @@ static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
 #endif
   } else {  /* Otherwise separately allocate the array part. */
     Node *nilnode;
-    t = lj_mem_newobj(L, GCtab);
+    t = lj_mem_newgcot(L, sizeof(GCtab), GCtab);
     t->gct = ~LJ_TTAB;
     t->nomm = (uint8_t)~0;
     t->colo = 0;

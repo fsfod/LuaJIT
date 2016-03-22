@@ -125,7 +125,7 @@ static GCtrace *trace_save_alloc(jit_State *J)
   size_t sz = sztr + szins +
 	      J->cur.nsnap*sizeof(SnapShot) +
 	      J->cur.nsnapmap*sizeof(SnapEntry);
-  return lj_mem_newtgco(J->L, (MSize)sz, GCtrace);
+  return lj_mem_newgcoUL(J->L, (MSize)sz, GCtrace);
 }
 
 /* Save current trace by copying and compacting it. */

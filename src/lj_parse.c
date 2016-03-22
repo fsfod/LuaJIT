@@ -1565,7 +1565,7 @@ static GCproto *fs_finish(LexState *ls, BCLine line)
   ofsdbg = sizept; sizept += fs_prep_var(ls, fs, &ofsvar);
 
   /* Allocate prototype and initialize its fields. */
-  pt = (GCproto *)lj_mem_newgco(L, (MSize)sizept);
+  pt = lj_mem_newgcot(L, (MSize)sizept, GCproto);
   pt->gct = ~LJ_TPROTO;
   pt->sizept = (MSize)sizept;
   pt->trace = 0;

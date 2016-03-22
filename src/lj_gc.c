@@ -905,6 +905,15 @@ void *lj_mem_realloc(lua_State *L, void *p, GCSize osz, GCSize nsz)
   return p;
 }
 
+static GCobj *linkgco(global_State *g, GCobj *o)
+{
+  lua_assert(checkptrGC(o));
+  setgcrefr(o->gch.nextgc, g->gc.root);
+  setgcref(g->gc.root, o);
+  newwhite(g, o);
+  return o;
+}
+
 /* Allocate new GC object and link it to the root set. */
 void * LJ_FASTCALL lj_mem_newgco(lua_State *L, GCSize size)
 {
@@ -912,12 +921,8 @@ void * LJ_FASTCALL lj_mem_newgco(lua_State *L, GCSize size)
   GCobj *o = (GCobj*)arena_alloc(G(L)->travarena, size);
   if (o == NULL)
     lj_err_mem(L);
-  lua_assert(checkptrGC(o));
   g->gc.total += size;
-  setgcrefr(o->gch.nextgc, g->gc.root);
-  setgcref(g->gc.root, o);
-  newwhite(g, o);
-  return o;
+  return linkgco(g, o);
 }
 
 void * LJ_FASTCALL lj_mem_newcd(lua_State *L, GCSize size)
@@ -944,11 +949,20 @@ void *lj_mem_grow(lua_State *L, void *p, MSize *szp, MSize lim, MSize esz)
   return p;
 }
 
-GCobj *lj_mem_newgcoraw(lua_State * L, size_t osize)
+GCobj *lj_mem_newgco_unlinked(lua_State * L, size_t osize, uint32_t gct)
+{
+  GCArena *arena = gct == gctid_GCstr ? G(L)->arena : G(L)->travarena;
+  GCobj *o = (GCobj*)arena_alloc(arena, osize);
+
+  G(L)->gc.total += (GCSize)osize;
+  return o;
+}
+
+GCobj *lj_mem_newgco_t(lua_State * L, size_t osize, uint32_t gct)
 {
   GCobj *o = (GCobj*)arena_alloc(G(L)->travarena, osize);
   G(L)->gc.total += (GCSize)osize;
-  return o;
+  return linkgco(G(L), o);
 }
 
 void lj_mem_freegco(global_State * g, void * p, size_t osize)

@@ -49,7 +49,7 @@ static GCupval *func_finduv(lua_State *L, TValue *slot)
     pp = &p->nextgc;
   }
   /* No matching upvalue found. Create a new one. */
-  uv = lj_mem_newt_arena(L, sizeof(GCupval), GCupval);
+  uv = lj_mem_newgcoUL(L, sizeof(GCupval), GCupval);
   newwhite(g, uv);
   uv->gct = ~LJ_TUPVAL;
   uv->closed = 0;  /* Still open. */
@@ -68,7 +68,7 @@ static GCupval *func_finduv(lua_State *L, TValue *slot)
 /* Create an empty and closed upvalue. */
 static GCupval *func_emptyuv(lua_State *L)
 {
-  GCupval *uv = (GCupval *)lj_mem_newgco(L, sizeof(GCupval));
+  GCupval *uv = lj_mem_newobj(L, GCupval);
   uv->gct = ~LJ_TUPVAL;
   uv->closed = 1;
   setnilV(&uv->tv);
@@ -106,7 +106,7 @@ void LJ_FASTCALL lj_func_freeuv(global_State *g, GCupval *uv)
 
 GCfunc *lj_func_newC(lua_State *L, MSize nelems, GCtab *env)
 {
-  GCfunc *fn = (GCfunc *)lj_mem_newgco(L, sizeCfunc(nelems));
+  GCfunc *fn = lj_mem_newgcot(L, sizeCfunc(nelems), GCfunc);
   fn->c.gct = ~LJ_TFUNC;
   fn->c.ffid = FF_C;
   fn->c.nupvalues = (uint8_t)nelems;
@@ -119,7 +119,7 @@ GCfunc *lj_func_newC(lua_State *L, MSize nelems, GCtab *env)
 static GCfunc *func_newL(lua_State *L, GCproto *pt, GCtab *env)
 {
   uint32_t count;
-  GCfunc *fn = (GCfunc *)lj_mem_newgco(L, sizeLfunc((MSize)pt->sizeuv));
+  GCfunc *fn = lj_mem_newgcot(L, sizeLfunc((MSize)pt->sizeuv), GCfunc);
   fn->l.gct = ~LJ_TFUNC;
   fn->l.ffid = FF_LUA;
   fn->l.nupvalues = 0;  /* Set to zero until upvalues are initialized. */
