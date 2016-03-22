@@ -88,7 +88,7 @@ LJ_STATIC_ASSERT((MinCellId * 16) >= offsetof(GCArena, cellsstart));
 
 #define arena_getfree(arena, blockidx) (arena->mark[(blockidx)] & ~arena->block[(blockidx)]) 
 
-GCArena* arena_create(lua_State *L, int internalptrs);
+GCArena* arena_create(global_State *L, int travobjs);
 void arena_destroy(global_State *g, GCArena *arena);
 
 size_t arena_traversegrey(global_State *g, GCArena *arena, int limit);
@@ -98,6 +98,7 @@ void arena_majorsweep(GCArena *arena);
 void* arena_alloc(GCArena *arena, MSize size);
 void arena_free(GCArena *arena, void* mem, MSize size);
 MSize arena_cellextent(GCArena *arena, MSize cell);
+GCCellID arena_firstallocated(GCArena *arena);
 
 #define lj_mem_new_arena(L, size) arena_alloc((GCArena*)G(L)->arena, size)
 #define lj_mem_newt_arena(L, size, t) (t*)arena_alloc((GCArena*)G(L)->arena, size)

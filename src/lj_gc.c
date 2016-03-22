@@ -567,10 +567,51 @@ void lj_gc_freeall(global_State *g)
     gc_fullsweep(g, &g->strhash[i]);
 
   for (MSize i = 0; i < g->gc.arenas.top; i++) {
-    arena_destroy(g, g->gc.arenas.tab[i]);
+    GCArena *arena = g->gc.arenas.tab[i];
+    lua_assert(arena_firstallocated(arena) == 0);
+    arena_destroy(g, arena);
   }
 
   lj_mem_freevec(g, g->gc.arenas.tab, g->gc.arenas.tabsz, GCArena*);
+}
+
+GCArena* lj_gc_newarena(lua_State *L, int travobjs)
+{
+  GCArena *arena = arena_create(G(L), travobjs);
+  GCArenaList *list = &G(L)->gc.arenas;
+
+  if (LJ_UNLIKELY(list->top >= list->tabsz)) {
+    lj_mem_growvec(L, list->tab, list->tabsz, LJ_MAX_MEM32, GCArena*);
+  }
+
+  /* TODO: Could use the lower bits of the arena pointer we store here to flag if
+  ** the arena contains traversable objects, if the arena is full/fragmented(no bump)/empty, 
+  ** is only for one allocation size?
+  */
+  list->tab[list->top++] = arena;
+  return arena;
+}
+
+int lj_gc_getarenaid(global_State *g, void* arena)
+{
+  for (MSize i = 0; i < g->gc.arenas.top; i++)
+    if (g->gc.arenas.tab[i] == arena) return i;
+
+  return -1;
+}
+
+void lj_gc_freearena(global_State *g, GCArena *arena)
+{
+  GCArenaList *list = &g->gc.arenas;
+  int i = lj_gc_getarenaid(g, arena);
+  lua_assert(i != -1);
+  lua_assert(arena_firstallocated(arena) == 0);
+
+  if (i != (list->top-1)) {
+    list->tab[i] = list->tab[list->top-1];
+  }
+
+  arena_destroy(g, arena);
 }
 
 void lj_gc_init(global_State *g, lua_State *L)
@@ -587,10 +628,10 @@ void lj_gc_init(global_State *g, lua_State *L)
   arenas = lj_mem_newvec(L, 16, GCArena*);
   g->gc.arenas.tab = arenas;
   g->gc.arenas.tabsz = 16;
-  g->gc.arenas.top = 2;
+  g->gc.arenas.top = 0;
 
-  arenas[0] = g->arena = arena_create(L, 0);
-  arenas[1] = g->travarena = arena_create(L, 1);
+  g->arena = lj_gc_newarena(L, 0);
+  g->travarena = lj_gc_newarena(L, 1);
 }
 
 /* -- Collector ----------------------------------------------------------- */

@@ -28,10 +28,14 @@ GCArena* arena_init(GCArena* arena)
   return arena;
 }
 
-GCArena* arena_create(lua_State *L, int internalptrs)
+GCArena* arena_create(global_State *g, int travobjs)
 {
   GCArena* arena = (GCArena*)lj_allocpages(ArenaSize + ((MaxCellId-MinCellId) * 4));
   lua_assert((((uintptr_t)arena) & (ArenaSize-1)) == 0);
+  
+  if (travobjs) {
+
+  }
   return arena_init(arena);
 }
 
@@ -220,6 +224,21 @@ static GCCellID arena_findfree(GCArena *arena, MSize mincells)
     startcell = 0;
   }
   
+
+  return 0;
+}
+
+GCCellID arena_firstallocated(GCArena *arena)
+{
+  MSize i, maxblock = MaxBlockWord;
+
+  for (i = 0; i < maxblock; i++) {
+    GCBlockword allocated = arena->block[i];
+
+    if (allocated) {
+      return MinCellId + (i * BlocksetBits) + lj_ffs(allocated);
+    }
+  }
 
   return 0;
 }
