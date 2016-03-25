@@ -44,6 +44,21 @@
   { lua_assert(!tvisgcv(tv) || (~itype(tv) == gcval(tv)->gch.gct)); \
     if (tviswhite(tv)) gc_mark(g, gcV(tv)); }
 
+void gc_mark(global_State *g, GCobj *o);
+
+void gc_marktv2(global_State *g, TValue *tv)
+{
+  lua_assert(!tvisgcv(tv) || (~itype(tv) == gcval(tv)->gch.gct));
+
+  if (tviswhite(tv)) {
+    if (tvisstr(tv) || tviscdata(tv)) {
+      arena_markptr(gcV(tv));
+    } else {
+      gc_mark(g, gcV(tv));
+    }
+  }
+}
+
 /* Mark a GCobj (if needed). */
 #define gc_markobj(g, o) \
   { if (iswhite(obj2gco(o))) gc_mark(g, obj2gco(o)); }
@@ -965,25 +980,62 @@ void *lj_mem_grow(lua_State *L, void *p, MSize *szp, MSize lim, MSize esz)
   return p;
 }
 
-GCobj *lj_mem_newgco_unlinked(lua_State * L, size_t osize, uint32_t gct)
+GCobj *findarenaspace(lua_State *L, size_t osize, int travobj)
 {
-  GCArena *arena = gct == gctid_GCstr ? G(L)->arena : G(L)->travarena;
+  global_State *g = G(L);
+  GCArena *arena = lj_gc_newarena(L, 1);
+  MSize cellnum = arena_roundcells(osize);
+
+  if (0) {
+    for (MSize i = 0; i < g->gc.arenas.top; i++) {
+      GCArena *arena = g->gc.arenas.tab[i];
+      if (arena_canbump(arena, cellnum) || (arena->freecount >= cellnum && travobj)) {
+
+      }
+    }
+  } else {
+    arena = lj_gc_newarena(L, travobj);
+    lj_gc_setactive_arena(L, arena, travobj);
+  }
+
+  return (GCobj*)arena_alloc(arena, osize);
+}
+
+#define istrav(gct) (gct != ~LJ_TSTR && gct != ~LJ_TCDATA)
+
+size_t total = 0;
+
+GCobj *lj_mem_newgco_unlinked(lua_State *L, size_t osize, uint32_t gct)
+{
+  GCArena *arena = istrav(gct) ? G(L)->arena : G(L)->travarena;
   GCobj *o = (GCobj*)arena_alloc(arena, osize);
 
+  if (o == NULL) {
+    return findarenaspace(L, osize, istrav(gct));
+  }
+
   G(L)->gc.total += (GCSize)osize;
+  total += osize;
   return o;
 }
 
-GCobj *lj_mem_newgco_t(lua_State * L, size_t osize, uint32_t gct)
+GCobj *lj_mem_newgco_t(lua_State *L, size_t osize, uint32_t gct)
 {
   GCobj *o = (GCobj*)arena_alloc(G(L)->travarena, osize);
+
+  if (o == NULL) {
+    return findarenaspace(L, osize, 1);
+  }
+
   G(L)->gc.total += (GCSize)osize;
+  total += osize;
   return linkgco(G(L), o);
 }
 
-void lj_mem_freegco(global_State * g, void * p, size_t osize)
+void lj_mem_freegco(global_State *g, void *p, size_t osize)
 {
   g->gc.total -= (GCSize)osize;
-  arena_free(ptr2arena(p), p, osize);
+  /* TODO: Free cell list */
+  arena_free(g, ptr2arena(p), p, osize);
 }
 

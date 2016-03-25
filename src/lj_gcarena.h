@@ -67,6 +67,14 @@ typedef union FreeCellRange {
   uint32_t idlen;
 } FreeCellRange;
 
+typedef struct ArenaFreeSpace {
+  uint32_t binmask;
+  GCCellID1 *bins[8];
+  uint8_t bincounts[8];
+  uint32_t *oversized;
+  MSize listsz;
+} ArenaFreeSpace;
+
 typedef union GCArena {
   GCCell cells[0];
   struct {
@@ -95,14 +103,26 @@ typedef union GCArena {
 LJ_STATIC_ASSERT((offsetof(GCArena, cellsstart) & 15) == 0);
 LJ_STATIC_ASSERT((MinCellId * 16) == offsetof(GCArena, cellsstart));
 
+typedef struct FreeChunk {
+  uint8_t len;
+  uint8_t count;
+  GCCellID1 prev;
+  uint32_t binmask;
+  uint16_t ids[4];
+} FreeChunk;
+
 //LJ_STATIC_ASSERT(((offsetof(GCArena, cellsstart)) / 16) == MinCellId);
 
 #define round_alloc(size) lj_round(size, CellSize)
 #define arena_roundcells(size) (round_alloc(size) >> 4)
+#define arena_containsobj(arena, o) ((arena) >= ((GCArena *)(o)) && (arena) < ((GCArena *)(o))) 
 
 #define arena_cell(arena, cellidx) (&(arena)->cells[(cellidx)])
 #define arena_celltop(arena) (mref((arena)->celltop, GCCell))
+/* Can the arena bump allocate a min number of contiguous cells */
+#define arena_canbump(arena, mincells) ((arena_celltop(arena)+mincells) < arena_cell(arena, MaxCellId))
 #define arena_topcellid(arena) (ptr2cell(mref((arena)->celltop, GCCell)))
+#define arena_freelist(arena) mref((arena)->freelist, FreeChunk)
 
 #define arena_blockidx(cell) (((cell-MinCellId) & ~BlocksetMask) >> 5)
 #define arena_getblock(arena, cell) (arena->block)[(arena_blockidx(cell))]
@@ -111,7 +131,7 @@ LJ_STATIC_ASSERT((MinCellId * 16) == offsetof(GCArena, cellsstart));
 #define arena_blockbitidx(cell) (cell & BlocksetMask)
 #define arena_blockbit(cell) (((GCBlockword)1) << ((cell-MinCellId) & BlocksetMask))
 
-#define arena_getfree(arena, blockidx) (arena->mark[(blockidx)] & ~arena->block[(blockidx)]) 
+#define arena_getfree(arena, blockidx) (arena->mark[(blockidx)] & ~arena->block[(blockidx)])
 
 GCArena* arena_create(global_State *L, int travobjs);
 void arena_destroy(global_State *g, GCArena *arena);
@@ -120,8 +140,8 @@ size_t arena_traversegrey(global_State *g, GCArena *arena, int limit);
 void arena_minorsweep(GCArena *arena);
 void arena_majorsweep(GCArena *arena);
 
-void* arena_alloc(GCArena *arena, MSize size);
-void arena_free(GCArena *arena, void* mem, MSize size);
+void* arena_allocslow(GCArena *arena, MSize size);
+void arena_free(global_State *g, GCArena *arena, void* mem, MSize size);
 MSize arena_cellextent(GCArena *arena, MSize cell);
 
 GCCellID arena_firstallocated(GCArena *arena);
@@ -130,8 +150,6 @@ MSize arena_totalobjmem(GCArena *arena);
 
 #define lj_mem_new_arena(L, size) arena_alloc((GCArena*)G(L)->arena, size)
 #define lj_mem_newt_arena(L, size, t) (t*)arena_alloc((GCArena*)G(L)->arena, size)
-
-#define lj_mem_free_arena(L, p, size) arena_free(g->arena, p, size)
 
 /* Must be at least 16 byte aligned */
 #define arena_checkptr(p) lua_assert(p != NULL && (((uintptr_t)p) & 0xf) == 0)
@@ -190,8 +208,28 @@ static LJ_AINLINE void arena_markptr(void* o)
   if (((GCCell*)o)->gct != ~LJ_TSTR && ((GCCell*)o)->gct != ~LJ_TCDATA) {
     GCCellID1* greylist = mref(arena->greylist, GCCellID1);
     *greylist = cell;
-    //setmref(arena->greylist, greylist+1);
+    //setmref(arena->greylist, greylist-1);
   }
 
   arena_getmark(arena, cell) |= arena_blockbit(cell);
+}
+
+static void *arena_alloc(GCArena *arena, MSize size)
+{
+  MSize numcells = arena_roundcells(size);
+  GCCellID cell;
+  lua_assert(numcells != 0 && numcells < MaxCellId);
+
+  if (!arena_canbump(arena, numcells)) {
+    return arena_allocslow(arena, size);
+  }
+
+  cell = ptr2cell(arena_celltop(arena));
+  lua_assert(arena_cellstate(arena, cell) < CellState_White);
+
+  setmref(arena->celltop, arena_celltop(arena)+numcells);
+  arena_checkid(cell);
+
+  arena_getblock(arena, cell) |= arena_blockbit(cell);
+  return arena_cell(arena, cell);
 }
