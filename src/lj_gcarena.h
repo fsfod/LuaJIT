@@ -8,14 +8,15 @@ enum GCOffsets {
   CellSize = 16,
   ArenaSize = 1 << 20,
   ArenaCellMask = (ArenaSize-1),
-  MetadataSize = (ArenaSize / 64),
-  MinCellId = MetadataSize / CellSize,
+  ArenaMetadataSize = (ArenaSize / 64),
+  ArenaMaxObjMem = (ArenaSize - ArenaMetadataSize),
+  MinCellId = ArenaMetadataSize / CellSize,
   MaxCellId = ArenaSize / CellSize,
 
   BlocksetBits = 32,
   BlocksetMask = BlocksetBits - 1,
-  ArenaExtraData = 16,
-  MaxBlockWord = ((ArenaSize - MetadataSize) / 16 / BlocksetBits) ,
+  UnusedBlockWords = MinCellId / BlocksetBits,
+  MaxBlockWord = ((ArenaMaxObjMem) / 16 / BlocksetBits),
 };
 
 LJ_STATIC_ASSERT(((MaxCellId - MinCellId) & BlocksetMask) == 0);
@@ -30,6 +31,19 @@ typedef struct GCCell {
   };
 } GCCell;
 
+/*
++=========+=======+======+
+|  State  | Block | Mark |
++=========+=======+======+
+| Extent  | 0     | 0    |
++---------+-------+------+
+| Free    | 0     | 1    |
++---------+-------+------+
+| White   | 1     | 0    |
++---------+-------+------+
+| Black   | 1     | 1    |
++---------+-------+------+
+*/
 typedef enum CellState {
   CellState_Extent = 0,
   CellState_Free = 1,
@@ -56,19 +70,30 @@ typedef union FreeCellRange {
 typedef union GCArena {
   GCCell cells[0];
   struct {
-    MRef greylist;
-    MRef greybase;
+    union{
+      struct{
+        MRef celltop;
+        MRef freelist;
+      };
+      GCBlockword unusedblock[UnusedBlockWords];
+    };
     GCBlockword block[MaxBlockWord];
-    MRef celltop;
-    GCCellID1 freecount;
-    GCCellID1 firstfree;
+    union {
+      struct {
+        MRef greylist;
+        MRef greybase;
+        GCCellID1 freecount;
+        GCCellID1 firstfree;
+      };
+      GCBlockword unusedmark[UnusedBlockWords];
+    };
     GCBlockword mark[MaxBlockWord];
     GCCell cellsstart[0];
   };
 } GCArena;
 
 LJ_STATIC_ASSERT((offsetof(GCArena, cellsstart) & 15) == 0);
-LJ_STATIC_ASSERT((MinCellId * 16) >= offsetof(GCArena, cellsstart));
+LJ_STATIC_ASSERT((MinCellId * 16) == offsetof(GCArena, cellsstart));
 
 //LJ_STATIC_ASSERT(((offsetof(GCArena, cellsstart)) / 16) == MinCellId);
 
