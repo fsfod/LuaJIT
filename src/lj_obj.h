@@ -23,6 +23,8 @@ typedef uint64_t GCSize;
 typedef uint32_t GCSize;
 #endif
 
+#define round_alloc(size) lj_round(size, 16)
+
 /* Memory reference */
 typedef struct MRef {
 #if LJ_GC64
@@ -494,7 +496,7 @@ typedef struct GCtab {
 #endif
 } GCtab;
 
-#define sizetabcolo(n)	((n)*sizeof(TValue) + sizeof(GCtab))
+#define sizetabcolo(a, hbits)	(round_alloc((a)*sizeof(TValue)) + round_alloc((1u << (hbits)) * sizeof(Node)) + sizeof(GCtab))
 #define tabref(r)	(&gcref((r))->tab)
 #define noderef(r)	(mref((r), Node))
 #define nextnode(n)	(mref((n)->next, Node))

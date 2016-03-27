@@ -204,9 +204,13 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
     for (i = 0; i < asize; i++)
       gc_marktv(g, arrayslot(t, i));
   }
+  if (t->asize && !lj_tab_hascolo_array(t))
+    arena_markgcvec(arrayslot(t, 0), t->asize * sizeof(TValue));
   if (t->hmask > 0) {  /* Mark hash part. */
     Node *node = noderef(t->node);
     MSize i, hmask = t->hmask;
+    if(!lj_tab_hascolo_hash(t))
+      arena_markgcvec(node, hmask * sizeof(Node));
     for (i = 0; i <= hmask; i++) {
       Node *n = &node[i];
       if (!tvisnil(&n->val)) {  /* Mark non-empty slot. */
@@ -1037,5 +1041,20 @@ void lj_mem_freegco(global_State *g, void *p, size_t osize)
   g->gc.total -= (GCSize)osize;
   /* TODO: Free cell list */
   arena_free(g, ptr2arena(p), p, osize);
+}
+
+void *lj_mem_reallocgc(lua_State *L, void *p, MSize oldsz, GCSize newsz)
+{
+  void* mem;
+
+ // if (newsz < ArenaOversized) {
+    mem = arena_alloc(G(L)->arena, newsz);
+    memcpy(mem, p, oldsz);
+    if (p) lj_mem_freegco(G(L), p, oldsz);
+ // } else {
+//    mem = p;
+ // }
+
+  return mem;
 }
 

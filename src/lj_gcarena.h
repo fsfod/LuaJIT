@@ -113,7 +113,6 @@ typedef struct FreeChunk {
 
 //LJ_STATIC_ASSERT(((offsetof(GCArena, cellsstart)) / 16) == MinCellId);
 
-#define round_alloc(size) lj_round(size, CellSize)
 #define arena_roundcells(size) (round_alloc(size) >> 4)
 #define arena_containsobj(arena, o) ((arena) >= ((GCArena *)(o)) && (arena) < ((GCArena *)(o))) 
 
@@ -211,6 +210,15 @@ static LJ_AINLINE void arena_markptr(void* o)
     *greylist = cell;
     //setmref(arena->greylist, greylist-1);
   }
+
+  arena_getmark(arena, cell) |= arena_blockbit(cell);
+}
+
+static LJ_AINLINE void arena_markgcvec(void* o, MSize size)
+{
+  GCArena *arena = ptr2arena(o);
+  GCCellID cell = ptr2cell(o);
+  lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
 
   arena_getmark(arena, cell) |= arena_blockbit(cell);
 }

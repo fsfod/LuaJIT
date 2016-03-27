@@ -141,6 +141,7 @@ static LJ_AINLINE void lj_mem_free(global_State *g, void *p, size_t osize)
 GCobj *lj_mem_newgco_unlinked(lua_State *L, size_t osize, uint32_t gct);
 GCobj *lj_mem_newgco_t(lua_State * L, size_t osize, uint32_t gct);
 void lj_mem_freegco(global_State *g, void *p, size_t osize);
+void *lj_mem_reallocgc(lua_State *L, void *p, MSize oldsz, GCSize newsz);
 
 enum gctid {
   gctid_GCstr = ~LJ_TSTR,
@@ -158,5 +159,11 @@ enum gctid {
 #define lj_mem_newgcoUL(L, s, t) ((t *)lj_mem_newgco_unlinked(L, (s), gctid_##t))
 
 #define lj_mem_freetgco(g, p)	lj_mem_freegco(g, (p), sizeof(*(p)))
+
+#define lj_mem_newgcvec(L, n, t)	((t *)lj_mem_newgco_unlinked(L, (GCSize)((n)*sizeof(t)), ~LJ_TTAB))
+#define lj_mem_freegcvec(g, p, n, t)	lj_mem_freegco(g, (p), (n)*sizeof(t))
+
+#define lj_mem_reallocgcvec(L, p, on, n, t) \
+  ((p) = (t *)lj_mem_reallocgc(L, p, (on)*sizeof(t), (GCSize)((n)*sizeof(t))))
 
 #endif
