@@ -51,6 +51,17 @@ static void arena_setfreecell(GCArena *arena, GCCellID cell)
   arena_getblock(arena, cell) &= ~arena_blockbit(cell);
 }
 
+void arena_shrinkobj(void* obj, MSize newsize)
+{
+  GCArena *arena = ptr2arena(obj);
+  GCCellID cell = ptr2cell(obj);
+  MSize numcells = arena_roundcells(newsize);
+  arena_checkid(cell);
+  lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
+  lua_assert(arena_cellstate(arena, cell+numcells) == CellState_Extent);
+  arena_setfreecell(arena, cell+numcells);
+}
+
 static void arena_setextent(GCArena *arena, GCCellID cell)
 {
   arena_checkid(cell);

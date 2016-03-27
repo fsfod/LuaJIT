@@ -142,6 +142,7 @@ void arena_majorsweep(GCArena *arena);
 
 void* arena_allocslow(GCArena *arena, MSize size);
 void arena_free(global_State *g, GCArena *arena, void* mem, MSize size);
+void arena_shrinkobj(void* obj, MSize newsize);
 MSize arena_cellextent(GCArena *arena, MSize cell);
 
 GCCellID arena_firstallocated(GCArena *arena);
