@@ -38,6 +38,39 @@ end
 
 ]]
 
+local mmintrin = [[
+function lib.%s(%s)
+  %sasm.%s(%s)
+end
+]]
+
+require("mmdef")
+
+local mmtoasm = {}
+
+local params = {
+  "a",
+  "a, b",
+  "a, b, c",
+  "a, b, c, d"
+}
+
+for _,mm in ipairs(intrindef) do 
+  if not mmtoasm[mm.asm] then
+    mmtoasm[mm.asm] = mm
+    local paramters = params[#mm.parameters]
+    print(format(mmintrin, mm.name, paramters, "return ", mm.asm, paramters))
+  else 
+    local t = mmtoasm[mm.asm]
+    
+    if type(t) ~= "table" then
+      mmtoasm[mm.asm] = {mmtoasm[mm.asm]}
+    else
+      table.insert(t, mm)
+    end
+  end
+end
+
 require("integer_opdef")
 require("float_opdef")
 require("misc_ops")
