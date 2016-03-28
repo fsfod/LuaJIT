@@ -12,6 +12,8 @@ enum GCOffsets {
   ArenaMaxObjMem = (ArenaSize - ArenaMetadataSize),
   MinCellId = ArenaMetadataSize / CellSize,
   MaxCellId = ArenaSize / CellSize,
+  /* TODO: better value taking into account what min alignment the os page allocation can provide */
+  ArenaOversized = ArenaMaxObjMem-1000,
 
   BlocksetBits = 32,
   BlocksetMask = BlocksetBits - 1,
@@ -74,6 +76,14 @@ typedef struct ArenaFreeSpace {
   uint32_t *oversized;
   MSize listsz;
 } ArenaFreeSpace;
+
+typedef struct ArenaExtra {
+  GCCellID1 *fixedcells;
+  MSize fixedtop;
+  void* allocbase;/* The base page multiple arenas created from one large page allocation */
+  void* userd;
+  uint32_t flags;
+} ArenaExtra;
 
 typedef union GCArena {
   GCCell cells[0];
@@ -241,4 +251,33 @@ static void *arena_alloc(GCArena *arena, MSize size)
 
   arena_getblock(arena, cell) |= arena_blockbit(cell);
   return arena_cell(arena, cell);
+}
+
+typedef struct OversizedNode {
+  GCRef obj;
+  MSize size;
+}OversizedNode;
+
+typedef struct OversizedTable {
+  MSize hmask;
+  OversizedNode* node;
+  MSize count;
+  MSize total;
+} OversizedTable;
+
+
+static void mark_oversized(OversizedTable *tab, void *o)
+{
+  uint32_t idx = ((uintptr_t)o) & tab->hmask;//hashgcref(o);
+
+  for (size_t i = idx; i < tab->hmask; i++) {
+    OversizedNode *node = tab->node+i;
+    if (gcref(node->obj) == NULL) {
+      return;
+    }
+
+    if (gcref(node->obj) == (GCobj *)o) {
+      node->size |= CellState_Black;
+    }
+  }
 }

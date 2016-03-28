@@ -145,7 +145,7 @@ void arena_free(global_State *g, GCArena *arena, void* mem, MSize size)
   if (chunklist == NULL) {
     /* Reuse the cell memory for a free list */
     chunklist = setfreechunk(arena, mem, numcells);
-  } else if (chunklist > arena && chunklist < (arena->cells+MaxCellId)) {
+  } else if (arena_containsobj(arena, chunklist)) {
     if (chunklist->count == 4) {
       FreeChunk *newlist = setfreechunk(arena, mem, numcells);
       newlist->prev = ptr2cell(chunklist);
@@ -400,7 +400,47 @@ void arena_majorsweep(GCArena *arena)
   }
 }
 
+void arena_setblacks(GCArena *arena, GCCellID1 *cells, MSize count)
+{
+  for (size_t i = 0; i < count; i++) 
+  {
+    GCCellID cell = cells[i];
+    arena_getmark(arena, cell) |= arena_blockbit(cell);
+  }
+}
+
 void arena_sweep(global_State *g, GCArena *arena)
 {
-  arena_getfreerangs(gcrefp(g->cur_L, lua_State), arena);
+  MSize size = sizeof(arena->block)/sizeof(GCBlockword);
+
+  for (size_t i = 0; i < size; i++) {
+    GCBlockword white = arena->block[i] & ~arena->mark[i];
+
+    if (white) {
+      uint32_t bit = lj_ffs(white);
+      GCCellID cellid = bit + (i * BlocksetBits) + MinCellId;
+
+      GCCell *cell = arena_cell(arena, cellid);
+
+      if (cell->gct != LJ_TCDATA && cell->gct != LJ_TSTR) {
+        
+      }
+    }
+  }
+}
+
+void sweep_oversized(global_State *g, OversizedTable *tab)
+{
+
+  for (size_t i = 0; i < tab->hmask; i++) {
+    OversizedNode *node = tab->node+i;
+
+    if ((node->size & 3) == CellState_White) {
+      lj_mem_free(g, gcref(node->obj), node->size & 3);
+      setgcrefnull(node->obj);
+      node->size &= ~3;
+    }
+  }
+
+
 }
