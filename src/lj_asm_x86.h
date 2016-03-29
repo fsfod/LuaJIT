@@ -642,8 +642,15 @@ static void asm_gencall(ASMState *as, const CCallInfo *ci, IRRef *args)
 	emit_movmroi(as, RID_ESP, ofs+4, (int32_t)ir_knum(ir)->u32.hi);
       } else {
 	r = ra_alloc1(as, ref, RSET_FPR);
-	emit_rmro(as, irt_isnum(ir->t) ? XO_MOVSDto : XO_MOVSSto,
-		  r, RID_ESP, ofs);
+
+        if (irt_isvec(ir->t)) {
+          x86Op xo = as->flags & JIT_F_AVX1 ? XV_MOVUPSto : XO_MOVUPSto;
+          if (irt_isv256(ir->t)) xo |= VEX_256;
+          emit_rmro(as, xo,r, RID_ESP, ofs);
+        } else {
+          emit_rmro(as, irt_isnum(ir->t) ? XO_MOVSDto : XO_MOVSSto,
+                    r, RID_ESP, ofs);
+        }
       }
       ofs += (LJ_32 && irt_isfloat(ir->t)) ? 4 : 8;
     } else {  /* Non-FP argument is on stack. */
