@@ -2443,6 +2443,7 @@ typedef struct IntrinBuildState {
   RegSet inset, outset, modregs;
   uint32_t spadj, contexspill, contexofs;
   uint8_t outcontext;
+  char vzeroupper;
 } IntrinBuildState;
 
 static void intrins_setup(CIntrinsic *intrins, IntrinBuildState *info)
@@ -2456,6 +2457,9 @@ static void intrins_setup(CIntrinsic *intrins, IntrinBuildState *info)
   for (i = 0; i < intrins->insz; i++) {
     Reg r = reg_rid(info->in[i]);
     
+    if (reg_kind(info->in[i]) == REGKIND_V256)
+      info->vzeroupper = 1;
+
     if (reg_isgpr(info->in[i])) {
       if (r == RID_CONTEXT) {
         /* Save the offset in the input context so we can load it last */
@@ -2468,6 +2472,9 @@ static void intrins_setup(CIntrinsic *intrins, IntrinBuildState *info)
   }
 
   for (i = 0; i < intrins->outsz; i++) {
+    if (reg_kind(info->out[i]) == REGKIND_V256)
+      info->vzeroupper = 1;
+
     rset_set(info->outset, reg_rid(info->out[i]));
   }
 
@@ -2592,6 +2599,13 @@ restart:
   }
 
   emit_epilogue(as, spadj, info.modregs, intrins->outsz);
+
+  /* Zero upper parts of ymm registers if any ymm register were used.
+  ** TODO: This shouldn't be need for some AMD cpus like Jaguar.
+  */
+  if (info.vzeroupper) {
+    as->mcp = emit_vop(XV_VZEROUPPER, 0, 0, 0, as->mcp, 1);
+  }
 
   /* If one of the output registers was the same as the outcontext we will
    * of saved the output value to the stack earlier, now save it into context

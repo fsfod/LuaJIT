@@ -857,6 +857,10 @@ static void emit_loadfpr(ASMState *as, uint32_t reg, Reg base, int ofs)
   case REGKIND_V128:
     op = XO_MOVUPS;
     break;
+  case REGKIND_V256:
+    op = XV_MOVUPS;
+    r |= VEX_256;
+    break;
   }
 
   if (!rk_isvec(kind)) {
@@ -886,6 +890,10 @@ static void emit_savefpr(ASMState *as, Reg reg, Reg base, int ofs)
     break;
   case REGKIND_V128:
     op = XO_MOVUPSto;
+    break;
+  case REGKIND_V256:
+    op = XV_MOVUPSto;
+    r |= VEX_256;
     break;
   }
 
