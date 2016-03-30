@@ -596,7 +596,7 @@ void lj_gc_freeall(global_State *g)
 
 GCArena* lj_gc_newarena(lua_State *L, int travobjs)
 {
-  GCArena *arena = arena_create(G(L), travobjs);
+  GCArena *arena = arena_create(L, travobjs);
   GCArenaList *list = &G(L)->gc.arenas;
 
   if (LJ_UNLIKELY(list->top >= list->tabsz)) {

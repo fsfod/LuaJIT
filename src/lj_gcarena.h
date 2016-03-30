@@ -98,7 +98,7 @@ typedef union GCArena {
     GCBlockword block[MaxBlockWord];
     union {
       struct {
-        MRef greylist;
+        MRef greytop;
         MRef greybase;
         GCCellID1 freecount;
         GCCellID1 firstfree;
@@ -142,10 +142,12 @@ typedef struct FreeChunk {
 
 #define arena_getfree(arena, blockidx) (arena->mark[(blockidx)] & ~arena->block[(blockidx)])
 
-GCArena* arena_create(global_State *L, int travobjs);
+GCArena* arena_create(lua_State *L, int travobjs);
+void arena_destroy(global_State *g, GCArena *arena);
 void* arena_createGG(GCArena** arena);
 void arena_destroyGG(global_State *g, GCArena* arena);
-void arena_destroy(global_State *g, GCArena *arena);
+void arena_creategreystack(lua_State *L, GCArena *arena);
+void arena_growgreystack(global_State *L, GCArena *arena);
 
 size_t arena_traversegrey(global_State *g, GCArena *arena, int limit);
 void arena_minorsweep(GCArena *arena);
@@ -209,19 +211,43 @@ static LJ_AINLINE int isblack2(void* o)
   GCCellID cell = ptr2cell(o);
   return (arena_getmark(arena, cell) >> arena_blockbitidx(cell)) & 1;
 }
+  
+/* Mark a traversable object */
+static LJ_AINLINE void arena_marktrav(global_State *g, void* o)
+{
+  GCArena *arena = ptr2arena(o);
+  GCCellID cell = ptr2cell(o);
+  GCCellID1* greytop = mref(arena->greytop, GCCellID1);
+  lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
+  lua_assert(((GCCell*)o)->gct != ~LJ_TSTR && ((GCCell*)o)->gct != ~LJ_TCDATA);
 
-static LJ_AINLINE void arena_markptr(void* o)
+  arena_getmark(arena, cell) |= arena_blockbit(cell);
+
+  *greytop = cell;
+  setmref(arena->greytop, greytop-1);
+  if ((greytop-1) == mref(arena->greybase, GCCellID1)) {
+    arena_growgreystack(g, arena);
+  }
+}
+
+static LJ_AINLINE void arena_markgco(global_State *g, void* o)
 {
   GCArena *arena = ptr2arena(o);
   GCCellID cell = ptr2cell(o);
   lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
-
+  
   /* Only really needed for traversable objects */
   if (((GCCell*)o)->gct != ~LJ_TSTR && ((GCCell*)o)->gct != ~LJ_TCDATA) {
-    GCCellID1* greylist = mref(arena->greylist, GCCellID1);
-    *greylist = cell;
-    //setmref(arena->greylist, greylist-1);
+    arena_getmark(arena, cell) |= arena_blockbit(cell);
   }
+}
+
+static LJ_AINLINE void arena_markcdstr(void* o)
+{
+  GCArena *arena = ptr2arena(o);
+  GCCellID cell = ptr2cell(o);
+  lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
+  lua_assert(((GCCell*)o)->gct == ~LJ_TSTR || ((GCCell*)o)->gct == ~LJ_TCDATA);
 
   arena_getmark(arena, cell) |= arena_blockbit(cell);
 }

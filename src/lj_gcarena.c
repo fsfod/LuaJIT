@@ -22,26 +22,50 @@ GCArena* arena_init(GCArena* arena)
   setmref(arena->celltop, arena->cells+MinCellId);
   arena->freecount = 0;
   arena->firstfree = MaxCellId-1;
-  /* FIXME: Dynamically sized grey list */
-  setmref(arena->greybase, &arena->cells[MaxCellId]);
-  arena->greylist = arena->greybase;
   
   return arena;
 }
 
-GCArena* arena_create(global_State *g, int travobjs)
+#define greyvecsize(arena) (mref((arena)->greybase, uint32_t)[-1])
+
+static GCCellID1 *newgreystack(lua_State *L, GCArena *arena, MSize size)
 {
-  GCArena* arena = (GCArena*)lj_allocpages(ArenaSize + ((MaxCellId-MinCellId) * 4));
+  GCCellID1 *list = lj_mem_newvec(L, size, GCCellID1);
+  setmref(arena->greybase, list+2);
+  setmref(arena->greytop, list+size);
+
+  /* Store the stack size negative of the what will be the base pointer */
+  *((uint32_t*)list) = size;
+  /* Set a sentinel value so we know when the stack is empty */
+  list[size-1] = 0;
+  return list;
+}
+
+void arena_creategreystack(lua_State *L, GCArena *arena)
+{
+  if (!mref(arena->greybase, GCCellID1)) {
+    newgreystack(L, arena, 16);
+  }
+}
+
+GCArena* arena_create(lua_State *L, int travobjs)
+{
+  GCArena* arena = (GCArena*)lj_allocpages(ArenaSize);
   lua_assert((((uintptr_t)arena) & (ArenaSize-1)) == 0);
+  arena_init(arena);
   
   if (travobjs) {
-
+    arena_creategreystack(L, arena);
   }
-  return arena_init(arena);
+  return arena;
 }
 
 void arena_destroy(global_State *g, GCArena* arena)
 {
+  if (mref(arena->greybase, GCCellID1)) {
+    lj_mem_freevec(g, mref(arena->greybase, GCCellID1)-2, greyvecsize(arena), GCCellID1);
+  }
+  
   lj_freeepages(arena, ArenaSize);
 }
 
@@ -384,8 +408,10 @@ size_t arena_traversegrey(global_State *g, GCArena *arena, int limit)
   GCCellID1 *cellid = mref(arena->greybase, GCCellID1);
   size_t total = 0;
 
-  for (; cellid < mref(arena->greylist, GCCellID1); cellid++) {
-    GCCell* cell = arena_cell(arena, *cellid);
+  for (; *mref(arena->greytop, GCCellID1) != 0;) {
+    GCCellID1 *top = mref(arena->greytop, GCCellID1);
+    GCCell* cell = arena_cell(arena, top[-1]);
+    setmref(arena->greytop, top-1);
     
     if (cell->gct != ~LJ_TUDATA) {
       total += gc_traverse(g, (GCobj*)cell);
@@ -398,8 +424,19 @@ size_t arena_traversegrey(global_State *g, GCArena *arena, int limit)
     }
   }
 
-  arena->greylist = arena->greybase;
+  arena->greytop = arena->greybase;
   return total;
+}
+
+void arena_growgreystack(global_State *g, GCArena *arena)
+{
+  lua_State *L = mainthread(g);
+  GCCellID1 *old = mref(arena->greybase, GCCellID1)-2, *newlist;
+  MSize size = *(MSize *)old;
+
+  newlist = newgreystack(L, arena, greyvecsize(arena)*2);
+  memcpy(newlist + 2 + size, old, size*2);
+  lj_mem_freevec(g, old, size, GCCellID1);
 }
 
 void arena_minorsweep(GCArena *arena)
