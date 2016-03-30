@@ -111,12 +111,13 @@ static LJ_AINLINE void clearapart(GCtab *t)
 static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
 {
   GCtab *t;
+  MSize hmask = hbits > 0 ? 1 << hbits : 0;
 
   /* First try to colocate the array part. */
-  if (asize > 0 && sizetabcolo(asize, hbits) <= LJ_MAX_COLOSIZE) {
+  if (asize > 0 && sizetabcolo(asize, hmask) <= LJ_MAX_COLOSIZE) {
     Node *nilnode;
     lua_assert((sizeof(GCtab) & 7) == 0);
-    t = lj_mem_newgcot(L, sizetabcolo(asize, hbits), GCtab);
+    t = lj_mem_newgcot(L, sizetabcolo(asize, hmask), GCtab);
     t->gct = ~LJ_TTAB;
     t->nomm = (uint8_t)~0;
     t->colo = (asize > 0 ? 1 : 0) | (hbits > 0 ? 2 : 0);
@@ -252,9 +253,13 @@ void LJ_FASTCALL lj_tab_free(global_State *g, GCtab *t)
   if (t->asize > 0 && !lj_tab_hascolo_array(t))
     lj_mem_freegcvec(g, tvref(t->array), t->asize, TValue);
 
-  if (lj_tab_hascolo_array(t) || lj_tab_hascolo_array(t)) {
-
-    lj_mem_freegco(g, t, sizeof(GCtab) + sizeof(TValue) * t->asize);
+  if (lj_tab_hascolo_array(t) || lj_tab_hascolo_hash(t)) {
+    MSize size = sizeof(GCtab);
+    if (lj_tab_hascolo_hash(t))
+      size += sizeof(Node) * t->hmask+1;
+    if (lj_tab_hascolo_array(t)) 
+      size += sizeof(TValue) * t->asize;
+    lj_mem_freegco(g, t, size);
   } else {
     lj_mem_freetgco(g, t);
   }
@@ -283,7 +288,8 @@ void lj_tab_resize(lua_State *L, GCtab *t, uint32_t asize, uint32_t hbits)
       arena_shrinkobj(t, sizeof(GCtab));
       t->colo &= ~(int8_t)1;  /* Clear array colocated flag */
     } else {
-      array = lj_mem_reallocgcvec(L, tvref(t->array), oldasize, asize, TValue);
+      array = tvref(t->array);
+      lj_mem_reallocgcvec(L, array, oldasize, asize, TValue);
     }
     setmref(t->array, array);
     t->asize = asize;
