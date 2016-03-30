@@ -602,6 +602,11 @@ typedef struct GCState {
 
 /* Global state, shared by all threads of a Lua universe. */
 typedef struct global_State {
+  GCstr strempty;	/* Empty string. */
+  uint8_t stremptyz;	/* Zero terminator of empty string. */
+  uint8_t hookmask;	/* Hook mask. */
+  uint8_t dispatchmode;	/* Dispatch mode. */
+  uint8_t vmevmask;	/* VM event mask. */
   GCRef *strhash;	/* String hash table (hash chain anchors). */
   MSize strmask;	/* String hash mask (size of hash table - 1). */
   MSize strnum;		/* Number of strings in hash table. */
@@ -612,11 +617,6 @@ typedef struct global_State {
   union GCArena *travarena;  /* Traversal GC object arena */
   volatile int32_t vmstate;  /* VM state or current JIT code trace number. */
   SBuf tmpbuf;		/* Temporary string buffer. */
-  GCstr strempty;	/* Empty string. */
-  uint8_t stremptyz;	/* Zero terminator of empty string. */
-  uint8_t hookmask;	/* Hook mask. */
-  uint8_t dispatchmode;	/* Dispatch mode. */
-  uint8_t vmevmask;	/* VM event mask. */
   GCRef mainthref;	/* Link to main thread. */
   TValue registrytv;	/* Anchor for registry. */
   TValue tmptv, tmptv2;	/* Temporary TValues. */

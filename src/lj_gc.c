@@ -585,7 +585,7 @@ void lj_gc_freeall(global_State *g)
   for (i = 0; i <= strmask; i++)  /* Free all string hash chains. */
     gc_fullsweep(g, &g->strhash[i]);
 
-  for (MSize i = 0; i < g->gc.arenas.top; i++) {
+  for (MSize i = 1; i < g->gc.arenas.top; i++) {
     GCArena *arena = g->gc.arenas.tab[i];
     lua_assert(arena_firstallocated(arena) == 0);
     arena_destroy(g, arena);
@@ -639,7 +639,7 @@ void lj_gc_freearena(global_State *g, GCArena *arena)
 {
   GCArenaList *list = &g->gc.arenas;
   int i = lj_gc_getarenaid(g, arena);
-  lua_assert(i != -1);
+  lua_assert(i != -1 && i != 0);/* GG arena must never be destroyed here*/
   lua_assert(arena_firstallocated(arena) == 0);
 
   if (i != (list->top-1)) {
@@ -649,7 +649,7 @@ void lj_gc_freearena(global_State *g, GCArena *arena)
   arena_destroy(g, arena);
 }
 
-void lj_gc_init(global_State *g, lua_State *L)
+void lj_gc_init(global_State *g, lua_State *L, GCArena* GGarena)
 {
   GCArena** arenas;
 
@@ -663,10 +663,11 @@ void lj_gc_init(global_State *g, lua_State *L)
   arenas = lj_mem_newvec(L, 16, GCArena*);
   g->gc.arenas.tab = arenas;
   g->gc.arenas.tabsz = 16;
-  g->gc.arenas.top = 0;
+  g->gc.arenas.top = 1;
+  g->gc.arenas.tab[0] = g->travarena = GGarena;
+  arena_creategreystack(L, GGarena);
 
   g->arena = lj_gc_newarena(L, 0);
-  g->travarena = lj_gc_newarena(L, 1);
 }
 
 /* -- Collector ----------------------------------------------------------- */

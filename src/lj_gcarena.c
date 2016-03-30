@@ -5,6 +5,7 @@
 #include "lj_def.h"
 #include "lj_gcarena.h"
 #include "lj_alloc.h"
+#include "lj_dispatch.h"
 
 #define idx2bit(i)		((uint32_t)(1) << (i))
 #define bitset_range(lo, hi)	((idx2bit((hi)-(lo))-1) << (lo))
@@ -43,6 +44,33 @@ void arena_destroy(global_State *g, GCArena* arena)
 {
   lj_freeepages(arena, ArenaSize);
 }
+
+LJ_STATIC_ASSERT((offsetof(GG_State, L) & 15) == 0);
+LJ_STATIC_ASSERT(((offsetof(GG_State, g) + offsetof(global_State, strempty)) & 15) == 0);
+
+void* arena_createGG(GCArena** GGarena)
+{
+  GCArena* arena = (GCArena*)lj_allocpages(ArenaSize);
+  GG_State *GG;
+  GCCellID cell;
+  lua_assert((((uintptr_t)arena) & (ArenaSize-1)) == 0);
+  *GGarena = arena_init(arena);
+  GG = arena_alloc(arena, sizeof(GG_State));
+
+  /* Setup fake cell starts for mainthread and empty string */
+  cell = ptr2cell(&GG->L);
+  arena_getblock(arena, cell) |= arena_blockbit(cell);
+  cell = ptr2cell(&GG->g.strempty);
+  arena_getblock(arena, cell) |= arena_blockbit(cell);
+  return GG;
+}
+
+void arena_destroyGG(global_State *g, GCArena* arena)
+{
+  lj_mem_freevec(g, mref(arena->greybase, GCCellID1)-2, greyvecsize(arena), GCCellID1);
+  lua_assert(g->gc.total == sizeof(GG_State));
+  lj_freeepages(arena, ArenaSize); 
+}  
 
 static void arena_setfreecell(GCArena *arena, GCCellID cell)
 {

@@ -143,6 +143,8 @@ typedef struct FreeChunk {
 #define arena_getfree(arena, blockidx) (arena->mark[(blockidx)] & ~arena->block[(blockidx)])
 
 GCArena* arena_create(global_State *L, int travobjs);
+void* arena_createGG(GCArena** arena);
+void arena_destroyGG(global_State *g, GCArena* arena);
 void arena_destroy(global_State *g, GCArena *arena);
 
 size_t arena_traversegrey(global_State *g, GCArena *arena, int limit);
