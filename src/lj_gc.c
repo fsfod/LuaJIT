@@ -985,7 +985,7 @@ void *lj_mem_grow(lua_State *L, void *p, MSize *szp, MSize lim, MSize esz)
   return p;
 }
 
-GCobj *findarenaspace(lua_State *L, size_t osize, int travobj)
+GCobj *findarenaspace(lua_State *L, GCSize osize, int travobj)
 {
   global_State *g = G(L);
   GCArena *arena = lj_gc_newarena(L, 1);
@@ -1010,7 +1010,7 @@ GCobj *findarenaspace(lua_State *L, size_t osize, int travobj)
 
 size_t total = 0;
 
-GCobj *lj_mem_newgco_unlinked(lua_State *L, size_t osize, uint32_t gct)
+GCobj *lj_mem_newgco_unlinked(lua_State *L, GCSize osize, uint32_t gct)
 {
   GCArena *arena = istrav(gct) ? G(L)->arena : G(L)->travarena;
   GCobj *o = (GCobj*)arena_alloc(arena, osize);
@@ -1024,7 +1024,7 @@ GCobj *lj_mem_newgco_unlinked(lua_State *L, size_t osize, uint32_t gct)
   return o;
 }
 
-GCobj *lj_mem_newgco_t(lua_State *L, size_t osize, uint32_t gct)
+GCobj *lj_mem_newgco_t(lua_State *L, GCSize osize, uint32_t gct)
 {
   GCobj *o = (GCobj*)arena_alloc(G(L)->travarena, osize);
 
@@ -1037,14 +1037,14 @@ GCobj *lj_mem_newgco_t(lua_State *L, size_t osize, uint32_t gct)
   return linkgco(G(L), o);
 }
 
-void lj_mem_freegco(global_State *g, void *p, size_t osize)
+void lj_mem_freegco(global_State *g, void *p, GCSize osize)
 {
   g->gc.total -= (GCSize)osize;
   /* TODO: Free cell list */
   arena_free(g, ptr2arena(p), p, osize);
 }
 
-void *lj_mem_reallocgc(lua_State *L, void *p, MSize oldsz, GCSize newsz)
+void *lj_mem_reallocgc(lua_State *L, void *p, GCSize oldsz, GCSize newsz)
 {
   void* mem;
 
