@@ -50,6 +50,11 @@ void gc_marktv2(global_State *g, TValue *tv)
 {
   lua_assert(!tvisgcv(tv) || (~itype(tv) == gcval(tv)->gch.gct));
 
+  if (ptr2cell(gcV(tv)) == 0) {
+    hugeblock_mark(g, gcV(tv));
+    return;
+  }
+
   if (tviswhite(tv)) {
     if (tvisstr(tv) || tviscdata(tv)) {
       arena_markptr(gcV(tv));
@@ -72,10 +77,13 @@ void gc_mark(global_State *g, GCobj *o)
   int gct = o->gch.gct;
   lua_assert(iswhite(o) && !isdead(g, o));
   white2gray(o);
-  /* Don't try to mark GG_State.L or global_State.strempty */
-  if ((void*)o < (void*)G2GG(g) || (void*)o > (void*)(&G2GG(g)->dispatch)) {
-    arena_markptr(o);
+
+  if (ptr2cell(o) != 0) {
+    arena_markgco(g, o);
+  } else {
+    hugeblock_mark(g, o);
   }
+  
 
   if (LJ_UNLIKELY(gct == ~LJ_TUDATA)) {
     GCtab *mt = tabref(gco2ud(o)->metatable);
@@ -205,12 +213,12 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
       gc_marktv(g, arrayslot(t, i));
   }
   if (t->asize && !lj_tab_hascolo_array(t))
-    arena_markgcvec(arrayslot(t, 0), t->asize * sizeof(TValue));
+    arena_markgcvec(g, arrayslot(t, 0), t->asize * sizeof(TValue));
   if (t->hmask > 0) {  /* Mark hash part. */
     Node *node = noderef(t->node);
     MSize i, hmask = t->hmask;
     if(!lj_tab_hascolo_hash(t))
-      arena_markgcvec(node, hmask * sizeof(Node));
+      arena_markgcvec(g, node, hmask * sizeof(Node));
     for (i = 0; i <= hmask; i++) {
       Node *n = &node[i];
       if (!tvisnil(&n->val)) {  /* Mark non-empty slot. */
@@ -1040,21 +1048,40 @@ GCobj *lj_mem_newgco_t(lua_State *L, GCSize osize, uint32_t gct)
 void lj_mem_freegco(global_State *g, void *p, GCSize osize)
 {
   g->gc.total -= (GCSize)osize;
-  /* TODO: Free cell list */
-  arena_free(g, ptr2arena(p), p, osize);
+
+  if (ptr2cell(p) != 0) {
+    /* TODO: Free cell list */
+    arena_free(g, ptr2arena(p), p, osize);
+  } else {
+    hugeblock_free(g, p, osize);
+  }
 }
 
 void *lj_mem_reallocgc(lua_State *L, void *p, GCSize oldsz, GCSize newsz)
 {
   void* mem;
 
- // if (newsz < ArenaOversized) {
+  if (newsz < ArenaOversized) {
     mem = arena_alloc(G(L)->arena, newsz);
+
+    if (mem == NULL) {
+      mem = findarenaspace(L, newsz, 1);
+    }
+
+    if (p) {
+      memcpy(mem, p, oldsz);
+      lj_mem_freegco(G(L), p, oldsz);
+    }
+  } else {
+    mem = hugeblock_alloc(L, newsz);
     memcpy(mem, p, oldsz);
-    if (p) lj_mem_freegco(G(L), p, oldsz);
- // } else {
-//    mem = p;
- // }
+
+    if (ptr2cell(p) == 0) {
+      hugeblock_free(G(L), p, oldsz);
+    } else {
+      lj_mem_freegco(G(L), p, oldsz);
+    }
+  }
 
   return mem;
 }

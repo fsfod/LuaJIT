@@ -121,6 +121,17 @@ typedef struct FreeChunk {
   uint16_t ids[4];
 } FreeChunk;
 
+typedef struct HugeBlock {
+  MRef obj;
+} HugeBlock;
+
+typedef struct HugeBlockTable {
+  MSize hmask;
+  HugeBlock* node;
+  MSize count;
+  MSize total;
+} HugeBlockTable;
+
 //LJ_STATIC_ASSERT(((offsetof(GCArena, cellsstart)) / 16) == MinCellId);
 
 #define arena_roundcells(size) (round_alloc(size) >> 4)
@@ -148,6 +159,10 @@ void* arena_createGG(GCArena** arena);
 void arena_destroyGG(global_State *g, GCArena* arena);
 void arena_creategreystack(lua_State *L, GCArena *arena);
 void arena_growgreystack(global_State *L, GCArena *arena);
+
+void *hugeblock_alloc(lua_State *L, GCSize size);
+void hugeblock_free(global_State *g, void *o, GCSize size);
+void hugeblock_mark(global_State *g, void *o);
 
 size_t arena_traversegrey(global_State *g, GCArena *arena, int limit);
 void arena_minorsweep(GCArena *arena);
@@ -252,10 +267,16 @@ static LJ_AINLINE void arena_markcdstr(void* o)
   arena_getmark(arena, cell) |= arena_blockbit(cell);
 }
 
-static LJ_AINLINE void arena_markgcvec(void* o, MSize size)
+static LJ_AINLINE void arena_markgcvec(global_State *g, void* o, MSize size)
 {
-  GCArena *arena = ptr2arena(o);
+  GCArena *arena;
   GCCellID cell = ptr2cell(o);
+
+  if (cell == 0) {
+    hugeblock_mark(g, o);
+  }
+  arena = ptr2arena(o);
+
   lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
 
   arena_getmark(arena, cell) |= arena_blockbit(cell);
@@ -279,33 +300,4 @@ static void *arena_alloc(GCArena *arena, MSize size)
 
   arena_getblock(arena, cell) |= arena_blockbit(cell);
   return arena_cell(arena, cell);
-}
-
-typedef struct OversizedNode {
-  GCRef obj;
-  MSize size;
-}OversizedNode;
-
-typedef struct OversizedTable {
-  MSize hmask;
-  OversizedNode* node;
-  MSize count;
-  MSize total;
-} OversizedTable;
-
-
-static void mark_oversized(OversizedTable *tab, void *o)
-{
-  uint32_t idx = ((uintptr_t)o) & tab->hmask;//hashgcref(o);
-
-  for (size_t i = idx; i < tab->hmask; i++) {
-    OversizedNode *node = tab->node+i;
-    if (gcref(node->obj) == NULL) {
-      return;
-    }
-
-    if (gcref(node->obj) == (GCobj *)o) {
-      node->size |= CellState_Black;
-    }
-  }
 }
