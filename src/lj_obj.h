@@ -578,6 +578,8 @@ typedef struct GCArenaList {
   MSize tabsz;
 } GCArenaList;
 
+struct ArenaFreeList;
+
 typedef struct GCState {
   GCSize total;		/* Memory currently allocated. */
   GCSize threshold;	/* Memory threshold. */
@@ -597,6 +599,7 @@ typedef struct GCState {
   MSize stepmul;	/* Incremental GC step granularity. */
   MSize pause;		/* Pause between successive GC cycles. */
   GCArenaList arenas;
+  struct ArenaFreeList* freelists;
 } GCState;
 
 

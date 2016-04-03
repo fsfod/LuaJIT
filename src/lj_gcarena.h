@@ -19,6 +19,8 @@ enum GCOffsets {
   BlocksetMask = BlocksetBits - 1,
   UnusedBlockWords = MinCellId / BlocksetBits,
   MaxBlockWord = ((ArenaMaxObjMem) / 16 / BlocksetBits),
+
+  MaxBinSize = 8,
 };
 
 LJ_STATIC_ASSERT(((MaxCellId - MinCellId) & BlocksetMask) == 0);
@@ -69,14 +71,6 @@ typedef union FreeCellRange {
   uint32_t idlen;
 } FreeCellRange;
 
-typedef struct ArenaFreeSpace {
-  uint32_t binmask;
-  GCCellID1 *bins[8];
-  uint8_t bincounts[8];
-  uint32_t *oversized;
-  MSize listsz;
-} ArenaFreeSpace;
-
 typedef struct ArenaExtra {
   GCCellID1 *fixedcells;
   MSize fixedtop;
@@ -113,6 +107,16 @@ typedef union GCArena {
 LJ_STATIC_ASSERT((offsetof(GCArena, cellsstart) & 15) == 0);
 LJ_STATIC_ASSERT((MinCellId * 16) == offsetof(GCArena, cellsstart));
 
+typedef struct ArenaFreeList {
+  uint32_t binmask;
+  MSize freecells;
+  GCCellID1 *bins[8];
+  uint8_t bincounts[8];
+  uint32_t *oversized;
+  MSize listsz;
+  GCArena *owner;
+} ArenaFreeList;
+
 typedef struct FreeChunk {
   uint8_t len;
   uint8_t count;
@@ -142,7 +146,7 @@ typedef struct HugeBlockTable {
 /* Can the arena bump allocate a min number of contiguous cells */
 #define arena_canbump(arena, mincells) ((arena_celltop(arena)+mincells) < arena_cell(arena, MaxCellId))
 #define arena_topcellid(arena) (ptr2cell(mref((arena)->celltop, GCCell)))
-#define arena_freelist(arena) mref((arena)->freelist, FreeChunk)
+#define arena_freelist(arena) mref((arena)->freelist, ArenaFreeList)
 
 #define arena_blockidx(cell) (((cell-MinCellId) & ~BlocksetMask) >> 5)
 #define arena_getblock(arena, cell) (arena->block)[(arena_blockidx(cell))]

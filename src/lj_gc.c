@@ -600,23 +600,58 @@ void lj_gc_freeall(global_State *g)
   }
 
   lj_mem_freevec(g, g->gc.arenas.tab, g->gc.arenas.tabsz, GCArena*);
+  lj_mem_freevec(g, g->gc.freelists, g->gc.arenas.tabsz, ArenaFreeList);
 }
 
-GCArena* lj_gc_newarena(lua_State *L, int travobjs)
+int lj_gc_getarenaid(global_State *g, void* arena)
 {
-  GCArena *arena = arena_create(L, travobjs);
+  for (MSize i = 0; i < g->gc.arenas.top; i++)
+    if (g->gc.arenas.tab[i] == arena) return i;
+
+  return -1;
+}
+
+static int register_arena(lua_State *L, GCArena *arena)
+{
   GCArenaList *list = &G(L)->gc.arenas;
+  ArenaFreeList *freelist;
 
   if (LJ_UNLIKELY(list->top >= list->tabsz)) {
     lj_mem_growvec(L, list->tab, list->tabsz, LJ_MAX_MEM32, GCArena*);
   }
 
   /* TODO: Could use the lower bits of the arena pointer we store here to flag if
-  ** the arena contains traversable objects, if the arena is full/fragmented(no bump)/empty, 
+  ** the arena contains traversable objects, if the arena is full/fragmented(no bump)/empty,
   ** is only for one allocation size?
   */
-  list->tab[list->top++] = arena;
+  list->tab[list->top] = arena;
+
+  freelist = G(L)->gc.freelists + list->top;
+  freelist->owner = arena;
+  setmref(arena->freelist, freelist);
+
+  return list->top++;
+}
+
+GCArena* lj_gc_newarena(lua_State *L, int travobjs)
+{
+  GCArena *arena = arena_create(L, travobjs);
+  register_arena(L, arena);
   return arena;
+}
+
+void lj_gc_freearena(global_State *g, GCArena *arena)
+{
+  GCArenaList *list = &g->gc.arenas;
+  int i = lj_gc_getarenaid(g, arena);
+  lua_assert(i != -1 && i != 0);/* GG arena must never be destroyed here*/
+  lua_assert(arena_firstallocated(arena) == 0);
+
+  if (i != (list->top-1)) {
+    list->tab[i] = list->tab[list->top-1];
+  }
+
+  arena_destroy(g, arena);
 }
 
 GCArena *lj_gc_setactive_arena(lua_State *L, GCArena *arena, int travobjs)
@@ -635,28 +670,6 @@ GCArena *lj_gc_setactive_arena(lua_State *L, GCArena *arena, int travobjs)
   return old;
 }
 
-int lj_gc_getarenaid(global_State *g, void* arena)
-{
-  for (MSize i = 0; i < g->gc.arenas.top; i++)
-    if (g->gc.arenas.tab[i] == arena) return i;
-
-  return -1;
-}
-
-void lj_gc_freearena(global_State *g, GCArena *arena)
-{
-  GCArenaList *list = &g->gc.arenas;
-  int i = lj_gc_getarenaid(g, arena);
-  lua_assert(i != -1 && i != 0);/* GG arena must never be destroyed here*/
-  lua_assert(arena_firstallocated(arena) == 0);
-
-  if (i != (list->top-1)) {
-    list->tab[i] = list->tab[list->top-1];
-  }
-
-  arena_destroy(g, arena);
-}
-
 void lj_gc_init(global_State *g, lua_State *L, GCArena* GGarena)
 {
   GCArena** arenas;
@@ -671,8 +684,12 @@ void lj_gc_init(global_State *g, lua_State *L, GCArena* GGarena)
   arenas = lj_mem_newvec(L, 16, GCArena*);
   g->gc.arenas.tab = arenas;
   g->gc.arenas.tabsz = 16;
-  g->gc.arenas.top = 1;
-  g->gc.arenas.tab[0] = g->travarena = GGarena;
+  g->gc.arenas.top = 0;
+  g->gc.freelists = lj_mem_newvec(L, 16, ArenaFreeList);
+  memset(g->gc.freelists, 0, sizeof(ArenaFreeList) * 16);
+  
+  g->travarena = GGarena;
+  register_arena(L, GGarena);
   arena_creategreystack(L, GGarena);
 
   g->arena = lj_gc_newarena(L, 0);

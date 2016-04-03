@@ -131,43 +131,51 @@ static int arena_isextent(GCArena *arena, GCCellID cell)
 
 void *arena_allocslow(GCArena *arena, MSize size)
 {
-  MSize numblocks = arena_roundcells(size);
+  MSize numcells = arena_roundcells(size);
   GCCellID cell;
-  lua_assert(numblocks != 0 && numblocks < MaxCellId);
-  FreeChunk *freelist = arena_freelist(arena);
+  lua_assert(numcells != 0 && numcells < MaxCellId);
+  ArenaFreeList *freelist = arena_freelist(arena);
   
   cell = 0; //arena_findfree(arena, numblocks);
 
   if (freelist == NULL) {
     return NULL;
-  } else if(arena_containsobj(arena, freelist)) {
-    uint32_t mask = 0x01010101 * (1 << min(numblocks, 7));
-    uint32_t lmask = 0x01010101 * (0xff & (0xff << min(numblocks+1, 7)));
+  } else {
+    MSize bin = min(numcells, MaxBinSize-1)-1;
+    uint32_t sizebit = (1 << bin);
 
-    do {
-      if (freelist->binmask & mask) {
-        uint32_t bit = lj_ffs(freelist->binmask & mask);
-        uint32_t idx = bit/8;
-        freelist->binmask ^= 1 << bit;
-        freelist->count--;
-        cell = freelist->ids[idx];
-        freelist->ids[idx] = 0;
-        break;
+    if (numcells < MaxBinSize) {
+      uint32_t firstbin = lj_ffs(freelist->binmask & (0xffffffff << bin));
+      if (firstbin) {
+        cell = freelist->bins[bin][freelist->bincounts[bin]--];
       }
-
-      if (freelist->prev == 0) {
+    }
+    
+    if(!cell) {
+      if (!freelist->oversized) {
         return NULL;
       }
-      freelist = (FreeChunk *)arena_cell(arena, freelist->prev);
-    } while (1);
+      
+      uint32_t sizecell = freelist->oversized[freelist->listsz-1];
+      cell = sizecell & 0xffff;
+
+      /* Put the trailing cells back into a bin */
+      bin = (sizecell >> 16) -  numcells;
+      
+      if (bin > MaxBinSize) {
+        freelist->oversized[freelist->listsz-1] = (bin << 16) | (cell+numcells);
+      } else {
+        freelist->listsz--;
+      }
+    }
   }
 
   lua_assert(cell);
   arena_getmark(arena, cell) &= ~arena_blockbit(cell);
-  if (arena_isextent(arena, cell+numblocks)) {
-    arena_setfreecell(arena, cell+numblocks);
+  if (arena_isextent(arena, cell+numcells)) {
+    arena_setfreecell(arena, cell+numcells);
   }
-  arena->freecount -= numblocks;
+  freelist->freecells -= numcells;
 
   arena_getblock(arena, cell) |= arena_blockbit(cell);
   return arena_cell(arena, cell);
@@ -186,8 +194,7 @@ void arena_free(global_State *g, GCArena *arena, void* mem, MSize size)
 {
   GCCellID cell = ptr2cell(mem);
   MSize numcells = arena_roundcells(size);
-  GCBlockword freecells = arena_getmark(arena, cell) & ~arena_getblock(arena, cell);
-  FreeChunk *chunklist = arena_freelist(arena);
+  ArenaFreeList *freelist = arena_freelist(arena);
   lua_assert(cell < arena_topcellid(arena) && cell >= MinCellId);
   lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
   lua_assert(numcells > 0 && (cell + numcells) < MaxCellId);
@@ -195,35 +202,29 @@ void arena_free(global_State *g, GCArena *arena, void* mem, MSize size)
  
   arena_setfreecell(arena, cell);
 
-  if (chunklist == NULL) {
-    /* Reuse the cell memory for a free list */
-    chunklist = setfreechunk(arena, mem, numcells);
-  } else if (arena_containsobj(arena, chunklist)) {
-    if (chunklist->count == 4) {
-      FreeChunk *newlist = setfreechunk(arena, mem, numcells);
-      newlist->prev = ptr2cell(chunklist);
-      chunklist = newlist;
-    }
-    chunklist->binmask |= 1 << (min(numcells-1, 7)+(chunklist->count*8));
-    chunklist->ids[chunklist->count++] = cell;
-  }
+  if (freelist) {
+    MSize bin = min(numcells, MaxBinSize)-1;
+    uint32_t sizebit = 1 << bin;
 
-  if (freecells) {
-    MSize bit = arena_blockbitidx(cell);
+    if (numcells < MaxBinSize) {
+      if ((freelist->binmask & sizebit) || freelist->bins[bin] != NULL) {
+        freelist->bins[bin][freelist->bincounts[bin]++] = (GCCellID1)cell;
+        freelist->binmask |= sizebit;
 
-    if (arena_cellstate(arena, cell+numcells) == CellState_Free) {
-      arena_setextent(arena, cell+numcells);
-
-      if ((cell+numcells+32) >= arena_topcellid(arena)) {
-      //  lua_assert(0);
+        if ((freelist->bincounts[bin] & 15) == 0 && arena_containsobj(arena, freelist->bins[bin])) {
+          /* TODO: find a larger cell range or allocate a vector from the normal allocation */
+        }
+      } else {
+        /* Repurpose the cell memory for the list */
+        freelist->bins[bin] = (GCCellID1 *)arena_cell(arena, cell);
       }
+    } else {
+      freelist->oversized[freelist->listsz++] = (numcells << 16) | (GCCellID1)cell;
     }
-    //
-    //GCBlockword blockmask = bitset_range(bit, bit+numcells);
   }
 
   arena->firstfree = min(arena->firstfree, cell);
-  arena->freecount += numcells;
+  freelist->freecells += numcells;
 }
 
 MSize arena_cellextent(GCArena *arena, MSize cell)
