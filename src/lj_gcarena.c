@@ -33,13 +33,13 @@ static GCCellID1 *newgreystack(lua_State *L, GCArena *arena, MSize size)
 {
   GCCellID1 *list = lj_mem_newvec(L, size, GCCellID1);
   setmref(arena->greybase, list+2);
-  setmref(arena->greytop, list+size-2);
+  setmref(arena->greytop, list+size-1); /* Set the top to the sentinel value */
 
   /* Store the stack size negative of the what will be the base pointer */
   *((uint32_t*)list) = size;
   /* Set a sentinel value so we know when the stack is empty */
   list[size-1] = 0;
-  return list;
+  return list+2;
 }
 
 void arena_creategreystack(lua_State *L, GCArena *arena)
@@ -403,11 +403,10 @@ FreeCellRange *findfreerange(FreeCellRange* ranges, MSize rangesz, MSize mincell
   return NULL;
 }
 
-extern size_t gc_traverse(global_State *g, GCobj *o);
+extern size_t gc_traverse2(global_State *g, GCobj *o);
 
-GCSize arena_propgrey(global_State *g, GCArena *arena, int limit)
+GCSize arena_propgrey(global_State *g, GCArena *arena, int limit, MSize *travcount)
 {
-  GCCellID1 *cellid = mref(arena->greybase, GCCellID1);
   MSize total = 0, count = 0;
 
   if (mref(arena->greytop, GCCellID1) == NULL) {
@@ -419,12 +418,15 @@ GCSize arena_propgrey(global_State *g, GCArena *arena, int limit)
     GCCell* cell = arena_cell(arena, *top);
     assert_allocated(arena, *top);
     setmref(arena->greytop, top+1); 
-    total += gc_traverse(g, (GCobj*)cell);
-
-    if (limit != -1 && count++ > limit) {
+    total += gc_traverse2(g, (GCobj*)cell);
+    count++;
+    if (limit != -1 && count > limit) {
       break;
     }
   }
+  if (travcount)*travcount = count;
+  /* Check we didn't stop from some corrupted cell id that looked like the stack top sentinel */
+  lua_assert(arena_greysize(arena) == 0 || *mref(arena->greytop, GCCellID1) != 0);
 
   return total;
 }
@@ -433,11 +435,21 @@ void arena_growgreystack(global_State *g, GCArena *arena)
 {
   lua_State *L = mainthread(g);
   GCCellID1 *old = mref(arena->greybase, GCCellID1)-2, *newlist;
-  MSize size = *(MSize *)old;
+  MSize size = *(MSize *)old, realsize = size-2;
 
   newlist = newgreystack(L, arena, size*2);
-  memcpy(newlist + 2 + size, old, size*sizeof(GCCellID1));
+  memcpy(newlist + size, old+2, realsize*sizeof(GCCellID1));
+  setmref(arena->greytop, newlist + size);
   lj_mem_freevec(g, old, size, GCCellID1);
+}
+
+void arena_towhite(GCArena *arena)
+{
+  MSize size = MaxBlockWord - UnusedBlockWords;
+
+  for (size_t i = 0; i < size; i++) {
+    arena->mark[i] ^= arena->block[i];
+  }
 }
 
 void arena_minorsweep(GCArena *arena)

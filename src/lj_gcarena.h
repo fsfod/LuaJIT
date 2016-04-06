@@ -168,9 +168,10 @@ void *hugeblock_alloc(lua_State *L, GCSize size);
 void hugeblock_free(global_State *g, void *o, GCSize size);
 void hugeblock_mark(global_State *g, void *o);
 
-GCSize arena_propgrey(global_State *g, GCArena *arena, int limit);
+GCSize arena_propgrey(global_State *g, GCArena *arena, int limit, MSize *travcount);
 void arena_minorsweep(GCArena *arena);
 void arena_majorsweep(GCArena *arena);
+void arena_towhite(GCArena *arena);
 
 void* arena_allocslow(GCArena *arena, MSize size);
 void arena_free(global_State *g, GCArena *arena, void* mem, MSize size);
@@ -230,7 +231,18 @@ static LJ_AINLINE int isblack2(void* o)
   GCCellID cell = ptr2cell(o);
   return (arena_getmark(arena, cell) >> arena_blockbitidx(cell)) & 1;
 }
-  
+/* Two slots taken up count and 1 by the sentinel value */
+#define arena_greycap(arena) (mref((arena)->greybase, uint32_t)[-1] - 2)
+
+/* Return the number of cellids in the grey stack of the arena*/
+static MSize arena_greysize(GCArena *arena)
+{
+  GCCellID1 *top = mref(arena->greytop, GCCellID1);
+  GCCellID1 *base = mref(arena->greybase, GCCellID1);
+  lua_assert(!base || (top > base));
+
+  return base ? arena_greycap(arena)-1 - (MSize)(top-base) : 0;
+}
 /* Mark a traversable object */
 static LJ_AINLINE void arena_marktrav(global_State *g, void* o)
 {
@@ -282,12 +294,11 @@ static LJ_AINLINE void arena_markgcvec(global_State *g, void* o, MSize size)
 
   if (cell == 0) {
     hugeblock_mark(g, o);
+  } else {
+    arena = ptr2arena(o);
+    lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
+    arena_getmark(arena, cell) |= arena_blockbit(cell);
   }
-  arena = ptr2arena(o);
-
-  lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
-
-  arena_getmark(arena, cell) |= arena_blockbit(cell);
 }
 
 static void *arena_alloc(GCArena *arena, MSize size)
