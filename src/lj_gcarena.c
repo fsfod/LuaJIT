@@ -33,7 +33,7 @@ static GCCellID1 *newgreystack(lua_State *L, GCArena *arena, MSize size)
 {
   GCCellID1 *list = lj_mem_newvec(L, size, GCCellID1);
   setmref(arena->greybase, list+2);
-  setmref(arena->greytop, list+size);
+  setmref(arena->greytop, list+size-2);
 
   /* Store the stack size negative of the what will be the base pointer */
   *((uint32_t*)list) = size;
@@ -405,28 +405,27 @@ FreeCellRange *findfreerange(FreeCellRange* ranges, MSize rangesz, MSize mincell
 
 extern size_t gc_traverse(global_State *g, GCobj *o);
 
-size_t arena_traversegrey(global_State *g, GCArena *arena, int limit)
+GCSize arena_propgrey(global_State *g, GCArena *arena, int limit)
 {
   GCCellID1 *cellid = mref(arena->greybase, GCCellID1);
-  size_t total = 0;
+  MSize total = 0, count = 0;
+
+  if (mref(arena->greytop, GCCellID1) == NULL) {
+    return 0;
+  }
 
   for (; *mref(arena->greytop, GCCellID1) != 0;) {
     GCCellID1 *top = mref(arena->greytop, GCCellID1);
-    GCCell* cell = arena_cell(arena, top[-1]);
-    setmref(arena->greytop, top-1);
-    
-    if (cell->gct != ~LJ_TUDATA) {
-      total += gc_traverse(g, (GCobj*)cell);
-    } else {
-      /* FIXME: do these still need tobe deferred */
-    }
+    GCCell* cell = arena_cell(arena, *top);
+    assert_allocated(arena, *top);
+    setmref(arena->greytop, top+1); 
+    total += gc_traverse(g, (GCobj*)cell);
 
-    if (limit != -1 && (cellid-mref(arena->greybase, GCCellID1)) > limit) {
+    if (limit != -1 && count++ > limit) {
       break;
     }
   }
 
-  arena->greytop = arena->greybase;
   return total;
 }
 
@@ -436,8 +435,8 @@ void arena_growgreystack(global_State *g, GCArena *arena)
   GCCellID1 *old = mref(arena->greybase, GCCellID1)-2, *newlist;
   MSize size = *(MSize *)old;
 
-  newlist = newgreystack(L, arena, greyvecsize(arena)*2);
-  memcpy(newlist + 2 + size, old, size*2);
+  newlist = newgreystack(L, arena, size*2);
+  memcpy(newlist + 2 + size, old, size*sizeof(GCCellID1));
   lj_mem_freevec(g, old, size, GCCellID1);
 }
 
