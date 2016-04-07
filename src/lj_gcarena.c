@@ -12,7 +12,13 @@
 #define bitset_range(lo, hi)	((idx2bit((hi)-(lo))-1) << (lo))
 #define left_bits(x)		(((x) << 1) | (~((x) << 1)+1))
 
-static int st = ((offsetof(GCArena, cellsstart)) / 16);
+void assert_allocated(GCArena *arena, GCCellID cell)
+{
+  lua_assert(cell >= MinCellId && cell < MaxCellId);
+  lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
+}
+
+static void arena_setfreecell(GCArena *arena, GCCellID cell);
 GCCellID arena_findfree(GCArena *arena, MSize mincells);
 
 GCArena* arena_init(GCArena* arena)
@@ -152,20 +158,41 @@ void *arena_allocslow(GCArena *arena, MSize size)
     }
     
     if(!cell) {
-      if (!freelist->oversized) {
+      if (!freelist->oversized || freelist->top == 0) {
         return NULL;
       }
       
-      uint32_t sizecell = freelist->oversized[freelist->listsz-1];
+      uint32_t sizecell = freelist->oversized[freelist->top-1];
       cell = sizecell & 0xffff;
 
       /* Put the trailing cells back into a bin */
       bin = (sizecell >> 16) -  numcells;
       
-      if (bin > MaxBinSize) {
-        freelist->oversized[freelist->listsz-1] = (bin << 16) | (cell+numcells);
+      if (bin > MaxBinSize || freelist->bincounts[bin] == 0) {
+        uint32_t minpair = numcells << 16;
+        MSize bestsize = 0, besti = 0;
+
+        for (MSize i = 0; i < freelist->top; i++) {
+          MSize cellsize = freelist->oversized[i] & ~0xffff;
+
+          if (cellsize == minpair) {
+            cell = freelist->oversized[i];
+            freelist->oversized[i] = freelist->oversized[freelist->top--];
+            break;
+          } else if(cellsize > minpair && cellsize < bestsize ) {
+            besti = i;
+            bestsize = cellsize;
+          }
+
+          if (cell == 0 && !bestsize) {
+            return NULL;
+          } else if(cell == 0) {
+            cell = freelist->oversized[besti] & 0xffff;
+            freelist->oversized[besti] = freelist->oversized[freelist->top--];
+          }
+        }
       } else {
-        freelist->listsz--;
+        freelist->top--;
       }
     }
   }
@@ -211,15 +238,36 @@ void arena_free(global_State *g, GCArena *arena, void* mem, MSize size)
         freelist->bins[bin][freelist->bincounts[bin]++] = (GCCellID1)cell;
         freelist->binmask |= sizebit;
 
-        if ((freelist->bincounts[bin] & 15) == 0 && arena_containsobj(arena, freelist->bins[bin])) {
+        if ((freelist->bincounts[bin]&7) == 0 && arena_containsobj(arena, freelist->bins[bin]) &&
+            (freelist->bincounts[bin]/8) >= numcells) {
           /* TODO: find a larger cell range or allocate a vector from the normal allocation */
+          freelist->bincounts[bin] = 0;
         }
       } else {
         /* Repurpose the cell memory for the list */
         freelist->bins[bin] = (GCCellID1 *)arena_cell(arena, cell);
       }
     } else {
-      freelist->oversized[freelist->listsz++] = (numcells << 16) | (GCCellID1)cell;
+
+      if (freelist->oversized == NULL) {
+        freelist->oversized = (GCCellID1 *)arena_cell(arena, cell);
+        freelist->listsz = (numcells * 16)/2;
+      } else {
+        freelist->oversized[freelist->top++] = (numcells << 16) | (GCCellID1)cell;
+
+        if (freelist->top == freelist->listsz) {
+          uint32_t *list = lj_mem_newvec(mainthread(g), freelist->listsz*2, uint32_t);
+          memcpy(list, freelist->oversized, sizeof(uint32_t)*freelist->listsz);
+
+          if (!arena_containsobj(arena, freelist->oversized)) {
+            lj_mem_freevec(g, freelist->oversized, freelist->listsz, uint32_t);
+          } else {
+            list[freelist->top++] = arena_roundcells(size) << 16 | ptr2cell(freelist->oversized);
+          }
+          freelist->listsz *= 2;
+          freelist->oversized = list;
+        }
+      }
     }
   }
 

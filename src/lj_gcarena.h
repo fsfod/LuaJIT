@@ -113,6 +113,7 @@ typedef struct ArenaFreeList {
   GCCellID1 *bins[8];
   uint8_t bincounts[8];
   uint32_t *oversized;
+  MSize top;
   MSize listsz;
   GCArena *owner;
 } ArenaFreeList;
@@ -139,7 +140,7 @@ typedef struct HugeBlockTable {
 //LJ_STATIC_ASSERT(((offsetof(GCArena, cellsstart)) / 16) == MinCellId);
 
 #define arena_roundcells(size) (round_alloc(size) >> 4)
-#define arena_containsobj(arena, o) ((arena) >= ((GCArena *)(o)) && (arena) < ((GCArena *)(o))) 
+#define arena_containsobj(arena, o) (((GCArena *)(o)) >= (arena) && ((char*)(o)) < (((char*)(arena))+ArenaSize)) 
 
 #define arena_cell(arena, cellidx) (&(arena)->cells[(cellidx)])
 #define arena_celltop(arena) (mref((arena)->celltop, GCCell))
