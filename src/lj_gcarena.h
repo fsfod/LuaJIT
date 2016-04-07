@@ -71,8 +71,16 @@ typedef union FreeCellRange {
   uint32_t idlen;
 } FreeCellRange;
 
+/* Should be 64 bytes the same size as a cache line */
+typedef struct CellIdChunk {
+  GCCellID1 cells[26];
+  uint32_t mark;
+  struct CellIdChunk *next;
+} CellIdChunk;
+
 typedef struct ArenaExtra {
   GCCellID1 *fixedcells;
+  CellIdChunk *finalizers;
   MSize fixedtop;
   void* allocbase;/* The base page multiple arenas created from one large page allocation */
   void* userd;
@@ -86,6 +94,7 @@ typedef union GCArena {
       struct{
         MRef celltop;
         MRef freelist;
+        CellIdChunk* finalizers;
       };
       GCBlockword unusedblock[UnusedBlockWords];
     };

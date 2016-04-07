@@ -526,13 +526,64 @@ void arena_majorsweep(GCArena *arena)
   }
 }
 
-void arena_setblacks(GCArena *arena, GCCellID1 *cells, MSize count)
+GCArena *arena_clonemeta(global_State *g, GCArena *arena)
 {
-  for (size_t i = 0; i < count; i++) 
-  {
-    GCCellID cell = cells[i];
-    arena_getmark(arena, cell) |= arena_blockbit(cell);
+  GCArena *meta = lj_mem_newt(mainthread(g), sizeof(GCArena), GCArena);
+  memcpy(meta, arena, sizeof(GCArena));
+  return meta;
+}
+
+void arena_restoremeta(GCArena *arena, GCArena *meta)
+{
+  memcpy(arena->block+MinBlockWord, meta->block+MinBlockWord, sizeof(GCBlockword) * (MaxBlockWord - UnusedBlockWords));
+  memcpy(arena->mark+MinBlockWord, meta->mark+MinBlockWord, sizeof(GCBlockword) * (MaxBlockWord - UnusedBlockWords));
+}
+
+#define linklist_size(list) ((list)->mark >> 26)
+
+void arena_addfinalizer(lua_State *L, GCArena *arena, void *o)
+{
+  CellIdChunk *list = arena->finalizers;
+  MSize index = 0;
+  lua_assert(arena_containsobj(arena, o));
+  assert_allocated(arena, ptr2cell(o));
+
+  if (!list || linklist_size(list) >= 26) {
+    list = lj_mem_newt(L, sizeof(CellIdChunk), CellIdChunk);
+    memset(list, 0, sizeof(CellIdChunk));
+    if (arena->finalizers) {
+      list->next = arena->finalizers;
+      arena->finalizers = list;
+    }
   }
+  index = linklist_size(list);
+  list->cells[index] = ptr2cell(o);
+  list->mark = (list->mark & 0x3FFFFFF) | ((index+1) << 26);
+}
+
+MSize arena_checkfinalizers(global_State *g, GCArena *arena)
+{
+  lua_State *L = mainthread(g);
+  CellIdChunk *chunk;
+  MSize count = 0, listsize = 16;
+
+  for (; chunk != NULL;) {
+    MSize chunksize = linklist_size(chunk);
+    for (size_t i = 0; i < chunksize; i++) {
+      GCCellID cell = chunk->cells[i];
+      if (cell == 0)continue;
+      assert_allocated(arena, cell);
+
+      if (!((arena_getmark(arena, cell) >> arena_blockbitidx(cell)) & 1)) {
+        /* Flag the cell id for finalization */
+        chunk->mark |= 1 << i;
+        count++;
+      }
+    }
+    chunk = chunk->next;
+  }
+
+  return count;
 }
 
 void arena_sweep(global_State *g, GCArena *arena)
