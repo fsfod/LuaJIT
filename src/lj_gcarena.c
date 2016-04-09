@@ -115,8 +115,7 @@ void arena_shrinkobj(void* obj, MSize newsize)
   GCArena *arena = ptr2arena(obj);
   GCCellID cell = ptr2cell(obj);
   MSize numcells = arena_roundcells(newsize);
-  arena_checkid(cell);
-  lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
+  assert_allocated(arena, cell);
   lua_assert(arena_cellstate(arena, cell+numcells) == CellState_Extent);
   arena_setfreecell(arena, cell+numcells);
 }
@@ -438,19 +437,6 @@ static GCCellID arena_findfreesingle(GCArena *arena)
   return 0;
 }
 
-FreeCellRange *findfreerange(FreeCellRange* ranges, MSize rangesz, MSize mincells)
-{
-  uint32_t minpair = mincells << 16;
-
-  for (size_t i = 0; i < rangesz; i++) {
-    if ((ranges[i].idlen & ~0xffff) == minpair) {
-      return ranges+i;
-    }
-  }
-
-  return NULL;
-}
-
 extern size_t gc_traverse2(global_State *g, GCobj *o);
 
 GCSize arena_propgrey(global_State *g, GCArena *arena, int limit, MSize *travcount)
@@ -616,6 +602,9 @@ void arena_sweep(global_State *g, GCArena *arena)
 #define node_state(node) (((uintptr_t)mref((node)->obj, void)) & 3)
 #define node_size(node) (mref((node)->obj, MSize))
 #define node_bas(node) (mref((node)->obj, MSize))
+#define node_isblack(node) (((uintptr_t)mref((node)->obj, void)) & 1)
+#define node_setblack(node) setmref((node)->obj, (((uintptr_t)mref((node)->obj, void)) | 1))
+#define node_setwhite(node) setmref((node)->obj, (((uintptr_t)mref((node)->obj, void)) & ~1))
 
 #define hashptr(p) (((uintptr_t)(p)) >> 20)
 
@@ -630,7 +619,7 @@ void sweep_hugeblocks(global_State *g)
   for (size_t i = 0; i < tab->hmask; i++) {
     HugeBlock *node = tab->node+i;
 
-    if (node_state(node) == CellState_White) {
+    if (!node_isblack(node)) {
       //lj_mem_free(g, mref(node->obj, void*)[-1], mref(node->obj, void*)[-1])
       _aligned_free((void*)node_ptr(node));
       setmref(node->obj, (intptr_t)-1);
@@ -657,9 +646,10 @@ static HugeBlock *hugeblock_find(HugeBlockTable *tab, void *o)
 {
   uint32_t idx = hashptr(o) & tab->hmask;//hashgcref(o);
 
-  for (size_t i = idx; i < tab->hmask; i++) {
+  for (size_t i = idx; i < tab->hmask;) {
     if (node_ptr(tab->node+i) == (uintptr_t)o)
       return tab->node+i;
+    i = ++i & tab->hmask;
   }
 
   lua_assert(0);
@@ -687,7 +677,7 @@ void *hugeblock_alloc(lua_State *L, GCSize size)
     }
   }
   
-  setmref(node->obj, ((uintptr_t)o) | CellState_White);
+  setmref(node->obj, o);
   return o;
 }
 
@@ -700,10 +690,14 @@ void hugeblock_free(global_State *g, void *o, GCSize size)
   tab->total -= size;
 }
 
+int hugeblock_iswhite(global_State *g, void *o)
+{
+  HugeBlock *node = hugeblock_find(gettab(g), o);
+  return !node_isblack(node);
+}
+
 void hugeblock_mark(global_State *g, void *o)
 {
   HugeBlock *node = hugeblock_find(gettab(g), o);
-
-  setmref(node->obj, ((uintptr_t)o) | CellState_Black);
-  lua_assert(0);
+  node_setblack(node);
 }

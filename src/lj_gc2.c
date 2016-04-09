@@ -35,10 +35,11 @@
 
 #undef iswhite
 #undef isblack
+#undef tviswhite
 
-#define iswhite(x)	(!isblack2(x))
-#define isblack(x)	(isblack2(x))
-#define tviswhite(x)	(tvisgcv(x) && iswhite(gcV(x)))
+#define iswhite(g, x)	(!isblack2(g, x))
+#define isblack(g, x)	(isblack2(g, x))
+#define tviswhite(g, x)	(tvisgcv(x) && iswhite(g, gcV(x)))
 
 /* Macros to set GCobj colors and flags. */
 #define white2gray(x)		((x)->gch.marked &= (uint8_t)~LJ_GC_WHITES)
@@ -46,55 +47,57 @@
 #define isfinalized(u)		((u)->marked & LJ_GC_FINALIZED)
 
 /* -- Mark phase ---------------------------------------------------------- */
-static void gc_markgct(global_State *g, void *o, int32_t gct)
-{
-  if (!isblack2(o)) {
-    if (gct == LJ_TSTR || gct == LJ_TCDATA) {
-      arena_markcdstr(o);
-    } else {
-      arena_marktrav(g, o);
-    }
-  }
-}
 
-static void gc_mark(global_State *g, GCobj *o);
+static void gc_mark(global_State *g, GCobj *o, int gct);
 /* Mark a TValue (if needed). */
 #define gc_marktv(g, tv) \
   { lua_assert(!tvisgcv(tv) || (~itype(tv) == gcval(tv)->gch.gct)); \
-    if (tviswhite(tv)) gc_markgct(g, gcV(tv), ~itype(tv)); }
+    if (tvisgcv(tv) && (gc_ishugeblock(gcV(tv)) || iswhite(g, gcV(tv)))) gc_mark(g, gcV(tv), ~itype(tv)); }
 
 /* Mark a GCobj (if needed). */
 #define gc_markobj(g, o) \
-  { if (iswhite(obj2gco(o))) gc_mark(g, obj2gco(o)); }
+  { if (iswhite(g, obj2gco(o)) || gc_ishugeblock(o)) gc_mark(g, obj2gco(o), obj2gco(o)->gch.gct); }
+
+#define gc_markgct(g, o, gct) \
+  { if (iswhite(g, obj2gco(o)) || gc_ishugeblock(o)) gc_mark(g, obj2gco(o), gct); }
 
 #define gc_mark_tab(g, o) \
-  { if (iswhite(obj2gco(o))) gc_markgct(g, obj2gco(o), ~LJ_TTAB); }
+  { if (iswhite(g, obj2gco(o))) gc_mark(g, obj2gco(o), ~LJ_TTAB); }
 
 /* Mark a string object. */
-#define gc_mark_str(s)	\
-  { if (iswhite(obj2gco(s))) arena_markcdstr(s); }
+#define gc_mark_str(g, s)	\
+  { if (iswhite(g, obj2gco(s)) || gc_ishugeblock(s)) gc_mark(g, obj2gco(s), ~LJ_TSTR); }
 
 /* Mark a white GCobj. */
-static void gc_mark(global_State *g, GCobj *o)
+static void gc_mark(global_State *g, GCobj *o, int gct)
 {
-  int gct = o->gch.gct;
-  lua_assert(iswhite(o) && !isdead(g, o));
+  lua_assert((gc_ishugeblock(o) || iswhite(g, o)) && !isdead(g, o));
+
+  /* Huge objects are always unconditionally sent to us to make white checks simple */
+  if (LJ_UNLIKELY(gc_ishugeblock(o))) {
+    hugeblock_mark(g, o); /* may appended to huge grey queue */
+
+    /* No further processing */
+    if (gct != ~LJ_TUDATA)
+      return;
+  }
 
   if (LJ_UNLIKELY(gct == ~LJ_TUDATA)) {
     GCtab *mt = tabref(gco2ud(o)->metatable);
-    gray2black(o);  /* Userdata are never gray. */
+    arena_markcdstr(o);  /* Userdata are never gray. */
     if (mt) gc_mark_tab(g, mt);
     gc_mark_tab(g, tabref(gco2ud(o)->env));
   } else if (LJ_UNLIKELY(gct == ~LJ_TUPVAL)) {
     GCupval *uv = gco2uv(o);
     gc_marktv(g, uvval(uv));
     if (uv->closed)
-      gray2black(o);  /* Closed upvalues are never gray. */
-  } else if (gct != ~LJ_TSTR && gct != ~LJ_TCDATA) {
+      gc_markobj(g, o);  /* Closed upvalues are never gray. */
+  } else if(gct == ~LJ_TSTR || gct == ~LJ_TCDATA) {
+    arena_markcdstr(o);
+  } else {
     lua_assert(gct == ~LJ_TFUNC || gct == ~LJ_TTAB ||
                gct == ~LJ_TTHREAD || gct == ~LJ_TPROTO || gct == ~LJ_TTRACE);
-
-    arena_markgco(g, o);
+    arena_marktrav(g, o);
   }
 }
 
@@ -261,12 +264,12 @@ static void gc_traverse_trace(global_State *g, GCtrace *T)
   for (ref = T->nk; ref < REF_TRUE; ref++) {
     IRIns *ir = &T->ir[ref];
     if (ir->o == IR_KGC)
-      gc_markobj(g, ir_kgc(ir));
+      gc_markgct(g, ir_kgc(ir), irt_toitype(ir->t));
   }
   if (T->link) gc_marktrace(g, T->link);
   if (T->nextroot) gc_marktrace(g, T->nextroot);
   if (T->nextside) gc_marktrace(g, T->nextside);
-  gc_markgct(g, gcref(T->startpt), LJ_TPROTO);
+  gc_mark(g, gcref(T->startpt), ~LJ_TPROTO);
 }
 
 /* The current trace is a GC root while not anchored in the prototype (yet). */
@@ -279,7 +282,7 @@ static void gc_traverse_trace(global_State *g, GCtrace *T)
 static void gc_traverse_proto(global_State *g, GCproto *pt)
 {
   ptrdiff_t i;
-  gc_mark_str(proto_chunkname(pt));
+  gc_mark_str(g, proto_chunkname(pt));
   for (i = -(ptrdiff_t)pt->sizekgc; i < 0; i++)  /* Mark collectable consts. */
     gc_markobj(g, proto_kgc(pt, i));
 #if LJ_HASJIT
@@ -483,14 +486,14 @@ static GCRef *gc_sweep(global_State *g, GCRef *p, uint32_t lim)
 }
 
 /* Check whether we can clear a key or a value slot from a table. */
-static int gc_mayclear(cTValue *o, int val)
+static int gc_mayclear(global_State *g, cTValue *o, int val)
 {
   if (tvisgcv(o)) {  /* Only collectable objects can be weak references. */
     if (tvisstr(o)) {  /* But strings cannot be used as weak references. */
-      gc_mark_str(strV(o));  /* And need to be marked. */
+      gc_mark_str(g, strV(o));  /* And need to be marked. */
       return 0;
     }
-    if (iswhite(gcV(o)))
+    if (iswhite(g, gcV(o)))
       return 1;  /* Object is about to be collected. */
     if (tvisudata(o) && val && isfinalized(udataV(o)))
       return 1;  /* Finalized userdata is dropped only from values. */
@@ -499,7 +502,7 @@ static int gc_mayclear(cTValue *o, int val)
 }
 
 /* Clear collected entries from weak tables. */
-static void gc_clearweak(GCobj *o)
+static void gc_clearweak(global_State *g, GCobj *o)
 {
   while (o) {
     GCtab *t = gco2tab(o);
@@ -509,7 +512,7 @@ static void gc_clearweak(GCobj *o)
       for (i = 0; i < asize; i++) {
 	/* Clear array slot when value is about to be collected. */
 	TValue *tv = arrayslot(t, i);
-	if (gc_mayclear(tv, 1))
+	if (gc_mayclear(g, tv, 1))
 	  setnilV(tv);
       }
     }
@@ -519,8 +522,8 @@ static void gc_clearweak(GCobj *o)
       for (i = 0; i <= hmask; i++) {
 	Node *n = &node[i];
 	/* Clear hash slot when key or value is about to be collected. */
-	if (!tvisnil(&n->val) && (gc_mayclear(&n->key, 0) ||
-				  gc_mayclear(&n->val, 1)))
+	if (!tvisnil(&n->val) && (gc_mayclear(g, &n->key, 0) ||
+				  gc_mayclear(g, &n->val, 1)))
 	  setnilV(&n->val);
       }
     }
