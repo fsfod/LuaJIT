@@ -330,7 +330,7 @@ uint32_t* arena_getfreerangs(lua_State *L, GCArena *arena)
   uint32_t* ranges = lj_mem_newvec(L, 16, uint32_t);
   MSize top = 0, rangesz = 16;
 
-  for (i = 0; i < maxblock; i++) {
+  for (i = MinBlockWord; i < maxblock; i++) {
     GCBlockword freecells = arena_getfree(arena, i);
 
     if (!freecells) {
@@ -386,9 +386,9 @@ uint32_t* arena_getfreerangs(lua_State *L, GCArena *arena)
 
 GCCellID arena_firstallocated(GCArena *arena)
 {
-  MSize i, maxblock = MaxBlockWord;
+  MSize i, limit = MaxBlockWord;
 
-  for (i = 0; i < maxblock; i++) {
+  for (i = MinBlockWord; i < limit; i++) {
     GCBlockword allocated = arena->block[i];
 
     if (allocated) {
@@ -410,9 +410,9 @@ static int popcnt(uint32_t i)
 
 MSize arena_objcount(GCArena *arena)
 {
-  MSize i, maxblock = MaxBlockWord, count = 0;
+  MSize i, limit = MaxBlockWord, count = 0;
 
-  for (i = 0; i < maxblock; i++) {
+  for (i = MinBlockWord; i < limit; i++) {
     count += popcnt(arena->block[i]);
   }
   return count;
@@ -426,9 +426,9 @@ MSize arena_totalobjmem(GCArena *arena)
 
 static GCCellID arena_findfreesingle(GCArena *arena)
 {
-  MSize i, maxblock = MaxBlockWord;
+  MSize i, limit = MaxBlockWord;
 
-  for (i = 0; i < maxblock; i++) {
+  for (i = MinBlockWord; i < limit; i++) {
     GCBlockword freecells = arena_getfree(arena, i);
 
     if (freecells) {
@@ -493,31 +493,37 @@ void arena_growgreystack(global_State *g, GCArena *arena)
 
 void arena_towhite(GCArena *arena)
 {
-  MSize size = MaxBlockWord - UnusedBlockWords;
-
-  for (size_t i = 0; i < size; i++) {
+  MSize limit = MaxBlockWord;
+  for (size_t i = MinBlockWord; i < limit; i++) {
     arena->mark[i] ^= arena->block[i];
+  }
+}
+
+void arena_setblacks(GCArena *arena, GCCellID1 *cells, MSize count)
+{
+  for (size_t i = 0; i < count; i++) {
+    GCCellID cell = cells[i];
+    assert_allocated(arena, cell);
+    arena_markcell(arena, cell);
   }
 }
 
 void arena_minorsweep(GCArena *arena)
 {
-  MSize size = sizeof(arena->block)/sizeof(GCBlockword);
-
-  for (size_t i = 0; i < size; i++) {
+  MSize limit = MaxBlockWord;
+  for (size_t i = MinBlockWord; i < limit; i++) {
     GCBlockword block = arena->block[i];
     GCBlockword mark = arena->mark[i];
 
-    arena->block[i] = block = block & mark;
-    arena->mark[i] = mark = block | mark;
+    arena->block[i] = block & mark;
+    arena->mark[i] = block | mark;
   }
 }
 
 void arena_majorsweep(GCArena *arena)
 {
-  MSize size = sizeof(arena->block)/sizeof(GCBlockword);
-
-  for (size_t i = 0; i < size ; i++) {
+  MSize limit = MaxBlockWord;
+  for (size_t i = MinBlockWord; i < limit; i++) {
     GCBlockword block = arena->block[i];
     GCBlockword mark = arena->mark[i];
     
@@ -535,8 +541,8 @@ GCArena *arena_clonemeta(global_State *g, GCArena *arena)
 
 void arena_restoremeta(GCArena *arena, GCArena *meta)
 {
-  memcpy(arena->block+MinBlockWord, meta->block+MinBlockWord, sizeof(GCBlockword) * (MaxBlockWord - UnusedBlockWords));
-  memcpy(arena->mark+MinBlockWord, meta->mark+MinBlockWord, sizeof(GCBlockword) * (MaxBlockWord - UnusedBlockWords));
+  memcpy(arena->block+MinBlockWord, meta->block+MinBlockWord, sizeof(GCBlockword) * (MaxBlockWord - MinBlockWord));
+  memcpy(arena->mark+MinBlockWord, meta->mark+MinBlockWord, sizeof(GCBlockword) * (MaxBlockWord - MinBlockWord));
 }
 
 #define linklist_size(list) ((list)->mark >> 26)

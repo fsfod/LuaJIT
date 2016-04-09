@@ -18,7 +18,9 @@ enum GCOffsets {
   BlocksetBits = 32,
   BlocksetMask = BlocksetBits - 1,
   UnusedBlockWords = MinCellId / BlocksetBits,
-  MaxBlockWord = ((ArenaMaxObjMem) / 16 / BlocksetBits),
+  MinBlockWord = UnusedBlockWords,
+  MaxBlockWord = ((ArenaMetadataSize/2) / (BlocksetBits /8)),
+  MaxBlockWord2 = ((ArenaMaxObjMem) / 16 / BlocksetBits),
 
   MaxBinSize = 8,
 };
@@ -95,20 +97,21 @@ typedef union GCArena {
         MRef celltop;
         MRef freelist;
         CellIdChunk* finalizers;
+        GCBlockword unusedblock[UnusedBlockWords];
       };
-      GCBlockword unusedblock[UnusedBlockWords];
+      GCBlockword block[MaxBlockWord];
     };
-    GCBlockword block[MaxBlockWord];
+    
     union {
       struct {
         MRef greytop;
         MRef greybase;
         GCCellID1 freecount;
         GCCellID1 firstfree;
+        GCBlockword unusedmark[UnusedBlockWords];
       };
-      GCBlockword unusedmark[UnusedBlockWords];
+      GCBlockword mark[MaxBlockWord];
     };
-    GCBlockword mark[MaxBlockWord];
     GCCell cellsstart[0];
   };
 } GCArena;
@@ -158,12 +161,12 @@ typedef struct HugeBlockTable {
 #define arena_topcellid(arena) (ptr2cell(mref((arena)->celltop, GCCell)))
 #define arena_freelist(arena) mref((arena)->freelist, ArenaFreeList)
 
-#define arena_blockidx(cell) (((cell-MinCellId) & ~BlocksetMask) >> 5)
+#define arena_blockidx(cell) (((cell) & ~BlocksetMask) >> 5)
 #define arena_getblock(arena, cell) (arena->block)[(arena_blockidx(cell))]
 #define arena_getmark(arena, cell) (arena->mark)[(arena_blockidx(cell))]
 
 #define arena_blockbitidx(cell) (cell & BlocksetMask)
-#define arena_blockbit(cell) (((GCBlockword)1) << ((cell-MinCellId) & BlocksetMask))
+#define arena_blockbit(cell) (((GCBlockword)1) << ((cell) & BlocksetMask))
 
 #define arena_getfree(arena, blockidx) (arena->mark[(blockidx)] & ~arena->block[(blockidx)])
 
