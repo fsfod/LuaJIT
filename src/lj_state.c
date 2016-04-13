@@ -161,7 +161,7 @@ static TValue *cpluaopen(lua_State *L, lua_CFunction dummy, void *ud)
 static void close_state(lua_State *L)
 {
   global_State *g = G(L);
-  GCArena *GGarena = g->gc.arenas.tab[0];
+  GCArena *GGarena = g->gc.arenas[0];
   lj_func_closeuv(L, tvref(L->stack));
   lj_gc_freeall(g);
   lua_assert(gcref(g->gc.root) == obj2gco(L));

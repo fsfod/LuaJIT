@@ -572,12 +572,6 @@ typedef enum {
 #define basemt_obj(g, o)	((g)->gcroot[GCROOT_BASEMT+itypemap(o)])
 #define mmname_str(g, mm)	(strref((g)->gcroot[GCROOT_MMNAME+(mm)]))
 
-typedef struct GCArenaList {
-  union GCArena **tab;
-  MSize top;
-  MSize tabsz;
-} GCArenaList;
-
 struct ArenaFreeList;
 
 typedef struct GCState {
@@ -598,7 +592,10 @@ typedef struct GCState {
   GCSize estimate;	/* Estimate of memory actually in use. */
   MSize stepmul;	/* Incremental GC step granularity. */
   MSize pause;		/* Pause between successive GC cycles. */
-  GCArenaList arenas;
+  union GCArena **arenas;/* List of currently allocated arenas */
+  MSize curarena;	/* Current arena being processed by the GC */
+  MSize arenassz;
+  MSize arenastop; /* Top of the arena list */
   struct ArenaFreeList* freelists;
 } GCState;
 

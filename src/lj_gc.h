@@ -67,6 +67,8 @@ LJ_FUNC void lj_gc_fullgc(lua_State *L);
 union GCArena *lj_gc_newarena(lua_State *L, int travobjs);
 void lj_gc_freearena(global_State *g, union GCArena *arena);
 union GCArena *lj_gc_setactive_arena(lua_State *L, union GCArena *arena, int travobjs);
+#define lj_gc_arenaref(g, i) ((GCArena *)(((uintptr_t)(g)->gc.arenas[(i)]) & ~(ArenaCellMask)))
+#define lj_gc_curarena(g) lj_gc_arenaref(g, (g)->gc.curarena)
 
 /* GC check: drive collector forward if the GC threshold has been reached. */
 #define lj_gc_check(L) \

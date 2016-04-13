@@ -600,44 +600,45 @@ void lj_gc_freeall(global_State *g)
   for (i = 0; i <= strmask; i++)  /* Free all string hash chains. */
     gc_fullsweep(g, &g->strhash[i]);
 
-  for (MSize i = 1; i < g->gc.arenas.top; i++) {
-    GCArena *arena = g->gc.arenas.tab[i];
+  for (MSize i = 1; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
     lua_assert(arena_firstallocated(arena) == 0);
     arena_destroy(g, arena);
   }
 
-  lj_mem_freevec(g, g->gc.arenas.tab, g->gc.arenas.tabsz, GCArena*);
-  lj_mem_freevec(g, g->gc.freelists, g->gc.arenas.tabsz, ArenaFreeList);
+  lj_mem_freevec(g, g->gc.arenas, g->gc.arenassz, GCArena*);
+  lj_mem_freevec(g, g->gc.freelists, g->gc.arenassz, ArenaFreeList);
 }
 
 int lj_gc_getarenaid(global_State *g, void* arena)
 {
-  for (MSize i = 0; i < g->gc.arenas.top; i++)
-    if (g->gc.arenas.tab[i] == arena) return i;
+  for (MSize i = 0; i < g->gc.arenastop; i++)
+    if (lj_gc_arenaref(g, i) == arena) return i;
 
   return -1;
 }
 
 static int register_arena(lua_State *L, GCArena *arena)
 {
-  GCArenaList *list = &G(L)->gc.arenas;
+  global_State *g = G(L);
   ArenaFreeList *freelist;
 
-  if (LJ_UNLIKELY(list->top >= list->tabsz)) {
-    lj_mem_growvec(L, list->tab, list->tabsz, LJ_MAX_MEM32, GCArena*);
+  if (LJ_UNLIKELY(g->gc.arenastop >= g->gc.arenassz)) {
+    lj_mem_growvec(L, g->gc.arenas, g->gc.arenassz, LJ_MAX_MEM32, GCArena*);
   }
 
   /* TODO: Could use the lower bits of the arena pointer we store here to flag if
   ** the arena contains traversable objects, if the arena is full/fragmented(no bump)/empty,
   ** is only for one allocation size?
   */
-  list->tab[list->top] = arena;
+  g->gc.arenas[g->gc.arenastop] = arena;
 
-  freelist = G(L)->gc.freelists + list->top;
+  freelist = G(L)->gc.freelists + g->gc.arenastop;
+  memset(freelist, 0, sizeof(ArenaFreeList));
   freelist->owner = arena;
   setmref(arena->freelist, freelist);
 
-  return list->top++;
+  return g->gc.arenastop++;
 }
 
 GCArena* lj_gc_newarena(lua_State *L, int travobjs)
@@ -649,16 +650,22 @@ GCArena* lj_gc_newarena(lua_State *L, int travobjs)
 
 void lj_gc_freearena(global_State *g, GCArena *arena)
 {
-  GCArenaList *list = &g->gc.arenas;
+  GCArena *list = g->gc.arenas;
   int i = lj_gc_getarenaid(g, arena);
-  lua_assert(i != -1 && i != 0);/* GG arena must never be destroyed here*/
+  lua_assert(i != -1 && i != 0);/* GG arena must never be destroyed here */
   lua_assert(arena_firstallocated(arena) == 0);
-
-  if (i != (list->top-1)) {
-    list->tab[i] = list->tab[list->top-1];
-  }
-
+  
   arena_destroy(g, arena);
+
+  g->gc.arenastop--;
+  if (i != g->gc.arenastop) {
+    ArenaFreeList *freelist = g->gc.freelists + g->gc.arenastop;
+    /* Swap the arena at the end of the list to the position of the one we removed */
+    arena = g->gc.arenas[g->gc.arenastop];
+    g->gc.arenas[i] = arena;
+
+    g->gc.freelists[i].owner = NULL;
+  }
 }
 
 GCArena *lj_gc_setactive_arena(lua_State *L, GCArena *arena, int travobjs)
@@ -689,9 +696,9 @@ void lj_gc_init(global_State *g, lua_State *L, GCArena* GGarena)
   g->gc.stepmul = LUAI_GCMUL;
   
   arenas = lj_mem_newvec(L, 16, GCArena*);
-  g->gc.arenas.tab = arenas;
-  g->gc.arenas.tabsz = 16;
-  g->gc.arenas.top = 0;
+  g->gc.arenas = arenas;
+  g->gc.arenassz = 16;
+  g->gc.arenastop = 0;
   g->gc.freelists = lj_mem_newvec(L, 16, ArenaFreeList);
   memset(g->gc.freelists, 0, sizeof(ArenaFreeList) * 16);
   
@@ -746,8 +753,8 @@ static void sweep_arenas(global_State *g)
 {
   /*TODO: handling of multiple arenas */
 
-  for (MSize i = 0; i < g->gc.arenas.top; i++) {
-   // arena_majorsweep(g->gc.arenas.tab[i]);
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+   // arena_majorsweep(g->gc.arenas[i]);
   }
 }
 
@@ -1025,8 +1032,8 @@ GCobj *findarenaspace(lua_State *L, GCSize osize, int travobj)
   MSize cellnum = arena_roundcells(osize);
 
   if (0) {
-    for (MSize i = 0; i < g->gc.arenas.top; i++) {
-      GCArena *arena = g->gc.arenas.tab[i];
+    for (MSize i = 0; i < g->gc.arenastop; i++) {
+      GCArena *arena = lj_gc_arenaref(g, i);
       if (arena_canbump(arena, cellnum) || (arena->freecount >= cellnum && travobj)) {
 
       }
