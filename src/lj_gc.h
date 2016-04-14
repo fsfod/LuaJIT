@@ -23,6 +23,7 @@ enum {
 #define LJ_GC_CDATA_FIN	0x10
 #define LJ_GC_FIXED	0x20
 #define LJ_GC_SFIXED	0x40
+#define LJ_GC_GRAY	0x40
 
 #define LJ_GC_WHITES	(LJ_GC_WHITE0 | LJ_GC_WHITE1)
 #define LJ_GC_COLORS	(LJ_GC_WHITES | LJ_GC_BLACK)
@@ -44,6 +45,10 @@ enum {
 #define black2gray(x)	((x)->gch.marked &= (uint8_t)~LJ_GC_BLACK)
 #define fixstring(s)	((s)->marked |= LJ_GC_FIXED)
 #define markfinalized(x)	((x)->gch.marked |= LJ_GC_FINALIZED)
+
+#define isgray2(x)	(((x)->gch.marked & LJ_GC_GRAY))
+#define setgray(x)	((x)->gch.marked |= LJ_GC_GRAY)
+#define cleargray(x)	((x)->gch.marked &= ~LJ_GC_GRAY)
 
 /* Collector. */
 LJ_FUNC size_t lj_gc_separateudata(global_State *g, int all);
@@ -84,6 +89,44 @@ LJ_FUNC void lj_gc_closeuv(global_State *g, GCupval *uv);
 #if LJ_HASJIT
 LJ_FUNC void lj_gc_barriertrace(global_State *g, uint32_t traceno);
 #endif
+
+#define lj_gc_anybarriert2(L, t)  \
+  { if (LJ_UNLIKELY(!isgray2(obj2gco(t)))) lj_gc_barrierback(G(L), (t)); }
+
+static LJ_AINLINE void lj_gc_emptyssb(global_State *g)
+{
+  GCRef *list = (GCRef *)(((intptr_t)mref(g->gc.greyssb, GCRef)) & ~0x400);
+
+  for (MSize i = 0; i < 256; i++) {
+    GCobj *o = gcref(list[i]);
+    if (!gc_ishugeblock(o)) {
+      arena_marktrav(g, o);
+    } else {
+      hugeblock_trymark(g, o);
+    }
+  }
+  setmref(g->gc.greyssb, list);
+}
+
+/* Move the GC propagation frontier back for tables (make it gray again). */
+static LJ_AINLINE void lj_gc_barrierback2(global_State *g, GCtab *t)
+{
+  GCobj *o = obj2gco(t);
+  lua_assert(isblack(o) && !isdead(g, o));
+  lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);
+  setgray(o);
+  
+  if (g->gc.state != GCSpropagate || isblack2(g, t)) {
+    GCRef *ssb = mref(g->gc.greyssb, GCRef);
+    setgcrefp(*ssb, t);
+    ssb++;
+    if ((((uintptr_t)ssb) & (0x400-1)) != 0) {
+      setmref(g->gc.greyssb, ssb);
+    } else {
+      lj_gc_emptyssb(g);
+    }
+  }
+}
 
 /* Move the GC propagation frontier back for tables (make it gray again). */
 static LJ_AINLINE void lj_gc_barrierback(global_State *g, GCtab *t)
