@@ -53,7 +53,7 @@ void TraceGC(global_State *g, int newstate);
 
 void gc_mark(global_State *g, GCobj *o);
 
-void gc_marktv2(global_State *g, TValue *tv)
+static void gc_marktv2(global_State *g, TValue *tv)
 {
   lua_assert(!tvisgcv(tv) || (~itype(tv) == gcval(tv)->gch.gct));
 

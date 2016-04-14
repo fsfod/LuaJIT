@@ -1,7 +1,9 @@
-#pragma once
+/*
+** Garbage collector Arena.
+*/
 
-#include "lj_def.h"
-#include "lj_obj.h"
+#ifndef _LJ_GCARENA_H
+#define _LJ_GCARENA_H
 
 enum GCOffsets {
   MinArenaSize = 1 << 20,
@@ -20,7 +22,6 @@ enum GCOffsets {
   UnusedBlockWords = MinCellId / BlocksetBits,
   MinBlockWord = UnusedBlockWords,
   MaxBlockWord = ((ArenaMetadataSize/2) / (BlocksetBits /8)),
-  MaxBlockWord2 = ((ArenaMaxObjMem) / 16 / BlocksetBits),
 
   MaxBinSize = 8,
 };
@@ -256,7 +257,7 @@ static LJ_AINLINE int isblack2(global_State *g, void* o)
 #define arena_greycap(arena) (mref((arena)->greybase, uint32_t)[-1] - 2)
 
 /* Return the number of cellids in the grey stack of the arena*/
-static MSize arena_greysize(GCArena *arena)
+static LJ_AINLINE MSize arena_greysize(GCArena *arena)
 {
   GCCellID1 *top = mref(arena->greytop, GCCellID1);
   GCCellID1 *base = mref(arena->greybase, GCCellID1);
@@ -266,7 +267,7 @@ static MSize arena_greysize(GCArena *arena)
 }
 
 /* Mark a traversable object */
-static LJ_AINLINE void arena_marktrav(global_State *g, void* o)
+static LJ_AINLINE void arena_marktrav(global_State *g, void *o)
 {
   GCArena *arena = ptr2arena(o);
   GCCellID cell = ptr2cell(o);
@@ -285,7 +286,7 @@ static LJ_AINLINE void arena_marktrav(global_State *g, void* o)
   }
 }
 
-static LJ_AINLINE void arena_markgco(global_State *g, void* o)
+static LJ_AINLINE void arena_markgco(global_State *g, void *o)
 {
   GCArena *arena = ptr2arena(o);
   GCCellID cell = ptr2cell(o);
@@ -324,7 +325,7 @@ static LJ_AINLINE void arena_markgcvec(global_State *g, void* o, MSize size)
   }
 }
 
-static void *arena_alloc(GCArena *arena, MSize size)
+static LJ_AINLINE void *arena_alloc(GCArena *arena, MSize size)
 {
   MSize numcells = arena_roundcells(size);
   GCCellID cell;
@@ -343,3 +344,5 @@ static void *arena_alloc(GCArena *arena, MSize size)
   arena_getblock(arena, cell) |= arena_blockbit(cell);
   return arena_cell(arena, cell);
 }
+
+#endif

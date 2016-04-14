@@ -6,7 +6,6 @@
 #ifndef _LJ_GC_H
 #define _LJ_GC_H
 
-#include "lj_obj.h"
 #include "lj_gcarena.h"
 
 /* Garbage collector states. Order matters. */

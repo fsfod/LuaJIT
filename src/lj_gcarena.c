@@ -3,9 +3,10 @@
 #define LUA_CORE
 
 #include "lj_def.h"
-#include "lj_gcarena.h"
 #include "lj_alloc.h"
 #include "lj_dispatch.h"
+#include "lj_gcarena.h"
+#include "lj_gc.h"
 #include "malloc.h"
 
 #define idx2bit(i)		((uint32_t)(1) << (i))
@@ -147,7 +148,6 @@ void *arena_allocslow(GCArena *arena, MSize size)
     return NULL;
   } else {
     MSize bin = min(numcells, MaxBinSize-1)-1;
-    uint32_t sizebit = (1 << bin);
 
     if (numcells < MaxBinSize) {
       uint32_t firstbin = lj_ffs(freelist->binmask & (0xffffffff << bin));
@@ -249,7 +249,7 @@ void arena_free(global_State *g, GCArena *arena, void* mem, MSize size)
     } else {
 
       if (freelist->oversized == NULL) {
-        freelist->oversized = (GCCellID1 *)arena_cell(arena, cell);
+        freelist->oversized = (uint32_t *)arena_cell(arena, cell);
         freelist->listsz = (numcells * 16)/2;
       } else {
         freelist->oversized[freelist->top++] = (numcells << 16) | (GCCellID1)cell;
@@ -437,11 +437,12 @@ static GCCellID arena_findfreesingle(GCArena *arena)
   return 0;
 }
 
-extern size_t gc_traverse2(global_State *g, GCobj *o);
+extern GCSize gc_traverse2(global_State *g, GCobj *o);
 
 GCSize arena_propgrey(global_State *g, GCArena *arena, int limit, MSize *travcount)
 {
-  MSize total = 0, count = 0;
+  GCSize total = 0;
+  MSize count = 0;
 
   if (mref(arena->greytop, GCCellID1) == NULL) {
     return 0;
@@ -454,7 +455,7 @@ GCSize arena_propgrey(global_State *g, GCArena *arena, int limit, MSize *travcou
     setmref(arena->greytop, top+1); 
     total += gc_traverse2(g, (GCobj*)cell);
     count++;
-    if (limit != -1 && count > limit) {
+    if (limit != -1 && count > (MSize)limit) {
       break;
     }
   }
@@ -580,9 +581,9 @@ MSize arena_checkfinalizers(global_State *g, GCArena *arena)
 
 void arena_sweep(global_State *g, GCArena *arena)
 {
-  MSize size = sizeof(arena->block)/sizeof(GCBlockword);
+  MSize i, size = sizeof(arena->block)/sizeof(GCBlockword);
 
-  for (size_t i = 0; i < size; i++) {
+  for (i = 0; i < size; i++) {
     GCBlockword white = arena->block[i] & ~arena->mark[i];
 
     if (white) {
@@ -591,7 +592,7 @@ void arena_sweep(global_State *g, GCArena *arena)
 
       GCCell *cell = arena_cell(arena, cellid);
 
-      if (cell->gct != LJ_TCDATA && cell->gct != LJ_TSTR) {
+      if (cell->gct != ~LJ_TCDATA && cell->gct != ~LJ_TSTR) {
         
       }
     }
