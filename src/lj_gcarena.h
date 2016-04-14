@@ -81,6 +81,17 @@ typedef struct CellIdChunk {
   struct CellIdChunk *next;
 } CellIdChunk;
 
+enum ArenaFlags {
+  ArenaFlag_GGArena   = 1,
+  ArenaFlag_TravObjs  = 2,
+  ArenaFlag_Empty     = 4,    /* No reachable objects found in the arena */
+  ArenaFlag_SplitPage = 8,    /* Pages allocated for the arena were part of a larger allocation */
+  ArenaFlag_Explicit  = 0x10, /* Only allocate from this arena when explicitly asked to */
+  ArenaFlag_NoBump    = 0x20, /* Can't use bump allocation with this arena */
+  ArenaFlag_FreeList  = 0x40, 
+  ArenaFlag_FixedList = 0x80, /* Has a List of Fixed object cell ids */
+};
+
 typedef struct ArenaExtra {
   GCCellID1 *fixedcells;
   CellIdChunk *finalizers;
@@ -172,7 +183,7 @@ typedef struct HugeBlockTable {
 
 #define arena_getfree(arena, blockidx) (arena->mark[(blockidx)] & ~arena->block[(blockidx)])
 
-GCArena* arena_create(lua_State *L, int travobjs);
+GCArena* arena_create(lua_State *L, uint32_t flags);
 void arena_destroy(global_State *g, GCArena *arena);
 void* arena_createGG(GCArena** arena);
 void arena_destroyGG(global_State *g, GCArena* arena);

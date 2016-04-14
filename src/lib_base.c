@@ -471,7 +471,7 @@ LJLIB_CF(collectgarbage)
 LJLIB_CF(createarena)
 {
   int travobjs = 1;
-  GCArena *arena = lj_gc_newarena(L, travobjs);
+  GCArena *arena = lj_gc_newarena(L, travobjs ? ArenaFlag_TravObjs : 0);
   GCArena *oldarena = lj_gc_setactive_arena(L, arena, travobjs);
   if (travobjs) {
     lua_newuserdata(L, 0);

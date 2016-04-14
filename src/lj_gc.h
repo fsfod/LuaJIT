@@ -68,11 +68,27 @@ LJ_FUNC int LJ_FASTCALL lj_gc_step_jit(global_State *g, MSize steps);
 LJ_FUNC void lj_gc_fullgc(lua_State *L);
 
 /* GC Arena */
-union GCArena *lj_gc_newarena(lua_State *L, int travobjs);
-void lj_gc_freearena(global_State *g, union GCArena *arena);
-union GCArena *lj_gc_setactive_arena(lua_State *L, union GCArena *arena, int travobjs);
+LJ_FUNC union GCArena *lj_gc_newarena(lua_State *L, uint32_t flags);
+LJ_FUNC void lj_gc_freearena(global_State *g, union GCArena *arena);
+LJ_FUNC int lj_gc_getarenaid(global_State *g, void* arena);
+LJ_FUNC union GCArena *lj_gc_setactive_arena(lua_State *L, union GCArena *arena, int travobjs);
 #define lj_gc_arenaref(g, i) ((GCArena *)(((uintptr_t)(g)->gc.arenas[(i)]) & ~(ArenaCellMask)))
+#define lj_gc_arenaflags(g, i) ((uint32_t)(((uintptr_t)(g)->gc.arenas[(i)]) & ArenaCellMask))
 #define lj_gc_curarena(g) lj_gc_arenaref(g, (g)->gc.curarena)
+
+static LJ_AINLINE void lj_gc_setarenaflag(global_State *g, MSize i, uint32_t flags)
+{
+  lua_assert((flags & ArenaSize) == 0);
+  //GCArena *arena = lj_gc_arenaref(g, i);
+  //arena->
+  g->gc.arenas[i] = (GCArena *)(((uintptr_t)g->gc.arenas[i]) | flags);
+}
+
+static LJ_AINLINE void lj_gc_cleararenaflags(global_State *g, MSize i, uint32_t flags)
+{
+  lua_assert((flags & ArenaSize) == 0);
+  g->gc.arenas[i] = (GCArena *)(((uintptr_t)g->gc.arenas[i]) & (flags|~ArenaCellMask));
+}
 
 /* GC check: drive collector forward if the GC threshold has been reached. */
 #define lj_gc_check(L) \

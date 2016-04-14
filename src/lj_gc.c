@@ -641,16 +641,16 @@ static int register_arena(lua_State *L, GCArena *arena)
   return g->gc.arenastop++;
 }
 
-GCArena* lj_gc_newarena(lua_State *L, int travobjs)
+GCArena* lj_gc_newarena(lua_State *L, uint32_t flags)
 {
-  GCArena *arena = arena_create(L, travobjs);
-  register_arena(L, arena);
+  GCArena *arena = arena_create(L, flags);
+  int i = register_arena(L, arena);
+  lj_gc_setarenaflag(G(L), i, flags);
   return arena;
 }
 
 void lj_gc_freearena(global_State *g, GCArena *arena)
 {
-  GCArena *list = g->gc.arenas;
   int i = lj_gc_getarenaid(g, arena);
   lua_assert(i != -1 && i != 0);/* GG arena must never be destroyed here */
   lua_assert(arena_firstallocated(arena) == 0);
@@ -705,6 +705,7 @@ void lj_gc_init(global_State *g, lua_State *L, GCArena* GGarena)
   g->travarena = GGarena;
   register_arena(L, GGarena);
   arena_creategreystack(L, GGarena);
+  lj_gc_setarenaflag(g, 0, ArenaFlag_TravObjs|ArenaFlag_GGArena);
 
   g->arena = lj_gc_newarena(L, 0);
 }
@@ -1028,22 +1029,32 @@ void *lj_mem_grow(lua_State *L, void *p, MSize *szp, MSize lim, MSize esz)
 GCobj *findarenaspace(lua_State *L, GCSize osize, int travobj)
 {
   global_State *g = G(L);
-  GCArena *arena = lj_gc_newarena(L, 1);
+  GCArena *pickedarena = NULL, *curarena = travobj ? g->travarena : g->arena;
   MSize cellnum = arena_roundcells(osize);
+  uint32_t flags = (travobj ? ArenaFlag_TravObjs : 0);
+  uint32_t mask = ArenaFlag_NoBump|ArenaFlag_Explicit|flags;
 
-  if (0) {
-    for (MSize i = 0; i < g->gc.arenastop; i++) {
-      GCArena *arena = lj_gc_arenaref(g, i);
-      if (arena_canbump(arena, cellnum) || (arena->freecount >= cellnum && travobj)) {
-
-      }
-    }
-  } else {
-    arena = lj_gc_newarena(L, travobj);
-    lj_gc_setactive_arena(L, arena, travobj);
+  if (!arena_canbump(curarena, cellnum)) {
+    lj_gc_setarenaflag(g, lj_gc_getarenaid(g, curarena), ArenaFlag_NoBump);
   }
 
-  return (GCobj*)arena_alloc(arena, osize);
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+
+    if ((lj_gc_arenaflags(g, i)&mask) == flags) {
+      pickedarena = arena;
+      break;
+    }
+  }
+
+  if (!pickedarena) {
+    pickedarena = lj_gc_newarena(L, travobj ? ArenaFlag_TravObjs : 0);
+  } else {
+    lj_gc_cleararenaflags(g, lj_gc_getarenaid(g, pickedarena), ArenaFlag_Empty);
+  }
+  lj_gc_setactive_arena(L, pickedarena, travobj);
+
+  return (GCobj*)arena_alloc(pickedarena, osize);
 }
 
 #define istrav(gct) (gct != ~LJ_TSTR && gct != ~LJ_TCDATA)
@@ -1052,7 +1063,7 @@ size_t total = 0;
 
 GCobj *lj_mem_newgco_unlinked(lua_State *L, GCSize osize, uint32_t gct)
 {
-  GCArena *arena = istrav(gct) ? G(L)->arena : G(L)->travarena;
+  GCArena *arena = istrav(gct) ? G(L)->travarena : G(L)->arena;
   GCobj *o = (GCobj*)arena_alloc(arena, osize);
 
   if (o == NULL) {

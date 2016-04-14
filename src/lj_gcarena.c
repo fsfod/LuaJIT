@@ -56,13 +56,13 @@ void arena_creategreystack(lua_State *L, GCArena *arena)
   }
 }
 
-GCArena* arena_create(lua_State *L, int travobjs)
+GCArena* arena_create(lua_State *L, uint32_t flags)
 {
   GCArena* arena = (GCArena*)lj_allocpages(ArenaSize);
   lua_assert((((uintptr_t)arena) & (ArenaSize-1)) == 0);
   arena_init(arena);
   
-  if (travobjs) {
+  if (flags & ArenaFlag_TravObjs) {
     arena_creategreystack(L, arena);
   }
   return arena;
