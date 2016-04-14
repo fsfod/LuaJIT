@@ -12,6 +12,7 @@
 LJ_FUNC void *lj_alloc_create(void);
 LJ_FUNC void lj_alloc_destroy(void *msp);
 LJ_FUNC void *lj_alloc_f(void *msp, void *ptr, size_t osize, size_t nsize);
+LJ_FUNC void *lj_alloc_memalign(void* msp, size_t alignment, size_t bytes);
 #endif
 
 LJ_FUNC void *lj_allocpages(size_t minsize);
