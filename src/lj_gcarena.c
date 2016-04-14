@@ -617,7 +617,7 @@ void arena_sweep(global_State *g, GCArena *arena)
 #define node_state(node) (((uintptr_t)mref((node)->obj, void)) & 3)
 #define node_size(node) (mref((node)->obj, MSize))
 #define node_bas(node) (mref((node)->obj, MSize))
-#define node_isblack(node) (((uintptr_t)mref((node)->obj, void)) & 1)
+#define node_ismarked(node) (((uintptr_t)mref((node)->obj, void)) & 1)
 #define node_setblack(node) setmref((node)->obj, (((uintptr_t)mref((node)->obj, void)) | 1))
 #define node_setwhite(node) setmref((node)->obj, (((uintptr_t)mref((node)->obj, void)) & ~1))
 
@@ -627,20 +627,6 @@ HugeBlock _nodes[64] = { 0 };
 HugeBlockTable _tab = { 64-1, _nodes, 0, 0};
 
 #define gettab(g) (&_tab)
-
-void sweep_hugeblocks(global_State *g)
-{
-  HugeBlockTable *tab = gettab(g);
-  for (size_t i = 0; i < tab->hmask; i++) {
-    HugeBlock *node = tab->node+i;
-
-    if (!node_isblack(node)) {
-      //lj_mem_free(g, mref(node->obj, void*)[-1], mref(node->obj, void*)[-1])
-      _aligned_free((void*)node_ptr(node));
-      setmref(node->obj, (intptr_t)-1);
-    }
-  }
-}
 
 static HugeBlock *hugeblock_register(HugeBlockTable *tab, void *o)
 {
@@ -664,7 +650,8 @@ static HugeBlock *hugeblock_find(HugeBlockTable *tab, void *o)
   for (size_t i = idx; i < tab->hmask;) {
     if (node_ptr(tab->node+i) == (uintptr_t)o)
       return tab->node+i;
-    i = ++i & tab->hmask;
+    i++;
+    i &= tab->hmask;
   }
 
   lua_assert(0);
@@ -708,11 +695,25 @@ void hugeblock_free(global_State *g, void *o, GCSize size)
 int hugeblock_iswhite(global_State *g, void *o)
 {
   HugeBlock *node = hugeblock_find(gettab(g), o);
-  return !node_isblack(node);
+  return !node_ismarked(node);
 }
 
 void hugeblock_mark(global_State *g, void *o)
 {
   HugeBlock *node = hugeblock_find(gettab(g), o);
   node_setblack(node);
+}
+
+void sweep_hugeblocks(global_State *g)
+{
+  HugeBlockTable *tab = gettab(g);
+  for (size_t i = 0; i < tab->hmask; i++) {
+    HugeBlock *node = tab->node+i;
+
+    if (!node_ismarked(node)) {
+      //lj_mem_free(g, mref(node->obj, void*)[-1], mref(node->obj, void*)[-1])
+      _aligned_free((void*)node_ptr(node));
+      setmref(node->obj, (intptr_t)-1);
+    }
+  }
 }

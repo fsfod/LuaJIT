@@ -64,7 +64,7 @@ static void gc_marktv2(global_State *g, TValue *tv)
 
   if (tviswhite(tv)) {
     if (tvisstr(tv) || tviscdata(tv)) {
-      arena_markptr(gcV(tv));
+      arena_markcdstr(gcV(tv));
     } else {
       gc_mark(g, gcV(tv));
     }
@@ -86,7 +86,7 @@ void gc_mark(global_State *g, GCobj *o)
   white2gray(o);
 
   if (ptr2cell(o) != 0) {
-    arena_markgco(g, o);
+   // arena_markgco(g, o);
   } else {
     hugeblock_mark(g, o);
   }

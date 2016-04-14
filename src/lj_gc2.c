@@ -77,7 +77,7 @@ static void gc_mark(global_State *g, GCobj *o, int gct)
 
   /* Huge objects are always unconditionally sent to us to make white checks simple */
   if (LJ_UNLIKELY(gc_ishugeblock(o))) {
-    hugeblock_trymark(g, o); /* may appended to huge grey queue */
+    hugeblock_mark(g, o);
 
     /* No further processing */
     if (gct != ~LJ_TUDATA)

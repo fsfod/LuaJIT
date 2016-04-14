@@ -118,7 +118,7 @@ static LJ_AINLINE void lj_gc_emptyssb(global_State *g)
     if (!gc_ishugeblock(o)) {
       arena_marktrav(g, o);
     } else {
-      hugeblock_trymark(g, o);
+      hugeblock_mark(g, o);
     }
   }
   setmref(g->gc.greyssb, list);

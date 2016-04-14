@@ -269,6 +269,18 @@ static LJ_AINLINE int isblack2(global_State *g, void* o)
     return hugeblock_iswhite(g, o);
   }
 }
+/* Must never be passed huge block pointers. 
+** A fast pre-check for cellid zero can quickly filter out huge blocks. 
+*/
+static LJ_AINLINE int isblackfast(void* o)
+{
+  GCArena *arena = ptr2arena(o);
+  GCCellID cell = ptr2cell(o);
+  arena_checkid(cell);
+  lua_assert(!gc_ishugeblock(o));
+  return (arena_getmark(arena, cell) >> arena_blockbitidx(cell)) & 1;
+}
+
 /* Two slots taken up count and 1 by the sentinel value */
 #define arena_greycap(arena) (mref((arena)->greybase, uint32_t)[-1] - 2)
 
