@@ -77,7 +77,7 @@ typedef union FreeCellRange {
 /* Should be 64 bytes the same size as a cache line */
 typedef struct CellIdChunk {
   GCCellID1 cells[26];
-  uint32_t mark;
+  uint32_t count;
   struct CellIdChunk *next;
 } CellIdChunk;
 
@@ -93,12 +93,13 @@ enum ArenaFlags {
 };
 
 typedef struct ArenaExtra {
-  GCCellID1 *fixedcells;
-  CellIdChunk *finalizers;
-  MSize fixedtop;
+  MRef fixedcells;
+  uint16_t fixedtop;
+  uint16_t fixedsized;
+  MRef finalizers;
   void* allocbase;/* The base page multiple arenas created from one large page allocation */
   void* userd;
-  uint32_t flags;
+  uint16_t flags;
 } ArenaExtra;
 
 typedef union GCArena {
@@ -108,7 +109,7 @@ typedef union GCArena {
       struct{
         MRef celltop;
         MRef freelist;
-        CellIdChunk* finalizers;
+        MRef finalizers;
         GCBlockword unusedblock[UnusedBlockWords];
       };
       GCBlockword block[MaxBlockWord];
@@ -172,6 +173,10 @@ typedef struct HugeBlockTable {
 #define arena_canbump(arena, mincells) ((arena_celltop(arena)+mincells) < arena_cell(arena, MaxCellId))
 #define arena_topcellid(arena) (ptr2cell(mref((arena)->celltop, GCCell)))
 #define arena_freelist(arena) mref((arena)->freelist, ArenaFreeList)
+
+#define arena_finalizers(arena) mref((arena)->finalizers, CellIdChunk)
+void arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o);
+CellIdChunk *arena_checkfinalizers(global_State *g, GCArena *arena, CellIdChunk *out);
 
 #define arena_blockidx(cell) (((cell) & ~BlocksetMask) >> 5)
 #define arena_getblock(arena, cell) (arena->block)[(arena_blockidx(cell))]

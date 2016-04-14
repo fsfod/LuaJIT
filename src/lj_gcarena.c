@@ -532,51 +532,65 @@ void arena_restoremeta(GCArena *arena, GCArena *meta)
   memcpy(arena->mark+MinBlockWord, meta->mark+MinBlockWord, sizeof(GCBlockword) * (MaxBlockWord - MinBlockWord));
 }
 
-#define linklist_size(list) ((list)->mark >> 26)
-
-void arena_addfinalizer(lua_State *L, GCArena *arena, void *o)
+static CellIdChunk *idlist_new(lua_State *L)
 {
-  CellIdChunk *list = arena->finalizers;
-  MSize index = 0;
+  CellIdChunk *list = lj_mem_newt(L, sizeof(CellIdChunk), CellIdChunk);
+  list->count = 0;
+  list->next = NULL;
+  return list;
+}
+
+static CellIdChunk *idlist_add(lua_State *L, CellIdChunk *chunk, GCCellID cell)
+{
+  chunk->cells[chunk->count++] = cell;
+
+  if (chunk->count >= 26) {
+    CellIdChunk *newchunk = idlist_new(L);
+    newchunk->next = chunk;
+    chunk = newchunk;
+  }
+  return chunk;
+}
+
+void arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o)
+{
+  CellIdChunk *chunk = arena_finalizers(arena);
   lua_assert(arena_containsobj(arena, o));
   assert_allocated(arena, ptr2cell(o));
 
-  if (!list || linklist_size(list) >= 26) {
-    list = lj_mem_newt(L, sizeof(CellIdChunk), CellIdChunk);
-    memset(list, 0, sizeof(CellIdChunk));
-    if (arena->finalizers) {
-      list->next = arena->finalizers;
-      arena->finalizers = list;
+  if (!chunk || chunk->count >= 26) {
+    CellIdChunk *newchunk = idlist_new(L);
+    newchunk->next = chunk;
+    if (!chunk) {
+      /* TODO: Set has finalizer arena flag */
     }
+    setmref(arena->finalizers, newchunk);
+    chunk = newchunk;
   }
-  index = linklist_size(list);
-  list->cells[index] = ptr2cell(o);
-  list->mark = (list->mark & 0x3FFFFFF) | ((index+1) << 26);
+  chunk->cells[chunk->count++] = ptr2cell(o);
 }
 
-MSize arena_checkfinalizers(global_State *g, GCArena *arena)
+CellIdChunk *arena_checkfinalizers(global_State *g, GCArena *arena, CellIdChunk *out)
 {
   lua_State *L = mainthread(g);
-  CellIdChunk *chunk;
-  MSize count = 0, listsize = 16;
+  CellIdChunk *chunk = arena_finalizers(arena);
 
-  for (; chunk != NULL;) {
-    MSize chunksize = linklist_size(chunk);
-    for (size_t i = 0; i < chunksize; i++) {
+  for (; chunk != NULL;) { 
+    MSize count = chunk->count;
+    for (size_t i = 0; i < count; i++) {
       GCCellID cell = chunk->cells[i];
-      if (cell == 0)continue;
       assert_allocated(arena, cell);
 
       if (!((arena_getmark(arena, cell) >> arena_blockbitidx(cell)) & 1)) {
-        /* Flag the cell id for finalization */
-        chunk->mark |= 1 << i;
-        count++;
+        chunk->cells[i] = chunk->cells[--count];
+        out = idlist_add(L, out, cell);
       }
     }
+    chunk->count = count;
     chunk = chunk->next;
   }
 
-  return count;
+  return out;
 }
 
 void arena_sweep(global_State *g, GCArena *arena)
