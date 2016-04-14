@@ -31,6 +31,7 @@
 #include "lj_def.h"
 #include "lj_arch.h"
 #include "lj_alloc.h"
+#include "lj_obj.h"
 #include "lj_gcarena.h"
 
 #ifndef LUAJIT_USE_SYSMALLOC
@@ -395,38 +396,25 @@ static void *CALL_MREMAP_(void *ptr, size_t osz, size_t nsz, int flags)
 #define CALL_MREMAP(addr, osz, nsz, mv) ((void)osz, MFAIL)
 #endif
 
-void *lj_allocpages(size_t minsize)
+typedef struct PageHeader{
+  void* base;
+  size_t size;
+} PageHeader;
+
+void *lj_allocpages(size_t alignment, size_t size)
 {
-  void* mem = DIRECT_MMAP(minsize*2);
-  VirtualFree(mem, 0, MEM_RELEASE);
-
-  uintptr_t minbase = lj_round((uintptr_t)mem, ArenaSize);
-  mem = VirtualAlloc(minbase, minsize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-
-  if ((((uintptr_t)mem) & (ArenaSize-1)) != 0) {
-
-    for (size_t i = 0; i < 20; i++) {
-      VirtualFree(mem, 0, MEM_RELEASE);
-
-      mem = DIRECT_MMAP(minsize*(i+1));
-      VirtualFree(mem, 0, MEM_RELEASE);
-
-      minbase = lj_round((uintptr_t)mem, ArenaSize);
-      mem = VirtualAlloc(minbase, minsize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-
-      if (mem) {
-        break;
-      }
-    }
-  }
-
-  lua_assert((((uintptr_t)mem) & (ArenaSize-1)) == 0);
-  return mem;
+  void* base = DIRECT_MMAP(size*2);
+  uintptr_t mem = lj_round(((uintptr_t)base)+sizeof(PageHeader), alignment);
+  ((PageHeader*)mem)[-1].base = base;
+  ((PageHeader*)mem)[-1].size = (size*2);
+  
+  lua_assert((mem & ArenaCellMask) == 0);
+  return (void *)mem;
 }
 
-void lj_freeepages(void* p, size_t size)
+void lj_freepages(void* p, size_t size)
 {
-  CALL_MUNMAP(p, size);
+  CALL_MUNMAP(((PageHeader*)p)[-1].base, ((PageHeader*)p)[-1].size);
 }
 
 /* -----------------------  Chunk representations ------------------------ */

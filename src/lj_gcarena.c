@@ -58,7 +58,8 @@ void arena_creategreystack(lua_State *L, GCArena *arena)
 
 GCArena* arena_create(lua_State *L, uint32_t flags)
 {
-  GCArena* arena = (GCArena*)lj_allocpages(ArenaSize);
+  //(GCArena*)lj_allocpages(G(L)->allocd, ArenaSize, ArenaSize);
+  GCArena* arena = (GCArena*)lj_alloc_memalign(G(L)->allocd, ArenaSize, ArenaSize); 
   lua_assert((((uintptr_t)arena) & (ArenaSize-1)) == 0);
   arena_init(arena);
   
@@ -68,13 +69,27 @@ GCArena* arena_create(lua_State *L, uint32_t flags)
   return arena;
 }
 
-void arena_destroy(global_State *g, GCArena* arena)
+/* Free any memory allocated from system allocator used for arena data structures */
+static void arena_freemem(global_State *g, GCArena* arena)
 {
   if (mref(arena->greybase, GCCellID1)) {
     lj_mem_freevec(g, mref(arena->greybase, GCCellID1)-2, greyvecsize(arena), GCCellID1);
   }
-  
-  lj_freeepages(arena, ArenaSize);
+
+  if (arena_freelist(arena)) {
+    ArenaFreeList *freelist = arena_freelist(arena);
+
+    if (freelist->oversized && !arena_containsobj(arena, freelist->oversized)) {
+      lj_mem_freevec(g, freelist->oversized, freelist->listsz, uint32_t);
+    }
+  }
+}
+
+void arena_destroy(global_State *g, GCArena* arena)
+{
+  arena_freemem(g, arena);
+  //lj_freepages(g->allocd, arena, ArenaSize);
+  g->allocf(g->allocd, arena, ArenaSize, 0);
 }
 
 LJ_STATIC_ASSERT((offsetof(GG_State, L) & 15) == 0);
@@ -82,7 +97,7 @@ LJ_STATIC_ASSERT(((offsetof(GG_State, g) + offsetof(global_State, strempty)) & 1
 
 void* arena_createGG(GCArena** GGarena)
 {
-  GCArena* arena = (GCArena*)lj_allocpages(ArenaSize);
+  GCArena* arena = (GCArena*)lj_allocpages(ArenaSize, ArenaSize);
   GG_State *GG;
   GCCellID cell;
   lua_assert((((uintptr_t)arena) & (ArenaSize-1)) == 0);
@@ -99,9 +114,10 @@ void* arena_createGG(GCArena** GGarena)
 
 void arena_destroyGG(global_State *g, GCArena* arena)
 {
-  lj_mem_freevec(g, mref(arena->greybase, GCCellID1)-2, greyvecsize(arena), GCCellID1);
+  lua_assert((((uintptr_t)arena) & (ArenaCellMask)) == 0);
+  arena_freemem(g, arena);
   lua_assert(g->gc.total == sizeof(GG_State));
-  lj_freeepages(arena, ArenaSize); 
+  lj_freepages(arena, ArenaSize); 
 }  
 
 static void arena_setfreecell(GCArena *arena, GCCellID cell)
