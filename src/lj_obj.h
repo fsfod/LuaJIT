@@ -572,8 +572,6 @@ typedef enum {
 #define basemt_obj(g, o)	((g)->gcroot[GCROOT_BASEMT+itypemap(o)])
 #define mmname_str(g, mm)	(strref((g)->gcroot[GCROOT_MMNAME+(mm)]))
 
-struct ArenaFreeList;
-
 typedef struct GCState {
   GCSize total;		/* Memory currently allocated. */
   GCSize threshold;	/* Memory threshold. */

@@ -20,7 +20,7 @@ void assert_allocated(GCArena *arena, GCCellID cell)
 }
 
 static void arena_setfreecell(GCArena *arena, GCCellID cell);
-GCCellID arena_findfree(GCArena *arena, MSize mincells);
+void gc_mark(global_State *g, GCobj *o, int gct);
 
 GCArena* arena_init(GCArena* arena)
 {
@@ -249,7 +249,7 @@ void arena_free(global_State *g, GCArena *arena, void* mem, MSize size)
  
   arena_setfreecell(arena, cell);
 
-  if (freelist) {
+  if (freelist && 0) {
     MSize bin = min(numcells, MaxBinSize)-1;
     uint32_t sizebit = 1 << bin;
 
@@ -438,6 +438,16 @@ MSize arena_objcount(GCArena *arena)
   return count;
 }
 
+MSize arena_wbcount(GCArena *arena)
+{
+  MSize i, limit = MaxBlockWord, count = 0;
+
+  for (i = MinBlockWord; i < limit; i++) {
+    count += popcnt(arena->block[i]);
+  }
+  return count;
+}
+
 MSize arena_totalobjmem(GCArena *arena)
 {
   /* FIXME: placeholder */
@@ -569,7 +579,7 @@ void arena_marklist(GCArena *arena, CellIdChunk *list)
 
 void arena_minorsweep(GCArena *arena)
 {
-  MSize limit = MaxBlockWord;
+  MSize limit = arena_blocktop(arena);
   for (size_t i = MinBlockWord; i < limit; i++) {
     GCBlockword block = arena->block[i];
     GCBlockword mark = arena->mark[i];
@@ -579,29 +589,77 @@ void arena_minorsweep(GCArena *arena)
   }
 }
 
-void arena_majorsweep(GCArena *arena)
+MSize arena_majorsweep(GCArena *arena)
 {
-  MSize limit = MaxBlockWord;
+  MSize limit = arena_blocktop(arena);
+  MSize count = 0;
+  GCBlockword used = 0;
+
   for (size_t i = MinBlockWord; i < limit; i++) {
     GCBlockword block = arena->block[i];
     GCBlockword mark = arena->mark[i];
-    
+    /* Count whites that are swept to away */
+    count += popcnt(block & ~mark);
+    block = block & mark;
+    used |= block;
     arena->block[i] = block & mark;
     arena->mark[i] = block ^ mark;
   }
+  /* Set the 16th bit if there are still any reachable objects in the arena */
+  return count | (used ? (1 << 16) : 0);
+}
+
+void arena_copymeta(GCArena *arena, GCArena *meta)
+{
+  memcpy(meta->block+MinBlockWord, arena->block+MinBlockWord, sizeof(GCBlockword) * (MaxBlockWord - MinBlockWord));
+  memcpy(meta->mark+MinBlockWord, arena->mark+MinBlockWord, sizeof(GCBlockword) * (MaxBlockWord - MinBlockWord));
+}
+
+GCArena *arena_clone(global_State *g, GCArena *arena)
+{
+  GCArena *clone = arena_create(mainthread(g), 1);
+
+  arena_copymeta(arena, clone);
+  memcpy(clone->cellsstart+0, arena->cellsstart+0, ArenaSize-ArenaMetadataSize);
+
+  return clone;
 }
 
 GCArena *arena_clonemeta(global_State *g, GCArena *arena)
 {
-  GCArena *meta = lj_mem_newt(mainthread(g), sizeof(GCArena), GCArena);
+  GCArena *meta = lj_mem_newt(mainthread(g), sizeof(GCArena), GCArena);  
   memcpy(meta, arena, sizeof(GCArena));
+  setmref(meta->celltop, meta->cells+arena_topcellid(arena));
+  setmref(meta->greybase, NULL);
+  setmref(meta->greytop, NULL);
+  setmref(meta->freelist, NULL);
   return meta;
 }
 
-void arena_restoremeta(GCArena *arena, GCArena *meta)
+static MSize compareblockwords(GCBlockword *b1, GCBlockword *b2, MSize start, MSize limit)
 {
-  memcpy(arena->block+MinBlockWord, meta->block+MinBlockWord, sizeof(GCBlockword) * (MaxBlockWord - MinBlockWord));
-  memcpy(arena->mark+MinBlockWord, meta->mark+MinBlockWord, sizeof(GCBlockword) * (MaxBlockWord - MinBlockWord));
+  for (MSize i = start; i < limit; i++)
+  {
+    if (b1[i] != b2[i]) {
+      return i + lj_ffs((b1[i]|b2[i]) & ~(b1[i]&b2[i]));
+    }
+  }
+  return 0;
+}
+
+MSize arena_comparemeta(GCArena *arena, GCArena *meta)
+{
+  MSize index = compareblockwords(arena->block, meta->block, MinBlockWord, MaxBlockWord);
+  if (index) {
+    return index;
+  }
+
+  index = compareblockwords(arena->mark, meta->mark, MinBlockWord, MaxBlockWord);
+  if (index) {
+    return index | 0x10000;
+  }
+
+  return 0;
 }
 
 static CellIdChunk *idlist_new(lua_State *L)

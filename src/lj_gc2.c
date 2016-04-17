@@ -37,11 +37,21 @@
 #undef iswhite
 #undef isblack
 #undef tviswhite
+#undef makewhite
 
 #define iswhite(g, x)	(!isblack2(g, x))
 #define iswhitefast(x)	(!isblackfast(x)) /* must never be passed a huge block object */
 #define isblack(g, x)	(isblack2(g, x))
 #define tviswhite(g, x)	(tvisgcv(x) && iswhite(g, gcV(x)))
+
+static void makewhite(global_State *g, GCobj *o)
+{
+  if (!gc_ishugeblock(o)) {
+    arena_clearcellmark(ptr2arena(o), ptr2cell(o));
+  } else {
+    hugeblock_makewhite(g, o);
+  }
+}
 
 /* Macros to set GCobj colors and flags. */
 #define white2gray(x)		((x)->gch.marked &= (uint8_t)~LJ_GC_WHITES)
@@ -71,7 +81,7 @@ static void gc_mark(global_State *g, GCobj *o, int gct);
   { if (gc_ishugeblock(s) || iswhitefast(obj2gco(s))) gc_mark(g, obj2gco(s), ~LJ_TSTR); }
 
 /* Mark a white GCobj. */
-static void gc_mark(global_State *g, GCobj *o, int gct)
+void gc_mark(global_State *g, GCobj *o, int gct)
 {
   lua_assert((gc_ishugeblock(o) || iswhite(g, o)) && !isdead(g, o));
 
@@ -356,6 +366,7 @@ GCSize gc_traverse2(global_State *g, GCobj *o)
     //setgcrefr(th->gclist, g->gc.grayagain);
    // setgcref(g->gc.grayagain, o);
     //black2gray(o);  /* Threads are never black. */
+    cleargray(o);
     gc_traverse_thread(g, th);
     return sizeof(lua_State) + sizeof(TValue) * th->stacksize;
   } else {
@@ -576,7 +587,7 @@ static void gc_call_finalizer(global_State *g, lua_State *L,
     lj_err_throw(L, errcode);  /* Propagate errors. */
 }
 
-/* Finalize one userdata or cdata object from the mmudata list. */
+/* Finalize a userdata or cdata object */
 static void gc_finalize(lua_State *L, GCobj *o)
 {
   global_State *g = G(L);
@@ -629,13 +640,6 @@ static int gc_finalize_step(lua_State *L)
   }
 
   return 0;
-}
-
-/* Finalize all userdata objects from mmudata list. */
-void lj_gc_finalize_udata(lua_State *L)
-{
-  while (gcref(G(L)->gc.mmudata) != NULL)
-    gc_finalize(L);
 }
 
 #if LJ_HASFFI
@@ -695,7 +699,6 @@ static void atomic(global_State *g, lua_State *L)
   /* Prepare for sweep phase. */
   g->gc.currentwhite = (uint8_t)otherwhite(g);  /* Flip current white. */
   g->strempty.marked = g->gc.currentwhite;
-  setmref(g->gc.sweep, &g->gc.root);
   g->gc.estimate = g->gc.total - (GCSize)udsize;  /* Initial estimate. */
 }
 

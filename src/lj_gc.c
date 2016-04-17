@@ -32,6 +32,8 @@
 #define GCSWEEPCOST	10
 #define GCFINALIZECOST	100
 
+#define TraceGC TraceGC
+
 #ifdef TraceGC
 void TraceGC(global_State *g, int newstate);
 #define SetGCState(g, newstate) TraceGC(g, newstate); g->gc.state = newstate
@@ -219,13 +221,13 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
     for (i = 0; i < asize; i++)
       gc_marktv(g, arrayslot(t, i));
   }
-  if (t->asize && !lj_tab_hascolo_array(t))
-    arena_markgcvec(g, arrayslot(t, 0), t->asize * sizeof(TValue));
+//  if (t->asize && !lj_tab_hascolo_array(t))
+ //   arena_markgcvec(g, arrayslot(t, 0), t->asize * sizeof(TValue));
   if (t->hmask > 0) {  /* Mark hash part. */
     Node *node = noderef(t->node);
     MSize i, hmask = t->hmask;
-    if(!lj_tab_hascolo_hash(t))
-      arena_markgcvec(g, node, hmask * sizeof(Node));
+ //   if(!lj_tab_hascolo_hash(t))
+ //     arena_markgcvec(g, node, hmask * sizeof(Node));
     for (i = 0; i <= hmask; i++) {
       Node *n = &node[i];
       if (!tvisnil(&n->val)) {  /* Mark non-empty slot. */
@@ -785,7 +787,7 @@ static size_t gc_onestep(lua_State *L)
     if (g->gc.sweepstr > g->strmask) {
       SetGCState(g, GCSsweep);  /* All string hash chains sweeped. */
     }
-    lua_assert(old >= g->gc.total);
+    //lua_assert(old >= g->gc.total);
     g->gc.estimate -= old - g->gc.total;
     return GCSWEEPCOST;
     }
@@ -793,7 +795,7 @@ static size_t gc_onestep(lua_State *L)
     GCSize old = g->gc.total;
     setmref(g->gc.sweep, gc_sweep(g, mref(g->gc.sweep, GCRef), GCSWEEPMAX));
     sweep_arenas(g);
-    lua_assert(old >= g->gc.total);
+    //lua_assert(old >= g->gc.total);
     g->gc.estimate -= old - g->gc.total;
     if (gcref(*mref(g->gc.sweep, GCRef)) == NULL) {
       if (g->strnum <= (g->strmask >> 2) && g->strmask > LJ_MIN_STRTAB*2-1)

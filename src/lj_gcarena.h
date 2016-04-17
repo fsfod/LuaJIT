@@ -154,6 +154,7 @@ typedef struct FreeChunk {
 
 typedef struct HugeBlock {
   MRef obj;
+  GCSize size;
 } HugeBlock;
 
 typedef struct HugeBlockTable {
@@ -161,6 +162,8 @@ typedef struct HugeBlockTable {
   HugeBlock* node;
   MSize count;
   MSize total;
+  MRef *finalizers;
+  MRef *finalizertop;
 } HugeBlockTable;
 
 //LJ_STATIC_ASSERT(((offsetof(GCArena, cellsstart)) / 16) == MinCellId);
@@ -173,6 +176,7 @@ typedef struct HugeBlockTable {
 /* Can the arena bump allocate a min number of contiguous cells */
 #define arena_canbump(arena, mincells) ((arena_celltop(arena)+mincells) < arena_cell(arena, MaxCellId))
 #define arena_topcellid(arena) (ptr2cell(mref((arena)->celltop, GCCell)))
+#define arena_blocktop(arena) ((arena_topcellid(arena) & ~BlocksetMask)/BlocksetBits)
 #define arena_freelist(arena) mref((arena)->freelist, ArenaFreeList)
 
 #define arena_extrainfo(arena) (&(arena)->extra)
@@ -202,13 +206,14 @@ void *hugeblock_alloc(lua_State *L, GCSize size);
 void hugeblock_free(global_State *g, void *o, GCSize size);
 int hugeblock_iswhite(global_State *g, void *o);
 void hugeblock_mark(global_State *g, void *o);
+void hugeblock_makewhite(global_State *g, void *o);
 void hugeblock_setfixed(global_State *g, GCobj *o);
 #define gc_ishugeblock(o) ((((uintptr_t)(o)) & ArenaCellMask) == 0)
 
 void arena_markfixed(global_State *g, GCArena *arena);
 GCSize arena_propgrey(global_State *g, GCArena *arena, int limit, MSize *travcount);
 void arena_minorsweep(GCArena *arena);
-void arena_majorsweep(GCArena *arena);
+MSize arena_majorsweep(GCArena *arena);
 void arena_towhite(GCArena *arena);
 
 void* arena_allocslow(GCArena *arena, MSize size);
@@ -219,10 +224,18 @@ MSize arena_cellextent(GCArena *arena, MSize cell);
 GCCellID arena_firstallocated(GCArena *arena);
 MSize arena_objcount(GCArena *arena);
 MSize arena_totalobjmem(GCArena *arena);
+void arena_copymeta(GCArena *arena, GCArena *meta);
 
 /* Must be at least 16 byte aligned */
 #define arena_checkptr(p) lua_assert(p != NULL && (((uintptr_t)p) & 0xf) == 0)
 #define arena_checkid(id) lua_assert(id >= MinCellId && id <= MaxCellId)
+
+/* Returns if the cell is the start of an allocated cell range */
+static LJ_AINLINE int arena_cellisallocated(GCArena *arena, GCCellID cell)
+{
+  arena_checkid(cell);
+  return arena->block[arena_blockidx(cell)] & arena_blockbit(cell);
+}
 
 #define arena_freespace(arena) ((((arena)->cell+MaxCellId)-(arena)->celltop) * CellSize)
 
@@ -302,7 +315,7 @@ static LJ_AINLINE void arena_marktrav(global_State *g, void *o)
   GCArena *arena = ptr2arena(o);
   GCCellID cell = ptr2cell(o);
   GCCellID1* greytop;
-  lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
+  lua_assert(arena_cellisallocated(arena, cell));
   lua_assert(((GCCell*)o)->gct != ~LJ_TSTR && ((GCCell*)o)->gct != ~LJ_TCDATA);
 
   arena_markcell(arena, cell);
@@ -320,7 +333,7 @@ static LJ_AINLINE void arena_markgco(global_State *g, void *o)
 {
   GCArena *arena = ptr2arena(o);
   GCCellID cell = ptr2cell(o);
-  lua_assert(cell >= MinCellId && arena_cellstate(arena, cell) > CellState_Allocated);
+  lua_assert(cell >= MinCellId && arena_cellisallocated(arena, cell));
   
   /* Only really needed for traversable objects */
   if (((GCCell*)o)->gct == ~LJ_TSTR || ((GCCell*)o)->gct == ~LJ_TCDATA || ((GCCell*)o)->gct == ~LJ_TUDATA) {
@@ -334,7 +347,7 @@ static LJ_AINLINE void arena_markcdstr(void* o)
 {
   GCArena *arena = ptr2arena(o);
   GCCellID cell = ptr2cell(o);
-  lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
+  lua_assert(arena_cellisallocated(arena, cell));
   lua_assert(((GCCell*)o)->gct == ~LJ_TSTR || ((GCCell*)o)->gct == ~LJ_TCDATA || 
              ((GCCell*)o)->gct == ~LJ_TUDATA);
 
@@ -353,6 +366,13 @@ static LJ_AINLINE void arena_markgcvec(global_State *g, void* o, MSize size)
     lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
     arena_markcell(arena, cell);
   }
+}
+
+static LJ_AINLINE void arena_clearcellmark(GCArena *arena, GCCellID cell)
+{
+  arena_checkid(cell);
+  lua_assert(arena_cellisallocated(arena, cell));
+  arena_getmark(arena, cell) &= ~arena_blockbit(cell);
 }
 
 static LJ_AINLINE void *arena_alloc(GCArena *arena, MSize size)
