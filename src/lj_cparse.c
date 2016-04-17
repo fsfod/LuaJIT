@@ -1194,7 +1194,7 @@ static CTypeID cp_struct_name(CPState *cp, CPDecl *sdecl, CTInfo info)
       sid = lj_ctype_new(cp->cts, &ct);
       ct->info = info;
       ct->size = CTSIZE_INVALID;
-      ctype_setname(ct, cp->str);
+      ctype_setname(cp->cts, ct, cp->str);
       lj_ctype_addname(cp->cts, ct, sid);
     }
     cp_next(cp);
@@ -1341,7 +1341,7 @@ static CTypeID cp_decl_struct(CPState *cp, CPDecl *sdecl, CTInfo sinfo)
 	  CTypeID fieldid = cp_decl_constinit(cp, &ct, ctypeid);
 	  ctype_get(cp->cts, lastid)->sib = fieldid;
 	  lastid = fieldid;
-	  ctype_setname(ct, decl.name);
+	  ctype_setname(cp->cts, ct, decl.name);
 	} else {
 	  CTSize bsz = CTBSZ_FIELD;  /* Temp. for layout phase. */
 	  CType *ct;
@@ -1373,7 +1373,7 @@ static CTypeID cp_decl_struct(CPState *cp, CPDecl *sdecl, CTInfo sinfo)
 	  /* Create temporary field for layout phase. */
 	  ct->info = CTINFO(CT_FIELD, ctypeid + (bsz << CTSHIFT_BITCSZ));
 	  ct->size = decl.attr;
-	  if (decl.name) ctype_setname(ct, decl.name);
+	  if (decl.name) ctype_setname(cp->cts, ct, decl.name);
 
 	add_field:
 	  ctype_get(cp->cts, lastid)->sib = fieldid;
@@ -1431,7 +1431,7 @@ static CTypeID cp_decl_enum(CPState *cp, CPDecl *sdecl)
 	CTypeID constid = lj_ctype_new(cp->cts, &ct);
 	ctype_get(cp->cts, lastid)->sib = constid;
 	lastid = constid;
-	ctype_setname(ct, name);
+	ctype_setname(cp->cts, ct, name);
 	ct->info = CTINFO(CT_CONSTVAL, CTF_CONST|k.id);
 	ct->size = k.u32++;
 	if (k.u32 == 0x80000000u) k.id = CTID_UINT32;
@@ -1611,7 +1611,7 @@ static void cp_decl_func(CPState *cp, CPDecl *fdecl)
       else
 	anchor = fieldid;
       lastid = fieldid;
-      if (decl.name) ctype_setname(ct, decl.name);
+      if (decl.name) ctype_setname(cp->cts, ct, decl.name);
       ct->info = CTINFO(CT_FIELD, ctypeid);
       ct->size = nargs++;
     } while (cp_opt(cp, ','));
@@ -1827,10 +1827,10 @@ static void cp_decl_multi(CPState *cp)
 	  cta->info = CTINFO(CT_ATTRIB, CTATTRIB(CTA_REDIR));
 	  cta->sib = ct->sib;
 	  ct->sib = aid;
-	  ctype_setname(cta, decl.redir);
+	  ctype_setname(cp->cts, cta, decl.redir);
 	}
       noredir:
-	ctype_setname(ct, decl.name);
+	ctype_setname(cp->cts, ct, decl.name);
 	lj_ctype_addname(cp->cts, ct, id);
       }
       if (!cp_opt(cp, ',')) break;

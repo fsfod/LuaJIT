@@ -599,7 +599,7 @@ CTState *lj_ctype_init(lua_State *L)
   cts->tab = ct;
   cts->sizetab = CTTYPETAB_MIN;
   cts->top = CTTYPEINFO_NUM;
-  cts->L = NULL;
+  cts->L = L;
   cts->g = G(L);
   for (id = 0; id < CTTYPEINFO_NUM; id++, ct++) {
     CTInfo info = lj_ctype_typeinfo[id];
@@ -609,7 +609,7 @@ CTState *lj_ctype_init(lua_State *L)
     if (ctype_type(info) == CT_KW || ctype_istypedef(info)) {
       size_t len = strlen(name);
       GCstr *str = lj_str_new(L, name, len);
-      ctype_setname(ct, str);
+      ctype_setname(cts, ct, str);
       name += len+1;
       lj_ctype_addname(cts, ct, id);
     } else {
@@ -618,6 +618,7 @@ CTState *lj_ctype_init(lua_State *L)
       if (!ctype_isenum(info)) ctype_addtype(cts, ct, id);
     }
   }
+  cts->L = NULL;
   setmref(G(L)->ctype_state, cts);
   return cts;
 }

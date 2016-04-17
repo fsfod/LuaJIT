@@ -429,10 +429,10 @@ static LJ_AINLINE CType *ctype_rawchild(CTState *cts, CType *ct)
 }
 
 /* Set the name of a C type table element. */
-static LJ_AINLINE void ctype_setname(CType *ct, GCstr *s)
+static LJ_AINLINE void ctype_setname(CTState *cts, CType *ct, GCstr *s)
 {
   /* NOBARRIER: mark string as fixed -- the C type table is never collected. */
-  fixstring(s);
+  fixstring(cts->L, s);
   setgcref(ct->name, obj2gco(s));
 }
 

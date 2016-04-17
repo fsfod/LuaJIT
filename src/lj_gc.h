@@ -43,7 +43,7 @@ enum {
   ((x)->gch.marked = ((x)->gch.marked & (uint8_t)~LJ_GC_COLORS) | curwhite(g))
 #define flipwhite(x)	((x)->gch.marked ^= LJ_GC_WHITES)
 #define black2gray(x)	((x)->gch.marked &= (uint8_t)~LJ_GC_BLACK)
-#define fixstring(s)	((s)->marked |= LJ_GC_FIXED)
+#define fixstring(L, s)	((s)->marked |= LJ_GC_FIXED)
 #define markfinalized(x)	((x)->gch.marked |= LJ_GC_FINALIZED)
 
 #define isgray2(x)	(((x)->gch.marked & LJ_GC_GRAY))
