@@ -93,6 +93,7 @@ enum ArenaFlags {
 };
 
 typedef struct ArenaExtra {
+  MSize id;
   MRef fixedcells;
   uint16_t fixedtop;
   uint16_t fixedsized;
@@ -110,7 +111,7 @@ typedef union GCArena {
         MRef celltop;
         MRef freelist;
         MRef finalizers;
-        GCBlockword unusedblock[UnusedBlockWords];
+        ArenaExtra extra; /*FIXME: allocate separately */
       };
       GCBlockword block[MaxBlockWord];
     };
@@ -174,6 +175,7 @@ typedef struct HugeBlockTable {
 #define arena_topcellid(arena) (ptr2cell(mref((arena)->celltop, GCCell)))
 #define arena_freelist(arena) mref((arena)->freelist, ArenaFreeList)
 
+#define arena_extrainfo(arena) (&(arena)->extra)
 #define arena_finalizers(arena) mref((arena)->finalizers, CellIdChunk)
 void arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o);
 CellIdChunk *arena_checkfinalizers(global_State *g, GCArena *arena, CellIdChunk *out);
@@ -194,13 +196,16 @@ void* arena_createGG(GCArena** arena);
 void arena_destroyGG(global_State *g, GCArena* arena);
 void arena_creategreystack(lua_State *L, GCArena *arena);
 void arena_growgreystack(global_State *L, GCArena *arena);
+void arean_setfixed(lua_State *L, GCArena *arena, GCobj *o);
 
 void *hugeblock_alloc(lua_State *L, GCSize size);
 void hugeblock_free(global_State *g, void *o, GCSize size);
 int hugeblock_iswhite(global_State *g, void *o);
 void hugeblock_mark(global_State *g, void *o);
+void hugeblock_setfixed(global_State *g, GCobj *o);
 #define gc_ishugeblock(o) ((((uintptr_t)(o)) & ArenaCellMask) == 0)
 
+void arena_markfixed(global_State *g, GCArena *arena);
 GCSize arena_propgrey(global_State *g, GCArena *arena, int limit, MSize *travcount);
 void arena_minorsweep(GCArena *arena);
 void arena_majorsweep(GCArena *arena);
@@ -214,9 +219,6 @@ MSize arena_cellextent(GCArena *arena, MSize cell);
 GCCellID arena_firstallocated(GCArena *arena);
 MSize arena_objcount(GCArena *arena);
 MSize arena_totalobjmem(GCArena *arena);
-
-#define lj_mem_new_arena(L, size) arena_alloc((GCArena*)G(L)->arena, size)
-#define lj_mem_newt_arena(L, size, t) (t*)arena_alloc((GCArena*)G(L)->arena, size)
 
 /* Must be at least 16 byte aligned */
 #define arena_checkptr(p) lua_assert(p != NULL && (((uintptr_t)p) & 0xf) == 0)

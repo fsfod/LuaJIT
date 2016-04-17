@@ -43,12 +43,23 @@ enum {
   ((x)->gch.marked = ((x)->gch.marked & (uint8_t)~LJ_GC_COLORS) | curwhite(g))
 #define flipwhite(x)	((x)->gch.marked ^= LJ_GC_WHITES)
 #define black2gray(x)	((x)->gch.marked &= (uint8_t)~LJ_GC_BLACK)
-#define fixstring(L, s)	((s)->marked |= LJ_GC_FIXED)
+#define fixstring(L, s)	lj_gc_fixgcobj(L, (GCobj *)(s))
 #define markfinalized(x)	((x)->gch.marked |= LJ_GC_FINALIZED)
 
 #define isgray2(x)	(((x)->gch.marked & LJ_GC_GRAY))
 #define setgray(x)	((x)->gch.marked |= LJ_GC_GRAY)
 #define cleargray(x)	((x)->gch.marked &= ~LJ_GC_GRAY)
+
+static void lj_gc_fixgcobj(lua_State *L, GCobj *o)
+{
+  if (o->gch.marked & LJ_GC_FIXED) return;
+  o->gch.marked |= LJ_GC_FIXED;
+  if (!gc_ishugeblock(o)) {
+    arean_setfixed(L, ptr2arena(o), o);
+  } else {
+    hugeblock_setfixed(G(L), o);
+  }
+}
 
 /* Collector. */
 LJ_FUNC size_t lj_gc_separateudata(global_State *g, int all);

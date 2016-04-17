@@ -618,7 +618,7 @@ int lj_gc_getarenaid(global_State *g, void* arena)
   return -1;
 }
 
-static int register_arena(lua_State *L, GCArena *arena)
+static int register_arena(lua_State *L, GCArena *arena, uint32_t flags)
 {
   global_State *g = G(L);
   ArenaFreeList *freelist;
@@ -631,21 +631,21 @@ static int register_arena(lua_State *L, GCArena *arena)
   ** the arena contains traversable objects, if the arena is full/fragmented(no bump)/empty,
   ** is only for one allocation size?
   */
-  g->gc.arenas[g->gc.arenastop] = arena;
+  g->gc.arenas[g->gc.arenastop] = (GCArena *)(((uintptr_t)arena) | flags);
 
   freelist = G(L)->gc.freelists + g->gc.arenastop;
   memset(freelist, 0, sizeof(ArenaFreeList));
   freelist->owner = arena;
+  arena->extra.id = g->gc.arenastop;
+  arena->extra.flags = flags;
   setmref(arena->freelist, freelist);
-
   return g->gc.arenastop++;
 }
 
 GCArena* lj_gc_newarena(lua_State *L, uint32_t flags)
 {
   GCArena *arena = arena_create(L, flags);
-  int i = register_arena(L, arena);
-  lj_gc_setarenaflag(G(L), i, flags);
+  register_arena(L, arena, flags);
   return arena;
 }
 
@@ -664,6 +664,7 @@ void lj_gc_freearena(global_State *g, GCArena *arena)
     arena = g->gc.arenas[g->gc.arenastop];
     g->gc.arenas[i] = arena;
 
+    arena->extra.id = i;
     g->gc.freelists[i].owner = NULL;
   }
 }
@@ -703,9 +704,8 @@ void lj_gc_init(global_State *g, lua_State *L, GCArena* GGarena)
   memset(g->gc.freelists, 0, sizeof(ArenaFreeList) * 16);
   
   g->travarena = GGarena;
-  register_arena(L, GGarena);
+  register_arena(L, GGarena, ArenaFlag_TravObjs|ArenaFlag_GGArena);
   arena_creategreystack(L, GGarena);
-  lj_gc_setarenaflag(g, 0, ArenaFlag_TravObjs|ArenaFlag_GGArena);
 
   g->arena = lj_gc_newarena(L, 0);
 }

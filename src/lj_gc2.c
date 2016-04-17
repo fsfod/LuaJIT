@@ -120,6 +120,16 @@ static void gc_mark_start(global_State *g)
   gc_mark_tab(g, tabref(mainthread(g)->env));
   gc_marktv(g, &g->registrytv);
   gc_mark_gcroot(g);
+
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+    if (lj_gc_arenaflags(g, i) & ArenaFlag_FixedList) {
+      arena_markfixed(g, arena);
+    } else {
+      lua_assert(!mref(arena_extrainfo(arena)->fixedcells, GCCellID1));
+    }
+  }
+
   //g->gc.state = GCSpropagate;
 }
 
@@ -433,7 +443,7 @@ void TraceGC(global_State *g, int newstate)
       arena_towhite(lj_gc_arenaref(g, i));
     }
 
-    gc_mark_gcroot(g);
+    gc_mark_start(g);
     gc_propagate_gray(g);
   } else if (newstate == GCSsweep) {
     gc_sweep(g, -1);
