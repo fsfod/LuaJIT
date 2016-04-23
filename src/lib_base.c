@@ -441,6 +441,23 @@ LJLIB_CF(gcinfo)
 {
   if ((L->top-L->base) > 0) {
     GCArena *arena = checkarg_arena(L, 1);
+
+    /* Requested stats for a particular arena id */
+    if (tvisnumber(L->base)) {
+      int32_t i = lj_lib_checkint(L, 1);  
+      if (i == -1) {
+        /* Return the arena count for -1 arena id */
+        setintV(L->top++, G(L)->gc.arenastop);
+        return 1;
+      } else if(i >= 0 && (MSize)i < G(L)->gc.arenastop) {
+        arena = lj_gc_arenaref(G(L), i);
+      } else {
+        return 0;
+      }
+    } else {
+      arena = checkarg_arena(L, 1);
+    }
+
     lua_pushinteger(L, arena_objcount(arena));
     lua_pushinteger(L, arena_totalobjmem(arena));
     return 2;
