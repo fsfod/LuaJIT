@@ -208,6 +208,8 @@ int hugeblock_iswhite(global_State *g, void *o);
 void hugeblock_mark(global_State *g, void *o);
 void hugeblock_makewhite(global_State *g, void *o);
 void hugeblock_setfixed(global_State *g, GCobj *o);
+MSize hugeblock_checkfinalizers(global_State *g);
+MSize hugeblock_runfinalizers(global_State *g);
 #define gc_ishugeblock(o) ((((uintptr_t)(o)) & ArenaCellMask) == 0)
 
 void arena_markfixed(global_State *g, GCArena *arena);

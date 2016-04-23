@@ -24,6 +24,7 @@ GCudata *lj_udata_new(lua_State *L, MSize sz, GCtab *env)
   /* Chain to userdata list (after main thread). */
   setgcrefr(ud->nextgc, mainthread(g)->nextgc);
   setgcref(mainthread(g)->nextgc, obj2gco(ud));
+  lj_gc_setfinalizable(L, (GCobj *)ud, NULL);
   return ud;
 }
 

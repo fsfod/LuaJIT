@@ -73,4 +73,14 @@ LJ_FUNCA MSize LJ_FASTCALL lj_tab_len(GCtab *t);
 #define lj_tab_hascolo_array(t) (((t)->colo & 1) != 0)
 #define lj_tab_hascolo_hash(t) (((t)->colo & 2) != 0)
 
+void lj_gc_setfinalizable(lua_State *L, GCobj *o, GCtab *mt);
+
+static LJ_AINLINE void lj_tab_setmt(lua_State *L, GCtab *t, GCtab *mt)
+{
+  if (LJ_52 && mt && !(t->marked & LJ_GC_SETFINALIZBLE)) {
+    lj_gc_setfinalizable(L, (GCobj *)t, mt);
+  }
+  setgcref(t->metatable, obj2gco(mt));
+}
+
 #endif

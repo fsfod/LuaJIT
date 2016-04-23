@@ -60,6 +60,7 @@ static void lj_gc_fixgcobj(lua_State *L, GCobj *o)
     hugeblock_setfixed(G(L), o);
   }
 }
+void lj_gc_setfinalizable(lua_State *L, GCobj *o, GCtab *mt);
 
 /* Collector. */
 LJ_FUNC size_t lj_gc_separateudata(global_State *g, int all);

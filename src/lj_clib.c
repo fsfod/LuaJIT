@@ -388,7 +388,7 @@ static CLibrary *clib_new(lua_State *L, GCtab *mt)
   cl->cache = t;
   ud->udtype = UDTYPE_FFI_CLIB;
   /* NOBARRIER: The GCudata is new (marked white). */
-  setgcref(ud->metatable, obj2gco(mt));
+  lj_udata_setmt(L, ud, mt);
   setudataV(L, L->top++, ud);
   return cl;
 }

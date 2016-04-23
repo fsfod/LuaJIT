@@ -25,6 +25,7 @@
 #include "lj_strfmt.h"
 #include "lj_ff.h"
 #include "lj_lib.h"
+#include "lj_udata.h"
 
 /* Userdata payload for I/O file. */
 typedef struct IOFileUD {
@@ -74,7 +75,7 @@ static IOFileUD *io_file_new(lua_State *L)
   GCudata *ud = udataV(L->top-1);
   ud->udtype = UDTYPE_IO_FILE;
   /* NOBARRIER: The GCudata is new (marked white). */
-  setgcrefr(ud->metatable, curr_func(L)->c.env);
+  lj_udata_setmt(L, ud, tabref(curr_func(L)->c.env));
   iof->fp = NULL;
   iof->type = IOFILE_TYPE_FILE;
   return iof;
@@ -519,7 +520,7 @@ static GCobj *io_std_new(lua_State *L, FILE *fp, const char *name)
   GCudata *ud = udataV(L->top-1);
   ud->udtype = UDTYPE_IO_FILE;
   /* NOBARRIER: The GCudata is new (marked white). */
-  setgcref(ud->metatable, gcV(L->top-3));
+  lj_udata_setmt(L, ud, tabV(L->top-3));
   iof->fp = fp;
   iof->type = IOFILE_TYPE_STDF;
   lua_setfield(L, -2, name);

@@ -168,33 +168,28 @@ static void gc_mark_mmudata(global_State *g)
   }
 }
 
-/* Separate userdata objects to be finalized to mmudata list. */
-size_t lj_gc_separateudata2(global_State *g, int all)
+/* Separate userdata objects to be finalized */
+size_t lj_gc_separateudata(global_State *g, int all)
 {
   size_t m = 0;
-  GCRef *p = &mainthread(g)->nextgc;
-  GCobj *o;
-  while ((o = gcref(*p)) != NULL) {
-    if (!(iswhite(g, o) || all) || isfinalized(gco2ud(o))) {
-      p = &o->gch.nextgc;  /* Nothing to do. */
-    } else if (!lj_meta_fastg(g, tabref(gco2ud(o)->metatable), MM_gc)) {
-      markfinalized(o);  /* Done, as there's no __gc metamethod. */
-      p = &o->gch.nextgc;
-    } else {  /* Otherwise move userdata to be finalized to mmudata list. */
-      m += sizeudata(gco2ud(o));
-      markfinalized(o);
-      *p = o->gch.nextgc;
-      if (gcref(g->gc.mmudata)) {  /* Link to end of mmudata list. */
-	GCobj *root = gcref(g->gc.mmudata);
-	setgcrefr(o->gch.nextgc, root->gch.nextgc);
-	setgcref(root->gch.nextgc, o);
-	setgcref(g->gc.mmudata, o);
-      } else {  /* Create circular list. */
-	setgcref(o->gch.nextgc, o);
-	setgcref(g->gc.mmudata, o);
+  CellIdChunk *list = lj_mem_newt(mainthread(g), sizeof(CellIdChunk), CellIdChunk);
+  list->count = 0;
+  list->next = NULL;
+  TimerStart(gc_separateudata);
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+
+    if (arena_finalizers(arena)) {
+      CellIdChunk *whites = arena_checkfinalizers(g, arena, list);
+      if (whites) {
+        list = lj_mem_newt(mainthread(g), sizeof(CellIdChunk), CellIdChunk);
+        list->count = 0;
+        list->next = NULL;
       }
     }
   }
+  TimerEnd(gc_separateudata);
+  m += hugeblock_checkfinalizers(g);
   return m;
 }
 
@@ -865,3 +860,15 @@ void lj_gc_barriertrace2(global_State *g, uint32_t traceno)
     gc_marktrace(g, traceno);
 }
 #endif
+
+void lj_gc_setfinalizable(lua_State *L, GCobj *o, GCtab *mt)
+{
+  lua_assert(o->gch.gct == ~LJ_TCDATA || o->gch.gct == ~LJ_TUDATA);
+  if (!gc_ishugeblock(o)) {
+    arena_addfinalizer(L, ptr2arena(o), o);
+  } else {
+    hugeblock_setfinalizable(L, o);
+  }
+  o->gch.marked |= LJ_GC_FINALIZED;
+}
+

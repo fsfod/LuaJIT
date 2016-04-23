@@ -875,7 +875,7 @@ void hugeblock_setfixed(global_State *g, GCobj *o)
   node_setflag(node, HugeFlag_Fixed);
 }
 
-void hugeblock_addfinalizer(global_State *g, GCobj *o)
+void hugeblock_setfinalizable(global_State *g, GCobj *o)
 {
   lua_assert(o->gch.gct == ~LJ_TCDATA || o->gch.gct == ~LJ_TUDATA);
  

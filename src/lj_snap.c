@@ -769,7 +769,7 @@ static void snap_unsink(jit_State *J, GCtrace *T, ExitState *ex,
 	  lua_assert(irk->op2 == IRFL_TAB_META);
 	  snap_restoreval(J, T, ex, snapno, rfilt, irs->op2, &tmp);
 	  /* NOBARRIER: The table is new (marked white). */
-	  setgcref(t->metatable, obj2gco(tabV(&tmp)));
+          lj_tab_setmt(J->L, t, tabV(&tmp));
 	} else {
 	  irk = &T->ir[irk->op2];
 	  if (irk->o == IR_KSLOT) irk = &T->ir[irk->op1];
