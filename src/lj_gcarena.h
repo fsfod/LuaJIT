@@ -202,11 +202,11 @@ void arena_creategreystack(lua_State *L, GCArena *arena);
 void arena_growgreystack(global_State *L, GCArena *arena);
 void arean_setfixed(lua_State *L, GCArena *arena, GCobj *o);
 
-void *hugeblock_alloc(lua_State *L, GCSize size);
+void *hugeblock_alloc(lua_State *L, GCSize size, MSize gct);
 void hugeblock_free(global_State *g, void *o, GCSize size);
 int hugeblock_iswhite(global_State *g, void *o);
 void hugeblock_mark(global_State *g, void *o);
-void hugeblock_makewhite(global_State *g, void *o);
+void hugeblock_makewhite(global_State *g, GCobj *o);
 void hugeblock_setfixed(global_State *g, GCobj *o);
 MSize hugeblock_checkfinalizers(global_State *g);
 MSize hugeblock_runfinalizers(global_State *g);
