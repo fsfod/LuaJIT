@@ -203,7 +203,7 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
   GCtab *mt = tabref(t->metatable);
   if (mt)
     gc_mark_tab(g, mt);
-  //cleargray(obj2gco(t));
+  cleargray(obj2gco(t));
   mode = lj_meta_fastg(g, mt, MM_mode);
   if (mode && tvisstr(mode)) {  /* Valid __mode field? */
     const char *modestr = strVdata(mode);
@@ -872,3 +872,34 @@ void lj_gc_setfinalizable(lua_State *L, GCobj *o, GCtab *mt)
   o->gch.marked |= LJ_GC_FINALIZED;
 }
 
+void lj_gc_emptygrayssb(global_State *g)
+{
+  GCRef *list = mref(g->gc.grayssb, GCRef);
+  intptr_t mask = ((intptr_t)mref(g->gc.grayssb, GCRef)) & GRAYSSB_MASK;
+  MSize i, limit;
+
+  if (mask == 0) {
+    list = list-GRAYSSBSZ;
+    limit = GRAYSSBSZ;
+  } else {
+    list = (GCRef *)(((intptr_t)list) & ~GRAYSSB_MASK);
+    limit = (MSize)(mask/sizeof(GCRef));
+  }
+  /* Skip first dummy value */
+  for (i = 1; i < limit; i++) {
+    GCobj *o = gcref(list[i]);
+    if (!gc_ishugeblock(o)) {
+      /* Skip false positive triggered barriers since fast barrier only checks greybit
+      ** and not if the object being stored into is black
+      */
+      if (!isblackfast(o)) {
+        continue;
+      }
+      arena_marktrav(g, o);
+    } else {
+      hugeblock_mark(g, o);
+    }
+  }
+  /* Leave dummy value at the start so we always know if the list is completely empty or full */
+  setmref(g->gc.grayssb, list+1);
+}

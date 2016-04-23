@@ -610,6 +610,8 @@ void lj_gc_freeall(global_State *g)
 
   lj_mem_freevec(g, g->gc.arenas, g->gc.arenassz, GCArena*);
   lj_mem_freevec(g, g->gc.freelists, g->gc.arenassz, ArenaFreeList);
+  lj_mem_freevec(g, (void*)(((intptr_t)mref(g->gc.grayssb, GCRef)) & GRAYSSB_MASK), 
+                 GRAYSSBSZ, GCRef);
 }
 
 int lj_gc_getarenaid(global_State *g, void* arena)
@@ -697,6 +699,9 @@ void lj_gc_init(global_State *g, lua_State *L, GCArena* GGarena)
   g->gc.total = sizeof(GG_State);
   g->gc.pause = LUAI_GCPAUSE;
   g->gc.stepmul = LUAI_GCMUL;
+  /* Make sure the minimum slot is always base + 1 so we can tell empty and full apart */
+  setmref(g->gc.grayssb, ((GCRef*)lj_alloc_memalign(g->allocd, 
+            GRAYSSBSZ*sizeof(GCRef), GRAYSSBSZ*sizeof(GCRef)))+1);
   
   arenas = lj_mem_newvec(L, 16, GCArena*);
   g->gc.arenas = arenas;

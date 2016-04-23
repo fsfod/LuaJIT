@@ -121,20 +121,10 @@ LJ_FUNC void lj_gc_barriertrace(global_State *g, uint32_t traceno);
 #define lj_gc_anybarriert2(L, t)  \
   { if (LJ_UNLIKELY(!isgray2(obj2gco(t)))) lj_gc_barrierback(G(L), (t)); }
 
-static LJ_AINLINE void lj_gc_emptyssb(global_State *g)
-{
-  GCRef *list = (GCRef *)(((intptr_t)mref(g->gc.greyssb, GCRef)) & ~0x400);
-
-  for (MSize i = 0; i < 256; i++) {
-    GCobj *o = gcref(list[i]);
-    if (!gc_ishugeblock(o)) {
-      arena_marktrav(g, o);
-    } else {
-      hugeblock_mark(g, o);
-    }
-  }
-  setmref(g->gc.greyssb, list);
-}
+LJ_FUNCA void lj_gc_emptygrayssb(global_State *g);
+/* Must be a power of 2 */
+#define GRAYSSBSZ 256
+#define GRAYSSB_MASK ((GRAYSSBSZ*sizeof(GCRef))-1)
 
 /* Move the GC propagation frontier back for tables (make it gray again). */
 static LJ_AINLINE void lj_gc_barrierback2(global_State *g, GCtab *t)
@@ -145,13 +135,12 @@ static LJ_AINLINE void lj_gc_barrierback2(global_State *g, GCtab *t)
   setgray(o);
   
   if (g->gc.state != GCSpropagate || isblack2(g, t)) {
-    GCRef *ssb = mref(g->gc.greyssb, GCRef);
+    GCRef *ssb = mref(g->gc.grayssb, GCRef);
     setgcrefp(*ssb, t);
     ssb++;
-    if ((((uintptr_t)ssb) & (0x400-1)) != 0) {
-      setmref(g->gc.greyssb, ssb);
-    } else {
-      lj_gc_emptyssb(g);
+    setmref(g->gc.grayssb, ssb);
+    if ((((uintptr_t)ssb) & GRAYSSB_MASK) == 0) {
+      lj_gc_emptygrayssb(g);
     }
   }
 }

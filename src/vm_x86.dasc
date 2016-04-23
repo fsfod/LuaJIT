@@ -476,10 +476,33 @@
 |
 |// Move table write barrier back. Overwrites reg.
 |.macro barrierback, tab, reg
+
 |  and byte tab->marked, (uint8_t)~LJ_GC_BLACK	// black2gray(tab)
 |  mov reg, [DISPATCH+DISPATCH_GL(gc.grayagain)]
 |  mov [DISPATCH+DISPATCH_GL(gc.grayagain)], tab
 |  mov tab->gclist, reg
+
+|  and byte tab->marked, LJ_GC_GRAY
+// cmp dword [DISPATCH+DISPATCH_GL(gc.state)], GCSpropagate
+|  mov reg, [DISPATCH+DISPATCH_GL(gc.grayssb)]
+|  mov dword [reg], tab
+|  add reg, 4
+|  mov dword [DISPATCH+DISPATCH_GL(gc.grayssb)], reg
+|  and reg, 0x3ff
+|  push rdi
+|  push rsi
+|  push rax
+|  push rcx
+|  push rdx
+|  push rbp
+|  lea GL:CARG1, [DISPATCH+GG_DISP2G]
+|  call extern lj_gc_emptygrayssb
+|  pop rbp
+|  pop rdx
+|  pop rcx
+|  pop rax
+|  pop rsi
+|  pop rdi
 |.endmacro
 |
 |//-----------------------------------------------------------------------
@@ -1571,8 +1594,13 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov PC, [BASE-4]
   |  mov dword [BASE-4], LJ_TTAB		// Return original table.
   |  mov [BASE-8], TAB:RB
+  |.if GC2
+  |  test byte TAB:RB->marked, LJ_GC_GRAY   // !isgray(table)
+  |  jz >1
+  |.else
   |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
   |  jz >1
+  |.endif
   |  // Possible write barrier. Table is black, but skip iswhite(mt) check.
   |  barrierback TAB:RB, RC
   |1:
@@ -4027,8 +4055,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov [RB+4], RD
     |  jz >1
     |  // Check barrier for closed upvalue.
+    |.if GC2
+    |  test byte [RB+TV2MARKOFS], LJ_GC_GRAY  // !isgray(table)
+    |  jz >2
+    |.else
     |  test byte [RB+TV2MARKOFS], LJ_GC_BLACK		// isblack(uv)
     |  jnz >2
+    |.endif
     |1:
     |  ins_next
     |
@@ -4416,8 +4449,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cmp dword [RC+4], LJ_TNIL
     |  je >3				// Previous value is nil?
     |1:
+    |.if GC2
+    |  test byte TAB:RB->marked, LJ_GC_GRAY  // !isgray(table)
+    |  jz >7
+    |.else
     |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
     |  jnz >7
+    |.endif 
     |2:  // Set array slot.
     |.if X64
     |  mov RBa, [BASE+RA*8]
@@ -4470,8 +4508,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cmp dword [RA+4], LJ_TNIL
     |  je >4				// Previous value is nil?
     |2:
+    |.if GC2
+    |  test byte TAB:RB->marked, LJ_GC_GRAY   // !isgray(table)
+    |  jz >7
+    |.else
     |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
     |  jnz >7
+    |.endif
     |3:  // Set node value.
     |  movzx RC, PC_RA
     |.if X64
@@ -4548,8 +4591,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cmp dword [RC+4], LJ_TNIL
     |  je >3				// Previous value is nil?
     |1:
+    |.if GC2
+    |  test byte TAB:RB->marked, LJ_GC_GRAY   // !isgray(table)
+    |  jz >7
+    |.else
     |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
     |  jnz >7
+    |.endif
     |2:	 // Set array slot.
     |.if X64
     |  mov RAa, [BASE+RA*8]
@@ -4584,8 +4632,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |.else
     |  cvttsd2si RC, qword [BASE+RC*8]
     |.endif
+    |.if GC2
+    |  test byte TAB:RB->marked, LJ_GC_GRAY   // !isgray(table)
+    |  jz >7
+    |.else
     |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
     |  jnz >7
+    |.endif
     |2:
     |  cmp RC, TAB:RB->asize
     |  jae ->vmeta_tsetr
@@ -4617,8 +4670,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |1:
     |  lea RA, [BASE+RA*8]
     |  mov TAB:RB, [RA-8]		// Guaranteed to be a table.
+    |.if GC2
+    |  test byte TAB:RB->marked, LJ_GC_GRAY   // !isgray(table)
+    |  jz >7
+    |.else
     |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
     |  jnz >7
+    |.endif
     |2:
     |  mov RD, MULTRES
     |  sub RD, 1
