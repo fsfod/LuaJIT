@@ -8,6 +8,7 @@
 #include "lj_gcarena.h"
 #include "lj_gc.h"
 #include "malloc.h"
+#include "lj_timer.h"
 
 #define idx2bit(i)		((uint32_t)(1) << (i))
 #define bitset_range(lo, hi)	((idx2bit((hi)-(lo))-1) << (lo))
@@ -121,6 +122,7 @@ void arena_destroyGG(global_State *g, GCArena* arena)
 {
   lua_assert((((uintptr_t)arena) & (ArenaCellMask)) == 0);
   arena_freemem(g, arena);
+  timers_freelog(g);
   lua_assert(g->gc.total == sizeof(GG_State));
   lj_freepages(arena, ArenaSize); 
 }  

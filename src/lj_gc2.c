@@ -27,6 +27,7 @@
 #include "lj_trace.h"
 #include "lj_vm.h"
 #include "lj_dispatch.h"
+#include "lj_timer.h"
 #include <stdio.h>
 
 #define GCSTEPSIZE	1024u
@@ -411,6 +412,7 @@ static GCSize gc_propagate_gray(global_State *g)
 {
   GCSize total = 0;
   GCArena *maxarena = NULL;
+  TimerStart(propagate_gray);
 
   while (1) {
     int arenai = largestgray(g);
@@ -423,6 +425,7 @@ static GCSize gc_propagate_gray(global_State *g)
     total += omem;
     printf("propagated %d objects in arena(%d), with a size of %d\n", count, arenai, omem);
   }
+  TimerEnd(propagate_gray);
   
   return total;
 }
@@ -444,15 +447,23 @@ void TraceGC(global_State *g, int newstate)
   printf("GC State = %s\n", gcstates[newstate]);
   g->gc.curarena = 0;
 
+  if (mref(eventbuf.L, lua_State) == NULL) {
+    timers_setuplog(L);
+  }
+
   if (newstate == GCSpropagate) {
     for (MSize i = 0; i < g->gc.arenastop; i++) {
-      arena_towhite(lj_gc_arenaref(g, i));
+      //arena_towhite(lj_gc_arenaref(g, i));
     }
 
-    gc_mark_start(g);
-    gc_propagate_gray(g);
+   // gc_mark_start(g);
+    //gc_propagate_gray(g);
+  } else if (newstate == GCSatomic) {
+   // lj_gc_separateudata(g, 0);
+
   } else if (newstate == GCSsweep) {
-    gc_sweep(g, -1);
+   // gc_sweep(g, -1);
+    timers_printlog();
   } else if (newstate == GCSfinalize) {
     for (MSize i = 0; i < g->gc.arenastop; i++) {
       //  arena_runfinalizers(g, lj_gc_arenaref(g, i));
@@ -469,8 +480,7 @@ void TraceGC(global_State *g, int newstate)
 static void gc_sweep(global_State *g, int32_t lim)
 {
   MSize i = g->gc.curarena;
-  GCArena *metadatas = lj_mem_newt(mainthread(g), sizeof(GCArena), GCArena);
-
+  TimerStart(gcsweep);
   for (; i < g->gc.arenastop; i++) {
     GCArena *arena = lj_gc_arenaref(g, i);
 
@@ -478,10 +488,10 @@ static void gc_sweep(global_State *g, int32_t lim)
       continue;
     }
 
-    arena_copymeta(arena, metadatas);
-      MSize count = arena_majorsweep(arena);
-      printf("Swept arena(%d), objects fread %d\n", i, count & 0xffff);
-    arena_copymeta(metadatas, arena);
+   // arena_copymeta(arena, metadatas);
+    MSize count = arena_majorsweep(arena);
+    printf("Swept arena(%d), objects fread %d\n", i, count & 0xffff);
+    //arena_copymeta(metadatas, arena);
     /* If there are no reach objects left in the arena mark it empty so can 
     ** latter decide to free it if we have excess arenas.
     */
@@ -490,8 +500,7 @@ static void gc_sweep(global_State *g, int32_t lim)
       //lj_gc_freearena(g, arena);
     }
   }
-
-  lj_mem_free(g, metadatas, sizeof(GCArena));
+  TimerEnd(gcsweep);
 }
 
 int gc_sweepstring(global_State *g)
@@ -669,7 +678,7 @@ void lj_gc_finalize_cdata2(lua_State *L)
 static void atomic(global_State *g, lua_State *L)
 {
   size_t udsize;
-
+  TimerStart(gcatomic);
   lj_gc_emptygrayssb(g); /* Mark anything left in the gray SSB buffer */
   gc_mark_uv(g);  /* Need to remark open upvalues (the thread may be dead). */
   gc_propagate_gray(g);  /* Propagate any left-overs. */
@@ -696,6 +705,7 @@ static void atomic(global_State *g, lua_State *L)
   g->gc.currentwhite = (uint8_t)otherwhite(g);  /* Flip current white. */
   g->strempty.marked = g->gc.currentwhite;
   g->gc.estimate = g->gc.total - (GCSize)udsize;  /* Initial estimate. */
+  TimerEnd(gcatomic);
 }
 
 static void sweep_arenas(global_State *g)
