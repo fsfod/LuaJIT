@@ -670,6 +670,7 @@ static void atomic(global_State *g, lua_State *L)
 {
   size_t udsize;
 
+  lj_gc_emptygrayssb(g); /* Mark anything left in the gray SSB buffer */
   gc_mark_uv(g);  /* Need to remark open upvalues (the thread may be dead). */
   gc_propagate_gray(g);  /* Propagate any left-overs. */
 

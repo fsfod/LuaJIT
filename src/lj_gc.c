@@ -610,7 +610,7 @@ void lj_gc_freeall(global_State *g)
 
   lj_mem_freevec(g, g->gc.arenas, g->gc.arenassz, GCArena*);
   lj_mem_freevec(g, g->gc.freelists, g->gc.arenassz, ArenaFreeList);
-  lj_mem_freevec(g, (void*)(((intptr_t)mref(g->gc.grayssb, GCRef)) & GRAYSSB_MASK), 
+  lj_mem_freevec(g, (void*)(((intptr_t)mref(g->gc.grayssb, GCRef)) & ~GRAYSSB_MASK), 
                  GRAYSSBSZ, GCRef);
 }
 

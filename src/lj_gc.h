@@ -123,7 +123,7 @@ LJ_FUNC void lj_gc_barriertrace(global_State *g, uint32_t traceno);
 
 LJ_FUNCA void lj_gc_emptygrayssb(global_State *g);
 /* Must be a power of 2 */
-#define GRAYSSBSZ 256
+#define GRAYSSBSZ 64
 #define GRAYSSB_MASK ((GRAYSSBSZ*sizeof(GCRef))-1)
 
 /* Move the GC propagation frontier back for tables (make it gray again). */

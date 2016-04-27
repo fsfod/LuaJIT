@@ -15,7 +15,6 @@
 |.externnames extnames
 |
 |//-----------------------------------------------------------------------
-|.define GC2, 0
 |.if P64
 |.define X64, 1
 |.if WIN
@@ -473,7 +472,7 @@
 |.macro sseconst_tobit, reg, tmp	// Synthesize 2^52 + 2^51.
 |  sseconst_hi reg, tmp, 43380000
 |.endmacro
-|
+|.define GC2, 1
 |// Move table write barrier back. Overwrites reg.
 |.macro barrierback, tab, reg
 |.if GC2
@@ -1412,10 +1411,10 @@ static void build_subroutines(BuildCtx *ctx)
   |  push rax
   |  push rcx
   |  push rdx
-  |  push rbp
+  |  sub rsp, 32
   |  lea GL:CARG1, [DISPATCH+GG_DISP2G]
   |  call extern lj_gc_emptygrayssb
-  |  pop rbp
+  |  add rsp, 32
   |  pop rdx
   |  pop rcx
   |  pop rax
@@ -4495,6 +4494,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |.if GC2
     |8: // Mark and empty the full SSB buffer
     |  call ->emptygrayssb
+    |  movzx RA, PC_RA
     |  jmp <2
     |.endif
     break;
@@ -4639,7 +4639,15 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |
     |7:  // Possible table write barrier for the value. Skip valiswhite check.
     |  barrierback TAB:RB, RA
+    |.if GC2
+    |  test RA, GRAYSSB_MASK // Check SSB buffer overflow
+    |  jz >8
     |  movzx RA, PC_RA			// Restore RA.
+    |  jmp <2
+    |8: // Mark and empty the full SSB buffer
+    |  call ->emptygrayssb
+    |.endif
+    |  movzx RA, PC_RA
     |  jmp <2
     break;
   case BC_TSETR:

@@ -275,27 +275,46 @@ static CellState arena_cellstate(GCArena *arena, GCCellID cell)
   return mark | block;
 }
 
-static LJ_AINLINE int isblack2(global_State *g, void* o)
-{
-  GCArena *arena = ptr2arena(o);
-  GCCellID cell = ptr2cell(o);
-
-  if (LJ_LIKELY(!gc_ishugeblock(o))) {
-    return (arena_getmark(arena, cell) >> arena_blockbitidx(cell)) & 1;
-  } else {
-    return hugeblock_iswhite(g, o);
-  }
-}
 /* Must never be passed huge block pointers. 
 ** A fast pre-check for cellid zero can quickly filter out huge blocks. 
 */
-static LJ_AINLINE int isblackfast(void* o)
+static LJ_AINLINE int iswhitefast(void* o)
 {
   GCArena *arena = ptr2arena(o);
   GCCellID cell = ptr2cell(o);
   arena_checkid(cell);
   lua_assert(!gc_ishugeblock(o));
-  return (arena_getmark(arena, cell) >> arena_blockbitidx(cell)) & 1;
+  return ((arena_getmark(arena, cell) >> arena_blockbitidx(cell)) & 1);
+}
+
+static LJ_AINLINE int iswhite2(global_State *g, void* o)
+{
+  if (LJ_LIKELY(!gc_ishugeblock(o))) {
+    return iswhitefast(o);
+  } else {
+    return hugeblock_iswhite(g, o);
+  }
+}
+
+static LJ_AINLINE int isblack2(global_State *g, void* o)
+{
+  if (LJ_LIKELY(!gc_ishugeblock(o))) {
+    return !iswhitefast(o);
+  } else {
+    return hugeblock_iswhite(g, o);
+  }
+}
+
+/* Must never be passed huge block pointers.
+** A fast pre-check for cellid zero can quickly filter out huge blocks.
+*/
+static LJ_AINLINE int isdead2(void* o)
+{
+  GCArena *arena = ptr2arena(o);
+  GCCellID cell = ptr2cell(o);
+  arena_checkid(cell);
+  lua_assert(!gc_ishugeblock(o));
+  return !((arena_getblock(arena, cell) >> arena_blockbitidx(cell)) & 1);
 }
 
 /* Two slots taken up count and 1 by the sentinel value */
@@ -365,7 +384,7 @@ static LJ_AINLINE void arena_markgcvec(global_State *g, void* o, MSize size)
     hugeblock_mark(g, o);
   } else {
     arena = ptr2arena(o);
-    lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
+    lua_assert(arena_cellisallocated(arena, cell));
     arena_markcell(arena, cell);
   }
 }
