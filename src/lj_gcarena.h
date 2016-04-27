@@ -215,7 +215,7 @@ MSize hugeblock_runfinalizers(global_State *g);
 
 void arena_markfixed(global_State *g, GCArena *arena);
 GCSize arena_propgrey(global_State *g, GCArena *arena, int limit, MSize *travcount);
-void arena_minorsweep(GCArena *arena);
+MSize arena_minorsweep(GCArena *arena);
 MSize arena_majorsweep(GCArena *arena);
 void arena_towhite(GCArena *arena);
 

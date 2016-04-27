@@ -7,6 +7,7 @@
 #include "lj_dispatch.h"
 #include "lj_gcarena.h"
 #include "lj_gc.h"
+#include <immintrin.h>
 #include "malloc.h"
 #include "lj_timer.h"
 
@@ -580,36 +581,197 @@ void arena_marklist(GCArena *arena, CellIdChunk *list)
   }
 }
 
-void arena_minorsweep(GCArena *arena)
+static GCBlockword minorsweep_word(GCArena *arena, MSize i)
 {
-  MSize limit = arena_blocktop(arena);
-  for (size_t i = MinBlockWord; i < limit; i++) {
-    GCBlockword block = arena->block[i];
-    GCBlockword mark = arena->mark[i];
+  GCBlockword block = arena->block[i];
+  GCBlockword mark = arena->mark[i];
+  block = block & mark;
+  arena->block[i] = block;
+  arena->mark[i] = block | mark;
 
-    arena->block[i] = block & mark;
-    arena->mark[i] = block | mark;
-  }
+  return block;
 }
 
-MSize arena_majorsweep(GCArena *arena)
+MSize arena_minorsweep(GCArena *arena)
 {
   MSize limit = arena_blocktop(arena);
-  MSize count = 0;
   GCBlockword used = 0;
 
   for (size_t i = MinBlockWord; i < limit; i++) {
     GCBlockword block = arena->block[i];
     GCBlockword mark = arena->mark[i];
-    /* Count whites that are swept to away */
-    count += popcnt(block & ~mark);
     block = block & mark;
     used |= block;
-    arena->block[i] = block & mark;
-    arena->mark[i] = block ^ mark;
+    arena->block[i] = block;
+    arena->mark[i] = block | mark;
+  }
+}
+
+static GCBlockword majorsweep_word(GCArena *arena, MSize i)
+{
+  GCBlockword block = arena->block[i];
+  GCBlockword mark = arena->mark[i];
+  block = block & mark;
+
+  arena->block[i] = block & mark;
+  arena->mark[i] = block ^ mark;
+  
+  return block;
+}
+
+/* Based on http://0x80.pl/articles/sse-popcount.html */
+static __m128i simd_popcntbytes(__m128i vec)
+{
+  const __m128i lookup = _mm_setr_epi8(
+    /* 0 */ 0, /* 1 */ 1, /* 2 */ 1, /* 3 */ 2,
+    /* 4 */ 1, /* 5 */ 2, /* 6 */ 2, /* 7 */ 3,
+    /* 8 */ 1, /* 9 */ 2, /* a */ 2, /* b */ 3,
+    /* c */ 2, /* d */ 3, /* e */ 3, /* f */ 4
+  );
+  const __m128i low_mask = _mm_set1_epi8(0x0f);
+
+  const __m128i lo = _mm_and_si128(vec, low_mask);
+  const __m128i hi = _mm_and_si128(_mm_srli_epi16(vec, 4), low_mask);
+  const __m128i popcnt1 = _mm_shuffle_epi8(lookup, lo);
+  const __m128i popcnt2 = _mm_shuffle_epi8(lookup, hi);
+  //__m128i count = _mm_add_epi8(_mm_srli_epi16(vec, 8), _mm_and_si128(local, _mm_set1_epi16(0xff)));
+ 
+//_mm_add_epi64(acc, _mm_sad_epu8(local, _mm_setzero_si128()));
+  return _mm_add_epi8(popcnt1, popcnt2);
+}
+
+/* Time to sweep full 1mb arena uncached 4k(cached 800) cycles */
+static LJ_NOINLINE MSize majorsweep_simd(GCArena *arena, MSize start, MSize limit)
+{
+  MSize i;
+  __m128i count = _mm_setzero_si128();
+  __m128i *pblock = (__m128i *)(arena->block+start), *pmark = (__m128i *)(arena->mark+start);
+  __m128i used = _mm_setzero_si128();
+  limit = lj_round(limit, 4)/4;
+
+  for (i = start/4; i < limit; i++) {
+    //_mm_prefetch((char *)(pmark+i+4), 1);
+    __m128i block = _mm_load_si128(pblock+i);
+    __m128i mark = _mm_load_si128(pmark+i);
+    /* Count whites that are swept to away */ 
+    count = _mm_add_epi8(count, simd_popcntbytes(_mm_and_si128(mark, block)));
+    
+    block = _mm_and_si128(block, mark);
+    mark = _mm_xor_si128(block, mark); 
+    used = _mm_or_si128(block, used);
+
+    _mm_store_si128(pblock+i, block);
+    _mm_store_si128(pmark+i, mark);
+    /* if block < mark word ends in a white */
+    //__m128i whiteend = _mm_cmplt_epi8(block, mark);
+    //
+    //__m128i noblocks = _mm_cmpeq_epi8(block, _mm_setzero_si128());
+    //__m128i extent = _mm_cmpeq_epi8(_mm_or_si128(block, mark), _mm_setzero_si128());
+    //
+    //__m128i previswhite = _mm_srli_si128(whiteend, 1);
+    //__m128i whiteonly = _mm_cmpeq_epi8(_mm_andnot_si128(mark, block), _mm_setzero_si128());
+    //
+    //__m128i clear = _mm_and_si128(noblocks, previswhite);
+    //int bp = _mm_movemask_epi8(clear);
+    //mark = _mm_andnot_si128(mark, clear);
+    //_mm_storeu_si128(pmark, mark);
+  }
+
+  used = _mm_or_si128(used, _mm_srli_si128(used, 8));
+  used = _mm_or_si128(used, _mm_srli_si128(used, 4));
+
+  count = _mm_sad_epu8(count, _mm_setzero_si128());
+  count = _mm_add_epi64(count, _mm_srli_si128(count, 8));
+
+//count = _mm_add_epi8(_mm_srli_epi16(count, 8), _mm_and_si128(count, _mm_set1_epi16(0xff)));
+   // _mm_add_epi8(_mm_srli_epi16(count, 8), _mm_and_si128(count, _mm_set1_epi16(0xff)));
+  //count = _mm_add_epi32(count, _mm_srli_si128(count, 8));
+  //count = _mm_or_si128(count, _mm_srli_si128(count, 4));
+  
+  /* Set the 16th bit if there are still any reachable objects in the arena */
+  return _mm_cvtsi128_si32(count) | (_mm_cvtsi128_si32(used) ? (1 << 16) : 0);
+}
+
+/* About 800 cached cycles NOTE MSVC sticks a VZEROPUPPER in the loop */
+static LJ_NOINLINE MSize majorsweep_avx(GCArena *arena, MSize start, MSize limit)
+{
+  float *pblock = (float *)(arena->block), *pmark = (float *)(arena->mark);
+  __m256 used = _mm256_setzero_ps();
+
+  for (size_t i = start; i < limit; i += 8) {
+    //_mm_prefetch((char *)(pmark+i+4), 1);
+    __m256 block = _mm256_load_ps(pblock+i);
+    __m256 mark = _mm256_load_ps(pmark+i);
+    block = _mm256_and_ps(block, mark);
+    mark = _mm256_xor_ps(block, mark);
+    used = _mm256_or_ps(block, used);
+
+    _mm256_store_ps(pblock+i, block);
+    _mm256_store_ps(pmark+i, mark);
+  }
+
+  __m128i used128 = _mm_castps_si128(_mm_or_ps(_mm256_extractf128_ps(used, 0), _mm256_extractf128_ps(used, 1)));
+  used128 = _mm_or_si128(used128, _mm_srli_si128(used128, 8));
+  used128 = _mm_or_si128(used128, _mm_srli_si128(used128, 4));
+
+  /* Set the 16th bit if there are still any reachable objects in the arena */
+  return 1 | (_mm_cvtsi128_si32(used128) ? (1 << 16) : 0);
+}
+
+static MSize majorsweep(GCArena *arena, MSize start, MSize limit)
+{
+  MSize count = 1;
+  GCBlockword used = 0, prevwhite = 0;
+
+  for (size_t i = start; i < limit; i++) {
+    GCBlockword block = arena->block[i];
+    GCBlockword mark = arena->mark[i];
+    /* Count whites that are swept to away */
+    //count += popcnt(block & ~mark);
+    block = block & mark;
+    arena->block[i] = block;
+
+    mark = block ^ mark;
+    used |= block;
+
+   // GCBlockword nprev = block < mark ? 0 : (~(GCBlockword)0);
+    /* If previous block ended in white and the current block is all white clear mark bits of free cells 
+    ** turning them into extents
+    */
+    //mark = (block == 0 ? (prevwhite & mark) : mark);
+    arena->mark[i] = mark;
+    //prevwhite = nprev;
+    
+#if !defined(_MSC_VER) && defined(__clang__)
+    //arena->mark[i] = mark & (block == 0 ? prevwhite : mark);
+#else
+    //arena->mark[i] = (block == 0 ? (prevwhite & mark) : mark);
+#endif
+    
+    
   }
   /* Set the 16th bit if there are still any reachable objects in the arena */
-  return count | (used ? (1 << 16) : 0);
+  return count | ((used && prevwhite) ? (1 << 16) : 0);
+}
+
+MSize arena_majorsweep(GCArena *arena)
+{
+  MSize limit = arena_blocktop(arena);//MaxBlockWord
+  MSize count = 0;
+  GCBlockword used = 0, previous = 1;
+  lua_assert(arena_greysize(arena) == 0);
+
+  TimerStart(majorsweep);
+#if 0
+  count = majorsweep(arena, MinBlockWord, limit);
+#elif 1
+  count = majorsweep_simd(arena, MinBlockWord, limit);
+#else
+  count = majorsweep_avx(arena, MinBlockWord, limit);
+#endif
+  TimerEnd(majorsweep);
+  
+  return count;
 }
 
 void arena_copymeta(GCArena *arena, GCArena *meta)
