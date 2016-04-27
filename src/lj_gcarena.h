@@ -14,6 +14,7 @@ enum GCOffsets {
   ArenaMaxObjMem = (ArenaSize - ArenaMetadataSize),
   MinCellId = ArenaMetadataSize / CellSize,
   MaxCellId = ArenaSize / CellSize,
+  ArenaUsableCells = MaxCellId - MinCellId,
   /* TODO: better value taking into account what min alignment the os page allocation can provide */
   ArenaOversized = ArenaMaxObjMem-1000,
 
@@ -318,7 +319,7 @@ static LJ_AINLINE int isdead2(void* o)
 }
 
 /* Two slots taken up count and 1 by the sentinel value */
-#define arena_greycap(arena) (mref((arena)->greybase, uint32_t)[-1] - 2)
+#define arena_greycap(arena) (mref((arena)->greybase, uint32_t)[-1])
 
 /* Return the number of cellids in the grey stack of the arena*/
 static LJ_AINLINE MSize arena_greysize(GCArena *arena)
@@ -327,7 +328,7 @@ static LJ_AINLINE MSize arena_greysize(GCArena *arena)
   GCCellID1 *base = mref(arena->greybase, GCCellID1);
   lua_assert(!base || (top > base));
 
-  return base ? arena_greycap(arena)-1 - (MSize)(top-base) : 0;
+  return base ? arena_greycap(arena) - (MSize)(top-base) : 0;
 }
 
 /* Mark a traversable object */

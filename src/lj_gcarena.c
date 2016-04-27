@@ -44,7 +44,7 @@ static GCCellID1 *newgreystack(lua_State *L, GCArena *arena, MSize size)
   setmref(arena->greytop, list+size-1); /* Set the top to the sentinel value */
 
   /* Store the stack size negative of the what will be the base pointer */
-  *((uint32_t*)list) = size;
+  *((uint32_t*)list) = size-3;
   /* Set a sentinel value so we know when the stack is empty */
   list[size-1] = 0;
   return list+2;
@@ -503,10 +503,12 @@ void arena_growgreystack(global_State *g, GCArena *arena)
 {
   lua_State *L = mainthread(g);
   GCCellID1 *old = mref(arena->greybase, GCCellID1)-2, *newlist;
-  MSize size = *(MSize *)old, realsize = size-2;
+  /*4 bytes at the start for the size and a sentinel 0 cell id at the top */
+  MSize size = (*(MSize *)old)+3;
+  MSize newsize = min(size*2, ArenaUsableCells);
 
-  newlist = newgreystack(L, arena, size*2);
-  memcpy(newlist + size, old+2, realsize*sizeof(GCCellID1));
+  newlist = newgreystack(L, arena, newsize);
+  memcpy(newlist-2 + size, old, size*sizeof(GCCellID1));
   setmref(arena->greytop, newlist + size);
   lj_mem_freevec(g, old, size, GCCellID1);
 }
@@ -522,11 +524,10 @@ void arean_setfixed(lua_State *L, GCArena *arena, GCobj *o)
 
   if (info->fixedtop == info->fixedsized) {
     MSize size = info->fixedsized;
-    list = lj_mem_growvec(L, list, size, 0xffff, GCCellID1);
+    list = lj_mem_growvec(L, list, size, ArenaUsableCells, GCCellID1);
     setmref(info->fixedcells, list);
     info->fixedsized = size;
   }
-  
   list[info->fixedtop++] = ptr2cell(o);
 }
 
