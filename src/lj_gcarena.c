@@ -231,6 +231,45 @@ void *arena_allocslow(GCArena *arena, MSize size)
   return arena_cell(arena, cell);
 }
 
+void *arena_allocalign(GCArena *arena, MSize size, MSize align)
+{
+  MSize subcell_align = align & 15;
+  MSize numcells = arena_roundcells(size + subcell_align);
+  char* cellmem = ((char *)arena_celltop(arena))+subcell_align;
+  GCCellID cell;
+  lua_assert(numcells != 0 && numcells < MaxCellId);
+
+  if (!arena_canbump(arena, numcells)) {
+    return arena_allocslow(arena, size);
+  }
+
+  if (align > 16) {
+    cellmem = (char *)lj_round((uintptr_t)cellmem, align-subcell_align);
+    if (subcell_align) 
+      cellmem -= (16-subcell_align);
+    cell = ptr2cell(cellmem);
+
+    if (cell != arena_topcellid(arena)) {
+      /* Mark the padding cells as free so the previous cell range has an end marker */
+      arena_setfreecell(arena, arena_topcellid(arena));
+    }
+  } else {
+    cell = ptr2cell(cellmem);
+  }
+
+  if ((cell+numcells) > MaxCellId) {
+    lua_assert(0);
+    return arena_allocslow(arena, size);
+  }
+
+  setmref(arena->celltop, arena_celltop(arena)+numcells);
+
+  lua_assert(arena_cellstate(arena, cell) < CellState_White);
+  arena_checkid(cell);
+  arena_getblock(arena, cell) |= arena_blockbit(cell);
+  return cellmem;
+}
+
 static FreeChunk *setfreechunk(GCArena *arena, void *cell, MSize numcells)
 {
   FreeChunk *chunklist = (FreeChunk *)cell;
@@ -997,6 +1036,22 @@ void *hugeblock_alloc(lua_State *L, GCSize size, MSize gct)
   }
   
   setmref(node->obj, o);
+  return o;
+}
+
+void *hugeblock_allocalign(lua_State *L, GCSize size, MSize align, MSize gct)
+{
+  HugeBlockTable *tab = gettab(G(L));
+  char *o = (char* )lj_alloc_memalign(G(L)->allocd, ArenaSize, size+align);
+  HugeBlock *node = hugeblock_register(tab, o);
+  tab->total += size;
+
+  if (node == NULL) {
+    hugeblock_rehash(L, tab);
+    node = hugeblock_register(tab, o);
+  }
+  setmref(node->obj, o);
+  hbnode_setflag(node, HugeFlag_Aligned);
   return o;
 }
 

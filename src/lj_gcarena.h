@@ -219,6 +219,7 @@ MSize arena_minorsweep(GCArena *arena);
 MSize arena_majorsweep(GCArena *arena);
 void arena_towhite(GCArena *arena);
 
+void *arena_allocalign(GCArena *arena, MSize size, MSize align);
 void* arena_allocslow(GCArena *arena, MSize size);
 void arena_free(global_State *g, GCArena *arena, void* mem, MSize size);
 void arena_shrinkobj(void* obj, MSize newsize);
@@ -230,7 +231,7 @@ MSize arena_totalobjmem(GCArena *arena);
 void arena_copymeta(GCArena *arena, GCArena *meta);
 
 /* Must be at least 16 byte aligned */
-#define arena_checkptr(p) lua_assert(p != NULL && (((uintptr_t)p) & 0xf) == 0)
+#define arena_checkptr(p) lua_assert(p != NULL && (((uintptr_t)p) & 0x7) == 0)
 #define arena_checkid(id) lua_assert(id >= MinCellId && id <= MaxCellId)
 
 /* Returns if the cell is the start of an allocated cell range */

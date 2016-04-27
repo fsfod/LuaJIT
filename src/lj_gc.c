@@ -1136,3 +1136,23 @@ void *lj_mem_reallocgc(lua_State *L, void *p, GCSize oldsz, GCSize newsz)
   return mem;
 }
 
+
+GCobj *lj_mem_newagco(lua_State *L, GCSize osize, MSize align)
+{
+  global_State *g = G(L);
+  GCobj *o;
+  lua_assert(osize > 0 && align > 0 && align < ArenaMetadataSize);
+
+  if ((osize+align) < ArenaOversized) {
+    o = (GCobj *)arena_allocalign(g->arena, osize, align);
+    if (o == NULL) {
+      lua_assert(0);/*FIXME rety for aligned allocations */
+      o = findarenaspace(L, osize, 0);
+    }
+  } else {
+    o = hugeblock_alloc(L, osize, ~LJ_TCDATA);
+  }
+
+  g->gc.total += osize;
+  return o;
+}

@@ -201,6 +201,7 @@ static LJ_AINLINE void lj_mem_free(global_State *g, void *p, size_t osize)
 
 GCobj *lj_mem_newgco_unlinked(lua_State *L, GCSize osize, uint32_t gct);
 GCobj *lj_mem_newgco_t(lua_State * L, GCSize osize, uint32_t gct);
+GCobj *lj_mem_newagco(lua_State *L, GCSize osize, MSize align);
 void lj_mem_freegco(global_State *g, void *p, GCSize osize);
 void *lj_mem_reallocgc(lua_State *L, void *p, GCSize oldsz, GCSize newsz);
 

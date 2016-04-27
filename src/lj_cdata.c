@@ -49,13 +49,34 @@ GCcdata *lj_cdata_newv(lua_State *L, CTypeID id, CTSize sz, CTSize align)
   return cd;
 }
 
+GCcdata *lj_cdata_newalign(CTState *cts, CTypeID id, CTSize sz, CTSize align)
+{
+  GCcdata *cd;
+#ifdef LUA_USE_ASSERT
+  CType *ct = ctype_raw(cts, id);
+  lua_assert((ctype_hassize(ct->info) ? ct->size : CTSIZE_PTR) == sz);
+#endif
+  align = (1u << align);
+  if (align <= CellSize) {
+    align = sizeof(GCcdata);
+  }
+
+  cd = (GCcdata *)lj_mem_newagco(cts->L, sizeof(GCcdata) + sz, align);
+  cd->gct = ~LJ_TCDATA;
+  cd->ctypeid = ctype_check(cts, id);
+  return cd;
+}
+
 /* Allocate arbitrary C data object. */
 GCcdata *lj_cdata_newx(CTState *cts, CTypeID id, CTSize sz, CTInfo info)
 {
-  if (!(info & CTF_VLA) && ctype_align(info) <= CT_MEMALIGN)
+  if (!(info & CTF_VLA) && ctype_align(info) <= CT_MEMALIGN) {
     return lj_cdata_new(cts, id, sz);
-  else
+  } else if (!(info & CTF_VLA)) {
+    return lj_cdata_newalign(cts, id, sz, ctype_align(info));
+  } else {
     return lj_cdata_newv(cts->L, id, sz, ctype_align(info));
+  }
 }
 
 /* Free a C data object. */
