@@ -914,3 +914,20 @@ void lj_gc_emptygrayssb(global_State *g)
   /* Leave dummy value at the start so we always know if the list is completely empty or full */
   setmref(g->gc.grayssb, list+1);
 }
+
+void lj_gc_setfixed(lua_State *L, GCobj *o)
+{
+  lua_assert(o->gch.gct == ~LJ_TSTR);
+  if (o->gch.marked & LJ_GC_FIXED)
+    return;
+  o->gch.marked |= LJ_GC_FIXED;
+
+  if (!gc_ishugeblock(o)) {
+    GCArena *arena = ptr2arena(o);
+    arean_setfixed(L, ptr2arena(o), o);
+    /* Fixed objects should always be black */
+    arena_markcell(arena, ptr2cell(o));
+  } else {
+    hugeblock_setfixed(G(L), o);
+  }
+}
