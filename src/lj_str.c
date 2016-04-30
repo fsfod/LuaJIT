@@ -154,8 +154,11 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
     while (o != NULL) {
       GCstr *sx = gco2str(o);
       if (sx->len == len && str_fastcmp(str, strdata(sx), len) == 0) {
-	/* Resurrect if dead. Can only happen with fixstring() (keywords). */
-	if (isdead(g, o)) flipwhite(o);
+	lua_assert(!isdead(g, o) && (g->gc.state != GCSsweep || isblack2(g, o)));
+	/* Resurrect if dead. */
+	if (g->gc.state == GCSsweepstring && iswhitefast(o)) {
+	  toblack(g, o);
+	}
 	return sx;  /* Return existing string. */
       }
       o = gcnext(o);
@@ -164,8 +167,11 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
     while (o != NULL) {
       GCstr *sx = gco2str(o);
       if (sx->len == len && memcmp(str, strdata(sx), len) == 0) {
-	/* Resurrect if dead. Can only happen with fixstring() (keywords). */
-	if (isdead(g, o)) flipwhite(o);
+	lua_assert(!isdead(g, o) && (g->gc.state != GCSsweep || isblack2(g, o)));
+	/* Resurrect if dead. */
+	if (g->gc.state == GCSsweepstring && iswhitefast(o)) {
+	  toblack(g, o);
+	}
 	return sx;  /* Return existing string. */
       }
       o = gcnext(o);
