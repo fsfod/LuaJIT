@@ -114,33 +114,32 @@ static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
   MSize hmask = hbits > 0 ? 1 << hbits : 0;
 
   /* First try to colocate the array part. */
-  if (asize > 0 && sizetabcolo(asize, hmask) <= LJ_MAX_COLOSIZE) {
+  if (LJ_MAX_COLOSIZE != 0 && asize > 0 && asize <= (LJ_MAX_COLOSIZE/sizeof(TValue))) {
     Node *nilnode;
     lua_assert((sizeof(GCtab) & 7) == 0);
-    t = lj_mem_newgcot(L, sizetabcolo(asize, hmask), GCtab);
-    t->gct = ~LJ_TTAB;
-    t->nomm = (uint8_t)~0;
-    t->colo = (asize > 0 ? 1 : 0) | (hbits > 0 ? 2 : 0);
+    t = lj_mem_newgcot(L, sizetabcolo(asize), GCtab);
+    t->colo = 1;
     setmref(t->array, (TValue *)((char *)t + sizeof(GCtab)));
-    setgcrefnull(t->metatable);
     t->asize = asize;
-    if (hbits) {
-      sethpart(t, hbits, (Node *)arrayslot(t, asize));
-    } else {
-      nilnode = &G(L)->nilnode;
-      setmref(t->node, nilnode);
-    }
+    t->hmask = 0;
+    nilnode = &G(L)->nilnode;
+    setmref(t->node, nilnode);
+#if LJ_GC64
+    setmref(t->freetop, nilnode);
+#endif
+  } else if (LJ_MAX_COLOSIZE != 0 && hbits > 0 && (hmask*sizeof(Node)) < LJ_MAX_COLOSIZE) {
+    lua_assert((sizeof(GCtab) & 7) == 0);
+    t = lj_mem_newgcot(L, sizetabcoloh(hmask), GCtab);
+    t->colo = 2;
+    t->asize = 0;
+    sethpart(t, hbits, (Node *)(t+1));
 #if LJ_GC64
     setmref(t->freetop, nilnode);
 #endif
   } else {  /* Otherwise separately allocate the array part. */
     Node *nilnode;
     t = lj_mem_newgcot(L, sizeof(GCtab), GCtab);
-    t->gct = ~LJ_TTAB;
-    t->nomm = (uint8_t)~0;
     t->colo = 0;
-    setmref(t->array, NULL);
-    setgcrefnull(t->metatable);
     t->asize = 0;  /* In case the array allocation fails. */
     t->hmask = 0;
     nilnode = &G(L)->nilnode;
@@ -148,14 +147,18 @@ static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
 #if LJ_GC64
     setmref(t->freetop, nilnode);
 #endif
-    if (asize > 0) {
-      if (asize > LJ_MAX_ASIZE)
-	lj_err_msg(L, LJ_ERR_TABOV);
-      setmref(t->array, lj_mem_newgcvec(L, asize, TValue));
-      t->asize = asize;
-    }
   }
-  if (hbits && mref(t->node, Node) == &G(L)->nilnode)
+  t->gct = ~LJ_TTAB;
+  t->nomm = (uint8_t)~0;
+  setgcrefnull(t->metatable);
+
+  if (asize > 0 && !hascolo_array(t)) {
+    if (asize > LJ_MAX_ASIZE)
+      lj_err_msg(L, LJ_ERR_TABOV);
+    setmref(t->array, lj_mem_newgcvec(L, asize, TValue));
+    t->asize = asize;
+  }
+  if (hbits && !hascolo_hash(t))
     newhpart(L, t, hbits);
   return t;
 }
@@ -248,21 +251,14 @@ void LJ_FASTCALL lj_tab_clear(GCtab *t)
 /* Free a table. */
 void LJ_FASTCALL lj_tab_free(global_State *g, GCtab *t)
 {
-  if (t->hmask > 0 && !lj_tab_hascolo_hash(t))
-    lj_mem_freegcvec(g, noderef(t->node), t->hmask+1, Node);
-  if (t->asize > 0 && !lj_tab_hascolo_array(t))
-    lj_mem_freegcvec(g, tvref(t->array), t->asize, TValue);
-
-  if (lj_tab_hascolo_array(t) || lj_tab_hascolo_hash(t)) {
-    MSize size = sizeof(GCtab);
-    if (lj_tab_hascolo_hash(t))
-      size += sizeof(Node) * t->hmask+1;
-    if (lj_tab_hascolo_array(t)) 
-      size += sizeof(TValue) * t->asize;
-    lj_mem_freegco(g, t, size);
-  } else {
+  if (t->hmask > 0)
+    lj_mem_freevec(g, noderef(t->node), t->hmask+1, Node);
+  if (t->asize > 0 && LJ_MAX_COLOSIZE != 0 && t->colo <= 0)
+    lj_mem_freevec(g, tvref(t->array), t->asize, TValue);
+  if (LJ_MAX_COLOSIZE != 0 && t->colo)
+    lj_mem_freegco(g, t, sizetabcolo((uint32_t)t->colo & 0x7f));
+  else
     lj_mem_freetgco(g, t);
-  }
 }
 
 /* -- Table resizing ------------------------------------------------------ */
@@ -278,7 +274,7 @@ void lj_tab_resize(lua_State *L, GCtab *t, uint32_t asize, uint32_t hbits)
     uint32_t i;
     if (asize > LJ_MAX_ASIZE)
       lj_err_msg(L, LJ_ERR_TABOV);
-    if (lj_tab_hascolo_array(t)) {
+    if (hascolo_array(t)) {
       /* A colocated array must be separated and copied. */
       TValue *oarray = tvref(t->array);
       array = lj_mem_newgcvec(L, asize, TValue);
@@ -316,12 +312,8 @@ void lj_tab_resize(lua_State *L, GCtab *t, uint32_t asize, uint32_t hbits)
       if (!tvisnil(&array[i]))
 	copyTV(L, lj_tab_setinth(L, t, (int32_t)i), &array[i]);
     /* Physically shrink only separated arrays. */
-    if (!lj_tab_hascolo_array(t)) {
-      arena_shrinkobj(mref(t->array, TValue), asize * sizeof(TValue));
-     // setmref(t->array, lj_mem_reallocgcvec(L, array, oldasize, asize, TValue));
-    } else {
-      arena_shrinkobj(t, asize * sizeof(TValue) + sizeof(GCtab));
-    }
+    if (LJ_MAX_COLOSIZE != 0 && t->colo <= 0)
+      setmref(t->array, lj_mem_reallocgcvec(L, array, oldasize, asize, TValue));
   }
   if (oldhmask > 0) {  /* Reinsert pairs from old hash part. */
     global_State *g;
@@ -332,7 +324,12 @@ void lj_tab_resize(lua_State *L, GCtab *t, uint32_t asize, uint32_t hbits)
 	copyTV(L, lj_tab_set(L, t, &n->key), &n->val);
     }
     g = G(L);
-    lj_mem_freegcvec(g, oldnode, oldhmask+1, Node);
+    if (hascolo_hash(t)) {
+      arena_shrinkobj(t, sizeof(GCtab));
+      t->colo &= ~(int8_t)2;  /* Clear hash colocated flag */
+    } else {
+      lj_mem_freegcvec(g, oldnode, oldhmask+1, Node);
+    }
   }
 }
 

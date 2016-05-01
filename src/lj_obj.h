@@ -498,7 +498,8 @@ typedef struct GCtab {
 #endif
 } GCtab;
 
-#define sizetabcolo(a, hmask)	(((a)*sizeof(TValue)) + ((hmask) * sizeof(Node)) + sizeof(GCtab))
+#define sizetabcolo(n)	((n)*sizeof(TValue) + sizeof(GCtab))
+#define sizetabcoloh(n)	((n)*sizeof(Node) + sizeof(GCtab))
 #define tabref(r)	(&gcref((r))->tab)
 #define noderef(r)	(mref((r), Node))
 #define nextnode(n)	(mref((n)->next, Node))

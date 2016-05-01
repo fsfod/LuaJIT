@@ -224,12 +224,12 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
     for (i = 0; i < asize; i++)
       gc_marktv(g, arrayslot(t, i));
   }
-//  if (t->asize && !lj_tab_hascolo_array(t))
+//  if (t->asize && !hascolo_array(t))
  //   arena_markgcvec(g, arrayslot(t, 0), t->asize * sizeof(TValue));
   if (t->hmask > 0) {  /* Mark hash part. */
     Node *node = noderef(t->node);
     MSize i, hmask = t->hmask;
- //   if(!lj_tab_hascolo_hash(t))
+ //   if(!hascolo_hash(t))
  //     arena_markgcvec(g, node, hmask * sizeof(Node));
     for (i = 0; i <= hmask; i++) {
       Node *n = &node[i];

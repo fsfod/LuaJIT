@@ -70,8 +70,8 @@ LJ_FUNC TValue *lj_tab_set(lua_State *L, GCtab *t, cTValue *key);
 LJ_FUNCA int lj_tab_next(lua_State *L, GCtab *t, TValue *key);
 LJ_FUNCA MSize LJ_FASTCALL lj_tab_len(GCtab *t);
 
-#define lj_tab_hascolo_array(t) (((t)->colo & 1) != 0)
-#define lj_tab_hascolo_hash(t) (((t)->colo & 2) != 0)
+#define hascolo_array(t) (((t)->colo & 1) != 0)
+#define hascolo_hash(t) (((t)->colo & 2) != 0)
 
 void lj_gc_setfinalizable(lua_State *L, GCobj *o, GCtab *mt);
 
