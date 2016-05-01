@@ -35,7 +35,11 @@ enum {
 #define isgray(x)	(!((x)->gch.marked & (LJ_GC_BLACK|LJ_GC_WHITES)))
 #define tviswhite(x)	(tvisgcv(x) && iswhite(gcV(x)))
 #define otherwhite(g)	(g->gc.currentwhite ^ LJ_GC_WHITES)
-#define isdead(g, v)	((v)->gch.marked & otherwhite(g) & LJ_GC_WHITES)
+#define isdead(g, x)	(!gc_ishugeblock(x) ? arenaobj_isdead(x) : hugeblock_isdead(g, x))
+
+#define iswhitefast(x)	(gc_ishugeblock(x) || arenaobj_iswhite(x))
+#define isblackfast(x)	(gc_ishugeblock(x) || !arenaobj_iswhite(x))
+#define tviswhitefast(x)  (tvisgcv(x) && iswhitefast(x))
 
 #define curwhite(g)	((g)->gc.currentwhite & LJ_GC_WHITES)
 #define newwhite(g, x)	(obj2gco(x)->gch.marked = (uint8_t)curwhite(g))
@@ -46,9 +50,9 @@ enum {
 #define fixstring(L, s)	lj_gc_setfixed(L, (GCobj *)(s))
 #define markfinalized(x)	((x)->gch.marked |= LJ_GC_FINALIZED)
 
-#define isgray2(x)	(((x)->gch.marked & LJ_GC_GRAY))
-#define setgray(x)	((x)->gch.marked |= LJ_GC_GRAY)
-#define cleargray(x)	((x)->gch.marked &= ~LJ_GC_GRAY)
+#define isgray2(x)	((obj2gco(x)->gch.marked & LJ_GC_GRAY))
+#define setgray(x)	(obj2gco(x)->gch.marked |= LJ_GC_GRAY)
+#define cleargray(x)	(obj2gco(x)->gch.marked &= ~LJ_GC_GRAY)
 
 void lj_gc_setfixed(lua_State *L, GCobj *o);
 void lj_gc_setfinalizable(lua_State *L, GCobj *o, GCtab *mt);

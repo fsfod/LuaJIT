@@ -7,6 +7,9 @@
 #include "lj_dispatch.h"
 #include "lj_gcarena.h"
 #include "lj_gc.h"
+#include "lj_meta.h"
+#include "lj_err.h"
+
 #include <immintrin.h>
 #include "malloc.h"
 #include "lj_timer.h"
@@ -90,6 +93,15 @@ static void arena_freemem(global_State *g, GCArena* arena)
   if (extra && extra->fixedsized) {
     lj_mem_freevec(g, mref(extra->fixedcells, GCCellID1), extra->fixedsized, GCCellID1);
   }
+
+  if (mref(extra->finalizers, void)) {
+    CellIdChunk *chunk = mref(extra->finalizers, CellIdChunk);
+    while (chunk) {
+      CellIdChunk *next = chunk->next;
+      lj_mem_free(g, chunk, sizeof(CellIdChunk));
+      chunk = next;
+    }
+  }
 }
 
 void arena_destroy(global_State *g, GCArena* arena)
@@ -109,6 +121,8 @@ void* arena_createGG(GCArena** GGarena)
   GCCellID cell;
   lua_assert((((uintptr_t)arena) & (ArenaSize-1)) == 0);
   *GGarena = arena_init(arena);
+  /* move GG off the first cache line that alias the arena base address */
+  arena_alloc(arena, 64);
   GG = arena_alloc(arena, sizeof(GG_State));
 
   /* Setup fake cell starts for mainthread and empty string */
@@ -151,6 +165,33 @@ static void arena_setextent(GCArena *arena, GCCellID cell)
   lua_assert(arena_cellstate(arena, cell) == CellState_Free);
   arena_getmark(arena, cell) &= ~arena_blockbit(cell);
   arena_getblock(arena, cell) &= ~arena_blockbit(cell);
+}
+
+int arena_tryextobj(void* obj, MSize osz, MSize nsz)
+{
+  GCArena *arena = ptr2arena(obj);
+  GCCellID cell = ptr2cell(obj);
+  MSize numcells = arena_roundcells(osz);
+  MSize extracells = arena_roundcells(nsz)-numcells;
+  CellState endstate = arena_cellstate(arena, cell+numcells);
+  assert_allocated(arena, cell);
+  lua_assert(arena_cellstate(arena, cell+numcells) == CellState_Extent);
+
+  if (endstate > CellState_Free) {
+    return 0;
+  }
+
+  if (endstate == CellState_Free) {
+    MSize cellspace = arena_cellextent(arena, cell+numcells);
+    if (extracells > cellspace) {
+      /*TODO: try harder and coales free blocks*/
+      return 0;
+    }
+    arena_setextent(arena, cell+numcells);
+  }
+
+  arena_setfreecell(arena, cell+numcells+extracells);
+  return 1;
 }
 
 static int arena_isextent(GCArena *arena, GCCellID cell)
@@ -523,10 +564,11 @@ GCSize arena_propgrey(global_State *g, GCArena *arena, int limit, MSize *travcou
 
   for (; *mref(arena->greytop, GCCellID1) != 0;) {
     GCCellID1 *top = mref(arena->greytop, GCCellID1);
-    GCCell* cell = arena_cell(arena, *top);
+    GCobj* cell = arena_cellobj(arena, *top);
     assert_allocated(arena, *top);
+    lua_assert(arenaobj_isblack(g, cell));
     setmref(arena->greytop, top+1); 
-    total += gc_traverse2(g, (GCobj*)cell);
+    total += gc_traverse2(g, cell);
     count++;
     if (limit != -1 && count > (MSize)limit) {
       break;
@@ -602,19 +644,22 @@ void arena_markfixed(global_State *g, GCArena *arena)
       lua_assert(arena->cells[cell].gct == ~LJ_TSTR);
       arena_markcell(arena, cell);
     } else {
-      GCobj *o = (GCobj *)arena_cell(arena, cell);
+      GCobj *o = arena_cellobj(arena, cell);
       gc_mark(g, o, o->gch.gct);
     }
   }
 }
 
-void arena_marklist(GCArena *arena, CellIdChunk *list)
+void arena_marklist(global_State *g, GCArena *arena, CellIdChunk *list)
 {
   for (; list != NULL;) {
-    for (MSize i = 0; i < list->count; i++) {
+    for (MSize i = 0; i < idlist_count(list); i++) {
       GCCellID cell = list->cells[i];
       assert_allocated(arena, cell);
       arena_markcell(arena, cell);
+      if (idlist_getmark(list, i)) {
+        gc_mark(g, arena_cellobj(arena, cell), arena_cellobj(arena, cell)->gch.gct);
+      }
     }
     list = list->next;
   }
@@ -644,6 +689,7 @@ MSize arena_minorsweep(GCArena *arena)
     arena->block[i] = block;
     arena->mark[i] = block | mark;
   }
+  return used ? (1 << 16) : 0;
 }
 
 static GCBlockword majorsweep_word(GCArena *arena, MSize i)
@@ -686,21 +732,24 @@ static LJ_NOINLINE MSize majorsweep_simd(GCArena *arena, MSize start, MSize limi
   __m128i count = _mm_setzero_si128();
   __m128i *pblock = (__m128i *)(arena->block+start), *pmark = (__m128i *)(arena->mark+start);
   __m128i used = _mm_setzero_si128();
-  limit = lj_round(limit, 4)/4;
+  pblock--;
+  pmark--;
 
-  for (i = start/4; i < limit; i++) {
+  for (i = start; i < limit; i += 4) {
+    pblock++;
+    pmark++;
     //_mm_prefetch((char *)(pmark+i+4), 1);
-    __m128i block = _mm_load_si128(pblock+i);
-    __m128i mark = _mm_load_si128(pmark+i);
+    __m128i block = _mm_load_si128(pblock);
+    __m128i mark = _mm_load_si128(pmark);
     /* Count whites that are swept to away */ 
-    count = _mm_add_epi8(count, simd_popcntbytes(_mm_and_si128(mark, block)));
+    count = _mm_add_epi8(count, simd_popcntbytes(_mm_andnot_si128(mark, block)));
     
     block = _mm_and_si128(block, mark);
     mark = _mm_xor_si128(block, mark); 
     used = _mm_or_si128(block, used);
 
-    _mm_store_si128(pblock+i, block);
-    _mm_store_si128(pmark+i, mark);
+    _mm_store_si128(pblock, block);
+    _mm_store_si128(pmark, mark);
     /* if block < mark word ends in a white */
     //__m128i whiteend = _mm_cmplt_epi8(block, mark);
     //
@@ -714,6 +763,7 @@ static LJ_NOINLINE MSize majorsweep_simd(GCArena *arena, MSize start, MSize limi
     //int bp = _mm_movemask_epi8(clear);
     //mark = _mm_andnot_si128(mark, clear);
     //_mm_storeu_si128(pmark, mark);
+
   }
 
   used = _mm_or_si128(used, _mm_srli_si128(used, 8));
@@ -795,9 +845,8 @@ static MSize majorsweep(GCArena *arena, MSize start, MSize limit)
 
 MSize arena_majorsweep(GCArena *arena)
 {
-  MSize limit = arena_blocktop(arena);//MaxBlockWord
+  MSize limit = MaxBlockWord;
   MSize count = 0;
-  GCBlockword used = 0, previous = 1;
   lua_assert(arena_greysize(arena) == 0);
 
   TimerStart(majorsweep);
@@ -866,95 +915,96 @@ MSize arena_comparemeta(GCArena *arena, GCArena *meta)
   return 0;
 }
 
-static CellIdChunk *idlist_new(lua_State *L)
-{
-  CellIdChunk *list = lj_mem_newt(L, sizeof(CellIdChunk), CellIdChunk);
-  list->count = 0;
-  list->next = NULL;
-  return list;
-}
-
-static CellIdChunk *idlist_add(lua_State *L, CellIdChunk *chunk, GCCellID cell)
-{
-  chunk->cells[chunk->count++] = cell;
-
-  if (chunk->count >= 26) {
-    CellIdChunk *newchunk = idlist_new(L);
-    newchunk->next = chunk;
-    chunk = newchunk;
-  }
-  return chunk;
-}
-
 void arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o)
 {
   CellIdChunk *chunk = arena_finalizers(arena);
   lua_assert(arena_containsobj(arena, o));
   assert_allocated(arena, ptr2cell(o));
 
-  if (!chunk || chunk->count >= 26) {
-    CellIdChunk *newchunk = idlist_new(L);
-    newchunk->next = chunk;
-    if (!chunk) {
-      /* TODO: Set has finalizer arena flag */
-    }
-    setmref(arena->finalizers, newchunk);
-    chunk = newchunk;
+  if (LJ_UNLIKELY(!chunk)) {
+    chunk = idlist_new(L);
+    /* TODO: Set has finalizer arena flag */
+    setmref(arena_extrainfo(arena)->finalizers, chunk);
   }
-  chunk->cells[chunk->count++] = ptr2cell(o);
+  /* Flag item as needing a meta lookup so we don't need to touch the memory
+  ** of cdata that needs finalizing 
+  */
+  idlist_add(L, chunk, ptr2cell(o), o->gch.gct == ~LJ_TTAB || o->gch.gct == ~LJ_TUDATA);
 }
 
-CellIdChunk *arena_checkfinalizers(global_State *g, GCArena *arena, CellIdChunk *out)
+CellIdChunk *arena_checkfinalizers(global_State *g, GCArena *arena, CellIdChunk *list)
 {
   lua_State *L = mainthread(g);
   CellIdChunk *chunk = arena_finalizers(arena);
 
   for (; chunk != NULL;) { 
-    MSize count = chunk->count;
+    MSize count = idlist_count(chunk);
     for (size_t i = 0; i < count; i++) {
       GCCellID cell = chunk->cells[i];
       assert_allocated(arena, cell);
 
       if (!((arena_getmark(arena, cell) >> arena_blockbitidx(cell)) & 1)) {
+        GCobj *o = arena_cellobj(arena, cell);
         chunk->cells[i] = chunk->cells[--count];
-        out = idlist_add(L, out, cell);
+        /* If theres no __gc meta skip saving the cell */
+        if (!idlist_getmark(chunk, i) || 
+            lj_meta_fastg(g, tabref(o->gch.metatable), MM_gc)) {
+          /* Temporally mark black before the sweep */
+          arena_markcell(arena, cell);
+          list = idlist_add(L, list, cell, idlist_getmark(chunk, i));
+        }
       }
     }
     chunk->count = count;
     chunk = chunk->next;
   }
 
-  return out;
+  return list->count > 0 ? list : NULL;
 }
 
-void arena_sweep(global_State *g, GCArena *arena)
+void arena_dumpwhitecells(global_State *g, GCArena *arena)
 {
-  MSize i, size = sizeof(arena->block)/sizeof(GCBlockword);
+  MSize i, size = arena_blocktop(arena);
+  MSize arenaid = arena_extrainfo(arena)->id;
 
-  for (i = 0; i < size; i++) {
+  for (i = MinBlockWord-1; i < size; i++) {
     GCBlockword white = arena->block[i] & ~arena->mark[i];
 
     if (white) {
       uint32_t bit = lj_ffs(white);
-      GCCellID cellid = bit + (i * BlocksetBits) + MinCellId;
 
-      GCCell *cell = arena_cell(arena, cellid);
+      for (; bit < (BlocksetBits-1);) {
+        GCCellID cellid = bit + (i * BlocksetBits);
+        GCobj *cell = arena_cellobj(arena, cellid);
 
-      if (cell->gct != ~LJ_TCDATA && cell->gct != ~LJ_TSTR) {
-        
+        printf("Dead Cell %d in arena %d\n", cellid, arenaid);
+
+        if (cellid == 2042) {
+          DebugBreak();
+        }
+
+        /* Create a mask to remove the bits to the LSB backwards the end of the free segment */
+        GCBlockword mask = ((GCBlockword)0xffffffff) << (bit+1);
+
+        /* Don't try to bit scan an empty mask */
+        if (!(white & mask)) {
+          break;
+        }
+
+        bit = lj_ffs(white & mask);
       }
     }
   }
 }
 
 enum HugeFlags {
-  HugeFlag_Black   = 0x1,
-  HugeFlag_Fixed   = 0x2,
-  HugeFlag_TravObj = 0x4,
+  HugeFlag_Black     = 0x1,
+  HugeFlag_Fixed     = 0x2,
+  HugeFlag_TravObj   = 0x4,
   HugeFlag_Finalizer = 0x8,
-
-  HugeFlag_GCTMask = 0xf00,
-  HugeFlag_GCTShift = 8,
+  HugeFlag_Aligned   = 0xf,
+  HugeFlag_GCTMask   = 0xf00,
+  HugeFlag_GCTShift  = 8,
 };
 
 #define hbnode_ptr(node) ((GCobj *)(((uintptr_t)mref((node)->obj, void)) & ~ArenaCellMask))
@@ -1029,6 +1079,12 @@ void *hugeblock_alloc(lua_State *L, GCSize size, MSize gct)
   void *o = lj_alloc_memalign(G(L)->allocd, ArenaSize, size);
   HugeBlock *node = hugeblock_register(tab, o);
   tab->total += size;
+  tab->count++;
+  lua_assert((((intptr_t)o)&ArenaCellMask) == 0 && o != NULL);
+
+  if (o == NULL) {
+    lj_err_mem(L);
+  }
 
   if (node == NULL) {
     hugeblock_rehash(L, tab);
@@ -1036,6 +1092,7 @@ void *hugeblock_alloc(lua_State *L, GCSize size, MSize gct)
   }
   
   setmref(node->obj, o);
+  node->size = size;
   return o;
 }
 
@@ -1071,6 +1128,11 @@ void hugeblock_free(global_State *g, void *o, GCSize size)
   freehugeblock(g, tab, hugeblock_find(tab, o));
 }
 
+int hugeblock_isdead(global_State * g, GCobj * o)
+{
+  return !hugeblock_find(gettab(g), o);
+}
+
 int hugeblock_iswhite(global_State *g, void *o)
 {
   HugeBlock *node = hugeblock_find(gettab(g), o);
@@ -1081,6 +1143,12 @@ void hugeblock_makewhite(global_State *g, GCobj *o)
 {
   HugeBlock *node = hugeblock_find(gettab(g), o);
   hbnode_clearflag(node, HugeFlag_Black);
+}
+
+void hugeblock_toblack(global_State *g, GCobj *o)
+{
+  HugeBlock *node = hugeblock_find(gettab(g), o);
+  hbnode_setflag(node, HugeFlag_Black);
 }
 
 static void hbnode_mark(global_State *g, HugeBlock *node)
@@ -1117,7 +1185,8 @@ MSize hugeblock_checkfinalizers(global_State *g)
   HugeBlockTable *tab = gettab(g);
   for (size_t i = 0; i < tab->hmask; i++) {
     HugeBlock *node = tab->node+i;
-    if (hbnode_getflags(node, HugeFlag_Finalizer)) {
+    if (hbnode_getflags(node, HugeFlag_Finalizer|HugeFlag_Black) == 
+        HugeFlag_Finalizer) {
       hbnode_setflag(node, HugeFlag_Black);
       gc_mark(g, hbnode_ptr(node), hbnode_gct(node));
       setmref(*tab->finalizertop, hbnode_ptr(node));
@@ -1164,9 +1233,34 @@ GCSize sweep_hugeblocks(global_State *g)
   HugeBlockTable *tab = gettab(g);
   MSize count = tab->count;
   GCSize total = tab->total;
+
+  if (count == 0) {
+    return;
+  }
+
   for (size_t i = 0; i < tab->hmask; i++) {
     HugeBlock *node = tab->node+i;
     if (!hbnode_isempty(node) && !hbnode_getflags(node, HugeFlag_Finalizer|HugeFlag_Black)) {
+      freehugeblock(g, tab, node);
+    }
+  }
+
+  return total - tab->total;
+}
+
+GCSize hugeblock_freeall(global_State *g)
+{
+  HugeBlockTable *tab = gettab(g);
+  MSize i;
+  GCSize total = tab->total;
+
+  if (tab->count == 0) {
+    return;
+  }
+
+  for (i = 0; i < tab->hmask; i++) {
+    HugeBlock *node = tab->node+i;
+    if (!hbnode_isempty(node)) {
       freehugeblock(g, tab, node);
     }
   }

@@ -5,7 +5,7 @@
 #ifndef _LJ_GCARENA_H
 #define _LJ_GCARENA_H
 
-enum GCOffsets {
+enum {
   MinArenaSize = 1 << 20,
   CellSize = 16,
   ArenaSize = 1 << 20,
@@ -16,7 +16,7 @@ enum GCOffsets {
   MaxCellId = ArenaSize / CellSize,
   ArenaUsableCells = MaxCellId - MinCellId,
   /* TODO: better value taking into account what min alignment the os page allocation can provide */
-  ArenaOversized = ArenaMaxObjMem-1000,
+  ArenaOversized = ArenaMaxObjMem >> 1,
 
   BlocksetBits = 32,
   BlocksetMask = BlocksetBits - 1,
@@ -91,6 +91,7 @@ enum ArenaFlags {
   ArenaFlag_NoBump    = 0x20, /* Can't use bump allocation with this arena */
   ArenaFlag_FreeList  = 0x40, 
   ArenaFlag_FixedList = 0x80, /* Has a List of Fixed object cell ids */
+  ArenaFlag_Swept     = 0x100, 
 };
 
 typedef struct ArenaExtra {
@@ -111,7 +112,6 @@ typedef union GCArena {
       struct{
         MRef celltop;
         MRef freelist;
-        MRef finalizers;
         ArenaExtra extra; /*FIXME: allocate separately */
       };
       GCBlockword block[MaxBlockWord];
@@ -163,6 +163,7 @@ typedef struct HugeBlockTable {
   HugeBlock* node;
   MSize count;
   MSize total;
+  MSize finalizersize;
   MRef *finalizers;
   MRef *finalizertop;
 } HugeBlockTable;
@@ -173,6 +174,7 @@ typedef struct HugeBlockTable {
 #define arena_containsobj(arena, o) (((GCArena *)(o)) >= (arena) && ((char*)(o)) < (((char*)(arena))+ArenaSize)) 
 
 #define arena_cell(arena, cellidx) (&(arena)->cells[(cellidx)])
+#define arena_cellobj(arena, cellidx) ((GCobj *)&(arena)->cells[(cellidx)])
 #define arena_celltop(arena) (mref((arena)->celltop, GCCell))
 /* Can the arena bump allocate a min number of contiguous cells */
 #define arena_canbump(arena, mincells) ((arena_celltop(arena)+mincells) < arena_cell(arena, MaxCellId))
@@ -181,7 +183,7 @@ typedef struct HugeBlockTable {
 #define arena_freelist(arena) mref((arena)->freelist, ArenaFreeList)
 
 #define arena_extrainfo(arena) (&(arena)->extra)
-#define arena_finalizers(arena) mref((arena)->finalizers, CellIdChunk)
+#define arena_finalizers(arena) mref(arena_extrainfo(arena)->finalizers, CellIdChunk)
 void arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o);
 CellIdChunk *arena_checkfinalizers(global_State *g, GCArena *arena, CellIdChunk *out);
 
@@ -205,10 +207,13 @@ void arean_setfixed(lua_State *L, GCArena *arena, GCobj *o);
 
 void *hugeblock_alloc(lua_State *L, GCSize size, MSize gct);
 void hugeblock_free(global_State *g, void *o, GCSize size);
+int hugeblock_isdead(global_State *g, GCobj *o);
 int hugeblock_iswhite(global_State *g, void *o);
 void hugeblock_mark(global_State *g, void *o);
 void hugeblock_makewhite(global_State *g, GCobj *o);
+void hugeblock_toblack(global_State *g, GCobj *o);
 void hugeblock_setfixed(global_State *g, GCobj *o);
+GCSize sweep_hugeblocks(global_State *g);
 MSize hugeblock_checkfinalizers(global_State *g);
 MSize hugeblock_runfinalizers(global_State *g);
 #define gc_ishugeblock(o) ((((uintptr_t)(o)) & ArenaCellMask) == 0)
@@ -218,6 +223,7 @@ GCSize arena_propgrey(global_State *g, GCArena *arena, int limit, MSize *travcou
 MSize arena_minorsweep(GCArena *arena);
 MSize arena_majorsweep(GCArena *arena);
 void arena_towhite(GCArena *arena);
+void arena_dumpwhitecells(global_State *g, GCArena *arena);
 
 void *arena_allocalign(GCArena *arena, MSize size, MSize align);
 void* arena_allocslow(GCArena *arena, MSize size);
@@ -280,19 +286,21 @@ static CellState arena_cellstate(GCArena *arena, GCCellID cell)
 /* Must never be passed huge block pointers. 
 ** A fast pre-check for cellid zero can quickly filter out huge blocks. 
 */
-static LJ_AINLINE int iswhitefast(void* o)
+static LJ_AINLINE int arenaobj_iswhite(void* o)
 {
   GCArena *arena = ptr2arena(o);
   GCCellID cell = ptr2cell(o);
   arena_checkid(cell);
   lua_assert(!gc_ishugeblock(o));
-  return ((arena_getmark(arena, cell) >> arena_blockbitidx(cell)) & 1);
+  return !((arena_getmark(arena, cell) >> arena_blockbitidx(cell)) & 1);
 }
+
+#define arenaobj_isblack(o) (!arenaobj_iswhite(o))
 
 static LJ_AINLINE int iswhite2(global_State *g, void* o)
 {
   if (LJ_LIKELY(!gc_ishugeblock(o))) {
-    return iswhitefast(o);
+    return arenaobj_iswhite(o);
   } else {
     return hugeblock_iswhite(g, o);
   }
@@ -301,22 +309,39 @@ static LJ_AINLINE int iswhite2(global_State *g, void* o)
 static LJ_AINLINE int isblack2(global_State *g, void* o)
 {
   if (LJ_LIKELY(!gc_ishugeblock(o))) {
-    return !iswhitefast(o);
+    return !arenaobj_iswhite(o);
   } else {
-    return hugeblock_iswhite(g, o);
+    return !hugeblock_iswhite(g, o);
   }
 }
 
 /* Must never be passed huge block pointers.
 ** A fast pre-check for cellid zero can quickly filter out huge blocks.
 */
-static LJ_AINLINE int isdead2(void* o)
+static LJ_AINLINE int arenaobj_isdead(void* o)
 {
   GCArena *arena = ptr2arena(o);
   GCCellID cell = ptr2cell(o);
   arena_checkid(cell);
   lua_assert(!gc_ishugeblock(o));
   return !((arena_getblock(arena, cell) >> arena_blockbitidx(cell)) & 1);
+}
+
+static LJ_AINLINE void arenaobj_toblack(GCobj *o)
+{
+  GCArena *arena = ptr2arena(o);
+  GCCellID cell = ptr2cell(o);
+  lua_assert(arena_cellisallocated(arena, cell));
+  arena_markcell(arena, cell);
+}
+
+static LJ_AINLINE void toblack(global_State *g, GCobj *o)
+{
+  if (LJ_LIKELY(!gc_ishugeblock(o))) {
+    arenaobj_toblack(o);
+  } else {
+    hugeblock_toblack(g, o);
+  }
 }
 
 /* Two slots taken up count and 1 by the sentinel value */
@@ -366,7 +391,7 @@ static LJ_AINLINE void arena_markgco(global_State *g, void *o)
   }
 }
 
-static LJ_AINLINE void arena_markcdstr(void* o)
+static LJ_AINLINE void arenaobj_markcdstr(void* o)
 {
   GCArena *arena = ptr2arena(o);
   GCCellID cell = ptr2cell(o);
@@ -416,6 +441,34 @@ static LJ_AINLINE void *arena_alloc(GCArena *arena, MSize size)
 
   arena_getblock(arena, cell) |= arena_blockbit(cell);
   return arena_cell(arena, cell);
+}
+
+#define idlist_count(list) ((list)->count & 31)
+#define idlist_getmark(list, cellidx) ((list)->count & (1 << ((cellidx)+5)))
+#define idlist_markcell(list, cellidx) ((list)->count |= (1 << ((cellidx)+5)))
+
+void *lj_mem_realloc(lua_State *L, void *p, GCSize osz, GCSize nsz);
+
+static LJ_AINLINE CellIdChunk *idlist_new(lua_State *L)
+{
+  CellIdChunk *list = (CellIdChunk*)lj_mem_realloc(L, NULL, 0, sizeof(CellIdChunk));
+  list->count = 0;
+  list->next = NULL;
+  return list;
+}
+
+static LJ_AINLINE CellIdChunk *idlist_add(lua_State *L, CellIdChunk *chunk, GCCellID cell, int mark)
+{
+  MSize count = idlist_count(chunk);
+  chunk->cells[count] = cell;
+  chunk->count |= mark ? (1 << (count+5)) : 0;
+  chunk->count = ++count;
+  if (LJ_UNLIKELY(count >= 26)) {
+    CellIdChunk *newchunk = idlist_new(L);
+    newchunk->next = chunk;
+    chunk = newchunk;
+  }
+  return chunk;
 }
 
 #endif

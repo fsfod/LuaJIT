@@ -1,7 +1,6 @@
 #pragma once
 
 #include "lj_buf.h"
-#include <stdio.h>
 
 #if !defined(_MSC_VER) || defined(__clang__)
 #include <x86intrin.h>
@@ -22,6 +21,16 @@ typedef struct TimerEvent {
   uint32_t time;
 } TimerEvent;
 
+void LJ_AINLINE timer_end(const char* name, uint64_t time)
+{
+  SBuf *sb = &eventbuf;
+  TimerEvent *e = (TimerEvent *)sbufP(sb);
+  e->name = name;
+  e->time = (uint32_t)(time);
+  setsbufP(sb, sbufP(sb)+sizeof(TimerEvent));
+  lj_buf_more(sb, 16);
+}
+
 #define TimerMode 2
 
 #if TimerMode == 1
@@ -41,11 +50,7 @@ typedef struct TimerEvent {
 
 #define TimerEnd(evtname) \
   evtname##_end = __rdtsc(); \
-  ((TimerEvent *)sbufP(&eventbuf))->name = #evtname; \
-  ((TimerEvent *)sbufP(&eventbuf))->time = (uint32_t)(evtname##_end-evtname##_start); \
-  setsbufP(&eventbuf, sbufP(&eventbuf)+sizeof(TimerEvent));\
-  lj_buf_more(&eventbuf, 16)
-
+  timer_end(#evtname, evtname##_end-evtname##_start)
 #else
 #define TimerStart(name)
 #define TimerEnd(name)

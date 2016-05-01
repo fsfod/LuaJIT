@@ -26,6 +26,9 @@
 #endif
 #include "lj_trace.h"
 #include "lj_vm.h"
+#include "lj_alloc.h"
+
+#include "disablegc.h"
 
 #define GCSTEPSIZE	1024u
 #define GCSWEEPMAX	40
@@ -66,7 +69,7 @@ static void gc_marktv2(global_State *g, TValue *tv)
 
   if (tviswhite(tv)) {
     if (tvisstr(tv) || tviscdata(tv)) {
-      arena_markcdstr(gcV(tv));
+      arenaobj_markcdstr(gcV(tv));
     } else {
       gc_mark(g, gcV(tv));
     }
@@ -630,19 +633,14 @@ static int register_arena(lua_State *L, GCArena *arena, uint32_t flags)
   if (LJ_UNLIKELY(g->gc.arenastop >= g->gc.arenassz)) {
     lj_mem_growvec(L, g->gc.arenas, g->gc.arenassz, LJ_MAX_MEM32, GCArena*);
   }
-
-  /* TODO: Could use the lower bits of the arena pointer we store here to flag if
-  ** the arena contains traversable objects, if the arena is full/fragmented(no bump)/empty,
-  ** is only for one allocation size?
-  */
-  g->gc.arenas[g->gc.arenastop] = (GCArena *)(((uintptr_t)arena) | flags);
+  g->gc.arenas[g->gc.arenastop] = (GCArena *)(((intptr_t)arena) | flags);
 
   freelist = G(L)->gc.freelists + g->gc.arenastop;
   memset(freelist, 0, sizeof(ArenaFreeList));
   freelist->owner = arena;
-  arena->extra.id = g->gc.arenastop;
-  arena->extra.flags = flags;
   setmref(arena->freelist, freelist);
+  arena->extra.id = g->gc.arenastop;
+  arena->extra.flags = flags; 
   return g->gc.arenastop++;
 }
 
@@ -691,8 +689,6 @@ GCArena *lj_gc_setactive_arena(lua_State *L, GCArena *arena, int travobjs)
 
 void lj_gc_init(global_State *g, lua_State *L, GCArena* GGarena)
 {
-  GCArena** arenas;
-
   g->gc.state = GCSpause;
   setgcref(g->gc.root, obj2gco(L));
   setmref(g->gc.sweep, &g->gc.root);
@@ -703,8 +699,7 @@ void lj_gc_init(global_State *g, lua_State *L, GCArena* GGarena)
   setmref(g->gc.grayssb, ((GCRef*)lj_alloc_memalign(g->allocd, 
             GRAYSSBSZ*sizeof(GCRef), GRAYSSBSZ*sizeof(GCRef)))+1);
   
-  arenas = lj_mem_newvec(L, 16, GCArena*);
-  g->gc.arenas = arenas;
+  g->gc.arenas = lj_mem_newvec(L, 16, GCArena*);
   g->gc.arenassz = 16;
   g->gc.arenastop = 0;
   g->gc.freelists = lj_mem_newvec(L, 16, ArenaFreeList);
@@ -994,7 +989,6 @@ static GCobj *linkgco(global_State *g, GCobj *o)
   lua_assert(checkptrGC(o));
   setgcrefr(o->gch.nextgc, g->gc.root);
   setgcref(g->gc.root, o);
-  newwhite(g, o);
   return o;
 }
 
@@ -1005,7 +999,13 @@ void * LJ_FASTCALL lj_mem_newgco(lua_State *L, GCSize size)
   GCobj *o = (GCobj*)arena_alloc(G(L)->travarena, size);
   if (o == NULL)
     lj_err_mem(L);
-  g->gc.total += size;
+  /* Set created object black while the gc is sweeping */
+  if (G(L)->gc.state == GCSsweepstring) {
+    arena_markcell(ptr2arena(o), ptr2cell(o));
+  }
+  setgray(o);
+  g->gc.atotal += size;
+  //g->gc.total += size;
   return linkgco(g, o);
 }
 
@@ -1013,7 +1013,17 @@ void * LJ_FASTCALL lj_mem_newcd(lua_State *L, GCSize size)
 {
   global_State *g = G(L);
   GCobj *o = (GCobj*)arena_alloc(G(L)->arena, size);
-  g->gc.total += size;
+
+  if (size < ArenaOversized) {
+    o = (GCobj*)arena_alloc(G(L)->arena, size);
+  } else {
+    o = (GCobj*)hugeblock_alloc(L, size, LJ_TCDATA);
+  }
+  if (o == NULL)
+    lj_err_mem(L);
+  setgray(o);
+  g->gc.atotal += size;
+  //g->gc.total += size;
   setgcrefr(o->gch.nextgc, g->gc.root);
   setgcref(g->gc.root, o);
   newwhite(g, o);
@@ -1064,44 +1074,51 @@ GCobj *findarenaspace(lua_State *L, GCSize osize, int travobj)
   return (GCobj*)arena_alloc(pickedarena, osize);
 }
 
-#define istrav(gct) (gct != ~LJ_TSTR && gct != ~LJ_TCDATA)
+#define istrav(gct) ((gct) != ~LJ_TSTR && (gct) != ~LJ_TCDATA)
 
-size_t total = 0;
+#include <stdio.h>
 
 GCobj *lj_mem_newgco_unlinked(lua_State *L, GCSize osize, uint32_t gct)
 {
-  GCArena *arena = istrav(gct) ? G(L)->travarena : G(L)->arena;
-  GCobj *o = (GCobj*)arena_alloc(arena, osize);
+  global_State *g = G(L);
+  GCobj *o ;
 
-  if (o == NULL) {
-    return findarenaspace(L, osize, istrav(gct));
+  if (osize < ArenaOversized) {
+    o = (GCobj*)arena_alloc(istrav(gct) ? G(L)->travarena : G(L)->arena, osize);  
+    if (o == NULL) {
+      o = findarenaspace(L, osize, istrav(gct));
+    }
+    printf("Alloc(%d, %d) %s\n", ptr2arena(o)->extra.id, ptr2cell(o), lj_obj_itypename[gct]);
+    
+    g->gc.atotal += osize;
+  } else {
+    o = hugeblock_alloc(L, osize, gct);
   }
 
-  G(L)->gc.total += (GCSize)osize;
-  total += osize;
+  /* Set created object black while the gc is sweeping */
+  if (g->gc.state > GCSpropagate && g->gc.state < GCSfinalize) {
+    arena_markcell(ptr2arena(o), ptr2cell(o));
+  } else {
+    setgray(o);
+  }
+  
+ // g->gc.total += osize;
   return o;
 }
 
 GCobj *lj_mem_newgco_t(lua_State *L, GCSize osize, uint32_t gct)
 {
-  GCobj *o = (GCobj*)arena_alloc(G(L)->travarena, osize);
-
-  if (o == NULL) {
-    return findarenaspace(L, osize, 1);
-  }
-
-  G(L)->gc.total += (GCSize)osize;
-  total += osize;
+  GCobj *o = lj_mem_newgco_unlinked(L, osize, gct);
   return linkgco(G(L), o);
 }
 
 void lj_mem_freegco(global_State *g, void *p, GCSize osize)
 {
-  g->gc.total -= (GCSize)osize;
+ // g->gc.total -= (GCSize)osize;
 
   if (ptr2cell(p) != 0) {
     /* TODO: Free cell list */
-    arena_free(g, ptr2arena(p), p, osize);
+    //arena_free(g, ptr2arena(p), p, osize);
   } else {
     hugeblock_free(g, p, osize);
   }
@@ -1109,30 +1126,38 @@ void lj_mem_freegco(global_State *g, void *p, GCSize osize)
 
 void *lj_mem_reallocgc(lua_State *L, void *p, GCSize oldsz, GCSize newsz)
 {
+  global_State *g = G(L);
   void* mem;
 
   if (newsz < ArenaOversized) {
-    mem = arena_alloc(G(L)->arena, newsz);
+    mem = arena_alloc(g->arena, newsz);
 
+    if (oldsz && oldsz < ArenaOversized) {
+      GCArena *arena = ptr2arena(p);
+      if (oldsz < newsz) {
+        /*if(arena_tryext(arena, oldsz, newsz))*/
+      } else {
+        //arena_shrinkobj(arena, newsz);
+        //mem = p;
+      }
+    }
     if (mem == NULL) {
-      mem = findarenaspace(L, newsz, 1);
+      mem = findarenaspace(L, newsz, 0);
     }
 
-    if (p) {
-      memcpy(mem, p, oldsz);
-      lj_mem_freegco(G(L), p, oldsz);
+    /* Set created object black while the gc is sweeping */
+    if (g->gc.state >= GCSsweepstring && g->gc.state < GCSfinalize) {
+      arena_markcell(ptr2arena(mem), ptr2cell(mem));
     }
   } else {
-    mem = hugeblock_alloc(L, newsz);
+    mem = hugeblock_alloc(L, newsz, LJ_TTAB);
+  } 
+
+  if (p) {
+    lua_assert(oldsz > 0);
     memcpy(mem, p, oldsz);
-
-    if (ptr2cell(p) == 0) {
-      hugeblock_free(G(L), p, oldsz);
-    } else {
-      lj_mem_freegco(G(L), p, oldsz);
-    }
+    lj_mem_freegco(G(L), p, oldsz);
   }
-
   return mem;
 }
 
@@ -1153,6 +1178,6 @@ GCobj *lj_mem_newagco(lua_State *L, GCSize osize, MSize align)
     o = hugeblock_alloc(L, osize, ~LJ_TCDATA);
   }
 
-  g->gc.total += osize;
+  g->gc.atotal += osize;
   return o;
 }

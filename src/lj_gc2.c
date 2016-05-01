@@ -27,8 +27,19 @@
 #include "lj_trace.h"
 #include "lj_vm.h"
 #include "lj_dispatch.h"
+//#include "disablegc.h"
+
 #include "lj_timer.h"
 #include <stdio.h>
+
+#define TraceGC TraceGC
+
+#ifdef TraceGC
+void TraceGC(global_State *g, int newstate);
+#define SetGCState(g, newstate) TraceGC(g, newstate); g->gc.state = newstate
+#else
+#define SetGCState(g, newstate) g->gc.state = newstate 
+#endif
 
 #define GCSTEPSIZE	1024u
 #define GCSWEEPMAX	40
@@ -41,7 +52,6 @@
 #undef makewhite
 
 #define iswhite(g, x)	(!isblack2(g, x))
-#define iswhitefast(x)	(!isblackfast(x)) /* must never be passed a huge block object */
 #define isblack(g, x)	(isblack2(g, x))
 #define tviswhite(g, x)	(tvisgcv(x) && iswhite(g, gcV(x)))
 
@@ -65,21 +75,21 @@ static void gc_mark(global_State *g, GCobj *o, int gct);
 /* Mark a TValue (if needed). */
 #define gc_marktv(g, tv) \
   { lua_assert(!tvisgcv(tv) || (~itype(tv) == gcval(tv)->gch.gct)); \
-    if (tvisgcv(tv) && (gc_ishugeblock(gcV(tv)) || iswhitefast(gcV(tv)))) gc_mark(g, gcV(tv), ~itype(tv)); }
+    if (tvisgcv(tv) && (gc_ishugeblock(gcV(tv)) || arenaobj_iswhite(gcV(tv)))) gc_mark(g, gcV(tv), ~itype(tv)); }
 
 /* Mark a GCobj (if needed). */
 #define gc_markobj(g, o) \
-  { if (gc_ishugeblock(o) || iswhitefast(obj2gco(o))) gc_mark(g, obj2gco(o), obj2gco(o)->gch.gct); }
+  { if (gc_ishugeblock(o) || arenaobj_iswhite(obj2gco(o))) gc_mark(g, obj2gco(o), obj2gco(o)->gch.gct); }
 
 #define gc_markgct(g, o, gct) \
-  { if (gc_ishugeblock(o) || iswhitefast(obj2gco(o))) gc_mark(g, obj2gco(o), gct); }
+  { if (gc_ishugeblock(o) || arenaobj_iswhite(obj2gco(o))) gc_mark(g, obj2gco(o), gct); }
 
 #define gc_mark_tab(g, o) \
-  { if (iswhitefast(obj2gco(o))) gc_mark(g, obj2gco(o), ~LJ_TTAB); }
+  { if (arenaobj_iswhite(obj2gco(o))) gc_mark(g, obj2gco(o), ~LJ_TTAB); }
 
 /* Mark a string object. */
 #define gc_mark_str(g, s)	\
-  { if (gc_ishugeblock(s) || iswhitefast(obj2gco(s))) gc_mark(g, obj2gco(s), ~LJ_TSTR); }
+  { if (gc_ishugeblock(s) || arenaobj_iswhite(obj2gco(s))) gc_mark(g, obj2gco(s), ~LJ_TSTR); }
 
 /* Mark a white GCobj. */
 void gc_mark(global_State *g, GCobj *o, int gct)
@@ -91,13 +101,18 @@ void gc_mark(global_State *g, GCobj *o, int gct)
     hugeblock_mark(g, o);
 
     /* No further processing */
-    if (gct != ~LJ_TUDATA)
+    if (gct != ~LJ_TUDATA) {
       return;
+    }
   }
 
+  if (arenaobj_isdead(o)) {
+    lua_assert(0);
+  }
+  
   if (LJ_UNLIKELY(gct == ~LJ_TUDATA)) {
     GCtab *mt = tabref(gco2ud(o)->metatable);
-    arena_markcdstr(o);  /* Userdata are never gray. */
+    arenaobj_markcdstr(o);  /* Userdata are never gray. */
     if (mt) gc_mark_tab(g, mt);
     gc_mark_tab(g, tabref(gco2ud(o)->env));
   } else if (LJ_UNLIKELY(gct == ~LJ_TUPVAL)) {
@@ -106,7 +121,7 @@ void gc_mark(global_State *g, GCobj *o, int gct)
     if (uv->closed)
       gc_markobj(g, o);  /* Closed upvalues are never gray. */
   } else if(gct == ~LJ_TSTR || gct == ~LJ_TCDATA) {
-    arena_markcdstr(o);
+    arenaobj_markcdstr(o);
   } else {
     lua_assert(gct == ~LJ_TFUNC || gct == ~LJ_TTAB ||
                gct == ~LJ_TTHREAD || gct == ~LJ_TPROTO || gct == ~LJ_TTRACE);
@@ -126,7 +141,10 @@ static void gc_mark_gcroot(global_State *g)
 /* Start a GC cycle and mark the root set. */
 static void gc_mark_start(global_State *g)
 {
+  lua_assert(iswhite2(g, &G2GG(g)->L));
   gc_markobj(g, &G2GG(g)->L);
+  lua_assert(iswhite2(g, &g->strempty));
+  gc_mark_str(g, &g->strempty);
   gc_markobj(g, mainthread(g));
   gc_mark_tab(g, tabref(mainthread(g)->env));
   gc_marktv(g, &g->registrytv);
@@ -141,7 +159,7 @@ static void gc_mark_start(global_State *g)
     }
   }
 
-  //g->gc.state = GCSpropagate;
+  SetGCState(g, GCSpropagate);
 }
 
 /* Mark open upvalues. */
@@ -202,9 +220,9 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
   int weak = 0;
   cTValue *mode;
   GCtab *mt = tabref(t->metatable);
+  cleargray(obj2gco(t));
   if (mt)
     gc_mark_tab(g, mt);
-  cleargray(obj2gco(t));
   mode = lj_meta_fastg(g, mt, MM_mode);
   if (mode && tvisstr(mode)) {  /* Valid __mode field? */
     const char *modestr = strVdata(mode);
@@ -249,6 +267,7 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
 /* Traverse a function. */
 static void gc_traverse_func(global_State *g, GCfunc *fn)
 {
+  cleargray((GCobj *)fn);
   gc_mark_tab(g, tabref(fn->c.env));
   if (isluafunc(fn)) {
     uint32_t i;
@@ -423,7 +442,7 @@ static GCSize gc_propagate_gray(global_State *g)
     MSize count = 0;
     GCSize omem = arena_propgrey(g, maxarena, -1, &count);
     total += omem;
-    printf("propagated %d objects in arena(%d), with a size of %d\n", count, arenai, omem);
+    //printf("propagated %d objects in arena(%d), with a size of %d\n", count, arenai, omem);
   }
   TimerEnd(propagate_gray);
   
@@ -441,17 +460,31 @@ static const char* gcstates[] = {
 
 static void gc_sweep(global_State *g, int32_t lim);
 
+MSize GCCount = 0;
+
 void TraceGC(global_State *g, int newstate)
 {
   lua_State *L = mainthread(g);
+
+  if (newstate == GCSpropagate) {
+    printf("---------------GC Start %d-------------------------\n", GCCount);
+  }
+
+#ifdef DEBUG
+  char buf[100];
+  sprintf(buf, "GC State = %s\n", gcstates[newstate]);
+  OutputDebugStringA(buf);
+#endif 
   printf("GC State = %s\n", gcstates[newstate]);
   g->gc.curarena = 0;
 
   if (mref(eventbuf.L, lua_State) == NULL) {
     timers_setuplog(L);
   }
+  timers_printlog();
 
   if (newstate == GCSpropagate) {
+
     for (MSize i = 0; i < g->gc.arenastop; i++) {
       //arena_towhite(lj_gc_arenaref(g, i));
     }
@@ -463,7 +496,6 @@ void TraceGC(global_State *g, int newstate)
 
   } else if (newstate == GCSsweep) {
    // gc_sweep(g, -1);
-    timers_printlog();
   } else if (newstate == GCSfinalize) {
     for (MSize i = 0; i < g->gc.arenastop; i++) {
       //  arena_runfinalizers(g, lj_gc_arenaref(g, i));
@@ -503,7 +535,7 @@ static void gc_sweep(global_State *g, int32_t lim)
   TimerEnd(gcsweep);
 }
 
-int gc_sweepstring(global_State *g)
+static int gc_sweepstring(global_State *g)
 {
   GCRef str = g->strhash[g->gc.sweepstr]; /* Sweep one chain. */
   GCstr *prev = NULL;
@@ -511,14 +543,14 @@ int gc_sweepstring(global_State *g)
   while (gcref(str)) {
     GCstr *s = strref(str);
     str = s->nextgc;
-    if (!isblack(g, s)) {
+    if (iswhite(g, s)) {
       *(prev ? &prev->nextgc : &g->strhash[g->gc.sweepstr]) = s->nextgc;
     } else {
       prev = s;
     }
   }
 
-  return ++g->gc.sweepstr > g->strmask;
+  return ++g->gc.sweepstr <= g->strmask;
 }
 
 /* Check whether we can clear a key or a value slot from a table. */
@@ -646,9 +678,32 @@ static int gc_finalize_step(lua_State *L)
   return 0;
 }
 
+/* Finalize all userdata objects from mmudata list. */
+void lj_gc_finalize_udata(lua_State *L)
+{
+  global_State *g = G(L);
+  CellIdChunk *chunk;
+
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+    chunk = arena_finalizers(arena);
+
+    while (chunk) {
+      CellIdChunk *next;
+      for (MSize j = 0; j < chunk->count; j++) {
+        gc_finalize(L, arena_cellobj(arena, chunk->cells[j]));
+      }
+
+      next = chunk->next;
+      lj_mem_free(g, chunk, sizeof(CellIdChunk));
+      chunk = next;
+    }
+  }
+}
+
 #if LJ_HASFFI
 /* Finalize all cdata objects from finalizer table. */
-void lj_gc_finalize_cdata2(lua_State *L)
+void lj_gc_finalize_cdata(lua_State *L)
 {
   global_State *g = G(L);
   CTState *cts = ctype_ctsG(g);
@@ -671,6 +726,23 @@ void lj_gc_finalize_cdata2(lua_State *L)
 }
 #endif
 
+/* Free all remaining GC objects. */
+void lj_gc_freeall(global_State *g)
+{
+  MSize i;
+  setgcref(g->gc.root, obj2gco(mainthread(g)));
+  g->strnum = 0;
+  /* Skip GG arena */
+  for (i = 1; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+    arena_destroy(g, arena);
+  }
+
+  lj_mem_freevec(g, g->gc.arenas, g->gc.arenassz, GCArena*);
+  lj_mem_freevec(g, g->gc.freelists, g->gc.arenassz, ArenaFreeList);
+  lj_mem_freevec(g, (void*)(((intptr_t)mref(g->gc.grayssb, GCRef)) & ~GRAYSSB_MASK),
+                            GRAYSSBSZ, GCRef);
+}
 
 /* -- Collector ----------------------------------------------------------- */
 
@@ -684,7 +756,6 @@ static void atomic(global_State *g, lua_State *L)
   gc_propagate_gray(g);  /* Propagate any left-overs. */
 
   /* Empty the list of weak tables. */
-
   lua_assert(!iswhite(g, obj2gco(mainthread(g))));
   gc_markobj(g, L);  /* Mark running thread. */
   gc_traverse_curtrace(g);  /* Traverse current trace. */
@@ -702,19 +773,61 @@ static void atomic(global_State *g, lua_State *L)
   lj_buf_shrink(L, &g->tmpbuf);  /* Shrink temp buffer. */
 
   /* Prepare for sweep phase. */
-  g->gc.currentwhite = (uint8_t)otherwhite(g);  /* Flip current white. */
-  g->strempty.marked = g->gc.currentwhite;
   g->gc.estimate = g->gc.total - (GCSize)udsize;  /* Initial estimate. */
   TimerEnd(gcatomic);
 }
 
-static void sweep_arenas(global_State *g)
+static void sweep_arena(global_State *g, MSize i)
 {
-  /*TODO: handling of multiple arenas */
+  lua_assert(!(lj_gc_arenaflags(g, i) & ArenaFlag_Swept));
+  MSize count = arena_majorsweep(lj_gc_arenaref(g, i));
+  if (count & 0xffff) {
+    printf("Swept arena(%d), objects fread %d\n", i, count & 0xffff);
+  }
+  lj_gc_setarenaflag(g, i, ArenaFlag_Swept);
+}
+
+static void arenasweep_start(global_State *g)
+{
+  lua_assert(isblack2(g, &g->strempty));
+  lua_assert(isblack2(g, mainthread(g)));
+  MSize nontrav = 0, trav = 0;
 
   for (MSize i = 0; i < g->gc.arenastop; i++) {
-    arena_majorsweep(lj_gc_arenaref(g, i));
+    arena_dumpwhitecells(g, lj_gc_arenaref(g, i));
   }
+
+  g->gc.curarena = 0;
+
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    lj_gc_cleararenaflags(g, i, ArenaFlag_Swept);
+    if (lj_gc_arenaref(g, i) == g->arena) {
+      nontrav = i;
+    } else if(lj_gc_arenaref(g, i) == g->travarena) {
+      trav = i;
+    }
+  }
+
+  sweep_arena(g, nontrav);
+  sweep_arena(g, trav);
+
+  //g->gc.total -= g->gc.atotal;
+  g->gc.atotal = 0;
+}
+
+static int arenasweep_step(global_State *g)
+{
+  MSize i;
+  for (i = g->gc.curarena; i < g->gc.arenastop; i++) {
+    if (!(lj_gc_arenaflags(g, i) & ArenaFlag_Swept)) {
+      sweep_arena(g, i);
+      g->gc.curarena = i+1;
+      return 1;
+    }
+  }
+
+  sweep_hugeblocks(g);
+  return 0;
 }
 
 /* GC state machine. Returns a cost estimate for each step performed. */
@@ -723,50 +836,56 @@ static size_t gc_onestep(lua_State *L)
   global_State *g = G(L);
   switch (g->gc.state) {
   case GCSpause:
+    GCCount++;
     gc_mark_start(g);  /* Start a new GC cycle by marking all GC roots. */
     return 0;
-  case GCSpropagate:
-    if (gcref(g->gc.gray) != NULL)
-      return propagatemark(g);  /* Propagate one gray object. */
-    g->gc.state = GCSatomic;  /* End of mark phase. */
-    return 0;
+  case GCSpropagate: {
+    GCSize total = gc_propagate_gray(g); /* Propagate one gray object. */
+    if (total != 0) {
+      return total;
+    } else {
+      SetGCState(g, GCSatomic);  /* End of mark phase. */
+      return 0;
+    }
+    }
   case GCSatomic:
     if (tvref(g->jit_base))  /* Don't run atomic phase on trace. */
       return LJ_MAX_MEM;
     atomic(g, L);
-    g->gc.state = GCSsweepstring;  /* Start of sweep phase. */
+    SetGCState(g, GCSsweepstring);  /* Start of sweep phase. */
     g->gc.sweepstr = 0;
-    return 0;
+    //return 0;
   case GCSsweepstring: {
     GCSize old = g->gc.total;
+   // while (gc_sweepstring(g));
     gc_sweepstring(g);  /* Sweep one chain. */
-    if (g->gc.sweepstr > g->strmask)
-      g->gc.state = GCSsweep;  /* All string hash chains sweeped. */
+    if (g->gc.sweepstr > g->strmask) {
+      SetGCState(g, GCSsweep);  /* All string hash chains sweeped. */
+    }
     lua_assert(old >= g->gc.total);
     g->gc.estimate -= old - g->gc.total;
     return GCSWEEPCOST;
     }
   case GCSsweep: {
     GCSize old = g->gc.total;
-    sweep_arenas(g);
-    lua_assert(old >= g->gc.total);
+    arenasweep_start(g);
+    while(arenasweep_step(g));
+    //lua_assert(old >= g->gc.total);
     g->gc.estimate -= old - g->gc.total;
 
-    if (gcref(*mref(g->gc.sweep, GCRef)) == NULL) {
-      if (g->strnum <= (g->strmask >> 2) && g->strmask > LJ_MIN_STRTAB*2-1)
-	lj_str_resize(L, g->strmask >> 1);  /* Shrink string table. */
-      if (gcref(g->gc.mmudata)) {  /* Need any finalizations? */
-	g->gc.state = GCSfinalize;
+    if (g->strnum <= (g->strmask >> 2) && g->strmask > LJ_MIN_STRTAB*2-1)
+      lj_str_resize(L, g->strmask >> 1);  /* Shrink string table. */
+    if (gcref(g->gc.mmudata)) {  /* Need any finalizations? */
+      SetGCState(g, GCSfinalize);
 #if LJ_HASFFI
-	g->gc.nocdatafin = 1;
+      g->gc.nocdatafin = 1;
 #endif
-      } else {  /* Otherwise skip this phase to help the JIT. */
-	g->gc.state = GCSpause;  /* End of GC cycle. */
-	g->gc.debt = 0;
-      }
+    } else {  /* Otherwise skip this phase to help the JIT. */
+      SetGCState(g, GCSpause);  /* End of GC cycle. */
+      g->gc.debt = 0;
     }
     return GCSWEEPMAX*GCSWEEPCOST;
-    }
+  }
   case GCSfinalize:
     if (gcref(g->gc.mmudata) != NULL) {
       if (tvref(g->jit_base))  /* Don't call finalizers on trace. */
@@ -780,7 +899,7 @@ static size_t gc_onestep(lua_State *L)
 #if LJ_HASFFI
     if (!g->gc.nocdatafin) lj_tab_rehash(L, ctype_ctsG(g)->finalizer);
 #endif
-    g->gc.state = GCSpause;  /* End of GC cycle. */
+    SetGCState(g, GCSpause);  /* End of GC cycle. */
     g->gc.debt = 0;
     return 0;
   default:
@@ -789,25 +908,88 @@ static size_t gc_onestep(lua_State *L)
   }
 }
 
+/* Perform a limited amount of incremental GC steps. */
+int LJ_FASTCALL lj_gc_step(lua_State *L)
+{
+  global_State *g = G(L);
+  GCSize lim;
+  int32_t ostate = g->vmstate;
+  setvmstate(g, GC);
+  lim = (GCSTEPSIZE/100) * g->gc.stepmul;
+  if (lim == 0)
+    lim = LJ_MAX_MEM;
+  if (g->gc.total > g->gc.threshold)
+    g->gc.debt += g->gc.total - g->gc.threshold;
+  do {
+    lim -= (GCSize)gc_onestep(L);
+    if (g->gc.state == GCSpause) {
+      g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
+      g->vmstate = ostate;
+      return 1;  /* Finished a GC cycle. */
+    }
+  } while (sizeof(lim) == 8 ? ((int64_t)lim > 0) : ((int32_t)lim > 0));
+  if (g->gc.debt < GCSTEPSIZE) {
+    g->gc.threshold = g->gc.total + GCSTEPSIZE;
+    g->vmstate = ostate;
+    return -1;
+  } else {
+    g->gc.debt -= GCSTEPSIZE;
+    g->gc.threshold = g->gc.total;
+    g->vmstate = ostate;
+    return 0;
+  }
+}
+
+/* Ditto, but fix the stack top first. */
+void LJ_FASTCALL lj_gc_step_fixtop(lua_State *L)
+{
+  if (curr_funcisL(L)) L->top = curr_topL(L);
+  lj_gc_step(L);
+}
+
+#if LJ_HASJIT
+/* Perform multiple GC steps. Called from JIT-compiled code. */
+int LJ_FASTCALL lj_gc_step_jit(global_State *g, MSize steps)
+{
+  lua_State *L = gco2th(gcref(g->cur_L));
+  L->base = tvref(G(L)->jit_base);
+  L->top = curr_topL(L);
+  while (steps-- > 0 && lj_gc_step(L) == 0)
+    ;
+  /* Return 1 to force a trace exit. */
+  return (G(L)->gc.state == GCSatomic || G(L)->gc.state == GCSfinalize);
+}
+#endif
+
 /* Perform a full GC cycle. */
-void lj_gc_fullgc2(lua_State *L)
+void lj_gc_fullgc(lua_State *L)
 {
   global_State *g = G(L);
   int32_t ostate = g->vmstate;
   setvmstate(g, GC);
-  if (g->gc.state <= GCSatomic) {  /* Caught somewhere in the middle. */
-    setmref(g->gc.sweep, &g->gc.root);  /* Sweep everything (preserving it). */
-    setgcrefnull(g->gc.gray);  /* Reset lists from partial propagation. */
-    setgcrefnull(g->gc.grayagain);
-    setgcrefnull(g->gc.weak);
-    g->gc.state = GCSsweepstring;  /* Fast forward to the sweep phase. */
-    g->gc.sweepstr = 0;
+  if (g->gc.state != GCSpause) {
+    /*FIXME: redesign assumption that we have 2 whites is no longer true  */
+    if (g->gc.state == GCSatomic) {  /* Caught somewhere in the middle. */
+      SetGCState(g, GCSsweepstring);  /* Fast forward to the sweep phase. */
+      g->gc.sweepstr = 0;
+    } else if (g->gc.state != GCSsweepstring) {
+
+      if (g->gc.state == GCSpropagate) {
+        for (MSize i = 0; i < g->gc.arenastop; i++) {
+          arena_towhite(lj_gc_arenaref(g, i));
+        }
+        SetGCState(g, GCSpause);
+        lj_gc_emptygrayssb(g);
+      } else {
+        lua_assert(0);
+      }
+    }
+    while (g->gc.state == GCSsweepstring || g->gc.state == GCSsweep)
+      gc_onestep(L);  /* Finish sweep. */
   }
-  while (g->gc.state == GCSsweepstring || g->gc.state == GCSsweep)
-    gc_onestep(L);  /* Finish sweep. */
   lua_assert(g->gc.state == GCSfinalize || g->gc.state == GCSpause);
   /* Now perform a full GC. */
-  g->gc.state = GCSpause;
+  SetGCState(g, GCSpause);
   do { gc_onestep(L); } while (g->gc.state != GCSpause);
   g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
   g->vmstate = ostate;
@@ -881,7 +1063,7 @@ void lj_gc_closeuv(global_State *g, GCupval *uv)
 
 #if LJ_HASJIT
 /* Mark a trace if it's saved during the propagation phase. */
-void lj_gc_barriertrace2(global_State *g, uint32_t traceno)
+void lj_gc_barriertrace(global_State *g, uint32_t traceno)
 {
   if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic)
     gc_marktrace(g, traceno);
@@ -911,7 +1093,14 @@ void lj_gc_emptygrayssb(global_State *g)
   } else {
     list = (GCRef *)(((intptr_t)list) & ~GRAYSSB_MASK);
     limit = (MSize)(mask/sizeof(GCRef));
+  } 
+
+  if (g->gc.state != GCSatomic && g->gc.state != GCSpropagate) {
+    setmref(g->gc.grayssb, list+1);
+    return;
   }
+
+  TimerStart(gc_emptygrayssb);
   /* Skip first dummy value */
   for (i = 1; i < limit; i++) {
     GCobj *o = gcref(list[i]);
@@ -919,7 +1108,7 @@ void lj_gc_emptygrayssb(global_State *g)
       /* Skip false positive triggered barriers since fast barrier only checks greybit
       ** and not if the object being stored into is black
       */
-      if (!isblackfast(o)) {
+      if (arenaobj_iswhite(o)) {
         continue;
       }
       arena_marktrav(g, o);
@@ -927,6 +1116,7 @@ void lj_gc_emptygrayssb(global_State *g)
       hugeblock_mark(g, o);
     }
   }
+  TimerEnd(gc_emptygrayssb);
   /* Leave dummy value at the start so we always know if the list is completely empty or full */
   setmref(g->gc.grayssb, list+1);
 }

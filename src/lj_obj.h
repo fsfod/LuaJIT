@@ -576,6 +576,7 @@ typedef enum {
 
 typedef struct GCState {
   GCSize total;		/* Memory currently allocated. */
+  GCSize atotal;	/* Memory currently allocated from arenas. */
   GCSize threshold;	/* Memory threshold. */
   uint8_t currentwhite;	/* Current white color. */
   uint8_t state;	/* GC state. */

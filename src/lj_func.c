@@ -42,8 +42,8 @@ static GCupval *func_finduv(lua_State *L, TValue *slot)
   while (gcref(*pp) != NULL && uvval((p = gco2uv(gcref(*pp)))) >= slot) {
     lua_assert(!p->closed && uvval(p) != &p->tv);
     if (uvval(p) == slot) {  /* Found open upvalue pointing to same slot? */
-      if (isdead(g, obj2gco(p)))  /* Resurrect it, if it's dead. */
-	flipwhite(obj2gco(p));
+      if (arenaobj_isdead(obj2gco(p)))  /* Resurrect it, if it's dead. */
+	arenaobj_markcdstr(obj2gco(p));
       return p;
     }
     pp = &p->nextgc;
