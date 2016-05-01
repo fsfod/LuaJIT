@@ -117,6 +117,7 @@ void gc_mark(global_State *g, GCobj *o, int gct)
     gc_mark_tab(g, tabref(gco2ud(o)->env));
   } else if (LJ_UNLIKELY(gct == ~LJ_TUPVAL)) {
     GCupval *uv = gco2uv(o);
+    arenaobj_toblack(o);
     gc_marktv(g, uvval(uv));
     if (uv->closed)
       gc_markobj(g, o);  /* Closed upvalues are never gray. */
@@ -141,6 +142,7 @@ static void gc_mark_gcroot(global_State *g)
 /* Start a GC cycle and mark the root set. */
 static void gc_mark_start(global_State *g)
 {
+  setgcrefnull(g->gc.grayagain);
   lua_assert(iswhite2(g, &G2GG(g)->L));
   gc_markobj(g, &G2GG(g)->L);
   lua_assert(iswhite2(g, &g->strempty));
@@ -168,8 +170,21 @@ static void gc_mark_uv(global_State *g)
   GCupval *uv;
   for (uv = uvnext(&g->uvhead); uv != &g->uvhead; uv = uvnext(uv)) {
     lua_assert(uvprev(uvnext(uv)) == uv && uvnext(uvprev(uv)) == uv);
-    if (isgray(obj2gco(uv)))
+    lua_assert(!arenaobj_isdead(uv));
+    if (arenaobj_isblack(obj2gco(uv)))
       gc_marktv(g, uvval(uv));
+  }
+}
+
+static void gc_sweep_uv(global_State *g)
+{
+  GCupval *uv;
+  for (uv = uvnext(&g->uvhead); uv != &g->uvhead; uv = uvnext(uv)) {
+    lua_assert(uvprev(uvnext(uv)) == uv && uvnext(uvprev(uv)) == uv);
+    if (arenaobj_iswhite(obj2gco(uv))) {
+      setgcrefr(uvnext(uv)->prev, uv->prev);
+      setgcrefr(uvprev(uv)->next, uv->next);
+    }
   }
 }
 
@@ -378,10 +393,10 @@ GCSize gc_traverse2(global_State *g, GCobj *o)
     return pt->sizept;
   } else if (LJ_LIKELY(gct == ~LJ_TTHREAD)) {
     lua_State *th = gco2th(o);
-    //setgcrefr(th->gclist, g->gc.grayagain);
-   // setgcref(g->gc.grayagain, o);
+    setgcrefr(th->gclist, g->gc.grayagain);
+    setgcref(g->gc.grayagain, o);
     //black2gray(o);  /* Threads are never black. */
-    cleargray(o);
+    //cleargray(o);
     gc_traverse_thread(g, th);
     return sizeof(lua_State) + sizeof(TValue) * th->stacksize;
   } else {
@@ -746,6 +761,20 @@ void lj_gc_freeall(global_State *g)
 
 /* -- Collector ----------------------------------------------------------- */
 
+/* Propagate all gray objects. */
+static size_t gc_mark_threads(global_State *g)
+{
+  size_t m = 0;
+  GCRef gray = g->gc.grayagain;
+  while (gcref(gray) != NULL) {
+    lua_State *th = gco2th(gcref(gray));
+    gc_traverse_thread(g, th);
+    gray = th->gclist;
+  }
+  setgcrefnull(g->gc.grayagain);
+  return m;
+}
+
 /* Atomic part of the GC cycle, transitioning from mark to sweep phase. */
 static void atomic(global_State *g, lua_State *L)
 {
@@ -762,6 +791,9 @@ static void atomic(global_State *g, lua_State *L)
   gc_mark_gcroot(g);  /* Mark GC roots (again). */
   gc_propagate_gray(g);  /* Propagate all of the above. */
 
+ /* Empty the 2nd chance list. */
+  gc_mark_threads(g);
+  gc_propagate_gray(g);
 
   udsize = lj_gc_separateudata(g, 0);  /* Separate userdata to be finalized. */
   gc_mark_mmudata(g);  /* Mark them. */
@@ -772,6 +804,7 @@ static void atomic(global_State *g, lua_State *L)
 
   lj_buf_shrink(L, &g->tmpbuf);  /* Shrink temp buffer. */
 
+  gc_sweep_uv(g);
   /* Prepare for sweep phase. */
   g->gc.estimate = g->gc.total - (GCSize)udsize;  /* Initial estimate. */
   TimerEnd(gcatomic);
