@@ -109,61 +109,50 @@ LJ_FUNC void lj_gc_closeuv(global_State *g, GCupval *uv);
 LJ_FUNC void lj_gc_barriertrace(global_State *g, uint32_t traceno);
 #endif
 
-#define lj_gc_anybarriert2(L, t)  \
-  { if (LJ_UNLIKELY(!isgray2(obj2gco(t)))) lj_gc_barrierback(G(L), (t)); }
-
 LJ_FUNCA void lj_gc_emptygrayssb(global_State *g);
 /* Must be a power of 2 */
 #define GRAYSSBSZ 64
 #define GRAYSSB_MASK ((GRAYSSBSZ*sizeof(GCRef))-1)
 
-/* Move the GC propagation frontier back for tables (make it gray again). */
-static LJ_AINLINE void lj_gc_barrierback2(global_State *g, GCtab *t)
+
+static void lj_gc_appendgrayssb(global_State *g, GCobj *o)
 {
-  GCobj *o = obj2gco(t);
-  lua_assert(isblack(o) && !isdead(g, o));
-  lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);
-  setgray(o);
-  
-  if (g->gc.state != GCSpropagate || isblack2(g, t)) {
-    GCRef *ssb = mref(g->gc.grayssb, GCRef);
-    setgcrefp(*ssb, t);
-    ssb++;
-    setmref(g->gc.grayssb, ssb);
-    if ((((uintptr_t)ssb) & GRAYSSB_MASK) == 0) {
-      lj_gc_emptygrayssb(g);
-    }
+  GCRef *ssb = mref(g->gc.grayssb, GCRef);
+  lua_assert(!isgray2(o));
+  setgcrefp(*ssb, o);
+  ssb++;
+  setmref(g->gc.grayssb, ssb);
+  if (LJ_UNLIKELY((((uintptr_t)ssb) & GRAYSSB_MASK) == 0)) {
+    lj_gc_emptygrayssb(g);
   }
 }
 
 /* Move the GC propagation frontier back for tables (make it gray again). */
-static LJ_AINLINE void lj_gc_barrierback(global_State *g, GCtab *t)
+static LJ_AINLINE void lj_gc_barrierback(global_State *g, GCtab *t, GCobj *o)
 {
-  GCobj *o = obj2gco(t);
-  lua_assert(isblack(o) && !isdead(g, o));
-  lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);
-  black2gray(o);
-  setgcrefr(t->gclist, g->gc.grayagain);
-  setgcref(g->gc.grayagain, o);
+  lua_assert(!arenaobj_isdead(t));
+  lua_assert(g->gc.state != GCSfinalize);
+  /* arenaobj_isblack(t) */
+  if (g->gc.state != GCSpause && g->gc.state != GCSfinalize) {
+    lj_gc_appendgrayssb(g, obj2gco(t));
+  }
+  setgray(t);
 }
 
 /* Barrier for stores to table objects. TValue and GCobj variant. */
 #define lj_gc_anybarriert(L, t)  \
-  { if (LJ_UNLIKELY(isblack(obj2gco(t)))) lj_gc_barrierback(G(L), (t)); }
+  { if (LJ_UNLIKELY(!isgray2(t))) lj_gc_barrierback(G(L), (t), NULL); }
 #define lj_gc_barriert(L, t, tv) \
-  { if (tviswhite(tv) && isblack(obj2gco(t))) \
-      lj_gc_barrierback(G(L), (t)); }
+  { if (!isgray2(t) && tvisgcv(tv)) lj_gc_barrierback(G(L), (t), gcval(tv)); }
 #define lj_gc_objbarriert(L, t, o)  \
-  { if (iswhite(obj2gco(o)) && isblack(obj2gco(t))) \
-      lj_gc_barrierback(G(L), (t)); }
+  { if (!isgray2(t)) lj_gc_barrierback(G(L), (t), obj2gco(o)); }
 
 /* Barrier for stores to any other object. TValue and GCobj variant. */
 #define lj_gc_barrier(L, p, tv) \
-  { if (tviswhite(tv) && isblack(obj2gco(p))) \
+  { if (!isgray2(obj2gco(p)) && tvisgcv(tv)) \
       lj_gc_barrierf(G(L), obj2gco(p), gcV(tv)); }
 #define lj_gc_objbarrier(L, p, o) \
-  { if (iswhite(obj2gco(o)) && isblack(obj2gco(p))) \
-      lj_gc_barrierf(G(L), obj2gco(p), obj2gco(o)); }
+  { if (!isgray2(obj2gco(p))) lj_gc_barrierf(G(L), obj2gco(p), obj2gco(o)); }
 
 /* Allocator. */
 LJ_FUNC void *lj_mem_realloc(lua_State *L, void *p, GCSize osz, GCSize nsz);
