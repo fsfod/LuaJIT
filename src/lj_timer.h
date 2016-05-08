@@ -56,13 +56,9 @@ void LJ_AINLINE timer_end(const char* name, uint64_t time)
 #define TimerEnd(name)
 #endif
 
-#define TimerSectionStart(name)
+#define Section_Start(name) log_section(Section_##name, __rdtsc(), 1)
+#define Section_End(name) log_section(Section_##name, __rdtsc(), 0)
 
 static uint32_t timercounters[256];
 
-
-enum TimerIDs {
-  TimerID_gcmark,
-};
-
-
+#include "timerdef.h"
