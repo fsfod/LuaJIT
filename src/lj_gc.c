@@ -26,6 +26,7 @@
 #endif
 #include "lj_trace.h"
 #include "lj_vm.h"
+#include "lj_timer.h"
 
 #define GCSTEPSIZE	1024u
 #define GCSWEEPMAX	40
@@ -349,8 +350,10 @@ static size_t propagatemark(global_State *g)
 static size_t gc_propagate_gray(global_State *g)
 {
   size_t m = 0;
+  TimerStart(gc_propagate_gray);
   while (gcref(g->gc.gray) != NULL)
     m += propagatemark(g);
+  TimerEnd(gc_propagate_gray);
   return m;
 }
 
@@ -569,7 +572,7 @@ void lj_gc_freeall(global_State *g)
 static void atomic(global_State *g, lua_State *L)
 {
   size_t udsize;
-
+  Section_Start(gc_atomic);
   gc_mark_uv(g);  /* Need to remark open upvalues (the thread may be dead). */
   gc_propagate_gray(g);  /* Propagate any left-overs. */
 
@@ -599,6 +602,7 @@ static void atomic(global_State *g, lua_State *L)
   g->strempty.marked = g->gc.currentwhite;
   setmref(g->gc.sweep, &g->gc.root);
   g->gc.estimate = g->gc.total - (GCSize)udsize;  /* Initial estimate. */
+  Section_End(gc_atomic);
 }
 
 /* GC state machine. Returns a cost estimate for each step performed. */
@@ -678,6 +682,8 @@ int LJ_FASTCALL lj_gc_step(lua_State *L)
   global_State *g = G(L);
   GCSize lim;
   int32_t ostate = g->vmstate;
+  int ret = 0;
+  Section_Start(gc_step);
   setvmstate(g, GC);
   lim = (GCSTEPSIZE/100) * g->gc.stepmul;
   if (lim == 0)
@@ -689,19 +695,22 @@ int LJ_FASTCALL lj_gc_step(lua_State *L)
     if (g->gc.state == GCSpause) {
       g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
       g->vmstate = ostate;
+      Section_End(gc_step);
       return 1;  /* Finished a GC cycle. */
     }
   } while (sizeof(lim) == 8 ? ((int64_t)lim > 0) : ((int32_t)lim > 0));
   if (g->gc.debt < GCSTEPSIZE) {
     g->gc.threshold = g->gc.total + GCSTEPSIZE;
     g->vmstate = ostate;
-    return -1;
+    ret = -1;
   } else {
     g->gc.debt -= GCSTEPSIZE;
     g->gc.threshold = g->gc.total;
     g->vmstate = ostate;
-    return 0;
+    ret = 0;
   }
+  Section_End(gc_step);
+  return ret;
 }
 
 /* Ditto, but fix the stack top first. */
@@ -731,6 +740,7 @@ void lj_gc_fullgc(lua_State *L)
   global_State *g = G(L);
   int32_t ostate = g->vmstate;
   setvmstate(g, GC);
+  Section_Start(gc_fullgc);
   if (g->gc.state <= GCSatomic) {  /* Caught somewhere in the middle. */
     setmref(g->gc.sweep, &g->gc.root);  /* Sweep everything (preserving it). */
     setgcrefnull(g->gc.gray);  /* Reset lists from partial propagation. */
@@ -747,6 +757,7 @@ void lj_gc_fullgc(lua_State *L)
   do { gc_onestep(L); } while (g->gc.state != GCSpause);
   g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
   g->vmstate = ostate;
+  Section_End(gc_fullgc);
 }
 
 /* -- Write barriers ------------------------------------------------------ */

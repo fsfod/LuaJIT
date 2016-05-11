@@ -138,12 +138,14 @@ static void stack_init(lua_State *L1, lua_State *L)
 
 /* -- State handling ------------------------------------------------------ */
 
+extern timers_setuplog(lua_State *L);
 /* Open parts that may cause memory-allocation errors. */
 static TValue *cpluaopen(lua_State *L, lua_CFunction dummy, void *ud)
 {
   global_State *g = G(L);
   UNUSED(dummy);
   UNUSED(ud);
+  timers_setuplog(L);
   stack_init(L, L);
   /* NOBARRIER: State initialization, all objects are white. */
   setgcref(L->env, obj2gco(lj_tab_new(L, 0, LJ_MIN_GLOBAL)));
