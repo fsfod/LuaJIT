@@ -34,13 +34,31 @@ void timers_print(const char *name, uint64_t time)
   printf("%s took %.4g ms(%d)\n", name, t, (uint32_t)time);
 }
 
+static const char* gcstates[] = {
+  "GCpause",
+  "GCSpropagate",
+  "GCSatomic",
+  "GCSsweepstring",
+  "GCSsweep",
+  "GCSfinalize"
+};
+
 void timers_printlog()
 {
-  MSize count = sbuflen(&eventbuf)/sizeof(TimerEvent);
-  TimerEvent *events = (TimerEvent *)sbufB(&eventbuf);
+  char* pos = sbufB(&eventbuf);
 
-  for (MSize i = 0; i < count; i++) {
-    timers_print(events[i].name, events[i].time);
+  for (; pos < sbufP(&eventbuf); ) {
+    uint32_t header = *(uint32_t*)pos;
+    uint8_t id = (uint8_t)header;
+
+    switch (id) {
+      case MSGID_gcstate:
+        printf("GC State = %s\n", gcstates[(uint8_t)(header >> 8)]);
+        pos += msgsizes[MSGID_gcstate];
+        break;
+      default:
+        pos += msgprinters[id](pos);
+    }
   }
   lj_buf_reset(&eventbuf);
 }

@@ -3,12 +3,14 @@ local msgs, outputfile
 msglist = msglist or {}
 msglookup = msglookup or {}
 
+local getticksstr = "__rdtsc()"
+
 local numtypes = {
-  int8_t  = {size = 8,   signed = true,   printf = "%i", ctype = "int8_t",   cstype = "sbyte"},
-  uint8_t = {size = 8,   signed = false,  printf = "%i", ctype = "uint8_t",  cstype = "byte"},
+  int8_t  = {size = 8,   signed = true,   printf = "%i", ctype = "int8_t",   cstype = "sbyte", argtype = "int32_t"},
+  uint8_t = {size = 8,   signed = false,  printf = "%i", ctype = "uint8_t",  cstype = "byte",  argtype = "uint32_t"},
   
-  int16_t  = {size = 16, signed = true,   printf = "%i", ctype = "int16_t",  cstype = "short"},
-  uint16_t = {size = 16, signed = false,  printf = "%i", ctype = "uint16_t", cstype = "ushort"},
+  int16_t  = {size = 16, signed = true,   printf = "%i", ctype = "int16_t",  cstype = "short",  argtype = "int32_t"},
+  uint16_t = {size = 16, signed = false,  printf = "%i", ctype = "uint16_t", cstype = "ushort", argtype = "uint32_t"},
   
   int32_t  = {size = 32, signed = true,   printf = "%i", ctype = "int32_t",  cstype = "int"},
   uint32_t = {size = 32, signed = false,  printf = "%u", ctype = "uint32_t", cstype = "uint"},
@@ -22,6 +24,8 @@ local numtypes = {
   i64 = "int64_t", u64 = "uint64_t",
   MSize = "uint32_t",
   bitfield = "uint32_t",
+  timestamp = "uint64_t",
+  smallticks = {size = 32, signed = false,  printf = "%u", ctype = "uint32_t", cstype = "uint", argtype = "uint64_t"},
 
   GCRef = {size = 32, signed = false, ctype = "GCRef", printf = "%p", ref = "gcptr32"},
   MRef =  {size = 32, signed = false, ctype = "MRef", printf = "%p", ref = "ptr32"},
@@ -33,6 +37,20 @@ for name, def in pairs(numtypes) do
     numtypes[name] = numtypes[def]
   end
 end
+
+function buildtemplate(tmpl, values)
+  return string.gsub(tmpl, "({{[^\n]-}})", function(key)
+    key = key:sub(3, -3)
+    assert(values[key] ~= nil, "missing value for template key")
+    return values[key]
+  end)
+end
+
+function joinlist(list, prefix, suffix)
+  return prefix .. table.concat(list, suffix .. prefix) .. suffix
+end
+
+buildtemplate("avd {{test}} efs", {test = "a string"})
 
 function write(s)
   print(s)
@@ -162,11 +180,11 @@ function write_struct(name, def)
 end
 
 local funcdef = [[
-static LJ_AINLINE void log_%s(%s)
+static LJ_AINLINE void log_{{name}}({{args}})
 {
   SBuf *sb = &eventbuf;
-  MSG_%s *msg = (MSG_%s *)sbufP(sb);
-  %s  setsbufP(sb, sbufP(sb)+sizeof(MSG_%s));
+  MSG_{{name}} *msg = (MSG_{{name}} *)sbufP(sb);
+  {{fields}}  setsbufP(sb, sbufP(sb)+sizeof(MSG_{{name}}));
   lj_buf_more(sb, 16);
 }
 
@@ -190,21 +208,31 @@ function write_logfunc(def)
     
   for i, f in ipairs(def.fields) do
     local type = f.type
+    local argtype
 
     if type == "bitfield" then
       type = "uint32_t"
     else
-      type = numtypes[type].ctype
+      local typedef = numtypes[type]
+      type = typedef.ctype
+      argtype = typedef.argtype and numtypes[typedef.argtype].ctype
     end
 
-    args = args .. format("%s %s%s", type, f.name, i ~= #def.fields and ", " or "")
+    --time stamp values are fetched inside the logger func so skip creating an arg for them
+    if f.type ~= "timestamp" then
+      args = args .. format("%s%s %s", i ~= 1 and ", " or "", argtype or type, f.name)
+    end
     
     local field = f.name
     if f.bitofs or f.idpart then
       field = format("(%s << %d)", f.name, f.bitofs)
+    elseif argtype then
+      field = format("(%s)%s", type, f.name)
     end
 
-    if f.idpart then
+    if f.type == "timestamp" then
+       field = format("  msg->%s = %s;\n", f.name, getticksstr)
+    elseif f.idpart then
       field = format("  msg->msgid |= %s;\n", field)
     else
       field = format("  msg->%s = %s;\n", f.name, field)
@@ -212,15 +240,16 @@ function write_logfunc(def)
     fieldstr = fieldstr .. field
   end
   
-  write(format(funcdef, def.name, args, def.name, def.name, fieldstr, def.name))
+  write(buildtemplate(funcdef, {name = def.name, args = args, fields = fieldstr}))
 end
 
 local printdef = [[
-static LJ_AINLINE void print_%s(void* msgptr)
+static LJ_AINLINE MSize print_{{name}}(void* msgptr)
 {
-  MSG_%s *msg = (MSG_%s *)msgptr;
-  lua_assert(((uint8_t)msg->msgid) == MSGID_%s);
-  printf("%s\n", %s);
+  MSG_{{name}} *msg = (MSG_{{name}} *)msgptr;
+  lua_assert(((uint8_t)msg->msgid) == MSGID_{{name}});
+  printf("{{fmtstr}}\n", {{args}});
+  return {{msgsz}};
 }
 
 ]]
@@ -243,13 +272,18 @@ function write_printfunc(def)
     
   for i, f in ipairs(def.fields) do
     local type = numtypes[f.type]
+    local fmtspec = type.printf
     local arg 
 
     if f.bitofs or f.idpart then
       arg = format("((%s >> %d) & 0x%x)", "msg->msgid", f.bitofs, bit.lshift(1, f.bitsize)-1)
     end
 
-    if arg then
+    --translate known enum ids into a name
+    if f.name == "id" and def.enumlist then
+      arg = format("%s_names[%s]", def.enumlist, arg)
+      fmtspec = "%s"
+    elseif arg then
       --arg = format("(msg->msgid >> %d) & %d", f.bitofs, bit.rshift(1, f.bitsize)-1)
     elseif type.ref then
       arg = format("(uintptr_t)msg->%s.%s", f.name, type.ref)
@@ -259,7 +293,7 @@ function write_printfunc(def)
 
     local comma = (i ~= #def.fields and ", ")
 
-    fmtlist[#fmtlist+1] = format("%s %s", f.name, type.printf)
+    fmtlist[#fmtlist+1] = format("%s %s", f.name, fmtspec)
 
     if i ~= #def.fields then 
       arg = arg ..", "
@@ -268,7 +302,8 @@ function write_printfunc(def)
   end
 
   local fmtstr = format('%s: %s', def.name, table.concat(fmtlist, ", "))
-  write(format(printdef, def.name, def.name, def.name, def.name, fmtstr, args))
+  write(buildtemplate(printdef, {name = def.name, fmtstr = fmtstr, args = args, msgsz = def.size + 4}))
+  return print_
 end
 
 local filecache = {}
@@ -330,7 +365,6 @@ function write_enum(name, names, prefix)
   local entries = prefix .. table.concat(names, ",\n  " .. prefix)
   local enum = format(enumdef, name, entries, prefix);
   write(enum)
-  write_namelist(name.."_namelist", names)
 end
 
 local namedef = [[
@@ -347,13 +381,13 @@ function write_namelist(name, names)
 end
 
 local namescans = {
-  Timers = {
+  timers = {
     patten = "TimerStart%(([^%,)]+)", 
-    enumname = "TimerIds",
+    enumname = "TimerId",
     enumprefix = "Timer",
   },
 
-  Sections = {
+  sections = {
     patten = "Section_Start%(([^%,)]+)", 
     enumname = "SectionId",
     enumprefix = "Section",
@@ -377,19 +411,25 @@ msgs = {
     "id : 16",
     "time : u32",
     "flags : 8",
-    enumlist = "Timers",
+    enumlist = "timers",
   },
 
   section = {
     "id : 23",
-    "time : uint64_t",
+    "time : timestamp",
     "start : 1",
-    enumlist = "Sections",
+    enumlist = "sections",
   },
 
   marker = {
     "id : 16",
     "flags : 8",
+  },
+
+  gcstate = {
+    "state : 8",
+    "prevstate : 8",
+    "time : timestamp",
   },
 
   arenacreated = {
@@ -398,9 +438,8 @@ msgs = {
     "flags : 16",
   },
 
---[[
   arenasweep = {
-    "arenaid : u32",
+    "arenaid : 24",
     "time : u32",
     "sweeped : u16",
     "celltop : u16",
@@ -411,7 +450,7 @@ msgs = {
     "size : 20",
     "address : GCRef",
   },
-
+--[[
   trace = {
     "id : u16",
     "parentid : u16",
@@ -434,8 +473,33 @@ parse_msglist()
 
 outputfile = io.open("timerdef.h", "w")
 
+local msgorder = {
+  marker = 1,
+  time = 2,
+  section = 3,
+}
+
 local names = map(msglist, function(def) return def.name end)
-table.sort(names)
+
+--Order fixed builtin messages before the 
+table.sort(names, function(a, b) 
+  if not msgorder[a] and not msgorder[b] then
+   return a < b
+  else  
+   if msgorder[a] and msgorder[b] then
+     return msgorder[a] < msgorder[b]
+   else
+    return msgorder[a] ~= nil
+   end
+  end
+end)
+
+write([[#include <stdio.h>
+
+#pragma pack(push, 1)
+
+]])
+
 write_enum("MSGIDS", names, "MSGID")
 
 write("static uint32_t msgsizes[] = {\n")
@@ -450,12 +514,24 @@ for key, def in ipairs(msglist) do
   if def.enumlist then
     local names = namescans[def.enumlist]
     write_enum(names.enumname, names.matches, names.enumprefix)
+    write_namelist(def.enumlist.."_names", names.matches)
   end
 
   write_struct(def.name, def)
   write_logfunc(def)
   write_printfunc(def)
 end
+
+write([[
+typedef MSize (*msgprinter)(void* msg);
+
+static msgprinter msgprinters[] = {
+]])
+
+write(joinlist(names, "  print_", ",\n"))
+write("};\n\n")
+
+write("#pragma pack(pop)")
 
 outputfile:close()
 
