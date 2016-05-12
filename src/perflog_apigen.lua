@@ -429,6 +429,7 @@ msgs = {
   gcstate = {
     "state : 8",
     "prevstate : 8",
+    "totalmem : u32",
     "time : timestamp",
   },
 

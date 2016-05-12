@@ -20,7 +20,7 @@ static uint32_t msgsizes[] = {
   12, /* arenacreated */
   12, /* arenasweep */
   8, /* gcobj */
-  12, /* gcstate */
+  16, /* gcstate */
 };
 
 typedef struct MSG_arenacreated{
@@ -94,16 +94,18 @@ typedef struct MSG_gcstate{
   uint32_t msgid;
 /*  state: 8;*/
 /*  prevstate: 8;*/
+  uint32_t totalmem;
   uint64_t time;
 } MSG_gcstate;
 
-static LJ_AINLINE void log_gcstate(uint32_t state, uint32_t prevstate)
+static LJ_AINLINE void log_gcstate(uint32_t state, uint32_t prevstate, uint32_t totalmem)
 {
   SBuf *sb = &eventbuf;
   MSG_gcstate *msg = (MSG_gcstate *)sbufP(sb);
   msg->msgid = MSGID_gcstate;
   msg->msgid |= (state << 8);
   msg->msgid |= (prevstate << 16);
+  msg->totalmem = totalmem;
   msg->time = __rdtsc();
   setsbufP(sb, sbufP(sb)+sizeof(MSG_gcstate));
   lj_buf_more(sb, 16);
@@ -113,8 +115,8 @@ static LJ_AINLINE MSize print_gcstate(void* msgptr)
 {
   MSG_gcstate *msg = (MSG_gcstate *)msgptr;
   lua_assert(((uint8_t)msg->msgid) == MSGID_gcstate);
-  printf("gcstate: state %u, prevstate %u, time %ull\n", ((msg->msgid >> 8) & 0xff), ((msg->msgid >> 16) & 0xff), msg->time);
-  return 12;
+  printf("gcstate: state %u, prevstate %u, totalmem %u, time %ull\n", ((msg->msgid >> 8) & 0xff), ((msg->msgid >> 16) & 0xff), msg->totalmem, msg->time);
+  return 16;
 }
 
 typedef struct MSG_gcobj{

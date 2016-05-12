@@ -159,9 +159,12 @@ static TValue *cpluaopen(lua_State *L, lua_CFunction dummy, void *ud)
   return NULL;
 }
 
+extern void timers_freelog(global_State *g);
+
 static void close_state(lua_State *L)
 {
   global_State *g = G(L);
+  timers_freelog(g);
   lj_func_closeuv(L, tvref(L->stack));
   lj_gc_freeall(g);
   lua_assert(gcref(g->gc.root) == obj2gco(L));
