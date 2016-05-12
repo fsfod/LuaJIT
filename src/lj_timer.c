@@ -73,6 +73,7 @@ void timers_printlog()
   char* pos = sbufB(&eventbuf);
   uint64_t steptime = 0;
   uint64_t laststatets = 0;
+  FILE* dumpfile = fopen("gcstats.csv", "a+");
 
   for (; pos < sbufP(&eventbuf); ) {
     uint32_t header = *(uint32_t*)pos;
@@ -91,6 +92,9 @@ void timers_printlog()
           steptime = msg->time-laststatets;
         }
         statetime[prevgcs] += steptime;
+        if (prevgcs != GCSpause) {
+          fprintf(dumpfile, "%s%llu", prevgcs != GCSpropagate ? ", " : "\n", steptime);
+        }
         steptime = 0;
         laststatets = msg->time;
       }break;
@@ -120,6 +124,8 @@ void timers_printlog()
     }
   }
   printsectotals();
+  fflush(dumpfile);
+  fclose(dumpfile);
   lj_buf_reset(&eventbuf);
 }
 
