@@ -493,27 +493,8 @@ void TraceGC(global_State *g, int newstate)
   //printf("GC State = %s\n", gcstates[newstate]);
   g->gc.curarena = 0;
 
-  log_gcstate(newstate, g->gc.state);
+  log_gcstate(newstate, g->gc.state, g->gc.total);
   timers_printlog();
-
-  if (newstate == GCSpropagate) {
-
-    for (MSize i = 0; i < g->gc.arenastop; i++) {
-      //arena_towhite(lj_gc_arenaref(g, i));
-    }
-
-   // gc_mark_start(g);
-    //gc_propagate_gray(g);
-  } else if (newstate == GCSatomic) {
-   // lj_gc_separateudata(g, 0);
-
-  } else if (newstate == GCSsweep) {
-   // gc_sweep(g, -1);
-  } else if (newstate == GCSfinalize) {
-    for (MSize i = 0; i < g->gc.arenastop; i++) {
-      //  arena_runfinalizers(g, lj_gc_arenaref(g, i));
-    }
-  }
 }
 
 /* -- Sweep phase --------------------------------------------------------- */

@@ -398,7 +398,7 @@ function gathernames()
 
   for name, def in pairs(namescans) do
     local t = getnames(def.patten)
-    assert(#t > 0)
+    --assert(#t > 0)
     def.matches = t
   end
 
@@ -429,6 +429,7 @@ msgs = {
   gcstate = {
     "state : 8",
     "prevstate : 8",
+    "totalmem : u32",
     "time : timestamp",
   },
 

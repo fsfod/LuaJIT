@@ -71,6 +71,11 @@ GCArena* arena_create(lua_State *L, uint32_t flags)
   if (flags & ArenaFlag_TravObjs) {
     arena_creategreystack(L, arena);
   }
+
+  if (mref(eventbuf.L, lua_State) == NULL) {
+    timers_setuplog(L);
+  }
+
   return arena;
 }
 
@@ -848,8 +853,6 @@ MSize arena_majorsweep(GCArena *arena)
   MSize limit = MaxBlockWord;
   MSize count = 0;
   lua_assert(arena_greysize(arena) == 0);
-
-  TimerStart(majorsweep);
 #if 0
   count = majorsweep(arena, MinBlockWord, limit);
 #elif 1
@@ -857,7 +860,6 @@ MSize arena_majorsweep(GCArena *arena)
 #else
   count = majorsweep_avx(arena, MinBlockWord, limit);
 #endif
-  TimerEnd(majorsweep);
   
   return count;
 }
