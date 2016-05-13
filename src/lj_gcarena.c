@@ -27,6 +27,15 @@ void assert_allocated(GCArena *arena, GCCellID cell)
 static void arena_setfreecell(GCArena *arena, GCCellID cell);
 void gc_mark(global_State *g, GCobj *o, int gct);
 
+void arena_reset(GCArena *arena)
+{
+  setmref(arena->celltop, arena->cells+MinCellId);
+  arena->firstfree = MaxCellId;
+  arena->freecount = 0;
+  memset(arena->block+MinBlockWord, 0, MaxBlockWord-MinBlockWord);
+  memset(arena->mark+MinBlockWord, 0, MaxBlockWord-MinBlockWord);
+}
+
 GCArena* arena_init(GCArena* arena)
 {
   /* Make sure block and mark bits are clear*/

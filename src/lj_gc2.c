@@ -792,10 +792,23 @@ static void atomic(global_State *g, lua_State *L)
 static void sweep_arena(global_State *g, MSize i)
 {
   lua_assert(!(lj_gc_arenaflags(g, i) & ArenaFlag_Swept));
-  MSize count = arena_majorsweep(lj_gc_arenaref(g, i));
-  if (count & 0xffff) {
-    printf("Swept arena(%d), objects fread %d\n", i, count & 0xffff);
+  GCArena *arena = lj_gc_arenaref(g, i);
+  MSize count = arena_majorsweep(arena);
+  ArenaFreeList *freelist = g->gc.freelists+i;
+  freelist->freeobjcount += count & 0xffff;
+
+  log_arenasweep(i, 0, count & 0xffff, arena_topcellid(arena));
+
+  if (!(count & 0x10000)) {
+    lj_gc_setarenaflag(g, i, ArenaFlag_Empty);
+    lj_gc_cleararenaflags(g, i, ArenaFlag_NoBump);
+    arena_reset(arena);
+    freelist->freeobjcount = 0;
+    freelist->freecells = 0;
+  } else if (freelist->freeobjcount > 100) {
+
   }
+
   lj_gc_setarenaflag(g, i, ArenaFlag_Swept);
 }
 
@@ -831,14 +844,15 @@ static int arenasweep_step(global_State *g)
 {
   MSize i;
   for (i = g->gc.curarena; i < g->gc.arenastop; i++) {
-    if (!(lj_gc_arenaflags(g, i) & ArenaFlag_Swept)) {
+    if (!(lj_gc_arenaflags(g, i) & (ArenaFlag_Swept|ArenaFlag_Empty))) {
       sweep_arena(g, i);
       g->gc.curarena = i+1;
       return 1;
     }
   }
-
-  sweep_hugeblocks(g);
+  g->gc.curarena = g->gc.arenastop;
+  /* All arenas sweepable have been swept */
+  hugeblock_sweep(g);
   return 0;
 }
 

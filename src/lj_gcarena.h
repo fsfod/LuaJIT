@@ -199,6 +199,7 @@ CellIdChunk *arena_checkfinalizers(global_State *g, GCArena *arena, CellIdChunk 
 
 GCArena* arena_create(lua_State *L, uint32_t flags);
 void arena_destroy(global_State *g, GCArena *arena);
+void arena_reset(GCArena *arena);
 void* arena_createGG(GCArena** arena);
 void arena_destroyGG(global_State *g, GCArena* arena);
 void arena_creategreystack(lua_State *L, GCArena *arena);
