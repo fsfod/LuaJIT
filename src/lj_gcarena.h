@@ -14,6 +14,7 @@ enum {
   ArenaMaxObjMem = (ArenaSize - ArenaMetadataSize),
   MinCellId = ArenaMetadataSize / CellSize,
   MaxCellId = ArenaSize / CellSize,
+  MaxUsableCellId = MaxCellId-2,
   ArenaUsableCells = MaxCellId - MinCellId,
   /* TODO: better value taking into account what min alignment the os page allocation can provide */
   ArenaOversized = ArenaMaxObjMem >> 1,
@@ -177,7 +178,7 @@ typedef struct HugeBlockTable {
 #define arena_cellobj(arena, cellidx) ((GCobj *)&(arena)->cells[(cellidx)])
 #define arena_celltop(arena) (mref((arena)->celltop, GCCell))
 /* Can the arena bump allocate a min number of contiguous cells */
-#define arena_canbump(arena, mincells) ((arena_celltop(arena)+mincells) < arena_cell(arena, MaxCellId))
+#define arena_canbump(arena, mincells) ((arena_celltop(arena)+mincells) < arena_cell(arena, MaxUsableCellId))
 #define arena_topcellid(arena) (ptr2cell(mref((arena)->celltop, GCCell)))
 #define arena_blocktop(arena) ((arena_topcellid(arena) & ~BlocksetMask)/BlocksetBits)
 #define arena_freelist(arena) mref((arena)->freelist, ArenaFreeList)
