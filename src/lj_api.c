@@ -622,7 +622,7 @@ LUA_API void lua_pushcclosure(lua_State *L, lua_CFunction f, int n)
   while (n--)
     copyTV(L, &fn->c.upvalue[n], L->top+n);
   setfuncV(L, L->top, fn);
-  lua_assert(iswhite(obj2gco(fn)));
+  //lua_assert(iswhite(obj2gco(fn)));
   incr_top(L);
 }
 

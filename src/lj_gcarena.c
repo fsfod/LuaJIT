@@ -133,11 +133,13 @@ LJ_STATIC_ASSERT(((offsetof(GG_State, g) + offsetof(global_State, strempty)) & 1
 
 void* arena_createGG(GCArena** GGarena)
 {
-  GCArena* arena = (GCArena*)lj_allocpages(ArenaSize, ArenaSize);
+  void *memhandle;
+  GCArena* arena = (GCArena*)lj_allocpages(ArenaSize, ArenaSize, &memhandle);
   GG_State *GG;
   GCCellID cell;
   lua_assert((((uintptr_t)arena) & (ArenaSize-1)) == 0);
   *GGarena = arena_init(arena);
+  arena_extrainfo(arena)->allocud = memhandle;
   /* move GG off the first cache line that alias the arena base address */
   arena_alloc(arena, 64);
   GG = arena_alloc(arena, sizeof(GG_State));
@@ -152,11 +154,13 @@ void* arena_createGG(GCArena** GGarena)
 
 void arena_destroyGG(global_State *g, GCArena* arena)
 {
+  void* allocud = arena_extrainfo(arena)->allocud;
   lua_assert((((uintptr_t)arena) & (ArenaCellMask)) == 0);
-  arena_freemem(g, arena);
+  setmref(arena->freelist, NULL);
   timers_freelog(g);
+  arena_freemem(g, arena);
   lua_assert(g->gc.total == sizeof(GG_State));
-  lj_freepages(arena, ArenaSize); 
+  lj_freepages(allocud, arena, ArenaSize);
 }  
 
 static void arena_setfreecell(GCArena *arena, GCCellID cell)
@@ -226,7 +230,7 @@ void *arena_allocslow(GCArena *arena, MSize size)
   
   cell = 0; //arena_findfree(arena, numblocks);
 
-  if (freelist == NULL) {
+  if (1) {
     return NULL;
   } else {
     MSize bin = min(numcells, MaxBinSize-1)-1;
@@ -984,8 +988,9 @@ void arena_dumpwhitecells(global_State *g, GCArena *arena)
 {
   MSize i, size = arena_blocktop(arena);
   MSize arenaid = arena_extrainfo(arena)->id;
+  MSize count = 0;
 
-  for (i = MinBlockWord-1; i < size; i++) {
+  for (i = MinBlockWord; i < size; i++) {
     GCBlockword white = arena->block[i] & ~arena->mark[i];
 
     if (white) {
@@ -995,11 +1000,13 @@ void arena_dumpwhitecells(global_State *g, GCArena *arena)
         GCCellID cellid = bit + (i * BlocksetBits);
         GCobj *cell = arena_cellobj(arena, cellid);
 
-        printf("Dead Cell %d in arena %d\n", cellid, arenaid);
-
-        if (cellid == 2042) {
-          DebugBreak();
+        if (count == 0) {
+          printf("Dead Cell ");
         }
+        printf("%d, ", cellid, arenaid);
+        count++;
+
+        memset(cell, 0xff, 16);
 
         /* Create a mask to remove the bits to the LSB backwards the end of the free segment */
         GCBlockword mask = ((GCBlockword)0xffffffff) << (bit+1);
@@ -1012,6 +1019,10 @@ void arena_dumpwhitecells(global_State *g, GCArena *arena)
         bit = lj_ffs(white & mask);
       }
     }
+  }
+
+  if (count) {
+    printf(" in arena %d\n", arenaid);
   }
 }
 

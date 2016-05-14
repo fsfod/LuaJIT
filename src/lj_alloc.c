@@ -157,8 +157,21 @@ static void *DIRECT_MMAP(size_t size)
 {
   DWORD olderr = GetLastError();
   void *ptr = NULL;
-  long st = ntavm(INVALID_HANDLE_VALUE, &ptr, NTAVM_ZEROBITS, &size,
-		  MEM_RESERVE|MEM_COMMIT|MEM_TOP_DOWN, PAGE_READWRITE);
+  ULONG flags = MEM_RESERVE|MEM_COMMIT|MEM_TOP_DOWN;
+
+  if (size >= 1024*1024) {
+  //  flags |= MEM_LARGE_PAGES;
+  //  size = lj_round(size, (1024*1024*2));
+  }
+
+  LONG st = ntavm(INVALID_HANDLE_VALUE, &ptr, NTAVM_ZEROBITS, &size,
+		  flags, PAGE_READWRITE);
+
+  if (st && (flags & MEM_LARGE_PAGES)) {
+    st = ntavm(INVALID_HANDLE_VALUE, &ptr, 0, &size,
+               MEM_RESERVE|MEM_COMMIT|MEM_TOP_DOWN, PAGE_READWRITE); 
+  }
+
   SetLastError(olderr);
   return st == 0 ? ptr : MFAIL;
 }
@@ -396,25 +409,68 @@ static void *CALL_MREMAP_(void *ptr, size_t osz, size_t nsz, int flags)
 #define CALL_MREMAP(addr, osz, nsz, mv) ((void)osz, MFAIL)
 #endif
 
+uint32_t enablelargepages()
+{
+  HANDLE hToken;
+  TOKEN_PRIVILEGES tp;
+  BOOL status;
+  DWORD error;
+
+  OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken);
+  LookupPrivilegeValueA(NULL, "SeLockMemoryPrivilege", &tp.Privileges[0].Luid);
+  tp.PrivilegeCount = 1;
+  tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+  status = AdjustTokenPrivileges(hToken, FALSE, &tp, 0, (PTOKEN_PRIVILEGES)NULL, 0);
+  error = GetLastError();
+  CloseHandle(hToken);
+  return error;
+}
+
+int priv = -1;
+
 typedef struct PageHeader{
   void* base;
   size_t size;
 } PageHeader;
 
-void *lj_allocpages(size_t alignment, size_t size)
+void *lj_allocpages(size_t alignment, size_t size, void** handle)
 {
-  void* base = DIRECT_MMAP(size*2);
+  size_t allocsize = size;
+  if (priv == -1) {
+    priv = enablelargepages();
+  }
+
+  if (alignment < size) {
+    allocsize = size+alignment+sizeof(PageHeader);
+  } else {
+    allocsize = alignment*2;
+    allocsize += sizeof(PageHeader);
+  }
+
+  void* base = DIRECT_MMAP(allocsize);
+  if (base == MFAIL) {
+    return NULL;
+  }
+  *handle = base;
+
   uintptr_t mem = lj_round(((uintptr_t)base)+sizeof(PageHeader), alignment);
   ((PageHeader*)mem)[-1].base = base;
-  ((PageHeader*)mem)[-1].size = (size*2);
+  ((PageHeader*)mem)[-1].size = allocsize;
   
   lua_assert((mem & ArenaCellMask) == 0);
   return (void *)mem;
 }
 
-void lj_freepages(void* p, size_t size)
+void lj_freepages(void *handle, void* p, size_t size)
 {
-  CALL_MUNMAP(((PageHeader*)p)[-1].base, ((PageHeader*)p)[-1].size);
+
+  if (((uintptr_t)handle) & 1) {
+    CALL_MUNMAP(p, size);
+  } else if (((uintptr_t)handle) & 2) {
+
+  } else {
+    CALL_MUNMAP(((PageHeader*)p)[-1].base, ((PageHeader*)p)[-1].size);
+  }
 }
 
 /* -----------------------  Chunk representations ------------------------ */
@@ -1763,16 +1819,29 @@ static LJ_NOINLINE void *lj_alloc_realloc(void *msp, void *ptr, size_t nsize)
   }
 }
 
+#include <stdio.h>
+
 void *lj_alloc_f(void *msp, void *ptr, size_t osize, size_t nsize)
 {
   (void)osize;
+  void *ret;
+#if DEBUG
+  do_check_malloc_state(msp);
+#endif
   if (nsize == 0) {
-    return lj_alloc_free(msp, ptr);
+    ret = lj_alloc_free(msp, ptr);
+    //printf("Free %x size %u\n", ptr, osize);
   } else if (ptr == NULL) {
-    return lj_alloc_malloc(msp, nsize);
+    ret = lj_alloc_malloc(msp, nsize);
+   // printf("Alloc %x size %u\n", ret, nsize);
   } else {
-    return lj_alloc_realloc(msp, ptr, nsize);
+    ret = lj_alloc_realloc(msp, ptr, nsize);
+   // printf("Realloc %x to %x size %u\n", ptr, ret, nsize);
   }
+#if DEBUG
+  do_check_malloc_state(msp);
+#endif
+  return ret;
 }
 
 /* Consolidate and bin a chunk. Differs from exported versions
@@ -1850,21 +1919,24 @@ Overreliance on memalign is a sure way to fragment space.
 void* lj_alloc_memalign(void* msp, size_t alignment, size_t bytes)
 {
   mstate m = (mstate)msp;
-  void* mem = 0;
+  char* mem = 0;
+
   size_t req, nb = request2size(bytes);
-  if (alignment <  MIN_CHUNK_SIZE) /* must be at least a minimum chunk size */
-    alignment = MIN_CHUNK_SIZE;
-  if ((alignment & (alignment-SIZE_T_ONE)) != 0) {/* Ensure a power of 2 */
-    size_t a = MALLOC_ALIGNMENT << 1;
-    while (a < alignment) a <<= 1;
-    alignment = a;
-  }
+#if DEBUG
+  do_check_malloc_state(m);
+#endif
+  lua_assert(alignment >  MIN_CHUNK_SIZE && (alignment & (alignment-SIZE_T_ONE)) == 0);
   lua_assert(bytes < (MAX_REQUEST - alignment));
+
+  if (bytes == 1024*1024*1024) {
+
+  }
+
   req = nb + alignment + MIN_CHUNK_SIZE - CHUNK_OVERHEAD;
-  mem = lj_alloc_malloc(m, req);
+  mem = (char*)lj_alloc_malloc(m, req);
   if (mem != 0) {
     mchunkptr p = mem2chunk(mem);
-    if ((((size_t)(mem)) & (alignment - 1)) != 0) { /* misaligned */
+    if ((((uintptr_t)mem) & (alignment - 1)) != 0) { /* misaligned */
       /*
         Find an aligned spot inside chunk.  Since we need to give
         back leading space in a chunk of at least MIN_CHUNK_SIZE, if
@@ -1873,10 +1945,9 @@ void* lj_alloc_memalign(void* msp, size_t alignment, size_t bytes)
         We've allocated enough total room so that this is always
         possible.
       */
-      char* br = (char*)mem2chunk((size_t)(((size_t)((char*)mem + alignment -
-                  SIZE_T_ONE)) & -alignment));
-      char* pos = ((size_t)(br - (char*)(p)) >= MIN_CHUNK_SIZE) ?
-                  br : br+alignment;
+      char* br2 = (char*)mem2chunk(lj_round((uintptr_t)(mem + alignment), alignment));
+      char* br = (char*)mem2chunk((size_t)(((size_t)((char*)mem + alignment - SIZE_T_ONE)) & -alignment));
+      char* pos = ((size_t)(br - (char*)(p)) >= MIN_CHUNK_SIZE) ? br : br+alignment;
       mchunkptr newp = (mchunkptr)pos;
       size_t leadsize = pos - (char*)(p);
       size_t newsize = chunksize(p) - leadsize;
@@ -1907,7 +1978,7 @@ void* lj_alloc_memalign(void* msp, size_t alignment, size_t bytes)
     mem = chunk2mem(p);
 #if DEBUG
     assert(chunksize(p) >= nb);
-    assert(((size_t)mem & (alignment - 1)) == 0);
+    assert(((uintptr_t)mem & (alignment - 1)) == 0);
     //check_inuse_chunk(m, p);
     //POSTACTION(m);
 #endif

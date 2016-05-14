@@ -8,24 +8,7 @@
 
 #include "lua.h"
 
-#if defined(_MSC_VER)
-/* MSVC is stuck in the last century and doesn't have C99's stdint.h. */
-typedef __int8 int8_t;
-typedef __int16 int16_t;
-typedef __int32 int32_t;
-typedef __int64 int64_t;
-typedef unsigned __int8 uint8_t;
-typedef unsigned __int16 uint16_t;
-typedef unsigned __int32 uint32_t;
-typedef unsigned __int64 uint64_t;
-#ifdef _WIN64
-typedef __int64 intptr_t;
-typedef unsigned __int64 uintptr_t;
-#else
-typedef __int32 intptr_t;
-typedef unsigned __int32 uintptr_t;
-#endif
-#elif defined(__symbian__)
+#if defined(__symbian__)
 /* Cough. */
 typedef signed char int8_t;
 typedef short int int16_t;
@@ -268,20 +251,22 @@ static LJ_AINLINE uint32_t lj_fls(uint32_t x)
   return _CountLeadingZeros(x) ^ 31;
 }
 #else
-unsigned char _BitScanForward(uint32_t *, unsigned long);
-unsigned char _BitScanReverse(uint32_t *, unsigned long);
-#pragma intrinsic(_BitScanForward)
-#pragma intrinsic(_BitScanReverse)
+unsigned char _BitScanForward(unsigned long *, unsigned long);
+unsigned char _BitScanReverse(unsigned long *, unsigned long);
 
 static LJ_AINLINE uint32_t lj_ffs(uint32_t x)
 {
-  uint32_t r; _BitScanForward(&r, x); return r;
+  unsigned long r; _BitScanForward(&r, x); return r;
 }
 
 static LJ_AINLINE uint32_t lj_fls(uint32_t x)
 {
-  uint32_t r; _BitScanReverse(&r, x); return r;
+  unsigned long r; _BitScanReverse(&r, x); return r;
 }
+/*
+#define lj_ffs(x)	((uint32_t)__builtin_ctz(x))
+#define lj_fls(x)	((uint32_t)(__builtin_clz(x)^31))
+*/
 #endif
 
 unsigned long _byteswap_ulong(unsigned long);

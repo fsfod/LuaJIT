@@ -227,7 +227,7 @@ static TValue *cpfinalize(lua_State *L, lua_CFunction dummy, void *ud)
   UNUSED(dummy);
   UNUSED(ud);
   lj_gc_finalize_cdata(L);
-  lj_gc_finalize_udata(L);
+ // lj_gc_finalize_udata(L);
   /* Frame pop omitted. */
   return NULL;
 }
@@ -277,7 +277,6 @@ lua_State *lj_state_new(lua_State *L)
   setmrefr(L1->glref, L->glref);
   setgcrefr(L1->env, L->env);
   stack_init(L1, L);  /* init stack */
-  lua_assert(iswhite(obj2gco(L1)));
   return L1;
 }
 

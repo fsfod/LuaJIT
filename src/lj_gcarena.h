@@ -101,7 +101,7 @@ typedef struct ArenaExtra {
   uint16_t fixedtop;
   uint16_t fixedsized;
   MRef finalizers;
-  void* allocbase;/* The base page multiple arenas created from one large page allocation */
+  void* allocud;/* The base page multiple arenas created from one large page allocation */
   void* userd;
   uint16_t flags;
 } ArenaExtra;
