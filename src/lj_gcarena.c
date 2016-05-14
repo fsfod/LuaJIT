@@ -943,7 +943,7 @@ void arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o)
   idlist_add(L, chunk, ptr2cell(o), o->gch.gct == ~LJ_TTAB || o->gch.gct == ~LJ_TUDATA);
 }
 
-CellIdChunk *arena_checkfinalizers(global_State *g, GCArena *arena, CellIdChunk *list)
+CellIdChunk *arena_separatefinalizers(global_State *g, GCArena *arena, CellIdChunk *list)
 {
   lua_State *L = mainthread(g);
   CellIdChunk *chunk = arena_finalizers(arena);
@@ -956,6 +956,10 @@ CellIdChunk *arena_checkfinalizers(global_State *g, GCArena *arena, CellIdChunk 
 
       if (!((arena_getmark(arena, cell) >> arena_blockbitidx(cell)) & 1)) {
         GCobj *o = arena_cellobj(arena, cell);
+        /* Swap the cellid at the end of the list into place of the one we removed */
+        /* FIXME: should really do 'stream compaction' and or sorting so theres better chance of the
+        ** next item is more likely tobe in cache
+        */
         chunk->cells[i] = chunk->cells[--count];
         /* If theres no __gc meta skip saving the cell */
         if (!idlist_getmark(chunk, i) || 

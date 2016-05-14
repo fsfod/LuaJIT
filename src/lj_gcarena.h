@@ -137,13 +137,15 @@ LJ_STATIC_ASSERT((MinCellId * 16) == offsetof(GCArena, cellsstart));
 
 typedef struct ArenaFreeList {
   uint32_t binmask;
-  MSize freecells;
+  uint16_t freecells;
+  uint16_t freeobjcount;
   GCCellID1 *bins[8];
   uint8_t bincounts[8];
   uint32_t *oversized;
   MSize top;
   MSize listsz;
   GCArena *owner;
+  CellIdChunk *finalizbles;
 } ArenaFreeList;
 
 typedef struct FreeChunk {
@@ -186,15 +188,16 @@ typedef struct HugeBlockTable {
 #define arena_extrainfo(arena) (&(arena)->extra)
 #define arena_finalizers(arena) mref(arena_extrainfo(arena)->finalizers, CellIdChunk)
 void arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o);
-CellIdChunk *arena_checkfinalizers(global_State *g, GCArena *arena, CellIdChunk *out);
+CellIdChunk *arena_separatefinalizers(global_State *g, GCArena *arena, CellIdChunk *out);
 
 #define arena_blockidx(cell) (((cell) & ~BlocksetMask) >> 5)
-#define arena_getblock(arena, cell) (arena->block)[(arena_blockidx(cell))]
-#define arena_getmark(arena, cell) (arena->mark)[(arena_blockidx(cell))]
+#define arena_getblock(arena, cell) ((arena)->block[(arena_blockidx(cell))])
+#define arena_getmark(arena, cell) ((arena)->mark[(arena_blockidx(cell))])
 
 #define arena_blockbitidx(cell) (cell & BlocksetMask)
 #define arena_blockbit(cell) (((GCBlockword)1) << ((cell) & BlocksetMask))
-#define arena_markcell(arena, cell) ((arena->mark)[(arena_blockidx(cell))] |= arena_blockbit(cell))
+#define arena_markcell(arena, cell) ((arena)->mark[(arena_blockidx(cell))] |= arena_blockbit(cell))
+#define arena_cellismarked(arena, cell) ((arena)->mark[(arena_blockidx(cell))] & arena_blockbit(cell))
 
 #define arena_getfree(arena, blockidx) (arena->mark[(blockidx)] & ~arena->block[(blockidx)])
 
@@ -472,5 +475,7 @@ static LJ_AINLINE CellIdChunk *idlist_add(lua_State *L, CellIdChunk *chunk, GCCe
   }
   return chunk;
 }
+
+#define idlist_freechunk(g, chunk) lj_mem_free(g, chunk, sizeof(CellIdChunk))
 
 #endif

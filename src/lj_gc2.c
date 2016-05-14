@@ -205,8 +205,9 @@ static void gc_mark_mmudata(global_State *g)
 /* Separate userdata objects to be finalized */
 size_t lj_gc_separateudata(global_State *g, int all)
 {
+  lua_State *L = mainthread(g);
   size_t m = 0;
-  CellIdChunk *list = lj_mem_newt(mainthread(g), sizeof(CellIdChunk), CellIdChunk);
+  CellIdChunk *list = idlist_new(L);
   list->count = 0;
   list->next = NULL;
   TimerStart(gc_separateudata);
@@ -214,11 +215,10 @@ size_t lj_gc_separateudata(global_State *g, int all)
     GCArena *arena = lj_gc_arenaref(g, i);
 
     if (arena_finalizers(arena)) {
-      CellIdChunk *whites = arena_checkfinalizers(g, arena, list);
+      CellIdChunk *whites = arena_separatefinalizers(g, arena, list);
       if (whites) {
-        list = lj_mem_newt(mainthread(g), sizeof(CellIdChunk), CellIdChunk);
-        list->count = 0;
-        list->next = NULL;
+        g->gc.freelists[i].finalizbles = list;
+        list = idlist_new(L);
       }
     }
   }
@@ -817,7 +817,7 @@ void lj_gc_finalize_udata(lua_State *L)
 
   for (MSize i = 0; i < g->gc.arenastop; i++) {
     GCArena *arena = lj_gc_arenaref(g, i);
-    chunk = arena_finalizers(arena);
+    chunk = g->gc.freelists[i].finalizbles;
 
     while (chunk) {
       CellIdChunk *next;
@@ -826,9 +826,10 @@ void lj_gc_finalize_udata(lua_State *L)
       }
 
       next = chunk->next;
-      lj_mem_free(g, chunk, sizeof(CellIdChunk));
+      idlist_freechunk(g, chunk);
       chunk = next;
     }
+    g->gc.freelists[i].finalizbles = NULL;
   }
 }
 
