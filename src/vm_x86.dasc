@@ -1412,8 +1412,8 @@ static void build_subroutines(BuildCtx *ctx)
   |  push rcx
   |  push rdx
   |  sub rsp, 32
-  |  lea GL:CARG1, [DISPATCH+GG_DISP2G]
-  |  call extern lj_gc_emptygrayssb
+  |  lea GL:FCARG1, [DISPATCH+GG_DISP2G]
+  |  call extern lj_gc_emptygrayssb@4
   |  add rsp, 32
   |  pop rdx
   |  pop rcx

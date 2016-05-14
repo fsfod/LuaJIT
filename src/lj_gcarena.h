@@ -212,13 +212,14 @@ void arean_setfixed(lua_State *L, GCArena *arena, GCobj *o);
 
 void *hugeblock_alloc(lua_State *L, GCSize size, MSize gct);
 void hugeblock_free(global_State *g, void *o, GCSize size);
+GCSize hugeblock_freeall(global_State *g);
 int hugeblock_isdead(global_State *g, GCobj *o);
 int hugeblock_iswhite(global_State *g, void *o);
 void hugeblock_mark(global_State *g, void *o);
 void hugeblock_makewhite(global_State *g, GCobj *o);
 void hugeblock_toblack(global_State *g, GCobj *o);
 void hugeblock_setfixed(global_State *g, GCobj *o);
-GCSize sweep_hugeblocks(global_State *g);
+GCSize hugeblock_sweep(global_State *g);
 MSize hugeblock_checkfinalizers(global_State *g);
 MSize hugeblock_runfinalizers(global_State *g);
 #define gc_ishugeblock(o) ((((uintptr_t)(o)) & ArenaCellMask) == 0)

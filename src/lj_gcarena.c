@@ -75,6 +75,9 @@ GCArena* arena_create(lua_State *L, uint32_t flags)
   //(GCArena*)lj_allocpages(G(L)->allocd, ArenaSize, ArenaSize);
   GCArena* arena = (GCArena*)lj_alloc_memalign(G(L)->allocd, ArenaSize, ArenaSize); 
   lua_assert((((uintptr_t)arena) & (ArenaSize-1)) == 0);
+  if (arena == NULL) {
+    lj_err_mem(L);
+  }
   arena_init(arena);
   
   if (flags & ArenaFlag_TravObjs) {
@@ -93,7 +96,7 @@ static void arena_freemem(global_State *g, GCArena* arena)
 {
   ArenaExtra *extra = arena_extrainfo(arena);
   if (mref(arena->greybase, GCCellID1)) {
-    lj_mem_freevec(g, mref(arena->greybase, GCCellID1)-2, greyvecsize(arena), GCCellID1);
+    lj_mem_freevec(g, mref(arena->greybase, GCCellID1)-2, arena_greycap(arena)+3, GCCellID1);
   }
 
   if (arena_freelist(arena)) {
@@ -578,11 +581,11 @@ GCSize arena_propgrey(global_State *g, GCArena *arena, int limit, MSize *travcou
 
   for (; *mref(arena->greytop, GCCellID1) != 0;) {
     GCCellID1 *top = mref(arena->greytop, GCCellID1);
-    GCobj* cell = arena_cellobj(arena, *top);
-    assert_allocated(arena, *top);
-    lua_assert(arenaobj_isblack(g, cell));
+    GCCellID cellid = *top;
+    lua_assert(cellid >= MinCellId && cellid < MaxCellId);
+    lua_assert(arena_cellstate(arena, cellid) == CellState_Black);
     setmref(arena->greytop, top+1); 
-    total += gc_traverse2(g, cell);
+    total += gc_traverse2(g, arena_cellobj(arena, cellid));
     count++;
     if (limit != -1 && count > (MSize)limit) {
       break;
@@ -1092,14 +1095,16 @@ void *hugeblock_alloc(lua_State *L, GCSize size, MSize gct)
 {
   HugeBlockTable *tab = gettab(G(L));
   void *o = lj_alloc_memalign(G(L)->allocd, ArenaSize, size);
-  HugeBlock *node = hugeblock_register(tab, o);
-  tab->total += size;
-  tab->count++;
-  lua_assert((((intptr_t)o)&ArenaCellMask) == 0 && o != NULL);
-
+  HugeBlock *node;
+  
   if (o == NULL) {
     lj_err_mem(L);
   }
+  lua_assert((((intptr_t)o)&ArenaCellMask) == 0);
+  node = hugeblock_register(tab, o);
+  G(L)->gc.total += size;
+  tab->total += size;
+  tab->count++;
 
   if (node == NULL) {
     hugeblock_rehash(L, tab);
@@ -1243,14 +1248,14 @@ void hugeblock_markfixed(global_State *g)
   tab->count = count;
 }
 
-GCSize sweep_hugeblocks(global_State *g)
+GCSize hugeblock_sweep(global_State *g)
 {
   HugeBlockTable *tab = gettab(g);
   MSize count = tab->count;
   GCSize total = tab->total;
 
   if (count == 0) {
-    return;
+    return 0;
   }
 
   for (size_t i = 0; i < tab->hmask; i++) {
@@ -1270,7 +1275,7 @@ GCSize hugeblock_freeall(global_State *g)
   GCSize total = tab->total;
 
   if (tab->count == 0) {
-    return;
+    return 0;
   }
 
   for (i = 0; i < tab->hmask; i++) {

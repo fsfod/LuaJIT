@@ -413,7 +413,7 @@ GCSize gc_traverse2(global_State *g, GCobj *o)
 }
 
 /* Propagate one gray object. Traverse it and turn it black. */
-static size_t propagatemark(global_State *g)
+static size_t propagatemark2(global_State *g)
 {
   GCobj *o = gcref(g->gc.gray);
   lua_assert(isgray(o));
@@ -619,7 +619,7 @@ void TraceGC(global_State *g, int newstate)
   lua_State *L = mainthread(g);
 
   if (newstate == GCSpropagate) {
-    printf("---------------GC Start %d-------------------------\n", GCCount);
+    //printf("---------------GC Start %d-------------------------\n", GCCount);
   }
 
 #ifdef DEBUG
@@ -627,11 +627,9 @@ void TraceGC(global_State *g, int newstate)
   sprintf(buf, "GC State = %s\n", gcstates[newstate]);
   OutputDebugStringA(buf);
 #endif 
-  //printf("GC State = %s\n", gcstates[newstate]);
-  g->gc.curarena = 0;
-
+ // printf("GC State = %s\n", gcstates[newstate]);
   log_gcstate(newstate, g->gc.state, g->gc.total);
-  timers_printlog();
+  //timers_printlog();
 }
 
 /* -- Sweep phase --------------------------------------------------------- */
@@ -653,7 +651,7 @@ static void gc_sweep(global_State *g, int32_t lim)
 
    // arena_copymeta(arena, metadatas);
     MSize count = arena_majorsweep(arena);
-    printf("Swept arena(%d), objects fread %d\n", i, count & 0xffff);
+    //printf("Swept arena(%d), objects fread %d\n", i, count & 0xffff);
     //arena_copymeta(metadatas, arena);
     /* If there are no reach objects left in the arena mark it empty so can 
     ** latter decide to free it if we have excess arenas.
@@ -869,6 +867,7 @@ void lj_gc_freeall(global_State *g)
     GCArena *arena = lj_gc_arenaref(g, i);
     arena_destroy(g, arena);
   }
+  hugeblock_freeall(g);
 
   lj_mem_freevec(g, g->gc.arenas, g->gc.arenassz, GCArena*);
   lj_mem_freevec(g, g->gc.freelists, g->gc.arenassz, ArenaFreeList);
@@ -936,7 +935,7 @@ static void sweep_arena(global_State *g, MSize i)
   freelist->freeobjcount += count & 0xffff;
 
   log_arenasweep(i, 0, count & 0xffff, arena_topcellid(arena));
-
+  /* If there no more live cells left flag the arena as empty and reset its bump and block state */
   if (!(count & 0x10000)) {
     lj_gc_setarenaflag(g, i, ArenaFlag_Empty);
     lj_gc_cleararenaflags(g, i, ArenaFlag_NoBump);
@@ -957,7 +956,7 @@ static void arenasweep_start(global_State *g)
   MSize nontrav = 0, trav = 0;
 
   for (MSize i = 0; i < g->gc.arenastop; i++) {
-    arena_dumpwhitecells(g, lj_gc_arenaref(g, i));
+   // arena_dumpwhitecells(g, lj_gc_arenaref(g, i));
   }
 
   g->gc.curarena = 0;
@@ -1024,7 +1023,9 @@ static size_t gc_onestep(lua_State *L)
    // while (gc_sweepstring(g));
     gc_sweepstring(g);  /* Sweep one chain. */
     if (g->gc.sweepstr > g->strmask) {
-      SetGCState(g, GCSsweep);  /* All string hash chains sweeped. */
+      /* All string hash chains sweeped. */
+      SetGCState(g, GCSsweep); 
+      arenasweep_start(g);
     }
     lua_assert(old >= g->gc.total);
     g->gc.estimate -= old - g->gc.total;
@@ -1032,7 +1033,6 @@ static size_t gc_onestep(lua_State *L)
     }
   case GCSsweep: {
     GCSize old = g->gc.total;
-    arenasweep_start(g);
     while(arenasweep_step(g));
     //lua_assert(old >= g->gc.total);
     g->gc.estimate -= old - g->gc.total;
@@ -1252,7 +1252,7 @@ void lj_gc_setfinalizable(lua_State *L, GCobj *o, GCtab *mt)
   o->gch.marked |= LJ_GC_FINALIZED;
 }
 
-void lj_gc_emptygrayssb(global_State *g)
+void LJ_FASTCALL lj_gc_emptygrayssb(global_State *g)
 {
   GCRef *list = mref(g->gc.grayssb, GCRef);
   intptr_t mask = ((intptr_t)mref(g->gc.grayssb, GCRef)) & GRAYSSB_MASK;

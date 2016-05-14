@@ -85,7 +85,7 @@ LJ_FUNC union GCArena *lj_gc_setactive_arena(lua_State *L, union GCArena *arena,
 
 static LJ_AINLINE void lj_gc_setarenaflag(global_State *g, MSize i, uint32_t flags)
 {
-  lua_assert((flags & ArenaSize) == 0);
+  lua_assert((flags & ~ArenaCellMask) == 0);
   //GCArena *arena = lj_gc_arenaref(g, i);
   //arena->
   g->gc.arenas[i] = (GCArena *)(((uintptr_t)g->gc.arenas[i]) | flags);
@@ -93,8 +93,8 @@ static LJ_AINLINE void lj_gc_setarenaflag(global_State *g, MSize i, uint32_t fla
 
 static LJ_AINLINE void lj_gc_cleararenaflags(global_State *g, MSize i, uint32_t flags)
 {
-  lua_assert((flags & ArenaSize) == 0);
-  g->gc.arenas[i] = (GCArena *)(((uintptr_t)g->gc.arenas[i]) & (flags|~ArenaCellMask));
+  lua_assert((flags & ~ArenaCellMask) == 0);
+  g->gc.arenas[i] = (GCArena *)(((uintptr_t)g->gc.arenas[i]) & ~flags);
 }
 
 /* GC check: drive collector forward if the GC threshold has been reached. */
@@ -113,7 +113,7 @@ LJ_FUNC void lj_gc_closeuv(global_State *g, GCupval *uv);
 LJ_FUNC void lj_gc_barriertrace(global_State *g, uint32_t traceno);
 #endif
 
-LJ_FUNCA void lj_gc_emptygrayssb(global_State *g);
+void LJ_FASTCALL lj_gc_emptygrayssb(global_State *g);
 /* Must be a power of 2 */
 #define GRAYSSBSZ 64
 #define GRAYSSB_MASK ((GRAYSSBSZ*sizeof(GCRef))-1)
@@ -169,6 +169,7 @@ LJ_FUNC void *lj_mem_grow(lua_State *L, void *p,
 
 static LJ_AINLINE void lj_mem_free(global_State *g, void *p, size_t osize)
 {
+  lua_assert(!p || ((((size_t*)p)[-1] & ~7)-8) >= osize);
   g->gc.total -= (GCSize)osize;
   g->allocf(g->allocd, p, osize, 0);
 }
