@@ -859,7 +859,7 @@ static MSize majorsweep(GCArena *arena, MSize start, MSize limit)
 
 MSize arena_majorsweep(GCArena *arena)
 {
-  MSize limit = MaxBlockWord;
+  MSize limit = min(arena_blockidx(arena_topcellid(arena))+1, MaxBlockWord);
   MSize count = 0;
   lua_assert(arena_greysize(arena) == 0);
 #if 0
