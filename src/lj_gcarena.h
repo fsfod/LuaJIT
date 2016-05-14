@@ -115,7 +115,7 @@ typedef union GCArena {
         MRef freelist;
         ArenaExtra extra; /*FIXME: allocate separately */
       };
-      GCBlockword block[MaxBlockWord];
+      GCBlockword mark[MaxBlockWord];
     };
     
     union {
@@ -126,7 +126,7 @@ typedef union GCArena {
         GCCellID1 firstfree;
         GCBlockword unusedmark[UnusedBlockWords];
       };
-      GCBlockword mark[MaxBlockWord];
+      GCBlockword block[MaxBlockWord];
     };
     GCCell cellsstart[0];
   };
