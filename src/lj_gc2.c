@@ -422,7 +422,123 @@ static size_t propagatemark(global_State *g)
   return gc_traverse2(g, o);
 }
 
-static int largestgray(global_State *g)
+typedef struct pqueue {
+  MSize size;
+  MSize count;
+  GCArena** array;
+}pqueue;
+
+pqueue _greyqueu = { 0 };
+pqueue* greyqueu = &_greyqueu;
+
+void pqueue_init(lua_State *L, pqueue* q)
+{
+  q->size = 16;
+  q->count = 0;
+  q->array = lj_mem_newvec(L, q->size, GCArena*);
+}
+
+#define child_left(idx) (idx * 2 + 1)
+#define child_right(idx) (idx * 2 + 2)
+#define parentidx(idx) ((idx - 1) / 2)
+
+void pqueue_pushup(pqueue* q, MSize idx)
+{
+  GCArena *arena = q->array[idx];
+  MSize greylen = arena_greysize(arena);
+  MSize i = idx;
+
+  while (i != 0) {
+    GCArena *parent = q->array[parentidx(i)];
+    MSize parentlen = arena_greysize(parent);
+    /* If parents queue is smaller swap it down */
+    if (parentlen < greylen) {
+      q->array[parentidx(i)] = arena;
+      q->array[i] = parent;
+    }
+    i = parentidx(i);
+    arena = parent;
+    greylen = parentlen;
+  }
+}
+
+void pqueue_insert(lua_State *L, pqueue* q, GCArena *arena)
+{
+  /* TODO: cache queue size in the lower bits of the pointer with some refresh mechanism */
+  
+  if ((q->count+1) >= q->size) {
+    lj_mem_growvec(L, q->array, q->size, LJ_MAX_MEM32, GCArena*);
+  }
+  q->array[q->count] = arena;
+  pqueue_pushup(q, q->count);
+  q->count++;
+}
+
+void pqueue_pushdown(pqueue* q, MSize idx)
+{
+  MSize i = idx;
+
+  while (1) {
+    GCArena *arena = q->array[i];
+
+    if (child_right(i) >= q->count) {
+      break;
+    }
+
+    MSize lsize = arena_greysize(q->array[child_left(i)]);
+    MSize rsize = arena_greysize(q->array[child_right(i)]);
+    MSize cidx = lsize > rsize ? child_left(i) : child_right(i);
+    GCArena *child = lsize > rsize ? q->array[child_left(i)] : q->array[child_right(i)];
+    MSize csize = lsize > rsize ? lsize : rsize;
+
+    if (csize > arena_greysize(arena)) {
+      q->array[i] = q->array[cidx];
+      q->array[cidx] = arena;
+      i = cidx;
+    } else {
+      return;
+    }
+  }
+}
+
+/* Rotate tree now that max was emptied */
+void pqueue_rotatemax(pqueue* q)
+{
+  GCArena *maxarena = q->array[0];
+
+  if (q->count <= 1) {
+    return;
+  }
+
+  q->array[0] = q->array[q->count-1];
+  q->array[q->count-1] = maxarena;
+  pqueue_pushdown(q, 0);
+}
+
+GCArena *pqueue_peekmax(pqueue* q)
+{
+  if (arena_greysize(q->array[0]) == 0) {
+    if (q->count == 1) {
+      return NULL;
+    } else {
+      pqueue_rotatemax(q);
+      /* FIXME: dirty hack for queues lengths changing from zero after being inserted */
+      if (arena_greysize(q->array[0]) == 0) {
+        for (MSize i = 0; i < q->count; i++) {
+          if (arena_greysize(q->array[i]) != 0) {
+            return q->array[i];
+          }
+        }
+        return NULL;
+      }
+      return q->array[0];
+    }
+  }
+
+  return q->array[0];
+}
+
+static GCArena* largestgray(global_State *g)
 {
   MSize maxqueue = 0;
   int arenai = -1;
@@ -430,33 +546,54 @@ static int largestgray(global_State *g)
   /* TODO: Replace with priority queue */
   for (MSize i = 0; i < g->gc.arenastop; i++) {
     GCArena *arena = lj_gc_arenaref(g, i);
+    if (lj_gc_arenaflags(g, i) & ArenaFlag_Empty) continue;
     if (arena_greysize(arena)) {
-      printf("arena(%d) greyqueue = %d\n", i, arena_greysize(arena));
+      //printf("arena(%d) greyqueue = %d\n", i, arena_greysize(arena));
     }
     if (arena_greysize(arena) > maxqueue) {
       maxqueue = arena_greysize(arena);
       arenai = i;
     }
   }
-  return arenai;
+  return lj_gc_arenaref(g, arenai);
 }
 
 /* Propagate all gray objects. */
 static GCSize gc_propagate_gray(global_State *g)
 {
+  lua_State *L = mainthread(g);
   GCSize total = 0;
   GCArena *maxarena = NULL;
   TimerStart(propagate_gray);
 
+  if (greyqueu->size == 0) {
+    pqueue_init(mainthread(g), greyqueu);
+  }
+  
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+    /* Skip empty and non traversable arenas */
+    if ((lj_gc_arenaflags(g, i) & (ArenaFlag_Empty|ArenaFlag_TravObjs)) != ArenaFlag_TravObjs) {
+      continue;
+    }
+    pqueue_insert(L, greyqueu, arena);
+  }
+
   while (1) {
-    int arenai = largestgray(g);
+    //int arenai = largestgray(g);
     /* Stop once all arena queues are empty */
-    if (arenai < 0) break;
-    maxarena = lj_gc_arenaref(g, arenai);
+    //if (arenai < 0) break;
+    maxarena = pqueue_peekmax(greyqueu);
+    if (maxarena == NULL) {
+      break;
+    }
 
     MSize count = 0;
     GCSize omem = arena_propgrey(g, maxarena, -1, &count);
+    /* Swap the arena to the back of the queue now its grey queue is empty */
+    pqueue_rotatemax(greyqueu);
     total += omem;
+
     //printf("propagated %d objects in arena(%d), with a size of %d\n", count, arenai, omem);
   }
   TimerEnd(propagate_gray);
