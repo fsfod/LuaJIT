@@ -160,7 +160,7 @@ static void gc_mark_start(global_State *g)
       lua_assert(!mref(arena_extrainfo(arena)->fixedcells, GCCellID1));
     }
   }
-
+  lj_gc_resetgrayssb(g);
   SetGCState(g, GCSpropagate);
 }
 
@@ -1149,7 +1149,7 @@ void lj_gc_fullgc(lua_State *L)
           arena_towhite(lj_gc_arenaref(g, i));
         }
         SetGCState(g, GCSpause);
-        lj_gc_emptygrayssb(g);
+        lj_gc_resetgrayssb(g);
       } else {
         lua_assert(0);
       }
@@ -1252,6 +1252,21 @@ void lj_gc_setfinalizable(lua_State *L, GCobj *o, GCtab *mt)
   o->gch.marked |= LJ_GC_FINALIZED;
 }
 
+void lj_gc_resetgrayssb(global_State *g)
+{
+  GCRef *list = mref(g->gc.grayssb, GCRef);
+  intptr_t mask = ((intptr_t)mref(g->gc.grayssb, GCRef)) & GRAYSSB_MASK;
+
+  if (mask == 0) {
+    list = list-GRAYSSBSZ;
+  } else {
+    list = (GCRef *)(((intptr_t)list) & ~GRAYSSB_MASK);
+  }
+
+  /* Leave dummy value at the start so we always know if the list is completely empty or full */
+  setmref(g->gc.grayssb, list+1);
+}
+
 void LJ_FASTCALL lj_gc_emptygrayssb(global_State *g)
 {
   GCRef *list = mref(g->gc.grayssb, GCRef);
@@ -1267,7 +1282,7 @@ void LJ_FASTCALL lj_gc_emptygrayssb(global_State *g)
   } 
 
   if (g->gc.state != GCSatomic && g->gc.state != GCSpropagate) {
-    setmref(g->gc.grayssb, list+1);
+    lj_gc_resetgrayssb(g);
     return;
   }
 
@@ -1288,8 +1303,7 @@ void LJ_FASTCALL lj_gc_emptygrayssb(global_State *g)
     }
   }
   TimerEnd(gc_emptygrayssb);
-  /* Leave dummy value at the start so we always know if the list is completely empty or full */
-  setmref(g->gc.grayssb, list+1);
+  lj_gc_resetgrayssb(g);
 }
 
 void lj_gc_setfixed(lua_State *L, GCobj *o)

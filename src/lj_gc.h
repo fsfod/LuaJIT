@@ -114,6 +114,7 @@ LJ_FUNC void lj_gc_barriertrace(global_State *g, uint32_t traceno);
 #endif
 
 void LJ_FASTCALL lj_gc_emptygrayssb(global_State *g);
+void LJ_FUNC lj_gc_resetgrayssb(global_State *g);
 /* Must be a power of 2 */
 #define GRAYSSBSZ 64
 #define GRAYSSB_MASK ((GRAYSSBSZ*sizeof(GCRef))-1)
