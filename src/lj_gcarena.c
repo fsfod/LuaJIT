@@ -572,7 +572,7 @@ static GCCellID arena_findfreesingle(GCArena *arena)
   return 0;
 }
 
-extern GCSize gc_traverse2(global_State *g, GCobj *o);
+extern GCSize gc_traverse(global_State *g, GCobj *o);
 
 GCSize arena_propgrey(global_State *g, GCArena *arena, int limit, MSize *travcount)
 {
@@ -589,7 +589,7 @@ GCSize arena_propgrey(global_State *g, GCArena *arena, int limit, MSize *travcou
     lua_assert(cellid >= MinCellId && cellid < MaxCellId);
     lua_assert(arena_cellstate(arena, cellid) == CellState_Black);
     setmref(arena->greytop, top+1); 
-    total += gc_traverse2(g, arena_cellobj(arena, cellid));
+    total += gc_traverse(g, arena_cellobj(arena, cellid));
     count++;
     if (limit != -1 && count > (MSize)limit) {
       break;

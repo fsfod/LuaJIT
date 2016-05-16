@@ -303,7 +303,7 @@ static LJ_AINLINE int arenaobj_iswhite(void* o)
 
 #define arenaobj_isblack(o) (!arenaobj_iswhite(o))
 
-static LJ_AINLINE int iswhite2(global_State *g, void* o)
+static LJ_AINLINE int iswhite(global_State *g, void* o)
 {
   if (LJ_LIKELY(!gc_ishugeblock(o))) {
     return arenaobj_iswhite(o);
@@ -312,7 +312,7 @@ static LJ_AINLINE int iswhite2(global_State *g, void* o)
   }
 }
 
-static LJ_AINLINE int isblack2(global_State *g, void* o)
+static LJ_AINLINE int isblack(global_State *g, void* o)
 {
   if (LJ_LIKELY(!gc_ishugeblock(o))) {
     return !arenaobj_iswhite(o);

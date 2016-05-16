@@ -14,9 +14,6 @@ enum {
 };
 
 /* Bitmasks for marked field of GCobj. */
-#define LJ_GC_WHITE0	0x01
-#define LJ_GC_WHITE1	0x02
-#define LJ_GC_BLACK	0x04
 #define LJ_GC_FINALIZED	0x08
 #define LJ_GC_WEAKKEY	0x08
 #define LJ_GC_WEAKVAL	0x10
@@ -24,35 +21,32 @@ enum {
 #define LJ_GC_FIXED	0x20
 #define LJ_GC_SFIXED	0x40
 #define LJ_GC_GRAY	0x40
-
-#define LJ_GC_WHITES	(LJ_GC_WHITE0 | LJ_GC_WHITE1)
-#define LJ_GC_COLORS	(LJ_GC_WHITES | LJ_GC_BLACK)
+#define LJ_GC_COLORS	(LJ_GC_GRAY)
 #define LJ_GC_WEAK	(LJ_GC_WEAKKEY | LJ_GC_WEAKVAL)
 
 /* Macros to test and set GCobj colors. */
-#define iswhite(x)	((x)->gch.marked & LJ_GC_WHITES)
-#define isblack(x)	((x)->gch.marked & LJ_GC_BLACK)
-#define isgray(x)	(!((x)->gch.marked & (LJ_GC_BLACK|LJ_GC_WHITES)))
+#define isgray(x)	((obj2gco(x)->gch.marked & LJ_GC_GRAY))
+#define setgray(x)	(obj2gco(x)->gch.marked |= LJ_GC_GRAY)
+#define cleargray(x)	(obj2gco(x)->gch.marked &= ~LJ_GC_GRAY)
 #define tviswhite(x)	(tvisgcv(x) && iswhite(gcV(x)))
-#define otherwhite(g)	(g->gc.currentwhite ^ LJ_GC_WHITES)
 #define isdead(g, x)	(!gc_ishugeblock(x) ? arenaobj_isdead(x) : hugeblock_isdead(g, x))
 
 #define iswhitefast(x)	(gc_ishugeblock(x) || arenaobj_iswhite(x))
 #define isblackfast(x)	(gc_ishugeblock(x) || !arenaobj_iswhite(x))
 #define tviswhitefast(x)  (tvisgcv(x) && iswhitefast(x))
 
-#define curwhite(g)	((g)->gc.currentwhite & LJ_GC_WHITES)
-#define newwhite(g, x)	(obj2gco(x)->gch.marked = (uint8_t)curwhite(g))
-#define makewhite(g, x) \
-  ((x)->gch.marked = ((x)->gch.marked & (uint8_t)~LJ_GC_COLORS) | curwhite(g))
-#define flipwhite(x)	((x)->gch.marked ^= LJ_GC_WHITES)
 #define black2gray(x)	((x)->gch.marked &= (uint8_t)~LJ_GC_BLACK)
 #define fixstring(L, s)	lj_gc_setfixed(L, (GCobj *)(s))
 #define markfinalized(x)	((x)->gch.marked |= LJ_GC_FINALIZED)
 
-#define isgray2(x)	((obj2gco(x)->gch.marked & LJ_GC_GRAY))
-#define setgray(x)	(obj2gco(x)->gch.marked |= LJ_GC_GRAY)
-#define cleargray(x)	(obj2gco(x)->gch.marked &= ~LJ_GC_GRAY)
+static LJ_AINLINE void makewhite(global_State *g, GCobj *o)
+{
+  if (!gc_ishugeblock(o)) {
+    arena_clearcellmark(ptr2arena(o), ptr2cell(o));
+  } else {
+    hugeblock_makewhite(g, o);
+  }
+}
 
 void lj_gc_setfixed(lua_State *L, GCobj *o);
 void lj_gc_setfinalizable(lua_State *L, GCobj *o, GCtab *mt);
@@ -123,7 +117,7 @@ void LJ_FUNC lj_gc_resetgrayssb(global_State *g);
 static void lj_gc_appendgrayssb(global_State *g, GCobj *o)
 {
   GCRef *ssb = mref(g->gc.grayssb, GCRef);
-  lua_assert(!isgray2(o));
+  lua_assert(!isgray(o));
   setgcrefp(*ssb, o);
   ssb++;
   setmref(g->gc.grayssb, ssb);
@@ -146,18 +140,18 @@ static LJ_AINLINE void lj_gc_barrierback(global_State *g, GCtab *t, GCobj *o)
 
 /* Barrier for stores to table objects. TValue and GCobj variant. */
 #define lj_gc_anybarriert(L, t)  \
-  { if (LJ_UNLIKELY(!isgray2(t))) lj_gc_barrierback(G(L), (t), NULL); }
+  { if (LJ_UNLIKELY(!isgray(t))) lj_gc_barrierback(G(L), (t), NULL); }
 #define lj_gc_barriert(L, t, tv) \
-  { if (!isgray2(t) && tvisgcv(tv)) lj_gc_barrierback(G(L), (t), gcval(tv)); }
+  { if (!isgray(t) && tvisgcv(tv)) lj_gc_barrierback(G(L), (t), gcval(tv)); }
 #define lj_gc_objbarriert(L, t, o)  \
-  { if (!isgray2(t)) lj_gc_barrierback(G(L), (t), obj2gco(o)); }
+  { if (!isgray(t)) lj_gc_barrierback(G(L), (t), obj2gco(o)); }
 
 /* Barrier for stores to any other object. TValue and GCobj variant. */
 #define lj_gc_barrier(L, p, tv) \
-  { if (!isgray2(obj2gco(p)) && tvisgcv(tv)) \
+  { if (!isgray(obj2gco(p)) && tvisgcv(tv)) \
       lj_gc_barrierf(G(L), obj2gco(p), gcV(tv)); }
 #define lj_gc_objbarrier(L, p, o) \
-  { if (!isgray2(obj2gco(p))) lj_gc_barrierf(G(L), obj2gco(p), obj2gco(o)); }
+  { if (!isgray(obj2gco(p))) lj_gc_barrierf(G(L), obj2gco(p), obj2gco(o)); }
 
 /* Allocator. */
 LJ_FUNC void *lj_mem_realloc(lua_State *L, void *p, GCSize osz, GCSize nsz);

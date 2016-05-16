@@ -154,7 +154,7 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
     while (o != NULL) {
       GCstr *sx = gco2str(o);
       if (sx->len == len && str_fastcmp(str, strdata(sx), len) == 0) {
-	lua_assert(!isdead(g, o) && (g->gc.state != GCSsweep || isblack2(g, o)));
+	lua_assert(!isdead(g, o) && (g->gc.state != GCSsweep || isblack(g, o)));
 	/* Resurrect if dead. */
 	if (g->gc.state == GCSsweepstring && iswhitefast(o)) {
 	  toblack(g, o);
@@ -167,7 +167,7 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
     while (o != NULL) {
       GCstr *sx = gco2str(o);
       if (sx->len == len && memcmp(str, strdata(sx), len) == 0) {
-	lua_assert(!isdead(g, o) && (g->gc.state != GCSsweep || isblack2(g, o)));
+	lua_assert(!isdead(g, o) && (g->gc.state != GCSsweep || isblack(g, o)));
 	/* Resurrect if dead. */
 	if (g->gc.state == GCSsweepstring && iswhitefast(o)) {
 	  toblack(g, o);
@@ -179,7 +179,6 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
   }
   /* Nope, create a new string. */
   s = lj_mem_newgcoUL(L, sizeof(GCstr)+len+1, GCstr);
-  newwhite(g, s);
   s->gct = ~LJ_TSTR;
   s->len = len;
   s->hash = h;

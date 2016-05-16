@@ -50,7 +50,6 @@ static GCupval *func_finduv(lua_State *L, TValue *slot)
   }
   /* No matching upvalue found. Create a new one. */
   uv = lj_mem_newgcoUL(L, sizeof(GCupval), GCupval);
-  newwhite(g, uv);
   uv->gct = ~LJ_TUPVAL;
   uv->closed = 0;  /* Still open. */
   setmref(uv->v, slot);  /* Pointing to the stack slot. */
@@ -84,7 +83,7 @@ void LJ_FASTCALL lj_func_closeuv(lua_State *L, TValue *level)
   while (gcref(L->openupval) != NULL &&
 	 uvval((uv = gco2uv(gcref(L->openupval)))) >= level) {
     GCobj *o = obj2gco(uv);
-    lua_assert(!isblack(o) && !uv->closed && uvval(uv) != &uv->tv);
+    lua_assert(!isblack(g, o) && !uv->closed && uvval(uv) != &uv->tv);
     setgcrefr(L->openupval, uv->nextgc);  /* No longer in open list. */
     if (isdead(g, o)) {
       lj_func_freeuv(g, uv);

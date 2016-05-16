@@ -4070,8 +4070,9 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  sub RD, LJ_TISGCV
     |  cmp RD, LJ_TNUMX - LJ_TISGCV			// tvisgcv(v)
     |  jbe <1
-    |  test byte GCOBJ:RA->gch.marked, LJ_GC_WHITES	// iswhite(v)
-    |  jz <1
+    |  //FIXME: forward barrier based on mark bit?
+    |  //test byte GCOBJ:RA->gch.marked, LJ_GC_WHITES	// iswhite(v)
+    |  //jz <1
     |  // Crossed a write barrier. Move the barrier forward.
     |.if X64 and not X64WIN
     |  mov FCARG2, RB

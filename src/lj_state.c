@@ -190,11 +190,9 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
   if (GG == NULL || !checkptrGC(GG)) return NULL;
   memset(GG, 0, sizeof(GG_State));
   L->gct = ~LJ_TTHREAD;
-  L->marked = LJ_GC_WHITE0 | LJ_GC_FIXED | LJ_GC_SFIXED;  /* Prevent free. */
+  L->marked = LJ_GC_FIXED;  /* Prevent free. */
   L->dummy_ffid = FF_C;
   setmref(L->glref, g);
-  g->gc.currentwhite = LJ_GC_WHITE0 | LJ_GC_FIXED;
-  g->strempty.marked = LJ_GC_WHITE0;
   g->strempty.gct = ~LJ_TSTR;
   g->allocf = f;
   g->allocd = ud;

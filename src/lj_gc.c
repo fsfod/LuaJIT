@@ -28,8 +28,7 @@
 #include "lj_vm.h"
 #include "lj_dispatch.h"
 #include "lj_alloc.h"
-
-#include "disablegc.h"
+#include "lj_timer.h"
 
 #define GCSTEPSIZE	1024u
 #define GCSWEEPMAX	40
@@ -45,6 +44,27 @@ void TraceGC(global_State *g, int newstate);
 #define SetGCState(g, newstate) g->gc.state = newstate 
 #endif
 
+MSize GCCount = 0;
+
+void TraceGC(global_State *g, int newstate)
+{
+  lua_State *L = mainthread(g);
+
+  if (newstate == GCSpropagate) {
+    // timers_printlog();
+    //printf("---------------GC Start %d-------------------------\n", GCCount);
+    GCCount++;
+  }
+
+#ifdef DEBUG
+  char buf[100];
+  // sprintf(buf, "GC State = %s\n", gcstates[newstate]);
+  // OutputDebugStringA(buf);
+#endif 
+  // printf("GC State = %s\n", gcstates[newstate]);
+  log_gcstate(newstate, g->gc.state, g->gc.total);
+}
+
 /* Macros to set GCobj colors and flags. */
 #define white2gray(x)		((x)->gch.marked &= (uint8_t)~LJ_GC_WHITES)
 #define gray2black(x)		((x)->gch.marked |= LJ_GC_BLACK)
@@ -55,64 +75,54 @@ void TraceGC(global_State *g, int newstate);
 /* Mark a TValue (if needed). */
 #define gc_marktv(g, tv) \
   { lua_assert(!tvisgcv(tv) || (~itype(tv) == gcval(tv)->gch.gct)); \
-    if (tviswhite(tv)) gc_mark(g, gcV(tv)); }
-
-void gc_mark(global_State *g, GCobj *o);
-
-static void gc_marktv2(global_State *g, TValue *tv)
-{
-  lua_assert(!tvisgcv(tv) || (~itype(tv) == gcval(tv)->gch.gct));
-
-  if (ptr2cell(gcV(tv)) == 0) {
-    hugeblock_mark(g, gcV(tv));
-    return;
-  }
-
-  if (tviswhite(tv)) {
-    if (tvisstr(tv) || tviscdata(tv)) {
-      arenaobj_markcdstr(gcV(tv));
-    } else {
-      gc_mark(g, gcV(tv));
-    }
-  }
-}
+    if (tvisgcv(tv) && (gc_ishugeblock(gcV(tv)) || arenaobj_iswhite(gcV(tv)))) gc_mark(g, gcV(tv), ~itype(tv)); }
 
 /* Mark a GCobj (if needed). */
 #define gc_markobj(g, o) \
-  { if (iswhite(obj2gco(o))) gc_mark(g, obj2gco(o)); }
+  { if (gc_ishugeblock(o) || arenaobj_iswhite(obj2gco(o))) gc_mark(g, obj2gco(o), obj2gco(o)->gch.gct); }
+
+#define gc_markgct(g, o, gct) \
+  { if (gc_ishugeblock(o) || arenaobj_iswhite(obj2gco(o))) gc_mark(g, obj2gco(o), gct); }
+
+#define gc_mark_tab(g, o) \
+  { if (arenaobj_iswhite(obj2gco(o))) gc_mark(g, obj2gco(o), ~LJ_TTAB); }
 
 /* Mark a string object. */
-#define gc_mark_str(s)		((s)->marked &= (uint8_t)~LJ_GC_WHITES)
+#define gc_mark_str(g, s)	\
+  { if (gc_ishugeblock(s) || arenaobj_iswhite(obj2gco(s))) gc_mark(g, obj2gco(s), ~LJ_TSTR); }
 
 /* Mark a white GCobj. */
-void gc_mark(global_State *g, GCobj *o)
+void gc_mark(global_State *g, GCobj *o, int gct)
 {
-  int gct = o->gch.gct;
-  lua_assert(iswhite(o) && !isdead(g, o));
-  white2gray(o);
+  lua_assert((gc_ishugeblock(o) || iswhite(g, o)) && !isdead(g, o));
 
-  if (ptr2cell(o) != 0) {
-   // arena_markgco(g, o);
-  } else {
+  /* Huge objects are always unconditionally sent to us to make white checks simple */
+  if (LJ_UNLIKELY(gc_ishugeblock(o))) {
     hugeblock_mark(g, o);
+
+    /* No further processing */
+    if (gct != ~LJ_TUDATA) {
+      return;
+    }
   }
-  
 
   if (LJ_UNLIKELY(gct == ~LJ_TUDATA)) {
     GCtab *mt = tabref(gco2ud(o)->metatable);
-    gray2black(o);  /* Userdata are never gray. */
-    if (mt) gc_markobj(g, mt);
-    gc_markobj(g, tabref(gco2ud(o)->env));
+    arenaobj_markcdstr(o);  /* Userdata are never gray. */
+    if (mt) gc_mark_tab(g, mt);
+    gc_mark_tab(g, tabref(gco2ud(o)->env));
   } else if (LJ_UNLIKELY(gct == ~LJ_TUPVAL)) {
     GCupval *uv = gco2uv(o);
+    arenaobj_toblack(o);
     gc_marktv(g, uvval(uv));
     if (uv->closed)
-      gray2black(o);  /* Closed upvalues are never gray. */
-  } else if (gct != ~LJ_TSTR && gct != ~LJ_TCDATA) {
+      gc_markobj(g, o);  /* Closed upvalues are never gray. */
+  } else if (gct == ~LJ_TSTR || gct == ~LJ_TCDATA) {
+    arenaobj_markcdstr(o);
+  } else {
     lua_assert(gct == ~LJ_TFUNC || gct == ~LJ_TTAB ||
-	       gct == ~LJ_TTHREAD || gct == ~LJ_TPROTO || gct == ~LJ_TTRACE);
-    setgcrefr(o->gch.gclist, g->gc.gray);
-    setgcref(g->gc.gray, o);
+               gct == ~LJ_TTHREAD || gct == ~LJ_TPROTO || gct == ~LJ_TTRACE);
+    arena_marktrav(g, o);
   }
 }
 
@@ -128,13 +138,23 @@ static void gc_mark_gcroot(global_State *g)
 /* Start a GC cycle and mark the root set. */
 static void gc_mark_start(global_State *g)
 {
-  setgcrefnull(g->gc.gray);
   setgcrefnull(g->gc.grayagain);
-  setgcrefnull(g->gc.weak);
+  gc_markobj(g, &G2GG(g)->L);
+  gc_mark_str(g, &g->strempty);
   gc_markobj(g, mainthread(g));
-  gc_markobj(g, tabref(mainthread(g)->env));
+  gc_mark_tab(g, tabref(mainthread(g)->env));
   gc_marktv(g, &g->registrytv);
   gc_mark_gcroot(g);
+
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+    if (lj_gc_arenaflags(g, i) & ArenaFlag_FixedList) {
+      arena_markfixed(g, arena);
+    } else {
+      lua_assert(!mref(arena_extrainfo(arena)->fixedcells, GCCellID1));
+    }
+  }
+  lj_gc_resetgrayssb(g);
   SetGCState(g, GCSpropagate);
 }
 
@@ -144,52 +164,46 @@ static void gc_mark_uv(global_State *g)
   GCupval *uv;
   for (uv = uvnext(&g->uvhead); uv != &g->uvhead; uv = uvnext(uv)) {
     lua_assert(uvprev(uvnext(uv)) == uv && uvnext(uvprev(uv)) == uv);
-    if (isgray(obj2gco(uv)))
+    lua_assert(!arenaobj_isdead(uv));
+    if (arenaobj_isblack(obj2gco(uv)))
       gc_marktv(g, uvval(uv));
   }
 }
 
-/* Mark userdata in mmudata list. */
-static void gc_mark_mmudata(global_State *g)
+static void gc_sweep_uv(global_State *g)
 {
-  GCobj *root = gcref(g->gc.mmudata);
-  GCobj *u = root;
-  if (u) {
-    do {
-      u = gcnext(u);
-      makewhite(g, u);  /* Could be from previous GC. */
-      gc_mark(g, u);
-    } while (u != root);
+  GCupval *uv;
+  for (uv = uvnext(&g->uvhead); uv != &g->uvhead; uv = uvnext(uv)) {
+    lua_assert(uvprev(uvnext(uv)) == uv && uvnext(uvprev(uv)) == uv);
+    if (arenaobj_iswhite(obj2gco(uv))) {
+      setgcrefr(uvnext(uv)->prev, uv->prev);
+      setgcrefr(uvprev(uv)->next, uv->next);
+    }
   }
 }
 
-/* Separate userdata objects to be finalized to mmudata list. */
+/* Separate userdata objects to be finalized */
 size_t lj_gc_separateudata(global_State *g, int all)
 {
+  lua_State *L = mainthread(g);
   size_t m = 0;
-  GCRef *p = &mainthread(g)->nextgc;
-  GCobj *o;
-  while ((o = gcref(*p)) != NULL) {
-    if (!(iswhite(o) || all) || isfinalized(gco2ud(o))) {
-      p = &o->gch.nextgc;  /* Nothing to do. */
-    } else if (!lj_meta_fastg(g, tabref(gco2ud(o)->metatable), MM_gc)) {
-      markfinalized(o);  /* Done, as there's no __gc metamethod. */
-      p = &o->gch.nextgc;
-    } else {  /* Otherwise move userdata to be finalized to mmudata list. */
-      m += sizeudata(gco2ud(o));
-      markfinalized(o);
-      *p = o->gch.nextgc;
-      if (gcref(g->gc.mmudata)) {  /* Link to end of mmudata list. */
-	GCobj *root = gcref(g->gc.mmudata);
-	setgcrefr(o->gch.nextgc, root->gch.nextgc);
-	setgcref(root->gch.nextgc, o);
-	setgcref(g->gc.mmudata, o);
-      } else {  /* Create circular list. */
-	setgcref(o->gch.nextgc, o);
-	setgcref(g->gc.mmudata, o);
+  CellIdChunk *list = idlist_new(L);
+  list->count = 0;
+  list->next = NULL;
+  TimerStart(gc_separateudata);
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+
+    if (arena_finalizers(arena)) {
+      CellIdChunk *whites = arena_separatefinalizers(g, arena, list);
+      if (whites) {
+        g->gc.freelists[i].finalizbles = list;
+        list = idlist_new(L);
       }
     }
   }
+  TimerEnd(gc_separateudata);
+  m += hugeblock_checkfinalizers(g);
   return m;
 }
 
@@ -201,8 +215,9 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
   int weak = 0;
   cTValue *mode;
   GCtab *mt = tabref(t->metatable);
+  cleargray(obj2gco(t));
   if (mt)
-    gc_markobj(g, mt);
+    gc_mark_tab(g, mt);
   mode = lj_meta_fastg(g, mt, MM_mode);
   if (mode && tvisstr(mode)) {  /* Valid __mode field? */
     const char *modestr = strVdata(mode);
@@ -214,8 +229,8 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
     }
     if (weak > 0) {  /* Weak tables are cleared in the atomic phase. */
       t->marked = (uint8_t)((t->marked & ~LJ_GC_WEAK) | weak);
-      setgcrefr(t->gclist, g->gc.weak);
-      setgcref(g->gc.weak, obj2gco(t));
+      //FIXME: weaktables setgcrefr(t->gclist, g->gc.weak);
+      //setgcref(g->gc.weak, obj2gco(t));
     }
   }
   if (weak == LJ_GC_WEAK)  /* Nothing to mark if both keys/values are weak. */
@@ -225,19 +240,19 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
     for (i = 0; i < asize; i++)
       gc_marktv(g, arrayslot(t, i));
   }
-//  if (t->asize && !hascolo_array(t))
- //   arena_markgcvec(g, arrayslot(t, 0), t->asize * sizeof(TValue));
+  if (t->asize && !hascolo_array(t))
+    arena_markgcvec(g, arrayslot(t, 0), t->asize * sizeof(TValue));
   if (t->hmask > 0) {  /* Mark hash part. */
     Node *node = noderef(t->node);
     MSize i, hmask = t->hmask;
- //   if(!hascolo_hash(t))
- //     arena_markgcvec(g, node, hmask * sizeof(Node));
+    if (!hascolo_hash(t))
+      arena_markgcvec(g, node, hmask * sizeof(Node));
     for (i = 0; i <= hmask; i++) {
       Node *n = &node[i];
       if (!tvisnil(&n->val)) {  /* Mark non-empty slot. */
-	lua_assert(!tvisnil(&n->key));
-	if (!(weak & LJ_GC_WEAKKEY)) gc_marktv(g, &n->key);
-	if (!(weak & LJ_GC_WEAKVAL)) gc_marktv(g, &n->val);
+        lua_assert(!tvisnil(&n->key));
+        if (!(weak & LJ_GC_WEAKKEY)) gc_marktv(g, &n->key);
+        if (!(weak & LJ_GC_WEAKVAL)) gc_marktv(g, &n->val);
       }
     }
   }
@@ -247,7 +262,8 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
 /* Traverse a function. */
 static void gc_traverse_func(global_State *g, GCfunc *fn)
 {
-  gc_markobj(g, tabref(fn->c.env));
+  cleargray((GCobj *)fn);
+  gc_mark_tab(g, tabref(fn->c.env));
   if (isluafunc(fn)) {
     uint32_t i;
     lua_assert(fn->l.nupvalues <= funcproto(fn)->sizeuv);
@@ -267,11 +283,7 @@ static void gc_marktrace(global_State *g, TraceNo traceno)
 {
   GCobj *o = obj2gco(traceref(G2J(g), traceno));
   lua_assert(traceno != G2J(g)->cur.traceno);
-  if (iswhite(o)) {
-    white2gray(o);
-    setgcrefr(o->gch.gclist, g->gc.gray);
-    setgcref(g->gc.gray, o);
-  }
+  gc_markgct(g, o, ~LJ_TTRACE);
 }
 
 /* Traverse a trace. */
@@ -282,12 +294,12 @@ static void gc_traverse_trace(global_State *g, GCtrace *T)
   for (ref = T->nk; ref < REF_TRUE; ref++) {
     IRIns *ir = &T->ir[ref];
     if (ir->o == IR_KGC)
-      gc_markobj(g, ir_kgc(ir));
+      gc_markgct(g, ir_kgc(ir), irt_toitype(ir->t));
   }
   if (T->link) gc_marktrace(g, T->link);
   if (T->nextroot) gc_marktrace(g, T->nextroot);
   if (T->nextside) gc_marktrace(g, T->nextside);
-  gc_markobj(g, gcref(T->startpt));
+  gc_mark(g, gcref(T->startpt), ~LJ_TPROTO);
 }
 
 /* The current trace is a GC root while not anchored in the prototype (yet). */
@@ -300,7 +312,7 @@ static void gc_traverse_trace(global_State *g, GCtrace *T)
 static void gc_traverse_proto(global_State *g, GCproto *pt)
 {
   ptrdiff_t i;
-  gc_mark_str(proto_chunkname(pt));
+  gc_mark_str(g, proto_chunkname(pt));
   for (i = -(ptrdiff_t)pt->sizekgc; i < 0; i++)  /* Mark collectable consts. */
     gc_markobj(g, proto_kgc(pt, i));
 #if LJ_HASJIT
@@ -340,14 +352,16 @@ static void gc_traverse_thread(global_State *g, lua_State *th)
   lj_state_shrinkstack(th, gc_traverse_frames(g, th));
 }
 
-size_t gc_traverse(global_State *g, GCobj *o)
+GCSize gc_traverse(global_State *g, GCobj *o)
 {
   int gct = o->gch.gct;
 
   if (LJ_LIKELY(gct == ~LJ_TTAB)) {
     GCtab *t = gco2tab(o);
-    if (gc_traverse_tab(g, t) > 0)
-      black2gray(o);  /* Keep weak tables gray. */
+    if (gc_traverse_tab(g, t) > 0) {
+      lua_assert(0);
+      //black2gray(o);  /* Keep weak tables gray. */
+    }
     return sizeof(GCtab) + sizeof(TValue) * t->asize +
 			   sizeof(Node) * (t->hmask + 1);
   } else if (LJ_LIKELY(gct == ~LJ_TFUNC)) {
@@ -363,7 +377,8 @@ size_t gc_traverse(global_State *g, GCobj *o)
     lua_State *th = gco2th(o);
     setgcrefr(th->gclist, g->gc.grayagain);
     setgcref(g->gc.grayagain, o);
-    black2gray(o);  /* Threads are never black. */
+    //black2gray(o);  /* Threads are never black. */
+    //cleargray(o);
     gc_traverse_thread(g, th);
     return sizeof(lua_State) + sizeof(TValue) * th->stacksize;
   } else {
@@ -379,87 +394,211 @@ size_t gc_traverse(global_State *g, GCobj *o)
   }
 }
 
-/* Propagate one gray object. Traverse it and turn it black. */
-static size_t propagatemark(global_State *g)
+typedef struct pqueue {
+  MSize size;
+  MSize count;
+  GCArena** array;
+}pqueue;
+
+pqueue _greyqueu = { 0 };
+pqueue* greyqueu = &_greyqueu;
+
+void pqueue_init(lua_State *L, pqueue* q)
 {
-  GCobj *o = gcref(g->gc.gray);
-  lua_assert(isgray(o));
-  gray2black(o);
-  setgcrefr(g->gc.gray, o->gch.gclist);  /* Remove from gray list. */
-  return gc_traverse(g, o);
+  q->size = 16;
+  q->count = 0;
+  q->array = lj_mem_newvec(L, q->size, GCArena*);
+}
+
+#define child_left(idx) (idx * 2 + 1)
+#define child_right(idx) (idx * 2 + 2)
+#define parentidx(idx) ((idx - 1) / 2)
+
+void pqueue_pushup(pqueue* q, MSize idx)
+{
+  GCArena *arena = q->array[idx];
+  MSize greylen = arena_greysize(arena);
+  MSize i = idx;
+
+  while (i != 0) {
+    GCArena *parent = q->array[parentidx(i)];
+    MSize parentlen = arena_greysize(parent);
+    /* If parents queue is smaller swap it down */
+    if (parentlen < greylen) {
+      q->array[parentidx(i)] = arena;
+      q->array[i] = parent;
+    }
+    i = parentidx(i);
+    arena = parent;
+    greylen = parentlen;
+  }
+}
+
+void pqueue_insert(lua_State *L, pqueue* q, GCArena *arena)
+{
+  /* TODO: cache queue size in the lower bits of the pointer with some refresh mechanism */
+  if ((q->count+1) >= q->size) {
+    lj_mem_growvec(L, q->array, q->size, LJ_MAX_MEM32, GCArena*);
+  }
+  q->array[q->count] = arena;
+  pqueue_pushup(q, q->count);
+  q->count++;
+}
+
+void pqueue_pushdown(pqueue* q, MSize idx)
+{
+  MSize i = idx;
+
+  while (1) {
+    GCArena *arena = q->array[i];
+    if (child_right(i) >= q->count) {
+      break;
+    }
+
+    MSize lsize = arena_greysize(q->array[child_left(i)]);
+    MSize rsize = arena_greysize(q->array[child_right(i)]);
+    MSize cidx = lsize > rsize ? child_left(i) : child_right(i);
+    GCArena *child = lsize > rsize ? q->array[child_left(i)] : q->array[child_right(i)];
+    MSize csize = lsize > rsize ? lsize : rsize;
+
+    if (csize > arena_greysize(arena)) {
+      q->array[i] = q->array[cidx];
+      q->array[cidx] = arena;
+      i = cidx;
+    } else {
+      return;
+    }
+  }
+}
+
+/* Rotate tree now that max was emptied */
+void pqueue_rotatemax(pqueue* q)
+{
+  GCArena *maxarena = q->array[0];
+
+  if (q->count <= 1) {
+    return;
+  }
+
+  q->array[0] = q->array[q->count-1];
+  q->array[q->count-1] = maxarena;
+  pqueue_pushdown(q, 0);
+}
+
+GCArena *pqueue_peekmax(pqueue* q)
+{
+  if (arena_greysize(q->array[0]) == 0) {
+    if (q->count == 1) {
+      return NULL;
+    } else {
+      pqueue_rotatemax(q);
+      /* FIXME: dirty hack for queues lengths changing from zero after being inserted */
+      if (arena_greysize(q->array[0]) == 0) {
+        for (MSize i = 0; i < q->count; i++) {
+          if (arena_greysize(q->array[i]) != 0) {
+            return q->array[i];
+          }
+        }
+        return NULL;
+      }
+      return q->array[0];
+    }
+  }
+
+  return q->array[0];
+}
+
+static GCArena* largestgray(global_State *g)
+{
+  MSize maxqueue = 0;
+  int arenai = -1;
+
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+    if (lj_gc_arenaflags(g, i) & ArenaFlag_Empty) continue;
+    if (arena_greysize(arena)) {
+      //printf("arena(%d) greyqueue = %d\n", i, arena_greysize(arena));
+    }
+    if (arena_greysize(arena) > maxqueue) {
+      maxqueue = arena_greysize(arena);
+      arenai = i;
+    }
+  }
+
+  return arenai != -1 ? lj_gc_arenaref(g, arenai) : NULL;
 }
 
 /* Propagate all gray objects. */
-static size_t gc_propagate_gray(global_State *g)
+static GCSize gc_propagate_gray(global_State *g)
 {
-  size_t m = 0;
-  while (gcref(g->gc.gray) != NULL)
-    m += propagatemark(g);
-  return m;
+  lua_State *L = mainthread(g);
+  GCSize total = 0;
+  GCArena *maxarena = NULL;
+  Section_Start(propagate_gray);
+
+  if (greyqueu->size == 0) {
+    pqueue_init(mainthread(g), greyqueu);
+  }
+
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+    /* Skip empty and non traversable arenas */
+    if ((lj_gc_arenaflags(g, i) & (ArenaFlag_Empty|ArenaFlag_TravObjs)) != ArenaFlag_TravObjs) {
+      continue;
+    }
+    pqueue_insert(L, greyqueu, arena);
+  }
+
+  while (1) {
+    maxarena = pqueue_peekmax(greyqueu);
+    //maxarena = largestgray(g);
+    /* Stop once all arena queues are empty */
+    if (maxarena == NULL) {
+      break;
+    }
+
+    MSize count = 0;
+    GCSize omem = arena_propgrey(g, maxarena, -1, &count);
+    /* Swap the arena to the back of the queue now its grey queue is empty */
+    pqueue_rotatemax(greyqueu);
+    total += omem;
+
+    // printf("propagated %d objects in arena(%d), with a size of %d\n", count, arena_extrainfo(maxarena)->id, omem);
+  }
+  Section_End(propagate_gray);
+
+  return total;
 }
 
 /* -- Sweep phase --------------------------------------------------------- */
 
-/* Type of GC free functions. */
-typedef void (LJ_FASTCALL *GCFreeFunc)(global_State *g, GCobj *o);
-
-/* GC free functions for LJ_TSTR .. LJ_TUDATA. ORDER LJ_T */
-static const GCFreeFunc gc_freefunc[] = {
-  (GCFreeFunc)lj_str_free,
-  (GCFreeFunc)lj_func_freeuv,
-  (GCFreeFunc)lj_state_free,
-  (GCFreeFunc)lj_func_freeproto,
-  (GCFreeFunc)lj_func_free,
-#if LJ_HASJIT
-  (GCFreeFunc)lj_trace_free,
-#else
-  (GCFreeFunc)0,
-#endif
-#if LJ_HASFFI
-  (GCFreeFunc)lj_cdata_free,
-#else
-  (GCFreeFunc)0,
-#endif
-  (GCFreeFunc)lj_tab_free,
-  (GCFreeFunc)lj_udata_free
-};
-
-/* Full sweep of a GC list. */
-#define gc_fullsweep(g, p)	gc_sweep(g, (p), ~(uint32_t)0)
-
-/* Partial sweep of a GC list. */
-static GCRef *gc_sweep(global_State *g, GCRef *p, uint32_t lim)
+static int gc_sweepstring(global_State *g)
 {
-  /* Mask with other white and LJ_GC_FIXED. Or LJ_GC_SFIXED on shutdown. */
-  int ow = otherwhite(g);
-  GCobj *o;
-  while ((o = gcref(*p)) != NULL && lim-- > 0) {
-    if (o->gch.gct == ~LJ_TTHREAD)  /* Need to sweep open upvalues, too. */
-      gc_fullsweep(g, &gco2th(o)->openupval);
-    if (((o->gch.marked ^ LJ_GC_WHITES) & ow)) {  /* Black or current white? */
-      lua_assert(!isdead(g, o) || (o->gch.marked & LJ_GC_FIXED));
-      makewhite(g, o);  /* Value is alive, change to the current white. */
-      p = &o->gch.nextgc;
-    } else {  /* Otherwise value is dead, free it. */
-      lua_assert(isdead(g, o) || ow == LJ_GC_SFIXED);
-      setgcrefr(*p, o->gch.nextgc);
-      if (o == gcref(g->gc.root))
-	setgcrefr(g->gc.root, o->gch.nextgc);  /* Adjust list anchor. */
-      gc_freefunc[o->gch.gct - ~LJ_TSTR](g, o);
+  GCRef str = g->strhash[g->gc.sweepstr]; /* Sweep one chain. */
+  GCstr *prev = NULL;
+
+  while (gcref(str)) {
+    GCstr *s = strref(str);
+    str = s->nextgc;
+    if (iswhite(g, s)) {
+      *(prev ? &prev->nextgc : &g->strhash[g->gc.sweepstr]) = s->nextgc;
+    } else {
+      prev = s;
     }
   }
-  return p;
+
+  return ++g->gc.sweepstr <= g->strmask;
 }
 
 /* Check whether we can clear a key or a value slot from a table. */
-static int gc_mayclear(cTValue *o, int val)
+static int gc_mayclear(global_State *g, cTValue *o, int val)
 {
   if (tvisgcv(o)) {  /* Only collectable objects can be weak references. */
     if (tvisstr(o)) {  /* But strings cannot be used as weak references. */
-      gc_mark_str(strV(o));  /* And need to be marked. */
+      gc_mark_str(g, strV(o));  /* And need to be marked. */
       return 0;
     }
-    if (iswhite(gcV(o)))
+    if (iswhite(g, gcV(o)))
       return 1;  /* Object is about to be collected. */
     if (tvisudata(o) && val && isfinalized(udataV(o)))
       return 1;  /* Finalized userdata is dropped only from values. */
@@ -468,7 +607,7 @@ static int gc_mayclear(cTValue *o, int val)
 }
 
 /* Clear collected entries from weak tables. */
-static void gc_clearweak(GCobj *o)
+static void gc_clearweak(global_State *g, GCobj *o)
 {
   while (o) {
     GCtab *t = gco2tab(o);
@@ -476,30 +615,41 @@ static void gc_clearweak(GCobj *o)
     if ((t->marked & LJ_GC_WEAKVAL)) {
       MSize i, asize = t->asize;
       for (i = 0; i < asize; i++) {
-	/* Clear array slot when value is about to be collected. */
-	TValue *tv = arrayslot(t, i);
-	if (gc_mayclear(tv, 1))
-	  setnilV(tv);
+        /* Clear array slot when value is about to be collected. */
+        TValue *tv = arrayslot(t, i);
+        if (gc_mayclear(g, tv, 1))
+          setnilV(tv);
       }
     }
     if (t->hmask > 0) {
       Node *node = noderef(t->node);
       MSize i, hmask = t->hmask;
       for (i = 0; i <= hmask; i++) {
-	Node *n = &node[i];
-	/* Clear hash slot when key or value is about to be collected. */
-	if (!tvisnil(&n->val) && (gc_mayclear(&n->key, 0) ||
-				  gc_mayclear(&n->val, 1)))
-	  setnilV(&n->val);
+        Node *n = &node[i];
+        /* Clear hash slot when key or value is about to be collected. */
+        if (!tvisnil(&n->val) && (gc_mayclear(g, &n->key, 0) ||
+          gc_mayclear(g, &n->val, 1)))
+          setnilV(&n->val);
       }
     }
     o = gcref(t->gclist);
   }
 }
 
+void lj_gc_setfinalizable(lua_State *L, GCobj *o, GCtab *mt)
+{
+  lua_assert(o->gch.gct == ~LJ_TCDATA || o->gch.gct == ~LJ_TUDATA);
+  if (!gc_ishugeblock(o)) {
+    arena_addfinalizer(L, ptr2arena(o), o);
+  } else {
+    hugeblock_setfinalizable(L, o);
+  }
+  o->gch.marked |= LJ_GC_FINALIZED;
+}
+
 /* Call a userdata or cdata finalizer. */
 static void gc_call_finalizer(global_State *g, lua_State *L,
-			      cTValue *mo, GCobj *o)
+  cTValue *mo, GCobj *o)
 {
   /* Save and restore lots of state around the __gc callback. */
   uint8_t oldh = hook_save(g);
@@ -521,25 +671,18 @@ static void gc_call_finalizer(global_State *g, lua_State *L,
     lj_err_throw(L, errcode);  /* Propagate errors. */
 }
 
-/* Finalize one userdata or cdata object from the mmudata list. */
-static void gc_finalize(lua_State *L)
+/* Finalize a userdata or cdata object */
+static void gc_finalize(lua_State *L, GCobj *o)
 {
   global_State *g = G(L);
-  GCobj *o = gcnext(gcref(g->gc.mmudata));
   cTValue *mo;
   lua_assert(tvref(g->jit_base) == NULL);  /* Must not be called on trace. */
-  /* Unchain from list of userdata to be finalized. */
-  if (o == gcref(g->gc.mmudata))
-    setgcrefnull(g->gc.mmudata);
-  else
-    setgcrefr(gcref(g->gc.mmudata)->gch.nextgc, o->gch.nextgc);
+
 #if LJ_HASFFI
   if (o->gch.gct == ~LJ_TCDATA) {
     TValue tmp, *tv;
     /* Add cdata back to the GC list and make it white. */
-    setgcrefr(o->gch.nextgc, g->gc.root);
-    setgcref(g->gc.root, o);
-    makewhite(g, o);
+
     o->gch.marked &= (uint8_t)~LJ_GC_CDATA_FIN;
     /* Resolve finalizer. */
     setcdataV(L, &tmp, gco2cd(o));
@@ -553,9 +696,6 @@ static void gc_finalize(lua_State *L)
     return;
   }
 #endif
-  /* Add userdata back to the main userdata list and make it white. */
-  setgcrefr(o->gch.nextgc, mainthread(g)->nextgc);
-  setgcref(mainthread(g)->nextgc, o);
   makewhite(g, o);
   /* Resolve the __gc metamethod. */
   mo = lj_meta_fastg(g, tabref(gco2ud(o)->metatable), MM_gc);
@@ -563,11 +703,51 @@ static void gc_finalize(lua_State *L)
     gc_call_finalizer(g, L, mo, o);
 }
 
+static int gc_finalize_step(lua_State *L)
+{
+  global_State *g = G(L);
+  CellIdChunk *chunk;
+
+  while (g->gc.curarena < g->gc.arenastop) {
+    GCArena *arena = lj_gc_curarena(g);
+    chunk = arena_finalizers(arena);/*TODO: pending finalzer list*/
+    if (chunk && chunk->count == 0) {
+      chunk = chunk->next;
+    }
+
+    if (chunk != NULL) {
+      gc_finalize(L, (GCobj *)arena_cell(arena, chunk->cells[--chunk->count]));
+      return 1;
+    } else {
+      g->gc.curarena++;
+    }
+  }
+
+  return 0;
+}
+
 /* Finalize all userdata objects from mmudata list. */
 void lj_gc_finalize_udata(lua_State *L)
 {
-  while (gcref(G(L)->gc.mmudata) != NULL)
-    gc_finalize(L);
+  global_State *g = G(L);
+  CellIdChunk *chunk;
+
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+    chunk = g->gc.freelists[i].finalizbles;
+
+    while (chunk) {
+      CellIdChunk *next;
+      for (MSize j = 0; j < chunk->count; j++) {
+        gc_finalize(L, arena_cellobj(arena, chunk->cells[j]));
+      }
+
+      next = chunk->next;
+      idlist_freechunk(g, chunk);
+      chunk = next;
+    }
+    g->gc.freelists[i].finalizbles = NULL;
+  }
 }
 
 #if LJ_HASFFI
@@ -583,13 +763,13 @@ void lj_gc_finalize_cdata(lua_State *L)
     setgcrefnull(t->metatable);  /* Mark finalizer table as disabled. */
     for (i = (ptrdiff_t)t->hmask; i >= 0; i--)
       if (!tvisnil(&node[i].val) && tviscdata(&node[i].key)) {
-	GCobj *o = gcV(&node[i].key);
-	TValue tmp;
-	makewhite(g, o);
-	o->gch.marked &= (uint8_t)~LJ_GC_CDATA_FIN;
-	copyTV(L, &tmp, &node[i].val);
-	setnilV(&node[i].val);
-	gc_call_finalizer(g, L, &tmp, o);
+        GCobj *o = gcV(&node[i].key);
+        TValue tmp;
+        makewhite(g, o);
+        o->gch.marked &= (uint8_t)~LJ_GC_CDATA_FIN;
+        copyTV(L, &tmp, &node[i].val);
+        setnilV(&node[i].val);
+        gc_call_finalizer(g, L, &tmp, o);
       }
   }
 }
@@ -598,23 +778,19 @@ void lj_gc_finalize_cdata(lua_State *L)
 /* Free all remaining GC objects. */
 void lj_gc_freeall(global_State *g)
 {
-  MSize i, strmask;
-  /* Free everything, except super-fixed objects (the main thread). */
-  g->gc.currentwhite = LJ_GC_WHITES | LJ_GC_SFIXED;
-  gc_fullsweep(g, &g->gc.root);
-  strmask = g->strmask;
-  for (i = 0; i <= strmask; i++)  /* Free all string hash chains. */
-    gc_fullsweep(g, &g->strhash[i]);
-
-  for (MSize i = 1; i < g->gc.arenastop; i++) {
+  MSize i;
+  setgcref(g->gc.root, obj2gco(mainthread(g)));
+  g->strnum = 0;
+  /* Skip GG arena */
+  for (i = 1; i < g->gc.arenastop; i++) {
     GCArena *arena = lj_gc_arenaref(g, i);
-    lua_assert(arena_firstallocated(arena) == 0);
     arena_destroy(g, arena);
   }
+  hugeblock_freeall(g);
 
   lj_mem_freevec(g, g->gc.arenas, g->gc.arenassz, GCArena*);
   lj_mem_freevec(g, g->gc.freelists, g->gc.arenassz, ArenaFreeList);
-  lj_mem_freevec(g, (void*)(((intptr_t)mref(g->gc.grayssb, GCRef)) & ~GRAYSSB_MASK), 
+  lj_mem_freevec(g, (void*)(((intptr_t)mref(g->gc.grayssb, GCRef)) & ~GRAYSSB_MASK),
                  GRAYSSBSZ, GCRef);
 }
 
@@ -721,51 +897,118 @@ void lj_gc_init(global_State *g, lua_State *L, GCArena* GGarena)
 
 /* -- Collector ----------------------------------------------------------- */
 
+static size_t gc_mark_threads(global_State *g)
+{
+  size_t m = 0;
+  GCRef gray = g->gc.grayagain;
+  while (gcref(gray) != NULL) {
+    lua_State *th = gco2th(gcref(gray));
+    gc_traverse_thread(g, th);
+    gray = th->gclist;
+  }
+  setgcrefnull(g->gc.grayagain);
+  return m;
+}
+
 /* Atomic part of the GC cycle, transitioning from mark to sweep phase. */
 static void atomic(global_State *g, lua_State *L)
 {
   size_t udsize;
- // arena_traversegrey(g, g->travarena, -1);
-
+  Section_Start(gc_atomic);
+  lj_gc_emptygrayssb(g); /* Mark anything left in the gray SSB buffer */
   gc_mark_uv(g);  /* Need to remark open upvalues (the thread may be dead). */
   gc_propagate_gray(g);  /* Propagate any left-overs. */
 
-  setgcrefr(g->gc.gray, g->gc.weak);  /* Empty the list of weak tables. */
-  setgcrefnull(g->gc.weak);
-  lua_assert(!iswhite(obj2gco(mainthread(g))));
+  /* Empty the list of weak tables. */
+  lua_assert(!iswhite(g, obj2gco(mainthread(g))));
   gc_markobj(g, L);  /* Mark running thread. */
   gc_traverse_curtrace(g);  /* Traverse current trace. */
   gc_mark_gcroot(g);  /* Mark GC roots (again). */
   gc_propagate_gray(g);  /* Propagate all of the above. */
 
-  setgcrefr(g->gc.gray, g->gc.grayagain);  /* Empty the 2nd chance list. */
-  setgcrefnull(g->gc.grayagain);
-  gc_propagate_gray(g);  /* Propagate it. */
-  //arena_traversegrey(g, g->travarena, -1);
+ /* Empty the 2nd chance list. */
+  gc_mark_threads(g);
+  gc_propagate_gray(g);
 
   udsize = lj_gc_separateudata(g, 0);  /* Separate userdata to be finalized. */
-  gc_mark_mmudata(g);  /* Mark them. */
+ // gc_mark_mmudata(g);  /* Mark them. */
   udsize += gc_propagate_gray(g);  /* And propagate the marks. */
 
   /* All marking done, clear weak tables. */
-  gc_clearweak(gcref(g->gc.weak));
+  gc_clearweak(g, gcref(g->gc.weak));
 
   lj_buf_shrink(L, &g->tmpbuf);  /* Shrink temp buffer. */
 
+  gc_sweep_uv(g);
   /* Prepare for sweep phase. */
-  g->gc.currentwhite = (uint8_t)otherwhite(g);  /* Flip current white. */
-  g->strempty.marked = g->gc.currentwhite;
-  setmref(g->gc.sweep, &g->gc.root);
   g->gc.estimate = g->gc.total - (GCSize)udsize;  /* Initial estimate. */
+  Section_End(gc_atomic);
 }
 
-static void sweep_arenas(global_State *g)
+static void sweep_arena(global_State *g, MSize i)
 {
-  /*TODO: handling of multiple arenas */
+  lua_assert(!(lj_gc_arenaflags(g, i) & ArenaFlag_Swept));
+  GCArena *arena = lj_gc_arenaref(g, i);
+  MSize count = arena_majorsweep(arena);
+  ArenaFreeList *freelist = g->gc.freelists+i;
+  freelist->freeobjcount += count & 0xffff;
+
+  log_arenasweep(i, 0, count & 0xffff, arena_topcellid(arena));
+  /* If there no more live cells left flag the arena as empty and reset its bump and block state */
+  if (!(count & 0x10000)) {
+    lj_gc_setarenaflag(g, i, ArenaFlag_Empty);
+    lj_gc_cleararenaflags(g, i, ArenaFlag_NoBump);
+    arena_reset(arena);
+    freelist->freeobjcount = 0;
+    freelist->freecells = 0;
+  } else if (freelist->freeobjcount > 100) {
+
+  }
+
+  lj_gc_setarenaflag(g, i, ArenaFlag_Swept);
+}
+
+static void arenasweep_start(global_State *g)
+{
+  lua_assert(isblack(g, &g->strempty));
+  lua_assert(isblack(g, mainthread(g)));
+  MSize nontrav = 0, trav = 0;
 
   for (MSize i = 0; i < g->gc.arenastop; i++) {
-   // arena_majorsweep(g->gc.arenas[i]);
+    // arena_dumpwhitecells(g, lj_gc_arenaref(g, i));
   }
+
+  g->gc.curarena = 0;
+
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    lj_gc_cleararenaflags(g, i, ArenaFlag_Swept);
+    if (lj_gc_arenaref(g, i) == g->arena) {
+      nontrav = i;
+    } else if (lj_gc_arenaref(g, i) == g->travarena) {
+      trav = i;
+    }
+  }
+
+  sweep_arena(g, nontrav);
+  sweep_arena(g, trav);
+  //g->gc.total -= g->gc.atotal;
+  g->gc.atotal = 0;
+}
+
+static int arenasweep_step(global_State *g)
+{
+  MSize i;
+  for (i = g->gc.curarena; i < g->gc.arenastop; i++) {
+    if (!(lj_gc_arenaflags(g, i) & (ArenaFlag_Swept|ArenaFlag_Empty))) {
+      sweep_arena(g, i);
+      g->gc.curarena = i+1;
+      return 1;
+    }
+  }
+  g->gc.curarena = g->gc.arenastop;
+  /* All arenas sweepable have been swept */
+  hugeblock_sweep(g);
+  return 0;
 }
 
 /* GC state machine. Returns a cost estimate for each step performed. */
@@ -776,56 +1019,64 @@ static size_t gc_onestep(lua_State *L)
   case GCSpause:
     gc_mark_start(g);  /* Start a new GC cycle by marking all GC roots. */
     return 0;
-  case GCSpropagate:
-    if (gcref(g->gc.gray) != NULL)
-      return propagatemark(g);  /* Propagate one gray object. */
-    SetGCState(g, GCSatomic); /* End of mark phase. */
-    return 0;
+  case GCSpropagate: {
+    GCSize total = gc_propagate_gray(g); /* Propagate one gray object. */
+    if (total != 0) {
+      return total;
+    } else {
+      SetGCState(g, GCSatomic);  /* End of mark phase. */
+      return 0;
+    }
+  }
   case GCSatomic:
     if (tvref(g->jit_base))  /* Don't run atomic phase on trace. */
       return LJ_MAX_MEM;
     atomic(g, L);
     SetGCState(g, GCSsweepstring);  /* Start of sweep phase. */
     g->gc.sweepstr = 0;
-    return 0;
+    //return 0;
   case GCSsweepstring: {
     GCSize old = g->gc.total;
-    gc_fullsweep(g, &g->strhash[g->gc.sweepstr++]);  /* Sweep one chain. */
+    Section_Start(gc_sweepstring);
+    while (gc_sweepstring(g));
+    //gc_sweepstring(g);  /* Sweep one chain. */
+    Section_End(gc_sweepstring);
     if (g->gc.sweepstr > g->strmask) {
-      SetGCState(g, GCSsweep);  /* All string hash chains sweeped. */
+      /* All string hash chains sweeped. */
+      SetGCState(g, GCSsweep);
+      arenasweep_start(g);
     }
-    //lua_assert(old >= g->gc.total);
+    lua_assert(old >= g->gc.total);
     g->gc.estimate -= old - g->gc.total;
     return GCSWEEPCOST;
-    }
+  }
   case GCSsweep: {
     GCSize old = g->gc.total;
-    setmref(g->gc.sweep, gc_sweep(g, mref(g->gc.sweep, GCRef), GCSWEEPMAX));
-    sweep_arenas(g);
+    while (arenasweep_step(g));
     //lua_assert(old >= g->gc.total);
     g->gc.estimate -= old - g->gc.total;
-    if (gcref(*mref(g->gc.sweep, GCRef)) == NULL) {
-      if (g->strnum <= (g->strmask >> 2) && g->strmask > LJ_MIN_STRTAB*2-1)
-	lj_str_resize(L, g->strmask >> 1);  /* Shrink string table. */
-      if (gcref(g->gc.mmudata)) {  /* Need any finalizations? */
-	SetGCState(g, GCSfinalize);
+
+    if (g->strnum <= (g->strmask >> 2) && g->strmask > LJ_MIN_STRTAB*2-1)
+      lj_str_resize(L, g->strmask >> 1);  /* Shrink string table. */
+    if (gcref(g->gc.mmudata)) {  /* Need any finalizations? */
+      SetGCState(g, GCSfinalize);
 #if LJ_HASFFI
-	g->gc.nocdatafin = 1;
+      g->gc.nocdatafin = 1;
 #endif
-      } else {  /* Otherwise skip this phase to help the JIT. */
-	SetGCState(g, GCSpause);  /* End of GC cycle. */
-	g->gc.debt = 0;
-      }
+    } else {  /* Otherwise skip this phase to help the JIT. */
+      SetGCState(g, GCSpause);  /* End of GC cycle. */
+      g->gc.debt = 0;
     }
     return GCSWEEPMAX*GCSWEEPCOST;
-    }
+  }
   case GCSfinalize:
     if (gcref(g->gc.mmudata) != NULL) {
       if (tvref(g->jit_base))  /* Don't call finalizers on trace. */
-	return LJ_MAX_MEM;
-      gc_finalize(L);  /* Finalize one userdata object. */
+        return LJ_MAX_MEM;
+      /* Finalize one userdata object. */
+      gc_finalize_step(L);
       if (g->gc.estimate > GCFINALIZECOST)
-	g->gc.estimate -= GCFINALIZECOST;
+        g->gc.estimate -= GCFINALIZECOST;
       return GCFINALIZECOST;
     }
 #if LJ_HASFFI
@@ -846,6 +1097,8 @@ int LJ_FASTCALL lj_gc_step(lua_State *L)
   global_State *g = G(L);
   GCSize lim;
   int32_t ostate = g->vmstate;
+  int ret = 0;
+  Section_Start(gc_step);
   setvmstate(g, GC);
   lim = (GCSTEPSIZE/100) * g->gc.stepmul;
   if (lim == 0)
@@ -857,19 +1110,22 @@ int LJ_FASTCALL lj_gc_step(lua_State *L)
     if (g->gc.state == GCSpause) {
       g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
       g->vmstate = ostate;
+      Section_End(gc_step);
       return 1;  /* Finished a GC cycle. */
     }
   } while (sizeof(lim) == 8 ? ((int64_t)lim > 0) : ((int32_t)lim > 0));
   if (g->gc.debt < GCSTEPSIZE) {
     g->gc.threshold = g->gc.total + GCSTEPSIZE;
     g->vmstate = ostate;
-    return -1;
+    ret = -1;
   } else {
     g->gc.debt -= GCSTEPSIZE;
     g->gc.threshold = g->gc.total;
     g->vmstate = ostate;
-    return 0;
+    ret = 0;
   }
+  Section_End(gc_step);
+  return ret;
 }
 
 /* Ditto, but fix the stack top first. */
@@ -899,22 +1155,34 @@ void lj_gc_fullgc(lua_State *L)
   global_State *g = G(L);
   int32_t ostate = g->vmstate;
   setvmstate(g, GC);
-  if (g->gc.state <= GCSatomic) {  /* Caught somewhere in the middle. */
-    setmref(g->gc.sweep, &g->gc.root);  /* Sweep everything (preserving it). */
-    setgcrefnull(g->gc.gray);  /* Reset lists from partial propagation. */
-    setgcrefnull(g->gc.grayagain);
-    setgcrefnull(g->gc.weak);
-    SetGCState(g, GCSsweepstring);  /* Fast forward to the sweep phase. */
-    g->gc.sweepstr = 0;
+  Section_Start(gc_fullgc);
+  if (g->gc.state != GCSpause) {
+    /*FIXME: redesign assumption that we have 2 whites is no longer true  */
+    if (g->gc.state == GCSatomic) {  /* Caught somewhere in the middle. */
+      SetGCState(g, GCSsweepstring);  /* Fast forward to the sweep phase. */
+      g->gc.sweepstr = 0;
+    } else if (g->gc.state != GCSsweepstring) {
+
+      if (g->gc.state == GCSpropagate) {
+        for (MSize i = 0; i < g->gc.arenastop; i++) {
+          arena_towhite(lj_gc_arenaref(g, i));
+        }
+        SetGCState(g, GCSpause);
+        lj_gc_resetgrayssb(g);
+      } else {
+        lua_assert(0);
+      }
+    }
+    while (g->gc.state == GCSsweepstring || g->gc.state == GCSsweep)
+      gc_onestep(L);  /* Finish sweep. */
   }
-  while (g->gc.state == GCSsweepstring || g->gc.state == GCSsweep)
-    gc_onestep(L);  /* Finish sweep. */
   lua_assert(g->gc.state == GCSfinalize || g->gc.state == GCSpause);
   /* Now perform a full GC. */
   SetGCState(g, GCSpause);
   do { gc_onestep(L); } while (g->gc.state != GCSpause);
   g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
   g->vmstate = ostate;
+  Section_End(gc_fullgc);
 }
 
 /* -- Write barriers ------------------------------------------------------ */
@@ -922,25 +1190,36 @@ void lj_gc_fullgc(lua_State *L)
 /* Move the GC propagation frontier forward. */
 void lj_gc_barrierf(global_State *g, GCobj *o, GCobj *v)
 {
-  lua_assert(isblack(o) && iswhite(v) && !isdead(g, v) && !isdead(g, o));
+  lua_assert(!isdead(g, v) && !isdead(g, o));
   lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);
   lua_assert(o->gch.gct != ~LJ_TTAB);
-  /* Preserve invariant during propagation. Otherwise it doesn't matter. */
-  if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic)
-    gc_mark(g, v);  /* Move frontier forward. */
-  else
-    makewhite(g, o);  /* Make it white to avoid the following barrier. */
+
+  if (g->gc.state != GCSpause) {
+    /* Preserve invariant during propagation. Otherwise it doesn't matter. */
+    if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic) {
+      /* Move frontier forward. */
+      lj_gc_appendgrayssb(g, o);
+      setgray(o);
+    } else if (iswhite(g, v)) {
+      arena_markcell(ptr2arena(v), ptr2cell(v));
+      //makewhite(g, o);  /* Make it white to avoid the following barrier. */
+    }
+  } else {
+    setgray(o);
+  }
 }
 
 /* Specialized barrier for closed upvalue. Pass &uv->tv. */
 void LJ_FASTCALL lj_gc_barrieruv(global_State *g, TValue *tv)
 {
+  lua_assert(tvisgcv(tv));
 #define TV2MARKED(x) \
   (*((uint8_t *)(x) - offsetof(GCupval, tv) + offsetof(GCupval, marked)))
-  if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic)
-    gc_mark(g, gcV(tv));
-  else
-    TV2MARKED(tv) = (TV2MARKED(tv) & (uint8_t)~LJ_GC_COLORS) | curwhite(g);
+  if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic) {
+    lj_gc_appendgrayssb(g, gcV(tv));
+  } else {
+    TV2MARKED(tv) = (TV2MARKED(tv) & (uint8_t)~LJ_GC_COLORS);
+  }
 #undef TV2MARKED
 }
 
@@ -952,15 +1231,21 @@ void lj_gc_closeuv(global_State *g, GCupval *uv)
   copyTV(mainthread(g), &uv->tv, uvval(uv));
   setmref(uv->v, &uv->tv);
   uv->closed = 1;
-  setgcrefr(o->gch.nextgc, g->gc.root);
-  setgcref(g->gc.root, o);
-  if (isgray(o)) {  /* A closed upvalue is never gray, so fix this. */
+  //lua_assert(0); /*TODO: open upvalue cell id list for arenas . could also be list of threads in the arena as well */
+
+  if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic) {
+    if (tvisgcv(&uv->tv))
+      lj_gc_barrierf(g, o, gcV(&uv->tv));
+  } else {
+    if (tvisgcv(&uv->tv) && g->gc.state != GCSpause)
+      arenaobj_toblack(gcV(&uv->tv));
+  }
+
+  if (arenaobj_isblack(o)) {  /* A closed upvalue is never gray, so fix this. */
     if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic) {
-      gray2black(o);  /* Make it black and preserve invariant. */
-      if (tviswhite(&uv->tv))
-	lj_gc_barrierf(g, o, gcV(&uv->tv));
+
     } else {
-      makewhite(g, o);  /* Make it white, i.e. sweep the upvalue. */
+      // makewhite(g, o);  /* Make it white, i.e. sweep the upvalue. */
       lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);
     }
   }
@@ -974,6 +1259,77 @@ void lj_gc_barriertrace(global_State *g, uint32_t traceno)
     gc_marktrace(g, traceno);
 }
 #endif
+
+void lj_gc_resetgrayssb(global_State *g)
+{
+  GCRef *list = mref(g->gc.grayssb, GCRef);
+  intptr_t mask = ((intptr_t)mref(g->gc.grayssb, GCRef)) & GRAYSSB_MASK;
+
+  if (mask == 0) {
+    list = list-GRAYSSBSZ;
+  } else {
+    list = (GCRef *)(((intptr_t)list) & ~GRAYSSB_MASK);
+  }
+
+  /* Leave dummy value at the start so we always know if the list is completely empty or full */
+  setmref(g->gc.grayssb, list+1);
+}
+
+void LJ_FASTCALL lj_gc_emptygrayssb(global_State *g)
+{
+  GCRef *list = mref(g->gc.grayssb, GCRef);
+  intptr_t mask = ((intptr_t)mref(g->gc.grayssb, GCRef)) & GRAYSSB_MASK;
+  MSize i, limit;
+
+  if (mask == 0) {
+    list = list-GRAYSSBSZ;
+    limit = GRAYSSBSZ;
+  } else {
+    list = (GCRef *)(((intptr_t)list) & ~GRAYSSB_MASK);
+    limit = (MSize)(mask/sizeof(GCRef));
+  }
+
+  if (g->gc.state != GCSatomic && g->gc.state != GCSpropagate) {
+    lj_gc_resetgrayssb(g);
+    return;
+  }
+
+  TimerStart(gc_emptygrayssb);
+  /* Skip first dummy value */
+  for (i = 1; i < limit; i++) {
+    GCobj *o = gcref(list[i]);
+    if (!gc_ishugeblock(o)) {
+      /* Skip false positive triggered barriers since fast barrier only checks greybit
+      ** and not if the object being stored into is black
+      */
+      if (arenaobj_iswhite(o)) {
+        continue;
+      }
+      arena_marktrav(g, o);
+    } else {
+      hugeblock_mark(g, o);
+    }
+  }
+  TimerEnd(gc_emptygrayssb);
+  lj_gc_resetgrayssb(g);
+}
+
+void lj_gc_setfixed(lua_State *L, GCobj *o)
+{
+  lua_assert(o->gch.gct == ~LJ_TSTR);
+  if (o->gch.marked & LJ_GC_FIXED)
+    return;
+  o->gch.marked |= LJ_GC_FIXED;
+
+  if (!gc_ishugeblock(o)) {
+    GCArena *arena = ptr2arena(o);
+    arean_setfixed(L, ptr2arena(o), o);
+    /* Fixed objects should always be black */
+    arena_markcell(arena, ptr2cell(o));
+  } else {
+    hugeblock_setfixed(G(L), o);
+  }
+}
 
 /* -- Allocator ----------------------------------------------------------- */
 
@@ -1020,21 +1376,7 @@ void * LJ_FASTCALL lj_mem_newgco(lua_State *L, GCSize size)
 void * LJ_FASTCALL lj_mem_newcd(lua_State *L, GCSize size)
 {
   global_State *g = G(L);
-  GCobj *o = (GCobj*)arena_alloc(G(L)->arena, size);
-
-  if (size < ArenaOversized) {
-    o = (GCobj*)arena_alloc(G(L)->arena, size);
-  } else {
-    o = (GCobj*)hugeblock_alloc(L, size, LJ_TCDATA);
-  }
-  if (o == NULL)
-    lj_err_mem(L);
-  setgray(o);
-  g->gc.atotal += size;
-  g->gc.total += size;
-  setgcrefr(o->gch.nextgc, g->gc.root);
-  setgcref(g->gc.root, o);
-  newwhite(g, o);
+  GCobj *o = lj_mem_newgco_unlinked(L, size, ~LJ_TCDATA);
   return o;
 }
 
@@ -1058,7 +1400,7 @@ GCobj *findarenaspace(lua_State *L, GCSize osize, int travobj)
   GCArena *pickedarena = NULL, *curarena = travobj ? g->travarena : g->arena;
   MSize cellnum = arena_roundcells(osize);
   uint32_t flags = (travobj ? ArenaFlag_TravObjs : 0);
-  uint32_t mask = ArenaFlag_NoBump|ArenaFlag_Explicit|flags;
+  uint32_t mask = ArenaFlag_NoBump|ArenaFlag_Explicit|ArenaFlag_TravObjs;
 
   if (!arena_canbump(curarena, cellnum)) {
     lj_gc_setarenaflag(g, lj_gc_getarenaid(g, curarena), ArenaFlag_NoBump);
