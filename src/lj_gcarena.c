@@ -1037,7 +1037,7 @@ enum HugeFlags {
 };
 
 #define hbnode_ptr(node) ((GCobj *)(((uintptr_t)mref((node)->obj, void)) & ~ArenaCellMask))
-#define hbnode_isempty(node) (((uintptr_t)mref((node)->obj, void)) == (uintptr_t)-1 || ((uintptr_t)mref((node)->obj, void)) == 0)
+#define hbnode_isempty(node) (((uintptr_t)mref((node)->obj, void)) == ((uintptr_t)((uint32_t)-1)) || ((uintptr_t)mref((node)->obj, void)) == 0)
 #define hbnode_gct(node) ((((uintptr_t)mref((node)->obj, void)) & HugeFlag_GCTMask) >> HugeFlag_GCTShift)
 #define hbnode_size(node) (mref((node)->obj, MSize))
 

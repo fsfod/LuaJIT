@@ -45,6 +45,7 @@ void TraceGC(global_State *g, int newstate);
 #endif
 
 MSize GCCount = 0;
+const char* gcstates[];
 
 void TraceGC(global_State *g, int newstate)
 {
@@ -66,7 +67,6 @@ void TraceGC(global_State *g, int newstate)
 }
 
 /* Macros to set GCobj colors and flags. */
-#define white2gray(x)		((x)->gch.marked &= (uint8_t)~LJ_GC_WHITES)
 #define gray2black(x)		((x)->gch.marked |= LJ_GC_BLACK)
 #define isfinalized(u)		((u)->marked & LJ_GC_FINALIZED)
 
@@ -94,7 +94,8 @@ void TraceGC(global_State *g, int newstate)
 /* Mark a white GCobj. */
 void gc_mark(global_State *g, GCobj *o, int gct)
 {
-  lua_assert((gc_ishugeblock(o) || iswhite(g, o)) && !isdead(g, o));
+  lua_assert(!isdead(g, o));
+  lua_assert(gc_ishugeblock(o) || iswhite(g, o));
 
   /* Huge objects are always unconditionally sent to us to make white checks simple */
   if (LJ_UNLIKELY(gc_ishugeblock(o))) {
@@ -117,12 +118,8 @@ void gc_mark(global_State *g, GCobj *o, int gct)
     gc_marktv(g, uvval(uv));
     if (uv->closed)
       gc_markobj(g, o);  /* Closed upvalues are never gray. */
-  } else if (gct == ~LJ_TSTR || gct == ~LJ_TCDATA) {
-    arenaobj_markcdstr(o);
   } else {
-    lua_assert(gct == ~LJ_TFUNC || gct == ~LJ_TTAB ||
-               gct == ~LJ_TTHREAD || gct == ~LJ_TPROTO || gct == ~LJ_TTRACE);
-    arena_marktrav(g, o);
+    arenaobj_markgct(g, o, gct);
   }
 }
 
@@ -267,7 +264,7 @@ static void gc_traverse_func(global_State *g, GCfunc *fn)
   if (isluafunc(fn)) {
     uint32_t i;
     lua_assert(fn->l.nupvalues <= funcproto(fn)->sizeuv);
-    gc_markobj(g, funcproto(fn));
+    gc_markgct(g, funcproto(fn), ~LJ_TPROTO);
     for (i = 0; i < fn->l.nupvalues; i++)  /* Mark Lua function upvalues. */
       gc_markobj(g, &gcref(fn->l.uvptr[i])->uv);
   } else {
@@ -299,7 +296,7 @@ static void gc_traverse_trace(global_State *g, GCtrace *T)
   if (T->link) gc_marktrace(g, T->link);
   if (T->nextroot) gc_marktrace(g, T->nextroot);
   if (T->nextside) gc_marktrace(g, T->nextside);
-  gc_mark(g, gcref(T->startpt), ~LJ_TPROTO);
+  gc_markgct(g, gcref(T->startpt), ~LJ_TPROTO);
 }
 
 /* The current trace is a GC root while not anchored in the prototype (yet). */
@@ -359,7 +356,7 @@ GCSize gc_traverse(global_State *g, GCobj *o)
   if (LJ_LIKELY(gct == ~LJ_TTAB)) {
     GCtab *t = gco2tab(o);
     if (gc_traverse_tab(g, t) > 0) {
-      lua_assert(0);
+     // lua_assert(0);
       //black2gray(o);  /* Keep weak tables gray. */
     }
     return sizeof(GCtab) + sizeof(TValue) * t->asize +
@@ -874,7 +871,6 @@ void lj_gc_init(global_State *g, lua_State *L, GCArena* GGarena)
 {
   g->gc.state = GCSpause;
   setgcref(g->gc.root, obj2gco(L));
-  setmref(g->gc.sweep, &g->gc.root);
   g->gc.total = sizeof(GG_State);
   g->gc.pause = LUAI_GCPAUSE;
   g->gc.stepmul = LUAI_GCMUL;
@@ -926,7 +922,7 @@ static void atomic(global_State *g, lua_State *L)
   gc_mark_gcroot(g);  /* Mark GC roots (again). */
   gc_propagate_gray(g);  /* Propagate all of the above. */
 
- /* Empty the 2nd chance list. */
+  /* Empty the 2nd chance list. */
   gc_mark_threads(g);
   gc_propagate_gray(g);
 
@@ -1348,38 +1344,6 @@ void *lj_mem_realloc(lua_State *L, void *p, GCSize osz, GCSize nsz)
   return p;
 }
 
-static GCobj *linkgco(global_State *g, GCobj *o)
-{
-  lua_assert(checkptrGC(o));
-  setgcrefr(o->gch.nextgc, g->gc.root);
-  setgcref(g->gc.root, o);
-  return o;
-}
-
-/* Allocate new GC object and link it to the root set. */
-void * LJ_FASTCALL lj_mem_newgco(lua_State *L, GCSize size)
-{
-  global_State *g = G(L);
-  GCobj *o = (GCobj*)arena_alloc(G(L)->travarena, size);
-  if (o == NULL)
-    lj_err_mem(L);
-  /* Set created object black while the gc is sweeping */
-  if (G(L)->gc.state == GCSsweepstring) {
-    arena_markcell(ptr2arena(o), ptr2cell(o));
-  }
-  setgray(o);
-  g->gc.atotal += size;
-  g->gc.total += size;
-  return linkgco(g, o);
-}
-
-void * LJ_FASTCALL lj_mem_newcd(lua_State *L, GCSize size)
-{
-  global_State *g = G(L);
-  GCobj *o = lj_mem_newgco_unlinked(L, size, ~LJ_TCDATA);
-  return o;
-}
-
 /* Resize growable vector. */
 void *lj_mem_grow(lua_State *L, void *p, MSize *szp, MSize lim, MSize esz)
 {
@@ -1391,6 +1355,23 @@ void *lj_mem_grow(lua_State *L, void *p, MSize *szp, MSize lim, MSize esz)
   p = lj_mem_realloc(L, p, (*szp)*esz, sz*esz);
   *szp = sz;
   return p;
+}
+
+/* Allocate new GC object and link it to the root set. */
+void * LJ_FASTCALL lj_mem_newgco(lua_State *L, GCSize size)
+{
+  global_State *g = G(L);
+  GCobj *o = lj_mem_newgco_t(L, size, ~LJ_TCDATA);
+  g->gc.atotal += size;
+  g->gc.total += size;
+  return o;
+}
+
+void * LJ_FASTCALL lj_mem_newcd(lua_State *L, GCSize size)
+{
+  global_State *g = G(L);
+  GCobj *o = lj_mem_newgco_t(L, size, ~LJ_TCDATA);
+  return o;
 }
 
 GCobj *findarenaspace(lua_State *L, GCSize osize, int travobj)
@@ -1428,7 +1409,7 @@ GCobj *findarenaspace(lua_State *L, GCSize osize, int travobj)
 
 #include <stdio.h>
 
-GCobj *lj_mem_newgco_unlinked(lua_State *L, GCSize osize, uint32_t gct)
+GCobj *lj_mem_newgco_t(lua_State *L, GCSize osize, uint32_t gct)
 {
   global_State *g = G(L);
   GCobj *o ;
@@ -1454,12 +1435,6 @@ GCobj *lj_mem_newgco_unlinked(lua_State *L, GCSize osize, uint32_t gct)
   
   g->gc.total += osize;
   return o;
-}
-
-GCobj *lj_mem_newgco_t(lua_State *L, GCSize osize, uint32_t gct)
-{
-  GCobj *o = lj_mem_newgco_unlinked(L, osize, gct);
-  return linkgco(G(L), o);
 }
 
 void lj_mem_freegco(global_State *g, void *p, GCSize osize)
@@ -1513,7 +1488,7 @@ void *lj_mem_reallocgc(lua_State *L, void *p, GCSize oldsz, GCSize newsz)
   return mem;
 }
 
-
+/* Alllocate aligned gc object min alignment is 8 */
 GCobj *lj_mem_newagco(lua_State *L, GCSize osize, MSize align)
 {
   global_State *g = G(L);

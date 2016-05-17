@@ -110,7 +110,7 @@ LJ_FUNC void lj_gc_barriertrace(global_State *g, uint32_t traceno);
 void LJ_FASTCALL lj_gc_emptygrayssb(global_State *g);
 void LJ_FUNC lj_gc_resetgrayssb(global_State *g);
 /* Must be a power of 2 */
-#define GRAYSSBSZ 64
+#define GRAYSSBSZ 64 /* Largest mask that fits in 1 byte imm */
 #define GRAYSSB_MASK ((GRAYSSBSZ*sizeof(GCRef))-1)
 
 
@@ -179,9 +179,11 @@ static LJ_AINLINE void lj_mem_free(global_State *g, void *p, size_t osize)
 #define lj_mem_newt(L, s, t)	((t *)lj_mem_new(L, (s)))
 #define lj_mem_freet(g, p)	lj_mem_free(g, (p), sizeof(*(p)))
 
-GCobj *lj_mem_newgco_unlinked(lua_State *L, GCSize osize, uint32_t gct);
 GCobj *lj_mem_newgco_t(lua_State * L, GCSize osize, uint32_t gct);
 GCobj *lj_mem_newagco(lua_State *L, GCSize osize, MSize align);
+
+void *lj_mem_newgcvecsz(lua_State *L, GCSize osize);
+
 void lj_mem_freegco(global_State *g, void *p, GCSize osize);
 void *lj_mem_reallocgc(lua_State *L, void *p, GCSize oldsz, GCSize newsz);
 
@@ -198,11 +200,11 @@ enum gctid {
 
 #define lj_mem_newobj(L, t)	((t *)lj_mem_newgco_t(L, sizeof(t), gctid_##t))
 #define lj_mem_newgcot(L, s, t)	((t *)lj_mem_newgco_t(L, (s), gctid_##t))
-#define lj_mem_newgcoUL(L, s, t) ((t *)lj_mem_newgco_unlinked(L, (s), gctid_##t))
+#define lj_mem_newgcoUL(L, s, t) ((t *)lj_mem_newgco_t(L, (s), gctid_##t))
 
 #define lj_mem_freetgco(g, p)	lj_mem_freegco(g, (p), sizeof(*(p)))
 
-#define lj_mem_newgcvec(L, n, t)	((t *)lj_mem_newgco_unlinked(L, (GCSize)((n)*sizeof(t)), ~LJ_TTAB))
+#define lj_mem_newgcvec(L, n, t)	((t *)lj_mem_reallocgc(L, NULL, 0, (GCSize)((n)*sizeof(t))))
 #define lj_mem_freegcvec(g, p, n, t)	lj_mem_freegco(g, (p), (n)*sizeof(t))
 
 #define lj_mem_reallocgcvec(L, p, on, n, t) \

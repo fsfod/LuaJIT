@@ -337,7 +337,7 @@ function file_getnames(path, patten, t, seen)
 end
 
 local paths = {
-  "lj_gc2.c",
+  "lj_gc.c",
   "lj_gcarena.c",
 }
 

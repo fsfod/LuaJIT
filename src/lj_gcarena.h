@@ -274,7 +274,8 @@ static LJ_AINLINE GCArena *ptr2arena(void* ptr)
 {
   GCArena *arena = (GCArena*)(((uintptr_t)ptr) & ~(uintptr_t)ArenaCellMask);
   arena_checkptr(ptr);
-  lua_assert(ptr2cell(mref(arena->celltop, GCCell)) <= MaxCellId && ((GCCell*)ptr) < mref(arena->celltop, GCCell));
+  lua_assert(ptr2cell(mref(arena->celltop, GCCell)) <= MaxCellId && 
+    ((GCCell*)ptr) < mref(arena->celltop, GCCell));
   return arena;
 }
 
@@ -363,24 +364,29 @@ static LJ_AINLINE MSize arena_greysize(GCArena *arena)
   return base ? arena_greycap(arena) - (MSize)(top-base) : 0;
 }
 
+static LJ_AINLINE void arena_queuegrey(global_State *g, void *o)
+{
+  GCArena *arena = ptr2arena(o);
+  GCCellID cell = ptr2cell(o);
+  GCCellID1* greytop = mref(arena->greytop, GCCellID1)-1;
+  *greytop = cell;
+  setmref(arena->greytop, greytop);
+
+  if (greytop == mref(arena->greybase, GCCellID1)) {
+    arena_growgreystack(g, arena);
+  }
+}
+
 /* Mark a traversable object */
 static LJ_AINLINE void arena_marktrav(global_State *g, void *o)
 {
   GCArena *arena = ptr2arena(o);
   GCCellID cell = ptr2cell(o);
-  GCCellID1* greytop;
   lua_assert(arena_cellisallocated(arena, cell));
   lua_assert(((GCCell*)o)->gct != ~LJ_TSTR && ((GCCell*)o)->gct != ~LJ_TCDATA);
 
   arena_markcell(arena, cell);
-
-  greytop = mref(arena->greytop, GCCellID1)-1;
-  *greytop = cell;
-  setmref(arena->greytop, greytop);
-  
-  if (greytop == mref(arena->greybase, GCCellID1)) {
-    arena_growgreystack(g, arena);
-  }
+  arena_queuegrey(g, o);
 }
 
 static LJ_AINLINE void arena_markgco(global_State *g, void *o)
@@ -406,6 +412,29 @@ static LJ_AINLINE void arenaobj_markcdstr(void* o)
              ((GCCell*)o)->gct == ~LJ_TUDATA);
 
   arena_markcell(arena, cell);
+}
+
+static LJ_AINLINE void arenaobj_markgct(global_State *g, void* o, int gct)
+{
+  GCArena *arena = ptr2arena(o);
+  GCCellID cell = ptr2cell(o);
+  MSize blockofs = ((((uintptr_t)o) >> 7) & 0x1FFC);
+  lua_assert(arena_cellisallocated(arena, cell));
+
+  *(GCBlockword*)(((char*)arena)+blockofs) |= arena_blockbit(cell);
+  //arena_markcell(arena, cell);
+
+  switch (gct) {
+  case ~LJ_TTHREAD:
+  case ~LJ_TFUNC:
+  case ~LJ_TPROTO:
+  case ~LJ_TTAB:
+  case ~LJ_TTRACE:
+    arena_queuegrey(g, o);
+    break;
+  default:
+    break;
+  }
 }
 
 static LJ_AINLINE void arena_markgcvec(global_State *g, void* o, MSize size)

@@ -125,7 +125,7 @@ static GCtrace *trace_save_alloc(jit_State *J)
   size_t sz = sztr + szins +
 	      J->cur.nsnap*sizeof(SnapShot) +
 	      J->cur.nsnapmap*sizeof(SnapEntry);
-  return lj_mem_newgcoUL(J->L, (MSize)sz, GCtrace);
+  return lj_mem_newgcot(J->L, (MSize)sz, GCtrace);
 }
 
 /* Save current trace by copying and compacting it. */
@@ -135,9 +135,6 @@ static void trace_save(jit_State *J, GCtrace *T)
   size_t szins = (J->cur.nins-J->cur.nk)*sizeof(IRIns);
   char *p = (char *)T + sztr;
   memcpy(T, &J->cur, sizeof(GCtrace));
-  setgcrefr(T->nextgc, J2G(J)->gc.root);
-  setgcrefp(J2G(J)->gc.root, T);
-  newwhite(J2G(J), T);
   T->gct = ~LJ_TTRACE;
   T->ir = (IRIns *)p - J->cur.nk;
   memcpy(p, J->cur.ir+J->cur.nk, szins);

@@ -41,7 +41,7 @@ void timers_print(const char *name, uint64_t time)
   printf("took %.4g ms(%ull)", name, t, time);
 }
 
-static const char* gcstates[] = {
+const char* gcstates[] = {
   "GCpause",
   "GCSpropagate",
   "GCSatomic",
