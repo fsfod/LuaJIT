@@ -71,8 +71,8 @@ void printsectotals()
 void timers_printlog()
 {
   char* pos = sbufB(&eventbuf);
-  uint64_t steptime = 0;
-  uint64_t laststatets = 0;
+  uint64_t steptime = 0;/* Acculated step time for current GC state */
+  uint64_t laststatets = 0; 
   FILE* dumpfile = fopen("gcstats.csv", "a+");
 
   for (; pos < sbufP(&eventbuf); ) {
@@ -98,20 +98,30 @@ void timers_printlog()
         steptime = 0;
         laststatets = msg->time;
       }break;
+
       case MSGID_section: {
         MSG_section *msg = (MSG_section *)pos;
         MSize secid = ((msg->msgid >> 8) & 0x7fffff);
+
         if ((msg->msgid >> 31)) {
           if(secid != Section_gc_step)printf("Start(%s)\n", sections_names[secid]);
           secstart[secid] = msg->time;
         } else {
           uint64_t time = msg->time-secstart[secid];
           lua_assert(secstart[secid] > 0 && secstart[secid] < msg->time);
+
           if (secid != Section_gc_step) {
             printf("End(%s) ", sections_names[secid]);
             printtickms(time);
           } else {
-            steptime += time;
+            /* If a new GC state started part the way through the step only record the
+            ** step time from when it started to the step end
+            */
+            if (laststatets > secstart[Section_gc_step]) {
+              steptime += msg->time-laststatets;
+            } else {
+              steptime += time;
+            }
           }
           sectotal[secid] += time;
           secstart[secid] = 0;
