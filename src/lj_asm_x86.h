@@ -1443,6 +1443,56 @@ static void asm_sload(ASMState *as, IRIns *ir)
 
 /* -- Allocations --------------------------------------------------------- */
 
+static void asm_bumpalloc(ASMState *as, IRIns *ir, MSize sz)
+{
+  RegSet allow = RSET_GPR & ~RID2RSET(RID_ECX);
+  Reg arena, tmp, blockbit, robj = ir->r;
+  MSize roundedsz = arena_roundcells(sz);
+
+  if (!ra_hasreg(ir->r)) {
+    robj = ra_dest(as, ir, allow);
+  }
+  rset_clear(allow, robj);
+
+  arena = ra_scratch(as, allow);
+  rset_clear(allow, arena);
+  blockbit = ra_scratch(as, allow);
+  tmp = ra_scratch(as, RID2RSET(RID_ECX));
+
+  /* Set block bit for cell */
+  emit_rmro(as, XO_ORto, blockbit, arena, 0);
+  emit_rr(as, XO_SHIFTcl, XOg_SHL, blockbit);/* Note shifted by tmp */
+  emit_loadi(as, blockbit, 1);
+  emit_shifti(as, XOg_SHR, RID_ECX, 4);
+  if (robj != RID_ECX) {
+    emit_rr(as, XO_MOV, tmp, robj);
+  }
+
+  checkmclim(as);
+
+  /* Compute block word address */
+  emit_rr(as, XO_ARITH(XOg_ADD), arena, tmp);
+  emit_gri(as, XG_ARITHi(XOg_AND), tmp, 0x1FFC);
+  emit_shifti(as, XOg_SHR, tmp, 7);
+  emit_rr(as, XO_MOV, tmp, robj);
+  emit_gri(as, XG_ARITHi(XOg_ADD), arena, MaxBlockWord*4);
+
+  /* Increment bump pointer */
+  emit_rmro(as, XO_MOVto, tmp, arena, 0);
+  emit_gri(as, XG_ARITHi(XOg_ADD), tmp, roundedsz);
+
+  /* Test bump limit */
+  asm_guardcc(as, CC_AE);
+  emit_gmrmi(as, XG_ARITHi(XOg_CMP), blockbit, (ArenaSize-32) - roundedsz);
+  emit_rr(as, XO_ARITH(XOg_SUB), blockbit, arena);
+  /* Load celltop from the currently active non traversable object arena */
+  emit_rr(as, XO_MOV, tmp, robj);
+  emit_rr(as, XO_MOV, blockbit, robj);
+  emit_rmro(as, XO_MOV, robj, arena, 0);
+  emit_getgl(as, arena, arena);
+  checkmclim(as);
+}
+
 #if LJ_HASFFI
 static void asm_cnew(ASMState *as, IRIns *ir)
 {
@@ -1452,14 +1502,27 @@ static void asm_cnew(ASMState *as, IRIns *ir)
   CTInfo info = lj_ctype_info(cts, id, &sz);
   const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_mem_newgco];
   IRRef args[4];
+  int usebump = ir->o == IR_CNEWI || sz < ArenaOversized;
+  Reg rcd;
+  RegSet allow = RSET_GPR;
   lua_assert(sz != CTSIZE_INVALID || (ir->o == IR_CNEW && ir->op2 != REF_NIL));
 
   as->gcsteps++;
-  asm_setupresult(as, ir, ci);  /* GCcdata * */
+
+  if (usebump) {
+    IRIns *irk = irref_isk(ir->op2) ? IR(ir->op2) : NULL;
+    if (irk && ra_hasreg(irk->r)) {
+      rset_clear(allow, irk->r);
+    }
+    rcd = ra_dest(as, ir, allow & ~RID2RSET(RID_ECX));
+  } else {
+    allow = (RSET_GPR & ~RSET_SCRATCH);
+    asm_setupresult(as, ir, ci);  /* GCcdata * */
+    rcd = RID_RET;
+  }
 
   /* Initialize immutable cdata object. */
   if (ir->o == IR_CNEWI) {
-    RegSet allow = (RSET_GPR & ~RSET_SCRATCH);
 #if LJ_64
     Reg r64 = sz == 8 ? REX_64 : 0;
     if (irref_isk(ir->op2)) {
@@ -1468,14 +1531,15 @@ static void asm_cnew(ASMState *as, IRIns *ir)
 					 (uint64_t)(uint32_t)irk->i;
       if (sz == 4 || checki32((int64_t)k)) {
 	emit_i32(as, (int32_t)k);
-	emit_rmro(as, XO_MOVmi, r64, RID_RET, sizeof(GCcdata));
+	emit_rmro(as, XO_MOVmi, r64, rcd, sizeof(GCcdata));
       } else {
-	emit_movtomro(as, RID_ECX + r64, RID_RET, sizeof(GCcdata));
-	emit_loadu64(as, RID_ECX, k);
+        Reg scratch = usebump ? ra_scratch(as, allow) : RID_ECX;
+	emit_movtomro(as, scratch + r64, rcd, sizeof(GCcdata));
+	emit_loadu64(as, scratch, k);
       }
     } else {
       Reg r = ra_alloc1(as, ir->op2, allow);
-      emit_movtomro(as, r + r64, RID_RET, sizeof(GCcdata));
+      emit_movtomro(as, r + r64, rcd, sizeof(GCcdata));
     }
 #else
     int32_t ofs = sizeof(GCcdata);
@@ -1485,10 +1549,10 @@ static void asm_cnew(ASMState *as, IRIns *ir)
     }
     do {
       if (irref_isk(ir->op2)) {
-	emit_movmroi(as, RID_RET, ofs, IR(ir->op2)->i);
+	emit_movmroi(as, rcd, ofs, IR(ir->op2)->i);
       } else {
 	Reg r = ra_alloc1(as, ir->op2, allow);
-	emit_movtomro(as, r, RID_RET, ofs);
+	emit_movtomro(as, r, rcd, ofs);
 	rset_clear(allow, r);
       }
       if (ofs == sizeof(GCcdata)) break;
@@ -1497,6 +1561,7 @@ static void asm_cnew(ASMState *as, IRIns *ir)
 #endif
     lua_assert(sz == 4 || sz == 8);
   } else if (ir->op2 != REF_NIL) {  /* Create VLA/VLS/aligned cdata. */
+    asm_setupresult(as, ir, ci);  /* GCcdata * */
     ci = &lj_ir_callinfo[IRCALL_lj_cdata_newv];
     args[0] = ASMREF_L;     /* lua_State *L */
     args[1] = ir->op1;      /* CTypeID id   */
@@ -1509,12 +1574,16 @@ static void asm_cnew(ASMState *as, IRIns *ir)
 
   /* Combine initialization of marked, gct and ctypeid. */
   emit_i32(as, (int32_t)((~LJ_TCDATA<<8)+(id<<16)));
-  emit_rmro(as, XO_MOVmi, 0, RID_RET, offsetof(GCcdata, marked));
-  /* TODO: GC direct arena bump based allocation without a call */
-  args[0] = ASMREF_L;     /* lua_State *L */
-  args[1] = ASMREF_TMP1;  /* MSize size   */
-  asm_gencall(as, ci, args);
-  emit_loadi(as, ra_releasetmp(as, ASMREF_TMP1), (int32_t)(sz+sizeof(GCcdata)));
+  emit_rmro(as, XO_MOVmi, 0, rcd, offsetof(GCcdata, marked));
+  
+  if (usebump) {
+    asm_bumpalloc(as, ir, sz+8);
+  } else {
+    args[0] = ASMREF_L;     /* lua_State *L */
+    args[1] = ASMREF_TMP1;  /* MSize size   */
+    asm_gencall(as, ci, args);
+    emit_loadi(as, ra_releasetmp(as, ASMREF_TMP1), (int32_t)(sz+sizeof(GCcdata)));
+  }
 }
 #else
 #define asm_cnew(as, ir)	((void)0)

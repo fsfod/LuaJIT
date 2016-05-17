@@ -274,6 +274,7 @@ typedef enum {
   XO_MOVSXd =	XO_(63),
   XO_BSWAP =	XO_0f(c8),
   XO_CMOV =	XO_0f(40),
+  XO_ORto =	XO_(09),
 
   XO_MOVSD =	XO_f20f(10),
   XO_MOVSDto =	XO_f20f(11),
