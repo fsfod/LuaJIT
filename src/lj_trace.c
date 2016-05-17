@@ -812,6 +812,10 @@ int LJ_FASTCALL lj_trace_exit(jit_State *J, void *exptr)
   if (errcode)
     return -errcode;  /* Return negated error code. */
 
+  if ((((intptr_t)mref(G(L)->gc.grayssb, GCRef)) & GRAYSSB_MASK) == 0) {
+    lj_gc_emptygrayssb(G(L));
+  }
+
   if (!(LJ_HASPROFILE && (G(L)->hookmask & HOOK_PROFILE)))
     lj_vmevent_send(L, TEXIT,
       lj_state_checkstack(L, 4+RID_NUM_GPR+RID_NUM_FPR+LUA_MINSTACK);

@@ -1508,12 +1508,9 @@ static void asm_cnew(ASMState *as, IRIns *ir)
   }
 
   /* Combine initialization of marked, gct and ctypeid. */
-  emit_movtomro(as, RID_ECX, RID_RET, offsetof(GCcdata, marked));
-  emit_gri(as, XG_ARITHi(XOg_OR), RID_ECX,
-	   (int32_t)((~LJ_TCDATA<<8)+(id<<16)));
-  emit_gri(as, XG_ARITHi(XOg_AND), RID_ECX, LJ_GC_WHITES);
-  emit_opgl(as, XO_MOVZXb, RID_ECX, gc.currentwhite);
-
+  emit_i32(as, (int32_t)((~LJ_TCDATA<<8)+(id<<16)));
+  emit_rmro(as, XO_MOVmi, 0, RID_RET, offsetof(GCcdata, marked));
+  /* TODO: GC direct arena bump based allocation without a call */
   args[0] = ASMREF_L;     /* lua_State *L */
   args[1] = ASMREF_TMP1;  /* MSize size   */
   asm_gencall(as, ci, args);
@@ -1530,14 +1527,37 @@ static void asm_tbar(ASMState *as, IRIns *ir)
   Reg tab = ra_alloc1(as, ir->op1, RSET_GPR);
   Reg tmp = ra_scratch(as, rset_exclude(RSET_GPR, tab));
   MCLabel l_end = emit_label(as);
-  emit_movtomro(as, tmp, tab, offsetof(GCtab, gclist));
-  emit_setgl(as, tab, gc.grayagain);
-  emit_getgl(as, tmp, gc.grayagain);
-  emit_i8(as, ~LJ_GC_BLACK);
-  emit_rmro(as, XO_ARITHib, XOg_AND, tab, offsetof(GCtab, marked));
-  emit_sjcc(as, CC_Z, l_end);
-  emit_i8(as, LJ_GC_BLACK);
+  checkmclim(as);
+  /* Exit if the gray SSB overflowed so it can be emptied*/
+  asm_guardcc(as, CC_Z);
+  emit_i32(as, GRAYSSB_MASK);
+  emit_mrm(as, XO_GROUP3, XOg_TEST, tmp);
+
+  /* Append to gray SSB */
+  emit_setgl(as, tmp, gc.grayssb);
+  emit_gri(as, XG_ARITHi(XOg_ADD), tmp, LJ_GC64 ? 8 : 4);
+  emit_rmro(as, XO_MOVto, tab, tmp, 0);
+  emit_getgl(as, tmp, gc.grayssb);
+  /* mark gray so barrier is not triggered again */
+  emit_i8(as, LJ_GC_GRAY);
+  emit_rmro(as, XO_ARITHib, XOg_OR, tab, offsetof(GCtab, marked));
+  /* Skip barrier if table is gray */
+  emit_sjcc(as, CC_NZ, l_end);
+  emit_i8(as, LJ_GC_GRAY);
   emit_rmro(as, XO_GROUP3b, XOg_TEST, tab, offsetof(GCtab, marked));
+
+  checkmclim(as);
+  /* Skip barrier if gc is paused 
+  ** TODO: minor collection handling
+  */
+  emit_sjcc(as, CC_Z, l_end);
+  emit_i8(as, 0xff);
+  emit_rmro(as, XO_GROUP3b, XOg_TEST, RID_NONE, (int32_t)(intptr_t)(void *)&J2G(as->J)->gc.state);
+
+  emit_sjcc(as, CC_A, l_end);
+  emit_gmrmi(as, XG_ARITHi(XOg_CMP), tmp, GCSatomic);
+  emit_gri(as, XG_ARITHi(XOg_SUB), tmp, GCSpropagate);
+  emit_opgl(as, XO_MOVZXb, tmp, gc.state);
 }
 
 static void asm_obar(ASMState *as, IRIns *ir)
@@ -1555,6 +1575,7 @@ static void asm_obar(ASMState *as, IRIns *ir)
   asm_gencall(as, ci, args);
   emit_loada(as, ra_releasetmp(as, ASMREF_TMP1), J2G(as->J));
   obj = IR(ir->op1)->r;
+  /* TODO: new barrier for upvalues 
   emit_sjcc(as, CC_Z, l_end);
   emit_i8(as, LJ_GC_WHITES);
   if (irref_isk(ir->op2)) {
@@ -1564,8 +1585,9 @@ static void asm_obar(ASMState *as, IRIns *ir)
     Reg val = ra_alloc1(as, ir->op2, rset_exclude(RSET_SCRATCH&RSET_GPR, obj));
     emit_rmro(as, XO_GROUP3b, XOg_TEST, val, (int32_t)offsetof(GChead, marked));
   }
-  emit_sjcc(as, CC_Z, l_end);
-  emit_i8(as, LJ_GC_BLACK);
+  */
+  emit_sjcc(as, CC_NZ, l_end);
+  emit_i8(as, LJ_GC_GRAY);
   emit_rmro(as, XO_GROUP3b, XOg_TEST, obj,
 	    (int32_t)offsetof(GCupval, marked)-(int32_t)offsetof(GCupval, tv));
 }
