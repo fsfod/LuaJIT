@@ -772,6 +772,8 @@ void lj_gc_finalize_cdata(lua_State *L)
 }
 #endif
 
+static void sweep_traces(global_State *g);
+
 /* Free all remaining GC objects. */
 void lj_gc_freeall(global_State *g)
 {
@@ -784,6 +786,7 @@ void lj_gc_freeall(global_State *g)
     arena_destroy(g, arena);
   }
   hugeblock_freeall(g);
+  sweep_traces(g);
 
   lj_mem_freevec(g, g->gc.arenas, g->gc.arenassz, GCArena*);
   lj_mem_freevec(g, g->gc.freelists, g->gc.arenassz, ArenaFreeList);
@@ -964,6 +967,18 @@ static void sweep_arena(global_State *g, MSize i)
   lj_gc_setarenaflag(g, i, ArenaFlag_Swept);
 }
 
+static void sweep_traces(global_State *g)
+{
+  jit_State *J = G2J(g);
+
+  for (int i = J->sizetrace-1; i > 0; i--) {
+    GCtrace *t = (GCtrace *)gcref(J->trace[i]);
+    if (t && iswhite(g, t)) {
+      lj_trace_free(g, t);
+    }
+  }
+}
+
 static void arenasweep_start(global_State *g)
 {
   lua_assert(isblack(g, &g->strempty));
@@ -974,6 +989,7 @@ static void arenasweep_start(global_State *g)
     // arena_dumpwhitecells(g, lj_gc_arenaref(g, i));
   }
 
+  sweep_traces(g);
   g->gc.curarena = 0;
 
   for (MSize i = 0; i < g->gc.arenastop; i++) {
