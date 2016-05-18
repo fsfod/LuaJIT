@@ -52,6 +52,7 @@ const char* gcstates[] = {
 
 uint64_t secstart[Section_MAX] = { 0 };
 uint64_t sectotal[Section_MAX] = { 0 };
+uint64_t timertotal[Timer_MAX] = { 0 };
 uint64_t laststatets = 0;
 uint64_t statetime[GCSfinalize+1] = { 0 };
 
@@ -60,6 +61,11 @@ void printsectotals()
   for (MSize i = 0; i < Section_MAX; i++) {
     printf("Section %s total ", sections_names[i]);
     printtickms(sectotal[i]);
+  }
+
+  for (MSize i = 0; i < Timer_MAX; i++) {
+    printf("Timer %s total ", timers_names[i]);
+    printtickms(timertotal[i]);
   }
 
   for (MSize i = 0; i < 6; i++) {
@@ -87,8 +93,10 @@ void timers_printlog()
         printf("GC State = %s, mem = %ukb\n", gcstates[gcs], msg->totalmem/1024);
         pos += msgsizes[MSGID_gcstate];
 
+        uint64_t start = secstart[Section_gc_step] ? secstart[Section_gc_step] : secstart[Section_gc_fullgc];
+
         /* Check if we transitioned gc state inside a step and continued running the new gc state */
-        if (laststatets != 0 && secstart[Section_gc_step] != 0 && laststatets > secstart[Section_gc_step]) {
+        if (laststatets != 0 && start != 0 && laststatets > start) {
           steptime = msg->time-laststatets;
         }
         statetime[prevgcs] += steptime;
@@ -128,7 +136,21 @@ void timers_printlog()
         }
         pos += sizeof(MSG_section);
       }break;
-
+      case MSGID_stringmarker: {
+        MSG_stringmarker *msg = (MSG_stringmarker *)pos;
+        printf("@%s - %llu\n", (const char*)(msg+1), msg->time);
+        fprintf(dumpfile, "\n\n@%s - %llu", (const char*)(msg+1), msg->time);
+        // printf("stringmarker: flags %u, size %u, label %s, time %ull\n", ((msg->msgid >> 8) & 0xffff), msg->size, (const char*)(msg+1), msg->time);
+        pos += msg->size;
+        break;
+      }
+      case MSGID_time: {
+        MSG_time *msg = (MSG_time *)pos;
+        uint32_t id = ((msg->msgid >> 8) & 0xffff);
+        timertotal[id] += msg->time;
+        pos += sizeof(MSG_time);
+        break;
+      }
       default:
         pos += msgprinters[id](pos);
     }
