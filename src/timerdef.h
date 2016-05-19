@@ -10,6 +10,7 @@ enum MSGIDS{
   MSGID_arenasweep,
   MSGID_gcobj,
   MSGID_gcstate,
+  MSGID_stringmarker,
   MSGID_MAX
 };
 
@@ -21,7 +22,40 @@ static uint32_t msgsizes[] = {
   12, /* arenasweep */
   8, /* gcobj */
   16, /* gcstate */
+  0, /* stringmarker */
 };
+
+typedef struct MSG_stringmarker{
+  uint32_t msgid;
+/*  flags: 16;*/
+  uint32_t size;/* uint64_t label;*/
+  uint64_t time;
+} MSG_stringmarker;
+
+static LJ_AINLINE void log_stringmarker(uint32_t flags, const char * label)
+{
+  SBuf *sb = &eventbuf;
+  MSG_stringmarker *msg = (MSG_stringmarker *)sbufP(sb);
+  MSize vtotal = sizeof(MSG_stringmarker);
+  MSize label_size = (MSize)strlen(label)+1;
+  vtotal += label_size;
+  msg->msgid = MSGID_stringmarker;
+  msg->msgid |= (flags << 8);
+  msg->size = vtotal;
+  msg->time = __rdtsc();
+  setsbufP(sb, sbufP(sb)+sizeof(MSG_stringmarker));
+  lj_buf_putmem(sb, label, label_size);
+
+  lj_buf_more(sb, 16);
+}
+
+static LJ_AINLINE MSize print_stringmarker(void* msgptr)
+{
+  MSG_stringmarker *msg = (MSG_stringmarker *)msgptr;
+  lua_assert(((uint8_t)msg->msgid) == MSGID_stringmarker);
+  printf("stringmarker: flags %u, size %u, label %s, time %ull\n", ((msg->msgid >> 8) & 0xffff), msg->size, (const char*)(msg+1), msg->time);
+  return msg->size;
+}
 
 typedef struct MSG_arenacreated{
   uint32_t msgid;
@@ -246,6 +280,7 @@ static msgprinter msgprinters[] = {
   print_arenasweep,
   print_gcobj,
   print_gcstate,
+  print_stringmarker,
 };
 
 #pragma pack(pop)

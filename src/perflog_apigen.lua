@@ -24,12 +24,14 @@ local numtypes = {
   i64 = "int64_t", u64 = "uint64_t",
   MSize = "uint32_t",
   bitfield = "uint32_t",
-  timestamp = "uint64_t",
+  timestamp = {size = 64, signed = false,  printf = "%ull", ctype = "uint64_t", cstype = "ulong", customwrite = true, noarg = true},
   smallticks = {size = 32, signed = false,  printf = "%u", ctype = "uint32_t", cstype = "uint", argtype = "uint64_t"},
 
   GCRef = {size = 32, signed = false, ctype = "GCRef", printf = "%p", ref = "gcptr32"},
   MRef =  {size = 32, signed = false, ctype = "MRef", printf = "%p", ref = "ptr32"},
   ptr =  {size = 32, signed = false, ctype = "void*", ref = true},
+
+  string = {vsize = true, signed = false, printf = "%s", ctype = "void*", string = true, vsize = true, ctype = "uint64_t", cstype = "string",  argtype = "const char *", customwrite = true},
 }
 
 for name, def in pairs(numtypes) do
@@ -92,10 +94,11 @@ function parse_msg(msgname, def)
   local offset = not def.base and 8 or 32
   local msgsize = 0
   local idsize = 8 -- bits used in the message id field 24 left
+  local vsize, sizefield = false, nil
   
   for i, field in ipairs(def) do
     local name, type = parse_field(field)
-    local t = {name = name, type = type}
+    local t = {name = name, type = type, order = i}
     table.insert(fieldlist, t)
 
     local size = 32 -- size in bits
@@ -105,8 +108,15 @@ function parse_msg(msgname, def)
       size = tonumber(type)
       assert(size or size < 32, "invalid bitfield size")
       t.bitsize = size
+    elseif numtypes[type].vsize then
+      vsize = true
     else
       size = numtypes[type].size
+    end
+
+    if name == def.sizefield then
+      t.sizefield = true
+      t.noarg = true
     end
 
     if size < 32 then
@@ -127,7 +137,13 @@ function parse_msg(msgname, def)
     end
   end
 
-  local result = {name = msgname, fields = fieldlist, size = msgsize, idsize = idsize}
+  if vsize and not def.sizefield then
+    sizefield = "msgsize"
+    table.insert(fieldlist, {name = "msgsize", type = "u32", order = 0})
+    msgsize = msgsize + 4
+  end
+
+  local result = {name = msgname, fields = fieldlist, size = msgsize, idsize = idsize, vsize = vsize, sizefield = sizefield}
   return setmetatable(result, {__index = def})
 end
 
@@ -145,7 +161,7 @@ function mkfield(f)
     return format("\n/*  %s: %d;*/", f.name, f.bitsize)
   else
     local type = numtypes[f.type]
-    if f.bitofs or f.idpart then
+    if f.bitofs or f.idpart or f.type == "string" then
       return format("/* %s %s;*/", type.ctype, f.name)
     else
       return format("\n  %s %s;", type.ctype, f.name)
@@ -184,7 +200,7 @@ static LJ_AINLINE void log_{{name}}({{args}})
 {
   SBuf *sb = &eventbuf;
   MSG_{{name}} *msg = (MSG_{{name}} *)sbufP(sb);
-  {{fields}}  setsbufP(sb, sbufP(sb)+sizeof(MSG_{{name}}));
+{{vtotal}}  {{fields}}  setsbufP(sb, sbufP(sb)+sizeof(MSG_{{name}}));{{vwrite}}
   lj_buf_more(sb, 16);
 }
 
@@ -204,34 +220,50 @@ function write_logfunc(def)
   end
 
   local fieldstr = format("msg->msgid = MSGID_%s;\n", msgid)
-  local args = ""
+  local vtotal, vwrite, args = "", "", ""
     
   for i, f in ipairs(def.fields) do
     local type = f.type
     local argtype
+    local typedef = numtypes[type]
 
     if type == "bitfield" then
       type = "uint32_t"
+    elseif type == "string" then
+      argtype = numtypes[type].argtype
     else
-      local typedef = numtypes[type]
       type = typedef.ctype
       argtype = typedef.argtype and numtypes[typedef.argtype].ctype
     end
 
     --time stamp values are fetched inside the logger func so skip creating an arg for them
-    if f.type ~= "timestamp" then
-      args = args .. format("%s%s %s", i ~= 1 and ", " or "", argtype or type, f.name)
+    if not typedef.noarg and not f.noarg then
+      args = args .. format("%s%s %s", args ~= "" and ", " or "", argtype or type, f.name)
     end
     
     local field = f.name
-    if f.bitofs or f.idpart then
-      field = format("(%s << %d)", f.name, f.bitofs)
-    elseif argtype then
-      field = format("(%s)%s", type, f.name)
+    if f.sizefield then
+      field = "vtotal"
     end
 
-    if f.type == "timestamp" then
-       field = format("  msg->%s = %s;\n", f.name, getticksstr)
+    if f.bitofs or f.idpart then
+      field = format("(%s << %d)", field, f.bitofs)
+    elseif not typedef.customwrite and argtype then
+      field = format("(%s)%s", type, field)
+    end
+
+    if typedef.customwrite then
+      if f.type == "timestamp" then
+        field = format("  msg->%s = %s;\n", f.name, getticksstr)
+      elseif f.type == "string" then
+        if vtotal == "" then
+          vtotal = format("  MSize vtotal = sizeof(MSG_%s);\n", def.name)
+        end
+        vtotal = vtotal .. buildtemplate("  MSize {{name}}_size = (MSize)strlen({{name}})+1;\n  vtotal += {{name}}_size;\n", {name = f.name})
+
+        vwrite = vwrite .. format("\n  lj_buf_putmem(sb, %s, %s_size);\n", f.name, f.name)
+        field = ""
+      end
     elseif f.idpart then
       field = format("  msg->msgid |= %s;\n", field)
     else
@@ -240,7 +272,11 @@ function write_logfunc(def)
     fieldstr = fieldstr .. field
   end
   
-  write(buildtemplate(funcdef, {name = def.name, args = args, fields = fieldstr}))
+  if vtotal then
+    
+  end
+
+  write(buildtemplate(funcdef, {name = def.name, args = args, fields = fieldstr, vtotal = vtotal, vwrite = vwrite}))
 end
 
 local printdef = [[
@@ -267,7 +303,7 @@ function write_printfunc(def)
     end
   end
 
-  local args = ""
+  local msgsz, args = def.size + 4, ""
   local fmtlist = {}
     
   for i, f in ipairs(def.fields) do
@@ -285,10 +321,16 @@ function write_printfunc(def)
       fmtspec = "%s"
     elseif arg then
       --arg = format("(msg->msgid >> %d) & %d", f.bitofs, bit.rshift(1, f.bitsize)-1)
+    elseif f.type == "string" then
+      arg = "(const char*)(msg+1)"
     elseif type.ref then
       arg = format("(uintptr_t)msg->%s.%s", f.name, type.ref)
     else
       arg = format("msg->%s", f.name)
+    end
+
+    if def.vsize and f.name == def.sizefield then
+      msgsz = arg
     end
 
     local comma = (i ~= #def.fields and ", ")
@@ -302,7 +344,7 @@ function write_printfunc(def)
   end
 
   local fmtstr = format('%s: %s', def.name, table.concat(fmtlist, ", "))
-  write(buildtemplate(printdef, {name = def.name, fmtstr = fmtstr, args = args, msgsz = def.size + 4}))
+  write(buildtemplate(printdef, {name = def.name, fmtstr = fmtstr, args = args, msgsz = msgsz}))
   return print_
 end
 
@@ -451,6 +493,14 @@ msgs = {
     "size : 20",
     "address : GCRef",
   },
+
+  stringmarker = {
+    "flags : 16",
+    "size : u32",
+    "label : string",
+    "time : timestamp",
+    sizefield = "size",
+  },
 --[[
   trace = {
     "id : u16",
@@ -506,6 +556,9 @@ write_enum("MSGIDS", names, "MSGID")
 write("static uint32_t msgsizes[] = {\n")
 for _, name in ipairs(names) do
   local size = msglookup[name].size + 4
+  if msglookup[name].vsize then
+    size = 0
+  end
   write(format("  %d, /* %s */\n", size, name))
 end
 write("};\n\n")
