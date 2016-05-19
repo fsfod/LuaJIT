@@ -145,6 +145,7 @@ static TValue *cpluaopen(lua_State *L, lua_CFunction dummy, void *ud)
   global_State *g = G(L);
   UNUSED(dummy);
   UNUSED(ud);
+  lj_gc_init(L);
   stack_init(L, L);
   /* NOBARRIER: State initialization, all objects are white. */
   setgcref(L->env, obj2gco(lj_tab_new(L, 0, LJ_MIN_GLOBAL)));
@@ -208,8 +209,8 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
 #endif
   lj_buf_init(NULL, &g->tmpbuf);
 
-  lj_gc_init(g, L, GGarena);
   lj_dispatch_init((GG_State *)L);
+  g->travarena = GGarena;
   L->status = LUA_ERRERR+1;  /* Avoid touching the stack upon memory error. */
   if (lj_vm_cpcall(L, NULL, NULL, cpluaopen) != 0) {
     /* Memory allocation error: free partial state. */

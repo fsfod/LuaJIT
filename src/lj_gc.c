@@ -870,8 +870,9 @@ GCArena *lj_gc_setactive_arena(lua_State *L, GCArena *arena, int travobjs)
   return old;
 }
 
-void lj_gc_init(global_State *g, lua_State *L, GCArena* GGarena)
+void lj_gc_init(lua_State *L)
 {
+  global_State *g = G(L);
   g->gc.state = GCSpause;
   setgcref(g->gc.root, obj2gco(L));
   g->gc.total = sizeof(GG_State);
@@ -886,10 +887,9 @@ void lj_gc_init(global_State *g, lua_State *L, GCArena* GGarena)
   g->gc.arenastop = 0;
   g->gc.freelists = lj_mem_newvec(L, 16, ArenaFreeList);
   memset(g->gc.freelists, 0, sizeof(ArenaFreeList) * 16);
-  
-  g->travarena = GGarena;
-  register_arena(L, GGarena, ArenaFlag_TravObjs|ArenaFlag_GGArena);
-  arena_creategreystack(L, GGarena);
+
+  register_arena(L, g->travarena, ArenaFlag_TravObjs|ArenaFlag_GGArena);
+  arena_creategreystack(L, g->travarena);
 
   g->arena = lj_gc_newarena(L, 0);
 }
