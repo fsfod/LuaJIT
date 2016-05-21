@@ -1591,12 +1591,29 @@ static void asm_cnew(ASMState *as, IRIns *ir)
 
 /* -- Write barriers ------------------------------------------------------ */
 
-static void asm_tbar(ASMState *as, IRIns *ir)
+static void asm_barrier(ASMState *as, Reg obj, Reg tmp, MCLabel l_end)
 {
-  Reg tab = ra_alloc1(as, ir->op1, RSET_GPR);
-  Reg tmp = ra_scratch(as, rset_exclude(RSET_GPR, tab));
-  MCLabel l_end = emit_label(as);
   checkmclim(as);
+  /* Skip barrier if gc is paused
+  ** TODO: minor collection handling
+  */
+  emit_sjcc(as, CC_A, l_end);
+  emit_gmrmi(as, XG_ARITHi(XOg_CMP), tmp, GCSatomic);
+  emit_gri(as, XG_ARITHi(XOg_SUB), tmp, GCSpropagate);
+  emit_opgl(as, XO_MOVZXb, tmp, gc.state);
+
+  /* mark gray so barrier is not triggered again */
+  emit_i8(as, LJ_GC_GRAY);
+  emit_rmro(as, XO_ARITHib, XOg_OR, obj, offsetof(GChead, marked));
+
+  emit_sjcc(as, CC_NZ, l_end);
+  emit_i8(as, LJ_GC_GRAY);
+  emit_rmro(as, XO_GROUP3b, XOg_TEST, obj, offsetof(GChead, marked));
+  checkmclim(as);
+}
+
+static void asm_appendssb(ASMState *as, Reg obj, Reg tmp, MCLabel l_end)
+{
   /* Exit if the gray SSB overflowed so it can be emptied*/
   asm_guardcc(as, CC_Z);
   emit_i32(as, GRAYSSB_MASK);
@@ -1605,28 +1622,20 @@ static void asm_tbar(ASMState *as, IRIns *ir)
   /* Append to gray SSB */
   emit_setgl(as, tmp, gc.grayssb);
   emit_gri(as, XG_ARITHi(XOg_ADD), tmp, LJ_GC64 ? 8 : 4);
-  emit_rmro(as, XO_MOVto, tab, tmp, 0);
+  emit_rmro(as, XO_MOVto | (LJ_GC64 ? REX_64 : 0), obj, tmp, 0);
   emit_getgl(as, tmp, gc.grayssb);
-  /* mark gray so barrier is not triggered again */
-  emit_i8(as, LJ_GC_GRAY);
-  emit_rmro(as, XO_ARITHib, XOg_OR, tab, offsetof(GCtab, marked));
-  /* Skip barrier if table is gray */
-  emit_sjcc(as, CC_NZ, l_end);
-  emit_i8(as, LJ_GC_GRAY);
-  emit_rmro(as, XO_GROUP3b, XOg_TEST, tab, offsetof(GCtab, marked));
+}
 
+static void asm_tbar(ASMState *as, IRIns *ir)
+{
+  Reg tab = ra_alloc1(as, ir->op1, RSET_GPR);
+  Reg tmp = ra_scratch(as, rset_exclude(RSET_GPR, tab));
+  MCLabel l_end = emit_label(as);
   checkmclim(as);
-  /* Skip barrier if gc is paused 
-  ** TODO: minor collection handling
-  */
-  emit_sjcc(as, CC_Z, l_end);
-  emit_i8(as, 0xff);
-  emit_rmro(as, XO_GROUP3b, XOg_TEST, RID_NONE, (int32_t)(intptr_t)(void *)&J2G(as->J)->gc.state);
+  /* Append to gray SSB */
+  asm_appendssb(as, tab, tmp, l_end);
 
-  emit_sjcc(as, CC_A, l_end);
-  emit_gmrmi(as, XG_ARITHi(XOg_CMP), tmp, GCSatomic);
-  emit_gri(as, XG_ARITHi(XOg_SUB), tmp, GCSpropagate);
-  emit_opgl(as, XO_MOVZXb, tmp, gc.state);
+  asm_barrier(as, tab, tmp, l_end);
 }
 
 static void asm_obar(ASMState *as, IRIns *ir)
