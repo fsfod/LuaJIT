@@ -772,8 +772,6 @@ void lj_gc_finalize_cdata(lua_State *L)
 }
 #endif
 
-static void sweep_traces(global_State *g);
-
 /* Free all remaining GC objects. */
 void lj_gc_freeall(global_State *g)
 {
@@ -786,7 +784,6 @@ void lj_gc_freeall(global_State *g)
     arena_destroy(g, arena);
   }
   hugeblock_freeall(g);
-  sweep_traces(g);
 
   lj_mem_freevec(g, g->gc.arenas, g->gc.arenassz, GCArena*);
   lj_mem_freevec(g, g->gc.freelists, g->gc.arenassz, ArenaFreeList);
@@ -806,6 +803,7 @@ static int register_arena(lua_State *L, GCArena *arena, uint32_t flags)
 {
   global_State *g = G(L);
   ArenaFreeList *freelist;
+
   if (LJ_UNLIKELY((g->gc.arenastop+1) >= g->gc.arenassz)) {
     MSize size = g->gc.arenassz;
     lj_mem_growvec(L, g->gc.arenas, g->gc.arenassz, LJ_MAX_MEM32, GCArena*);
@@ -816,6 +814,12 @@ static int register_arena(lua_State *L, GCArena *arena, uint32_t flags)
       setmref(lj_gc_arenaref(g, i)->freelist, freelist+i);
     }
   }
+
+  /* Don't allow the GC to sweep freshly created arenas */
+  if (g->gc.state == GCSsweep || g->gc.state == GCSsweepstring) {
+    flags |= ArenaFlag_Swept;
+  }
+
   g->gc.arenas[g->gc.arenastop] = (GCArena *)(((intptr_t)arena) | flags);
 
   freelist = G(L)->gc.freelists + g->gc.arenastop;

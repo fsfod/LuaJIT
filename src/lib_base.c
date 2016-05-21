@@ -593,6 +593,16 @@ LJLIB_CF(print)
   return 0;
 }
 
+#include "lj_timer.h"
+
+LJLIB_CF(perfmarker)
+{
+  GCstr *label = lj_lib_checkstr(L, 1);
+  int32_t flags = lj_lib_optint(L, 2, 0);
+  log_stringmarker(flags, strdata(label));
+  return 0;
+}
+
 LJLIB_PUSH(top-3)
 LJLIB_SET(_VERSION)
 

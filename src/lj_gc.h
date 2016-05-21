@@ -14,13 +14,12 @@ enum {
 };
 
 /* Bitmasks for marked field of GCobj. */
+#define LJ_GC_GRAY	0x01
 #define LJ_GC_FINALIZED	0x08
 #define LJ_GC_WEAKKEY	0x08
 #define LJ_GC_WEAKVAL	0x10
 #define LJ_GC_CDATA_FIN	0x10
 #define LJ_GC_FIXED	0x20
-#define LJ_GC_SFIXED	0x40
-#define LJ_GC_GRAY	0x40
 #define LJ_GC_COLORS	(LJ_GC_GRAY)
 #define LJ_GC_WEAK	(LJ_GC_WEAKKEY | LJ_GC_WEAKVAL)
 
@@ -114,7 +113,7 @@ void LJ_FUNC lj_gc_resetgrayssb(global_State *g);
 #define GRAYSSB_MASK ((GRAYSSBSZ*sizeof(GCRef))-1)
 
 
-static void lj_gc_appendgrayssb(global_State *g, GCobj *o)
+static LJ_AINLINE void lj_gc_appendgrayssb(global_State *g, GCobj *o)
 {
   GCRef *ssb = mref(g->gc.grayssb, GCRef);
   lua_assert(!isgray(o));
