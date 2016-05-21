@@ -134,8 +134,16 @@ static void gc_mark_gcroot(global_State *g)
 
 /* Start a GC cycle and mark the root set. */
 static void gc_mark_start(global_State *g)
-{
-  setgcrefnull(g->gc.grayagain);
+{ 
+  if (!g->gc.isminor) {
+    lj_gc_resetgrayssb(g);
+    setgcrefnull(g->gc.grayagain);
+  } else {
+    setgcrefnull(g->gc.grayagain);
+    arenaobj_towhite(obj2gco(&G2GG(g)->L));
+    arenaobj_towhite(obj2gco(mainthread(g)));
+  }
+  
   gc_markobj(g, &G2GG(g)->L);
   gc_mark_str(g, &g->strempty);
   gc_markobj(g, mainthread(g));
@@ -151,7 +159,6 @@ static void gc_mark_start(global_State *g)
       lua_assert(!mref(arena_extrainfo(arena)->fixedcells, GCCellID1));
     }
   }
-  lj_gc_resetgrayssb(g);
   SetGCState(g, GCSpropagate);
 }
 
@@ -909,7 +916,9 @@ static size_t gc_mark_threads(global_State *g)
     gc_traverse_thread(g, th);
     gray = th->gclist;
   }
-  setgcrefnull(g->gc.grayagain);
+  if (!g->gc.isminor) {
+    setgcrefnull(g->gc.grayagain);
+  }
   return m;
 }
 
@@ -952,11 +961,19 @@ static void sweep_arena(global_State *g, MSize i)
 {
   lua_assert(!(lj_gc_arenaflags(g, i) & ArenaFlag_Swept));
   GCArena *arena = lj_gc_arenaref(g, i);
-  MSize count = arena_majorsweep(arena);
+  MSize count ;
+
+  TicksStart();
+  if (g->gc.isminor) {
+    count = arena_minorsweep(arena);
+  } else {
+    count = arena_majorsweep(arena);
+  }
+  log_arenasweep(i, (uint32_t)TicksEnd(), count & 0xffff, arena_topcellid(arena));
+
   ArenaFreeList *freelist = g->gc.freelists+i;
   freelist->freeobjcount += count & 0xffff;
 
-  log_arenasweep(i, 0, count & 0xffff, arena_topcellid(arena));
   /* If there no more live cells left flag the arena as empty and reset its bump and block state */
   if (!(count & 0x10000)) {
     lj_gc_setarenaflag(g, i, ArenaFlag_Empty);
@@ -988,6 +1005,11 @@ static void arenasweep_start(global_State *g)
   lua_assert(isblack(g, &g->strempty));
   lua_assert(isblack(g, mainthread(g)));
   MSize nontrav = 0, trav = 0;
+
+  /* Turn off minor gc now if this is the last one */
+  if (g->gc.isminor) {
+    g->gc.isminor--;
+  }
 
   for (MSize i = 0; i < g->gc.arenastop; i++) {
     // arena_dumpwhitecells(g, lj_gc_arenaref(g, i));
@@ -1192,6 +1214,11 @@ void lj_gc_fullgc(lua_State *L)
     while (g->gc.state == GCSsweepstring || g->gc.state == GCSsweep)
       gc_onestep(L);  /* Finish sweep. */
   }
+
+  if (!g->gc.isminor) {
+    g->gc.isminor = 3;
+  }
+
   lua_assert(g->gc.state == GCSfinalize || g->gc.state == GCSpause);
   /* Now perform a full GC. */
   SetGCState(g, GCSpause);
@@ -1210,18 +1237,12 @@ void lj_gc_barrierf(global_State *g, GCobj *o, GCobj *v)
   lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);
   lua_assert(o->gch.gct != ~LJ_TTAB);
 
-  if (g->gc.state != GCSpause) {
-    /* Preserve invariant during propagation. Otherwise it doesn't matter. */
-    if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic) {
-      /* Move frontier forward. */
-      lj_gc_appendgrayssb(g, o);
-      setgray(o);
-    } else if (iswhite(g, v)) {
-      arena_markcell(ptr2arena(v), ptr2cell(v));
-      //makewhite(g, o);  /* Make it white to avoid the following barrier. */
-    }
-  } else {
-    setgray(o);
+  /* Preserve invariant during propagation. Otherwise it doesn't matter. */
+  if (g->gc.statebits & GCSneedsbarrier) {
+    /* Move frontier forward. */
+    lj_gc_appendgrayssb(g, o);
+  }
+  setgray(o);
   }
 }
 
@@ -1229,12 +1250,13 @@ void lj_gc_barrierf(global_State *g, GCobj *o, GCobj *v)
 void LJ_FASTCALL lj_gc_barrieruv(global_State *g, TValue *tv)
 {
   lua_assert(tvisgcv(tv));
+/* Adjust the TValue pointer to upvalue its contained in */
 #define TV2MARKED(x) \
-  (*((uint8_t *)(x) - offsetof(GCupval, tv) + offsetof(GCupval, marked)))
-  if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic) {
+  ((GCupval *)(((char*)x)-offsetof(GCupval, tv)))
+  if (g->gc.isminor || g->gc.state == GCSpropagate || g->gc.state == GCSatomic) {
     lj_gc_appendgrayssb(g, gcV(tv));
   } else {
-    TV2MARKED(tv) = (TV2MARKED(tv) & (uint8_t)~LJ_GC_COLORS);
+    TV2MARKED(tv)->marked |= LJ_GC_GRAY;
   }
 #undef TV2MARKED
 }
@@ -1271,8 +1293,21 @@ void lj_gc_closeuv(global_State *g, GCupval *uv)
 /* Mark a trace if it's saved during the propagation phase. */
 void lj_gc_barriertrace(global_State *g, uint32_t traceno)
 {
-  if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic)
+  if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic) {
     gc_marktrace(g, traceno);
+  } else if (g->gc.isminor) {
+    /* TODO: is this worth doing for short lived function/traces
+    GCtrace *t = traceref(G2J(g), traceno);
+    if (gcrefp(t->startpt, GCproto)->trace == traceno) {
+      cleargray(gcref(t->startpt));
+      // Starting proto might die before 
+      lj_gc_appendgrayssb(g, gcref(t->startpt));
+    } else {
+      gc_marktrace(g, traceno);
+    }
+    */
+    gc_marktrace(g, traceno);
+  }
 }
 #endif
 
@@ -1305,7 +1340,7 @@ void LJ_FASTCALL lj_gc_emptygrayssb(global_State *g)
     limit = (MSize)(mask/sizeof(GCRef));
   }
 
-  if (g->gc.state != GCSatomic && g->gc.state != GCSpropagate) {
+  if (!g->gc.isminor && g->gc.state != GCSpropagate && g->gc.state != GCSatomic) {
     lj_gc_resetgrayssb(g);
     return;
   }
@@ -1492,7 +1527,7 @@ void *lj_mem_reallocgc(lua_State *L, void *p, GCSize oldsz, GCSize newsz)
     }
 
     /* Set created object black while the gc is sweeping */
-    if (g->gc.state >= GCSsweepstring && g->gc.state < GCSfinalize) {
+    if ((g->gc.statebits & GCSneedsbarrier) && arenaobj_isblack(owner)) {
       arena_markcell(ptr2arena(mem), ptr2cell(mem));
     }
     g->gc.total += (GCSize)newsz;

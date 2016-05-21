@@ -1594,14 +1594,11 @@ static void asm_cnew(ASMState *as, IRIns *ir)
 static void asm_barrier(ASMState *as, Reg obj, Reg tmp, MCLabel l_end)
 {
   checkmclim(as);
-  /* Skip barrier if gc is paused
-  ** TODO: minor collection handling
-  */
-  emit_sjcc(as, CC_A, l_end);
-  emit_gmrmi(as, XG_ARITHi(XOg_CMP), tmp, GCSatomic);
-  emit_gri(as, XG_ARITHi(XOg_SUB), tmp, GCSpropagate);
-  emit_opgl(as, XO_MOVZXb, tmp, gc.state);
-
+  /* Skip barrier if gc is paused */
+  emit_sjcc(as, CC_Z, l_end);
+  emit_i32(as, GCSneedsbarrier);
+  emit_opgl(as, XO_GROUP3, XOg_TEST, gc.statebits);
+ 
   /* mark gray so barrier is not triggered again */
   emit_i8(as, LJ_GC_GRAY);
   emit_rmro(as, XO_ARITHib, XOg_OR, obj, offsetof(GChead, marked));

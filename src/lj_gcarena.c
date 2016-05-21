@@ -697,22 +697,6 @@ static GCBlockword minorsweep_word(GCArena *arena, MSize i)
   return block;
 }
 
-MSize arena_minorsweep(GCArena *arena)
-{
-  MSize limit = arena_blocktop(arena);
-  GCBlockword used = 0;
-
-  for (size_t i = MinBlockWord; i < limit; i++) {
-    GCBlockword block = arena->block[i];
-    GCBlockword mark = arena->mark[i];
-    block = block & mark;
-    used |= block;
-    arena->block[i] = block;
-    arena->mark[i] = block | mark;
-  }
-  return used ? (1 << 16) : 0;
-}
-
 static GCBlockword majorsweep_word(GCArena *arena, MSize i)
 {
   GCBlockword block = arena->block[i];
@@ -747,7 +731,7 @@ static __m128i simd_popcntbytes(__m128i vec)
 }
 
 /* Time to sweep full 1mb arena uncached 4k(cached 800) cycles */
-static LJ_NOINLINE MSize majorsweep_simd(GCArena *arena, MSize start, MSize limit)
+static LJ_NOINLINE MSize sweep_simd(GCArena *arena, MSize start, MSize limit, int minor)
 {
   MSize i;
   __m128i count = _mm_setzero_si128();
@@ -766,7 +750,11 @@ static LJ_NOINLINE MSize majorsweep_simd(GCArena *arena, MSize start, MSize limi
     count = _mm_add_epi8(count, simd_popcntbytes(_mm_andnot_si128(mark, block)));
     
     block = _mm_and_si128(block, mark);
-    mark = _mm_xor_si128(block, mark); 
+    if (!minor) {
+      mark = _mm_xor_si128(block, mark);
+    } else {
+      mark = _mm_or_si128(block, mark);
+    }   
     used = _mm_or_si128(block, used);
 
     _mm_store_si128(pblock, block);
@@ -872,12 +860,42 @@ MSize arena_majorsweep(GCArena *arena)
 #if 0
   count = majorsweep(arena, MinBlockWord, limit);
 #elif 1
-  count = majorsweep_simd(arena, MinBlockWord, limit);
+  count = sweep_simd(arena, MinBlockWord, limit, 0);
 #else
   count = majorsweep_avx(arena, MinBlockWord, limit);
 #endif
   
   return count;
+}
+
+static MSize minorsweep(GCArena *arena)
+{
+  MSize limit = arena_blocktop(arena);
+  GCBlockword used = 0;
+
+  for (size_t i = MinBlockWord; i < limit; i++) {
+    GCBlockword block = arena->block[i];
+    GCBlockword mark = arena->mark[i];
+    block = block & mark;
+    used |= block;
+    arena->block[i] = block;
+    arena->mark[i] = block | mark;
+  }
+  return used ? (1 << 16) : 0;
+}
+
+MSize arena_minorsweep(GCArena *arena)
+{
+  MSize limit = min(arena_blockidx(arena_topcellid(arena))+1, MaxBlockWord);
+  MSize count = 0;
+  lua_assert(arena_greysize(arena) == 0);
+#if 0
+  count = minorsweep(arena, MinBlockWord, limit);
+#elif 1
+  count = sweep_simd(arena, MinBlockWord, limit, 1);
+#else
+  count = majorsweep_avx(arena, MinBlockWord, limit);
+#endif
 }
 
 void arena_copymeta(GCArena *arena, GCArena *meta)

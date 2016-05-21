@@ -8,9 +8,17 @@
 
 #include "lj_gcarena.h"
 
-/* Garbage collector states. Order matters. */
+/* Garbage collector states. Order and bits used matter. */
 enum {
-  GCSpause, GCSpropagate, GCSatomic, GCSsweepstring, GCSsweep, GCSfinalize
+  GCSpause,
+  /* Only GCSpropagate and GCSatomic can have LSB set see GCSneedsbarrier */
+  GCSpropagate   = 1,
+  GCSatomic      = 3,
+  GCSsweepstring = 4,
+  GCSsweep       = 6,
+  GCSfinalize    = 8,
+  /* GC state is GCSpropagate/atomic or GC is in minor collection mode */
+  GCSneedsbarrier = 0xff01,
 };
 
 /* Bitmasks for marked field of GCobj. */
@@ -129,9 +137,8 @@ static LJ_AINLINE void lj_gc_appendgrayssb(global_State *g, GCobj *o)
 static LJ_AINLINE void lj_gc_barrierback(global_State *g, GCtab *t, GCobj *o)
 {
   lua_assert(!arenaobj_isdead(t));
-  lua_assert(g->gc.state != GCSfinalize);
   /* arenaobj_isblack(t) */
-  if (g->gc.state != GCSpause && g->gc.state != GCSfinalize) {
+  if (g->gc.statebits & GCSneedsbarrier) {
     lj_gc_appendgrayssb(g, obj2gco(t));
   }
   setgray(t);

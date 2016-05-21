@@ -579,10 +579,15 @@ typedef struct GCState {
   GCSize total;		/* Memory currently allocated. */
   GCSize atotal;	/* Memory currently allocated from arenas. */
   GCSize threshold;	/* Memory threshold. */
-  uint8_t currentwhite;	/* Current white color. */
-  uint8_t state;	/* GC state. */
-  uint8_t nocdatafin;	/* No cdata finalizer called. */
-  uint8_t unused2;
+  union {
+    struct {
+      uint8_t state;	/* GC state. */
+      uint8_t isminor;      /* Current GC cycle is a minor collection. */
+      uint8_t nocdatafin;	/* No cdata finalizer called. */
+      uint8_t unused1;
+    };
+    uint32_t statebits;
+  };  
   MSize sweepstr;	/* Sweep position in string table. */
   GCRef root;		/* List of all collectable objects. */
   MRef sweep;		/* Sweep position in root list. */
