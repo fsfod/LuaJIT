@@ -1044,6 +1044,89 @@ void arena_dumpwhitecells(global_State *g, GCArena *arena)
   }
 }
 
+LUA_API int arenaobj_getcellid(void *o)
+{
+  return (((uintptr_t)o) & ArenaCellMask) >> 4;
+}
+
+LUA_API GCBlockword *arenaobj_getblockword(void *o)
+{
+  GCArena *arena = (GCArena*)(((uintptr_t)o) & ~(uintptr_t)ArenaCellMask);
+  GCCellID cell = arenaobj_getcellid(o);
+
+  if (o == NULL || (((uintptr_t)o) & 0x7) != 0 || cell < MinCellId || cell > MaxCellId) {
+    return NULL;
+  }
+  return &arena_getblock(arena, cell);
+}
+
+LUA_API GCBlockword *arenaobj_getmarkword(void *o)
+{
+  GCArena *arena = (GCArena*)(((uintptr_t)o) & ~(uintptr_t)ArenaCellMask);
+  GCCellID cell = arenaobj_getcellid(o);
+
+  if (o == NULL || (((uintptr_t)o) & 0x7) != 0 || cell < MinCellId || cell > MaxCellId) {
+    return NULL;
+  }
+  return &arena_getmark(arena, cell);
+}
+
+LUA_API CellState arenaobj_cellstate(void *o)
+{
+  GCArena *arena = (GCArena*)(((uintptr_t)o) & ~(uintptr_t)ArenaCellMask);
+  GCCellID cell = arenaobj_getcellid(o);
+
+  if (o == NULL || (((uintptr_t)o) & 0x7) != 0 || cell < MinCellId || cell > MaxCellId) {
+    return -1;
+  }
+  return arena_cellstate(arena, cell);
+}
+
+LUA_API uint32_t arenaobj_getcellcount(void *o)
+{
+  GCArena *arena = (GCArena*)(((uintptr_t)o) & ~(uintptr_t)ArenaCellMask);
+  GCCellID cell = arenaobj_getcellid(o);
+
+  if (o == NULL || (((uintptr_t)o) & 0x7) != 0 || cell < MinCellId || cell > MaxCellId) {
+    return NULL;
+  }
+  return arena_cellextent(arena, cell);
+}
+
+char tmp[256] = { 0 };
+
+const char* arena_dumpwordstate(GCArena *arena, int blockidx)
+{
+  char *pos = tmp;
+  GCBlockword block = arena->block[blockidx];
+  GCBlockword mark = arena->mark[blockidx];
+  GCBlockword free = mark & ~block;
+
+  memset(pos, '-', 64);
+  pos += 64;
+  *(pos++) = '\n';
+  
+  for (size_t i = 0; i < 32; i++) {
+    GCBlockword bit = 1 << i;
+    *(pos++) = '|';
+    
+    if (!(bit & (mark | block))) {
+      *(pos++) = ' ';/* Extent cell */
+    } else if (free & bit) {
+      *(pos++) = 'F';/* Freeded cell */
+    } else {
+      *(pos++) = mark & bit ? 'B' : 'W';/* Live cell */
+    }
+  }
+
+  *(pos++) = '\n';
+  memset(pos, '-', 64);
+  pos += 64;
+  *(pos++) = '\n';
+  *(pos++) = 0;
+  return tmp;
+}
+
 enum HugeFlags {
   HugeFlag_Black     = 0x1,
   HugeFlag_Fixed     = 0x2,
