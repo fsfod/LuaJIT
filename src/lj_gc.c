@@ -543,6 +543,41 @@ static GCArena* largestgray(global_State *g)
   return arenai != -1 ? lj_gc_arenaref(g, arenai) : NULL;
 }
 
+static GCSize propagate_arenagrays(global_State *g, GCArena *arena, int limit, MSize *travcount)
+{
+  ArenaFreeList *freelist = arena_freelist(arena);
+  GCSize total = 0;
+  MSize count = 0;
+
+  if (mref(arena->greytop, GCCellID1) == NULL) {
+    return 0;
+  }
+
+  for (; *mref(arena->greytop, GCCellID1) != 0;) {
+    GCCellID1 *top = mref(arena->greytop, GCCellID1);
+    GCCellID cellid = *top;
+    MSize gct = arena_cell(arena, cellid)->gct;
+    lua_assert(cellid >= MinCellId && cellid < MaxCellId);
+    lua_assert(arena_cellstate(arena, cellid) == CellState_Black);
+    setmref(arena->greytop, top+1);
+    total += gc_traverse(g, arena_cellobj(arena, cellid));
+
+    if (gct == ~LJ_TTAB && (arena_cell(arena, cellid)->marked & LJ_GC_WEAK)) {
+   //   arena_adddefermark(mainthread(g), arena, arena_cellobj(arena, cellid));
+    }
+
+    count++;
+    if (limit != -1 && count >(MSize)limit) {
+      break;
+    }
+  }
+  if (travcount)*travcount = count;
+  /* Check we didn't stop from some corrupted cell id that looked like the stack top sentinel */
+  lua_assert(arena_greysize(arena) == 0 || *mref(arena->greytop, GCCellID1) != 0);
+
+  return total;
+}
+
 /* Propagate all gray objects. */
 static GCSize gc_propagate_gray(global_State *g)
 {
@@ -573,7 +608,7 @@ static GCSize gc_propagate_gray(global_State *g)
     }
 
     MSize count = 0;
-    GCSize omem = arena_propgrey(g, maxarena, -1, &count);
+    GCSize omem = propagate_arenagrays(g, maxarena, -1, &count);
     /* Swap the arena to the back of the queue now its grey queue is empty */
     pqueue_rotatemax(greyqueu);
     total += omem;
