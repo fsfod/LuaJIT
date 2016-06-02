@@ -1555,7 +1555,7 @@ void lj_mem_freegco(global_State *g, void *p, GCSize osize)
   }
 }
 
-void *lj_mem_reallocgc(lua_State *L, void *p, GCSize oldsz, GCSize newsz)
+void *lj_mem_reallocgc(lua_State *L, GCobj *owner, void *p, GCSize oldsz, GCSize newsz)
 {
   global_State *g = G(L);
   void* mem;
@@ -1585,8 +1585,8 @@ void *lj_mem_reallocgc(lua_State *L, void *p, GCSize oldsz, GCSize newsz)
     mem = hugeblock_alloc(L, newsz, LJ_TTAB);
   } 
 
+  lua_assert(!p || oldsz > 0);
   if (p) {
-    lua_assert(oldsz > 0);
     memcpy(mem, p, oldsz);
     lj_mem_freegco(G(L), p, oldsz);
   }
@@ -1613,4 +1613,27 @@ GCobj *lj_mem_newagco(lua_State *L, GCSize osize, MSize align)
   g->gc.atotal += osize;
   g->gc.total += osize;
   return o;
+}
+
+void lj_mem_shrinkobj(lua_State *L, GCobj *o, MSize osize, MSize newsz)
+{
+  global_State *g = G(L);
+  GCSize slack = osize-newsz;
+  lua_assert(osize > newsz);
+
+  g->gc.total -= osize-newsz;
+
+  /* Don't needlessly fragment free space if the returned memory is small */
+  if (slack <= (CellSize*2)) {
+    return;
+  }
+
+  if (!gc_ishugeblock(o)) {
+    /* TODO: set to correct mark color based on gc state */
+    lua_assert(!arenaobj_isdead(o));
+    //arena_shrinkobj(o, newsz);
+  } else {
+    lua_assert(o->gch.gct != LJ_TTRACE);
+    hugeblock_free(g, o, osize);
+  }
 }

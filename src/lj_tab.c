@@ -62,7 +62,7 @@ static LJ_AINLINE void newhpart(lua_State *L, GCtab *t, uint32_t hbits)
   if (hbits > LJ_MAX_HBITS)
     lj_err_msg(L, LJ_ERR_TABOV);
   hsize = 1u << hbits;
-  node = lj_mem_newgcvec(L, hsize, Node);
+  node = lj_mem_newgcvec(L, t, hsize, Node);
   setmref(t->node, node);
   setfreetop(t, node, &node[hsize]);
   t->hmask = hsize-1;
@@ -155,7 +155,7 @@ static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
   if (asize > 0 && !hascolo_array(t)) {
     if (asize > LJ_MAX_ASIZE)
       lj_err_msg(L, LJ_ERR_TABOV);
-    setmref(t->array, lj_mem_newgcvec(L, asize, TValue));
+    setmref(t->array, lj_mem_newgcvec(L, t, asize, TValue));
     t->asize = asize;
   }
   if (hbits && !hascolo_hash(t))
@@ -277,15 +277,15 @@ void lj_tab_resize(lua_State *L, GCtab *t, uint32_t asize, uint32_t hbits)
     if (hascolo_array(t)) {
       /* A colocated array must be separated and copied. */
       TValue *oarray = tvref(t->array);
-      array = lj_mem_newgcvec(L, asize, TValue);
+      array = lj_mem_newgcvec(L, t, asize, TValue);
       for (i = 0; i < oldasize; i++)
 	copyTV(L, &array[i], &oarray[i]);
       /* Trim off the cells of the colocated array */
-      arena_shrinkobj(t, sizeof(GCtab));
+      lj_mem_shrinkobj(L, obj2gco(t), sizetabcolo(oldasize), sizeof(GCtab));
       t->colo &= ~(int8_t)1;  /* Clear array colocated flag */
     } else {
       array = tvref(t->array);
-      lj_mem_reallocgcvec(L, array, oldasize, asize, TValue);
+      lj_mem_reallocgcvec(L, t, array, oldasize, asize, TValue);
     }
     setmref(t->array, array);
     t->asize = asize;
@@ -313,7 +313,7 @@ void lj_tab_resize(lua_State *L, GCtab *t, uint32_t asize, uint32_t hbits)
 	copyTV(L, lj_tab_setinth(L, t, (int32_t)i), &array[i]);
     /* Physically shrink only separated arrays. */
     if (LJ_MAX_COLOSIZE != 0 && t->colo <= 0)
-      setmref(t->array, lj_mem_reallocgcvec(L, array, oldasize, asize, TValue));
+      setmref(t->array, lj_mem_reallocgcvec(L, t, array, oldasize, asize, TValue));
   }
   if (oldhmask > 0) {  /* Reinsert pairs from old hash part. */
     global_State *g;
@@ -325,7 +325,7 @@ void lj_tab_resize(lua_State *L, GCtab *t, uint32_t asize, uint32_t hbits)
     }
     g = G(L);
     if (hascolo_hash(t)) {
-      arena_shrinkobj(t, sizeof(GCtab));
+      lj_mem_shrinkobj(L, obj2gco(t), sizetabcoloh(oldhmask+1), sizeof(GCtab));
       t->colo &= ~(int8_t)2;  /* Clear hash colocated flag */
     } else {
       lj_mem_freegcvec(g, oldnode, oldhmask+1, Node);

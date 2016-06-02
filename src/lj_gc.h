@@ -191,7 +191,8 @@ GCobj *lj_mem_newagco(lua_State *L, GCSize osize, MSize align);
 void *lj_mem_newgcvecsz(lua_State *L, GCSize osize);
 
 void lj_mem_freegco(global_State *g, void *p, GCSize osize);
-void *lj_mem_reallocgc(lua_State *L, void *p, GCSize oldsz, GCSize newsz);
+void *lj_mem_reallocgc(lua_State *L, GCobj * owner, void *p, GCSize oldsz, GCSize newsz);
+void lj_mem_shrinkobj(lua_State *L, GCobj *o, MSize osize, MSize newsz);
 
 enum gctid {
   gctid_GCstr = ~LJ_TSTR,
@@ -210,10 +211,10 @@ enum gctid {
 
 #define lj_mem_freetgco(g, p)	lj_mem_freegco(g, (p), sizeof(*(p)))
 
-#define lj_mem_newgcvec(L, n, t)	((t *)lj_mem_reallocgc(L, NULL, 0, (GCSize)((n)*sizeof(t))))
+#define lj_mem_newgcvec(L, owner, n, t)	((t *)lj_mem_reallocgc(L, obj2gco(owner), NULL, 0, (GCSize)((n)*sizeof(t))))
 #define lj_mem_freegcvec(g, p, n, t)	lj_mem_freegco(g, (p), (n)*sizeof(t))
 
-#define lj_mem_reallocgcvec(L, p, on, n, t) \
-  ((p) = (t *)lj_mem_reallocgc(L, p, (on)*sizeof(t), (GCSize)((n)*sizeof(t))))
+#define lj_mem_reallocgcvec(L, owner, p, on, n, t) \
+  ((p) = (t *)lj_mem_reallocgc(L, obj2gco(owner), p, (on)*sizeof(t), (GCSize)((n)*sizeof(t))))
 
 #endif
