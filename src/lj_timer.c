@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lj_tab.h"
 #include "lj_buf.h"
 #include <stdio.h>
 #include "lj_timer.h"
@@ -23,6 +24,40 @@ void timers_freelog(global_State *g)
     timers_printlog();
     g->gc.total += sbufsz(&eventbuf);
     lj_buf_free(g, &eventbuf);
+  }
+}
+
+uint32_t perf_counter[Counter_MAX] = { 0 };
+
+void perf_resetcounters()
+{
+  memset(perf_counter, 0, sizeof(perf_counter));
+}
+
+int perf_getcounters(lua_State *L)
+{
+  GCtab *t = lj_tab_new(L, 0, Counter_MAX*2);
+  settabV(L, L->top++, t);
+  
+  for (MSize i = 0; i < Counter_MAX; i++) {
+    TValue *tv = lj_tab_setstr(L, t, lj_str_newz(L, Counter_names[i]));
+    setintV(tv, (int32_t)perf_counter[i]);
+  }
+  
+  return 1;
+}
+
+void perf_printcounters()
+{
+  int seenfirst = 0;
+  
+  for (MSize i = 0; i < Counter_MAX; i++) {
+    if (perf_counter[i] == 0) continue;
+    if (!seenfirst) {
+      seenfirst = 1;
+      printf("Perf Counters\n");
+    }
+    printf("  %s: %d\n", Counter_names[i], perf_counter[i]);
   }
 }
 

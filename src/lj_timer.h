@@ -16,6 +16,9 @@ void timers_freelog(global_State *g);
 void timers_print(const char *name, uint64_t time);
 void timers_printlog();
 
+void perf_printcounters();
+void perf_resetcounters();
+
 #define TimerMode 2
 
 #if TimerMode == 1
@@ -78,10 +81,6 @@ enum GCStats {
   GCStat_hugesweep, /* sz swept, count swept*/
 };
 
-enum PerfCounters {
-  Counter_TabBarrier,
-  Counter_BarrierOther,
-  Counter_gcmark, /*gc mark calls */
-};
+#define PerfCounter(name) perfcounter[Counter_##name]++
 
 #include "timerdef.h"

@@ -459,6 +459,12 @@ local namescans = {
     patten = "Section_Start%(([^%,)]+)", 
     enumname = "SectionId",
     enumprefix = "Section",
+  },
+
+  counters = {
+    patten = "PerfCounter%(([^%,)]+)", 
+    enumname = "CounterId",
+    enumprefix = "Counter",
   }
 }
 
@@ -611,8 +617,18 @@ static msgprinter msgprinters[] = {
 write(joinlist(names, "  print_", ",\n"))
 write("};\n\n")
 
-write("#pragma pack(pop)")
+local counterdef = "uint32_t perf_counter[Counter_MAX];\n"
 
+function writercounters()
+  local names = namescans.counters
+  write_enum(names.enumname, names.matches, names.enumprefix)
+  write_namelist("Counter_names", names.matches)
+  write(counterdef)
+end
+
+writercounters()
+
+write("#pragma pack(pop)")
 outputfile:close()
 
 return
