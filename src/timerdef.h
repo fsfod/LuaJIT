@@ -25,6 +25,7 @@ static uint32_t msgsizes[] = {
   0, /* stringmarker */
 };
 
+#define stringmarkermsg_flags(msg) (((msg)->msgid >> 8) & 0xffff)
 typedef struct MSG_stringmarker{
   uint32_t msgid;
 /*  flags: 16;*/
@@ -57,6 +58,7 @@ static LJ_AINLINE MSize print_stringmarker(void* msgptr)
   return msg->size;
 }
 
+#define arenacreatedmsg_flags(msg) (((msg)->msgid >> 8) & 0xffff)
 typedef struct MSG_arenacreated{
   uint32_t msgid;
   MRef address;
@@ -98,9 +100,11 @@ static const char *sections_names[] = {
   "gc_fullgc",
   "gc_step",
   "gc_sweepstring",
-  "propagate_gray"
+  "propagate_gray",
 };
 
+#define sectionmsg_id(msg) (((msg)->msgid >> 8) & 0x7fffff)
+#define sectionmsg_start(msg) (((msg)->msgid >> 31) & 0x1)
 typedef struct MSG_section{
   uint32_t msgid;
 /*  id: 23;*/
@@ -128,6 +132,8 @@ static LJ_AINLINE MSize print_section(void* msgptr)
   return 12;
 }
 
+#define gcstatemsg_state(msg) (((msg)->msgid >> 8) & 0xff)
+#define gcstatemsg_prevstate(msg) (((msg)->msgid >> 16) & 0xff)
 typedef struct MSG_gcstate{
   uint32_t msgid;
 /*  state: 8;*/
@@ -157,6 +163,8 @@ static LJ_AINLINE MSize print_gcstate(void* msgptr)
   return 16;
 }
 
+#define gcobjmsg_kind(msg) (((msg)->msgid >> 8) & 0xf)
+#define gcobjmsg_size(msg) (((msg)->msgid >> 12) & 0xfffff)
 typedef struct MSG_gcobj{
   uint32_t msgid;
 /*  kind: 4;*/
@@ -194,9 +202,11 @@ enum TimerId{
 static const char *timers_names[] = {
   "gc_emptygrayssb",
   "gc_separateudata",
-  "gc_traverse_tab"
+  "gc_traverse_tab",
 };
 
+#define timemsg_id(msg) (((msg)->msgid >> 8) & 0xffff)
+#define timemsg_flags(msg) (((msg)->msgid >> 24) & 0xff)
 typedef struct MSG_time{
   uint32_t msgid;
 /*  id: 16;*/
@@ -224,6 +234,7 @@ static LJ_AINLINE MSize print_time(void* msgptr)
   return 8;
 }
 
+#define arenasweepmsg_arenaid(msg) (((msg)->msgid >> 8) & 0xffffff)
 typedef struct MSG_arenasweep{
   uint32_t msgid;
 /*  arenaid: 24;*/
@@ -253,6 +264,8 @@ static LJ_AINLINE MSize print_arenasweep(void* msgptr)
   return 12;
 }
 
+#define markermsg_id(msg) (((msg)->msgid >> 8) & 0xffff)
+#define markermsg_flags(msg) (((msg)->msgid >> 24) & 0xff)
 typedef struct MSG_marker{
   uint32_t msgid;
 /*  id: 16;*/
@@ -291,4 +304,32 @@ static msgprinter msgprinters[] = {
   print_stringmarker,
 };
 
+enum CounterId{
+  Counter_gc_barrierf,
+  Counter_gc_barrieruv,
+  Counter_gc_mark,
+  Counter_gc_markhuge,
+  Counter_gc_traverse_func,
+  Counter_gc_traverse_proto,
+  Counter_gc_traverse_tab,
+  Counter_gc_traverse_thread,
+  Counter_gc_traverse_trace,
+  Counter_sweptstring,
+  Counter_MAX
+};
+
+static const char *Counter_names[] = {
+  "gc_barrierf",
+  "gc_barrieruv",
+  "gc_mark",
+  "gc_markhuge",
+  "gc_traverse_func",
+  "gc_traverse_proto",
+  "gc_traverse_tab",
+  "gc_traverse_thread",
+  "gc_traverse_trace",
+  "sweptstring",
+};
+
+uint32_t perf_counter[Counter_MAX];
 #pragma pack(pop)

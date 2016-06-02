@@ -96,9 +96,11 @@ void gc_mark(global_State *g, GCobj *o, int gct)
 {
   lua_assert(!isdead(g, o));
   lua_assert(gc_ishugeblock(o) || iswhite(g, o));
+  PerfCounter(gc_mark);
 
   /* Huge objects are always unconditionally sent to us to make white checks simple */
   if (LJ_UNLIKELY(gc_ishugeblock(o))) {
+    PerfCounter(gc_markhuge);
     hugeblock_mark(g, o);
 
     /* No further processing */
@@ -220,6 +222,7 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
   cTValue *mode;
   GCtab *mt = tabref(t->metatable);
   cleargray(obj2gco(t));
+  PerfCounter(gc_traverse_tab);
   if (mt)
     gc_mark_tab(g, mt);
   mode = lj_meta_fastg(g, mt, MM_mode);
@@ -266,6 +269,7 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
 /* Traverse a function. */
 static void gc_traverse_func(global_State *g, GCfunc *fn)
 {
+  PerfCounter(gc_traverse_func);
   cleargray((GCobj *)fn);
   gc_mark_tab(g, tabref(fn->c.env));
   if (isluafunc(fn)) {
@@ -295,6 +299,7 @@ static void gc_traverse_trace(global_State *g, GCtrace *T)
 {
   IRRef ref;
   if (T->traceno == 0) return;
+  PerfCounter(gc_traverse_trace);
   for (ref = T->nk; ref < REF_TRUE; ref++) {
     IRIns *ir = &T->ir[ref];
     if (ir->o == IR_KGC)
@@ -316,6 +321,7 @@ static void gc_traverse_trace(global_State *g, GCtrace *T)
 static void gc_traverse_proto(global_State *g, GCproto *pt)
 {
   ptrdiff_t i;
+  PerfCounter(gc_traverse_proto);
   gc_mark_str(g, proto_chunkname(pt));
   for (i = -(ptrdiff_t)pt->sizekgc; i < 0; i++)  /* Mark collectable consts. */
     gc_markobj(g, proto_kgc(pt, i));
@@ -345,6 +351,7 @@ static MSize gc_traverse_frames(global_State *g, lua_State *th)
 static void gc_traverse_thread(global_State *g, lua_State *th)
 {
   TValue *o, *top = th->top;
+  PerfCounter(gc_traverse_thread);
   for (o = tvref(th->stack)+1+LJ_FR2; o < top; o++)
     gc_marktv(g, o);
   if (g->gc.state == GCSatomic) {
@@ -362,10 +369,12 @@ GCSize gc_traverse(global_State *g, GCobj *o)
 
   if (LJ_LIKELY(gct == ~LJ_TTAB)) {
     GCtab *t = gco2tab(o);
+    TimerStart(gc_traverse_tab);
     if (gc_traverse_tab(g, t) > 0) {
      // lua_assert(0);
       //black2gray(o);  /* Keep weak tables gray. */
     }
+    TimerEnd(gc_traverse_tab);
     return sizeof(GCtab) + sizeof(TValue) * t->asize +
 			   sizeof(Node) * (t->hmask + 1);
   } else if (LJ_LIKELY(gct == ~LJ_TFUNC)) {
@@ -585,6 +594,7 @@ static int gc_sweepstring(global_State *g)
     GCstr *s = strref(str);
     str = s->nextgc;
     if (iswhite(g, s)) {
+      PerfCounter(sweptstring);
       *(prev ? &prev->nextgc : &g->strhash[g->gc.sweepstr]) = s->nextgc;
     } else {
       prev = s;
@@ -1236,7 +1246,7 @@ void lj_gc_barrierf(global_State *g, GCobj *o, GCobj *v)
   lua_assert(!isdead(g, v) && !isdead(g, o));
   lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);
   lua_assert(o->gch.gct != ~LJ_TTAB);
-
+  PerfCounter(gc_barrierf);
   /* Preserve invariant during propagation. Otherwise it doesn't matter. */
   if (g->gc.statebits & GCSneedsbarrier) {
     /* Move frontier forward. */
@@ -1250,6 +1260,7 @@ void lj_gc_barrierf(global_State *g, GCobj *o, GCobj *v)
 void LJ_FASTCALL lj_gc_barrieruv(global_State *g, TValue *tv)
 {
   lua_assert(tvisgcv(tv));
+  PerfCounter(gc_barrieruv);
 /* Adjust the TValue pointer to upvalue its contained in */
 #define TV2MARKED(x) \
   ((GCupval *)(((char*)x)-offsetof(GCupval, tv)))
