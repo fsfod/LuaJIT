@@ -701,11 +701,11 @@ static GCBlockword majorsweep_word(GCArena *arena, MSize i)
 {
   GCBlockword block = arena->block[i];
   GCBlockword mark = arena->mark[i];
-  block = block & mark;
-
-  arena->block[i] = block & mark;
-  arena->mark[i] = block ^ mark;
   
+  arena->mark[i] = block ^ mark;
+  block = block & mark;
+  arena->block[i] = block;
+
   return block;
 }
 
@@ -731,7 +731,7 @@ static __m128i simd_popcntbytes(__m128i vec)
 }
 
 /* Time to sweep full 1mb arena uncached 4k(cached 800) cycles */
-static LJ_NOINLINE MSize sweep_simd(GCArena *arena, MSize start, MSize limit, int minor)
+static MSize sweep_simd(GCArena *arena, MSize start, MSize limit, int minor)
 {
   MSize i;
   __m128i count = _mm_setzero_si128();
@@ -746,19 +746,19 @@ static LJ_NOINLINE MSize sweep_simd(GCArena *arena, MSize start, MSize limit, in
     //_mm_prefetch((char *)(pmark+i+4), 1);
     __m128i block = _mm_load_si128(pblock);
     __m128i mark = _mm_load_si128(pmark);
+    __m128i newmark;
     /* Count whites that are swept to away */ 
     count = _mm_add_epi8(count, simd_popcntbytes(_mm_andnot_si128(mark, block)));
-    
-    block = _mm_and_si128(block, mark);
     if (!minor) {
-      mark = _mm_xor_si128(block, mark);
+      newmark = _mm_xor_si128(block, mark);
     } else {
-      mark = _mm_or_si128(block, mark);
-    }   
+      newmark = _mm_or_si128(block, mark);
+    }
+    _mm_store_si128(pmark, newmark);
+    block = _mm_and_si128(block, mark);
     used = _mm_or_si128(block, used);
-
     _mm_store_si128(pblock, block);
-    _mm_store_si128(pmark, mark);
+    
     /* if block < mark word ends in a white */
     //__m128i whiteend = _mm_cmplt_epi8(block, mark);
     //
@@ -790,32 +790,6 @@ static LJ_NOINLINE MSize sweep_simd(GCArena *arena, MSize start, MSize limit, in
   return _mm_cvtsi128_si32(count) | (_mm_cvtsi128_si32(used) ? (1 << 16) : 0);
 }
 
-/* About 800 cached cycles NOTE MSVC sticks a VZEROPUPPER in the loop */
-static LJ_NOINLINE MSize majorsweep_avx(GCArena *arena, MSize start, MSize limit)
-{
-  float *pblock = (float *)(arena->block), *pmark = (float *)(arena->mark);
-  __m256 used = _mm256_setzero_ps();
-
-  for (size_t i = start; i < limit; i += 8) {
-    //_mm_prefetch((char *)(pmark+i+4), 1);
-    __m256 block = _mm256_load_ps(pblock+i);
-    __m256 mark = _mm256_load_ps(pmark+i);
-    block = _mm256_and_ps(block, mark);
-    mark = _mm256_xor_ps(block, mark);
-    used = _mm256_or_ps(block, used);
-
-    _mm256_store_ps(pblock+i, block);
-    _mm256_store_ps(pmark+i, mark);
-  }
-
-  __m128i used128 = _mm_castps_si128(_mm_or_ps(_mm256_extractf128_ps(used, 0), _mm256_extractf128_ps(used, 1)));
-  used128 = _mm_or_si128(used128, _mm_srli_si128(used128, 8));
-  used128 = _mm_or_si128(used128, _mm_srli_si128(used128, 4));
-
-  /* Set the 16th bit if there are still any reachable objects in the arena */
-  return 1 | (_mm_cvtsi128_si32(used128) ? (1 << 16) : 0);
-}
-
 static MSize majorsweep(GCArena *arena, MSize start, MSize limit)
 {
   MSize count = 1;
@@ -826,10 +800,10 @@ static MSize majorsweep(GCArena *arena, MSize start, MSize limit)
     GCBlockword mark = arena->mark[i];
     /* Count whites that are swept to away */
     //count += popcnt(block & ~mark);
+    arena->mark[i] = block ^ mark;
     block = block & mark;
     arena->block[i] = block;
 
-    mark = block ^ mark;
     used |= block;
 
    // GCBlockword nprev = block < mark ? 0 : (~(GCBlockword)0);
@@ -837,7 +811,7 @@ static MSize majorsweep(GCArena *arena, MSize start, MSize limit)
     ** turning them into extents
     */
     //mark = (block == 0 ? (prevwhite & mark) : mark);
-    arena->mark[i] = mark;
+   
     //prevwhite = nprev;
     
 #if !defined(_MSC_VER) && defined(__clang__)
@@ -876,10 +850,11 @@ static MSize minorsweep(GCArena *arena)
   for (size_t i = MinBlockWord; i < limit; i++) {
     GCBlockword block = arena->block[i];
     GCBlockword mark = arena->mark[i];
+    arena->mark[i] = block | mark;
     block = block & mark;
     used |= block;
     arena->block[i] = block;
-    arena->mark[i] = block | mark;
+    
   }
   return used ? (1 << 16) : 0;
 }
