@@ -48,17 +48,27 @@ function buildtemplate(tmpl, values)
   end)
 end
 
-function joinlist(list, prefix, suffix)
+local function joinlist(list, prefix, suffix)
+  prefix = prefix or ""
+  suffix = suffix or ""
   return prefix .. table.concat(list, suffix .. prefix) .. suffix
 end
-
-buildtemplate("avd {{test}} efs", {test = "a string"})
 
 function write(s)
   print(s)
   if outputfile then
     outputfile:write(s)
   end
+end
+
+local function writef(s, ...)
+  assert(type(s) == "string" and s ~= "")
+  write(format(s, ...))
+end
+
+local function writetemplate(s, ...)
+  assert(type(s) == "string" and s ~= "")
+  write(buildtemplate(s, ...))
 end
 
 local function trim(s)
@@ -137,9 +147,10 @@ function parse_msg(msgname, def)
     end
   end
 
+  --If message has barible sized fields and theres no field declared to specify the messages variable size
   if vsize and not def.sizefield then
     sizefield = "msgsize"
-    table.insert(fieldlist, {name = "msgsize", type = "u32", order = 0})
+    table.insert(fieldlist, 1, {name = "msgsize", type = "u32", order = 0})
     msgsize = msgsize + 4
   end
 
@@ -156,23 +167,30 @@ function parse_msglist()
   end
 end
 
+local function mkbitget(f, fieldref)
+  return format("((%s >> %d) & 0x%x)", fieldref, f.bitofs, bit.lshift(1, f.bitsize)-1)
+end
+
 function mkfield(f)
+  local ret, getter
+
   if f.type == "bitfield" then
-    return format("\n/*  %s: %d;*/", f.name, f.bitsize)
+    ret = format("\n/*  %s: %d;*/", f.name, f.bitsize)
   else
     local type = numtypes[f.type]
     if f.bitofs or f.idpart or f.type == "string" then
-      return format("/* %s %s;*/", type.ctype, f.name)
+      ret = format("/* %s %s;*/", type.ctype, f.name)
     else
-      return format("\n  %s %s;", type.ctype, f.name)
+      ret = format("\n  %s %s;", type.ctype, f.name)
     end
   end
+  return ret
 end
 
 local structdef = [[
-typedef struct MSG_%s{
-  uint32_t msgid;%s
-} MSG_%s;
+typedef struct MSG_{{name}}{
+  uint32_t msgid;{{fields}}
+} MSG_{{name}};
 
 ]]
 
@@ -190,9 +208,12 @@ function write_struct(name, def)
 
   for i, f in ipairs(def.fields) do   
     fieldstr = fieldstr..mkfield(f)
+    if f.type == "bitfield" then
+      writef("#define %smsg_%s(msg) %s\n", name, f.name, mkbitget(f, "(msg)->msgid"))
+    end
   end
   
-  write(format(structdef, name, fieldstr, name))
+  writetemplate(structdef, {name = name, fields = fieldstr})
 end
 
 local funcdef = [[
@@ -276,7 +297,7 @@ function write_logfunc(def)
     
   end
 
-  write(buildtemplate(funcdef, {name = def.name, args = args, fields = fieldstr, vtotal = vtotal, vwrite = vwrite}))
+  writetemplate(funcdef, {name = def.name, args = args, fields = fieldstr, vtotal = vtotal, vwrite = vwrite})
 end
 
 local printdef = [[
@@ -312,7 +333,7 @@ function write_printfunc(def)
     local arg 
 
     if f.bitofs or f.idpart then
-      arg = format("((%s >> %d) & 0x%x)", "msg->msgid", f.bitofs, bit.lshift(1, f.bitsize)-1)
+      arg = mkbitget(f, "msg->msgid")
     end
 
     --translate known enum ids into a name
@@ -344,8 +365,7 @@ function write_printfunc(def)
   end
 
   local fmtstr = format('%s: %s', def.name, table.concat(fmtlist, ", "))
-  write(buildtemplate(printdef, {name = def.name, fmtstr = fmtstr, args = args, msgsz = msgsz}))
-  return print_
+  writetemplate(printdef, {name = def.name, fmtstr = fmtstr, args = args, msgsz = msgsz})
 end
 
 local filecache = {}
@@ -396,28 +416,34 @@ end
 
 local enumdef = [[
 enum %s{
-  %s,
-  %sMAX
+%s  %sMAX
 };
+
+]]
+
+local luaenumdef = [[
+local %s = {
+%s
+  %sMAX
+}
 
 ]]
 
 function write_enum(name, names, prefix)
   prefix = prefix and (prefix .. "_") or name
-  local entries = prefix .. table.concat(names, ",\n  " .. prefix)
+  local entries = joinlist(names, "  " .. prefix, ",\n")
   local enum = format(enumdef, name, entries, prefix);
   write(enum)
 end
 
 local namedef = [[
 static const char *%s[] = {
-  "%s"
-};
+%s};
 
 ]]
 
 function write_namelist(name, names)
-  local names = table.concat(names, '",\n  "')
+  local names = joinlist(names, '  "', '",\n')
   local enum = format(namedef, name, names);
   write(enum)
 end
