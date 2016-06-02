@@ -63,7 +63,9 @@ void TraceGC(global_State *g, int newstate)
   // OutputDebugStringA(buf);
 #endif 
   // printf("GC State = %s\n", gcstates[newstate]);
+#ifdef LJ_ENABLESTATS
   log_gcstate(newstate, g->gc.state, g->gc.total);
+#endif
 }
 
 /* Macros to set GCobj colors and flags. */
@@ -979,7 +981,9 @@ static void sweep_arena(global_State *g, MSize i)
   } else {
     count = arena_majorsweep(arena);
   }
+#ifdef LJ_ENABLESTATS
   log_arenasweep(i, (uint32_t)TicksEnd(), count & 0xffff, arena_topcellid(arena));
+#endif
 
   ArenaFreeList *freelist = g->gc.freelists+i;
   freelist->freeobjcount += count & 0xffff;

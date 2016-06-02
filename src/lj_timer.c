@@ -5,6 +5,39 @@
 #include <stdio.h>
 #include "lj_timer.h"
 
+const char* gcstates[] = {
+  "GCpause",
+  "GCSpropagate",
+  "GCSatomic",
+  "GCSsweepstring",
+  "GCSsweep",
+  "GCSfinalize"
+};
+
+const char *getgcsname(int gcs)
+{
+  switch (gcs) {
+  case GCSpause:
+    return "GCSpause";
+  case GCSpropagate:
+    return "GCSpropagate";
+  case GCSatomic:
+    return "GCSatomic";
+  case GCSsweepstring:
+    return "GCSsweepstring";
+  case GCSsweep:
+    return "GCSsweep";
+  case GCSfinalize:
+    return "GCSfinalize";
+  default:
+    return NULL;
+    break;
+  }
+}
+
+
+#ifdef LJ_ENABLESTATS
+
 SBuf eventbuf = { 0 };
 
 void timers_setuplog(lua_State *L)
@@ -76,15 +109,6 @@ void timers_print(const char *name, uint64_t time)
   printf("took %.4g ms(%ull)", name, t, time);
 }
 
-const char* gcstates[] = {
-  "GCpause",
-  "GCSpropagate",
-  "GCSatomic",
-  "GCSsweepstring",
-  "GCSsweep",
-  "GCSfinalize"
-};
-
 uint64_t secstart[Section_MAX] = { 0 };
 uint64_t sectotal[Section_MAX] = { 0 };
 uint64_t timertotal[Timer_MAX] = { 0 };
@@ -123,9 +147,9 @@ void timers_printlog()
     switch (id) {
       case MSGID_gcstate:{
         MSG_gcstate *msg = (MSG_gcstate *)pos;
-        MSize gcs = (uint8_t)(header >> 8);
-        MSize prevgcs = (uint8_t)(header >> 16);
-        printf("GC State = %s, mem = %ukb\n", gcstates[gcs], msg->totalmem/1024);
+        MSize gcs = gcstatemsg_state(msg);
+        MSize prevgcs = gcstatemsg_prevstate(msg);
+        printf("GC State = %s, mem = %ukb\n", getgcsname(gcs), msg->totalmem/1024);
         pos += msgsizes[MSGID_gcstate];
 
         uint64_t start = secstart[Section_gc_step] ? secstart[Section_gc_step] : secstart[Section_gc_fullgc];
@@ -181,7 +205,7 @@ void timers_printlog()
       }
       case MSGID_time: {
         MSG_time *msg = (MSG_time *)pos;
-        uint32_t id = ((msg->msgid >> 8) & 0xffff);
+        uint32_t id = timemsg_id(msg);
         timertotal[id] += msg->time;
         pos += sizeof(MSG_time);
         break;
@@ -201,3 +225,16 @@ void recgcstate(global_State *g, int newstate)
   lua_State *L = mainthread(g);
   log_gcstate(newstate, g->gc.state, g->gc.total);
 }
+
+#else
+
+void timers_setuplog(lua_State *L)
+{
+  UNUSED(L);
+}
+
+void timers_freelog(global_State *g)
+{
+  UNUSED(g);
+}
+#endif

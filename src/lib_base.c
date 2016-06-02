@@ -599,7 +599,9 @@ LJLIB_CF(perfmarker)
 {
   GCstr *label = lj_lib_checkstr(L, 1);
   int32_t flags = lj_lib_optint(L, 2, 0);
+#ifdef LJ_ENABLESTATS
   log_stringmarker(flags, strdata(label));
+#endif
   return 0;
 }
 

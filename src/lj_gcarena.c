@@ -84,9 +84,7 @@ GCArena* arena_create(lua_State *L, uint32_t flags)
     arena_creategreystack(L, arena);
   }
 
-  if (mref(eventbuf.L, lua_State) == NULL) {
-    timers_setuplog(L);
-  }
+  timers_setuplog(L);
 
   return arena;
 }
