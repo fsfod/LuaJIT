@@ -1488,6 +1488,7 @@ GCobj *findarenaspace(lua_State *L, GCSize osize, int travobj)
   uint32_t flags = (travobj ? ArenaFlag_TravObjs : 0);
   uint32_t mask = ArenaFlag_NoBump|ArenaFlag_Explicit|ArenaFlag_TravObjs;
 
+  /* FIXME: be smarter about large allocations */
   if (!arena_canbump(curarena, cellnum)) {
     lj_gc_setarenaflag(g, lj_gc_getarenaid(g, curarena), ArenaFlag_NoBump);
   }
@@ -1496,14 +1497,13 @@ GCobj *findarenaspace(lua_State *L, GCSize osize, int travobj)
     GCArena *arena = lj_gc_arenaref(g, i);
     if ((lj_gc_arenaflags(g, i)&mask) == flags) {
       pickedarena = arena;
+      lj_gc_cleararenaflags(g, i, ArenaFlag_Empty);
       break;
     }
   }
 
   if (!pickedarena) {
     pickedarena = lj_gc_newarena(L, travobj ? ArenaFlag_TravObjs : 0);
-  } else {
-    lj_gc_cleararenaflags(g, pickedid, ArenaFlag_Empty);
   }
   lj_gc_setactive_arena(L, pickedarena, travobj);
 
