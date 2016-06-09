@@ -230,6 +230,8 @@ MSize arena_minorsweep(GCArena *arena);
 MSize arena_majorsweep(GCArena *arena);
 void arena_towhite(GCArena *arena);
 void arena_dumpwhitecells(global_State *g, GCArena *arena);
+typedef int(*arenavisitor)(GCobj *o, void *user);
+void arena_visitobjects(GCArena *arena, arenavisitor cb, void *user);
 
 void *arena_allocalign(GCArena *arena, MSize size, MSize align);
 void* arena_allocslow(GCArena *arena, MSize size);

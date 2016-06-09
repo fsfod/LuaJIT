@@ -44,30 +44,6 @@ void TraceGC(global_State *g, int newstate);
 #define SetGCState(g, newstate) g->gc.state = newstate 
 #endif
 
-MSize GCCount = 0;
-const char* gcstates[];
-
-void TraceGC(global_State *g, int newstate)
-{
-  lua_State *L = mainthread(g);
-
-  if (newstate == GCSpropagate) {
-    // timers_printlog();
-    //printf("---------------GC Start %d-------------------------\n", GCCount);
-    GCCount++;
-  }
-
-#ifdef DEBUG
-  char buf[100];
-  // sprintf(buf, "GC State = %s\n", gcstates[newstate]);
-  // OutputDebugStringA(buf);
-#endif 
-  // printf("GC State = %s\n", gcstates[newstate]);
-#ifdef LJ_ENABLESTATS
-  log_gcstate(newstate, g->gc.state, g->gc.total);
-#endif
-}
-
 /* Macros to set GCobj colors and flags. */
 #define gray2black(x)		((x)->gch.marked |= LJ_GC_BLACK)
 #define isfinalized(u)		((u)->marked & LJ_GC_FINALIZED)
@@ -1004,12 +980,17 @@ static void atomic(global_State *g, lua_State *L)
   Section_End(gc_atomic);
 }
 
+#define PreSweepArena(g, arena, i)  sweepcallback(g, arena, i, -1)
+#define PostSweepArena(g, arena, i, count) sweepcallback(g, arena, i, count)
+
+void sweepcallback(global_State *g, GCArena *arena, MSize i, int count);
+
 static void sweep_arena(global_State *g, MSize i)
 {
   lua_assert(!(lj_gc_arenaflags(g, i) & ArenaFlag_Swept));
   GCArena *arena = lj_gc_arenaref(g, i);
-  MSize count ;
-
+  MSize count;
+  PreSweepArena(g, arena, i);
   TicksStart();
   if (g->gc.isminor) {
     count = arena_minorsweep(arena);
@@ -1019,6 +1000,7 @@ static void sweep_arena(global_State *g, MSize i)
 #ifdef LJ_ENABLESTATS
   log_arenasweep(i, (uint32_t)TicksEnd(), count & 0xffff, arena_topcellid(arena));
 #endif
+  PostSweepArena(g, arena, i, count);
 
   ArenaFreeList *freelist = g->gc.freelists+i;
   freelist->freeobjcount += count & 0xffff;

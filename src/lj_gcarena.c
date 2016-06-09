@@ -988,6 +988,39 @@ void arena_dumpwhitecells(global_State *g, GCArena *arena)
   }
 }
 
+void arena_visitobjects(GCArena *arena, arenavisitor cb, void *user)
+{
+  MSize i, size = arena_blocktop(arena);
+  MSize arenaid = arena_extrainfo(arena)->id;
+
+  for (i = MinBlockWord; i < size; i++) {
+    GCBlockword block = arena->block[i];
+
+    if (block) {
+      uint32_t bit = lj_ffs(block);
+
+      for (; bit < (BlocksetBits-1);) {
+        GCCellID cellid = bit + (i * BlocksetBits);
+        GCobj *cell = arena_cellobj(arena, cellid);
+
+        if (cb(cell, user)) {
+          return;
+        }
+
+        /* Create a mask to remove the bits to the LSB backwards the end of the free segment */
+        GCBlockword mask = ((GCBlockword)0xffffffff) << (bit+1);
+
+        /* Don't try to bit scan an empty mask */
+        if (!(block & mask)) {
+          break;
+        }
+
+        bit = lj_ffs(block & mask);
+      }
+    }
+  }
+}
+
 LUA_API int arenaobj_getcellid(void *o)
 {
   return (((uintptr_t)o) & ArenaCellMask) >> 4;
