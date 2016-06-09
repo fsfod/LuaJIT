@@ -1481,6 +1481,8 @@ static void asm_bumpalloc(ASMState *as, IRIns *ir, MSize sz)
   emit_rmro(as, XO_MOVto, tmp, arena, 0);
   emit_gri(as, XG_ARITHi(XOg_ADD), tmp, roundedsz);
 
+  emit_gmroi(as, XG_ARITHi(XOg_ADD), RID_NONE, &J2G(as->J)->gc.total, sz);
+
   /* Test bump limit */
   asm_guardcc(as, CC_AE);
   emit_gmrmi(as, XG_ARITHi(XOg_CMP), blockbit, (ArenaSize-32) - roundedsz);
