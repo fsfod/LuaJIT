@@ -1446,8 +1446,8 @@ static void asm_sload(ASMState *as, IRIns *ir)
 static void asm_bumpalloc(ASMState *as, IRIns *ir, MSize sz)
 {
   RegSet allow = RSET_GPR & ~RID2RSET(RID_ECX);
-  Reg arena, tmp, blockbit, robj = ir->r;
-  MSize roundedsz = arena_roundcells(sz);
+  Reg arena, tmp, blockbit, celltop, robj = ir->r;
+  MSize cellcount = arena_roundcells(sz);
 
   if (!ra_hasreg(ir->r)) {
     robj = ra_dest(as, ir, allow);
@@ -1459,38 +1459,53 @@ static void asm_bumpalloc(ASMState *as, IRIns *ir, MSize sz)
   blockbit = ra_scratch(as, allow);
   tmp = ra_scratch(as, RID2RSET(RID_ECX));
 
-  /* Set block bit for cell */
-  emit_rmro(as, XO_ORto, blockbit, arena, 0);
-  emit_rr(as, XO_SHIFTcl, XOg_SHL, blockbit);/* Note shifted by tmp */
-  emit_loadi(as, blockbit, 1);
-  emit_shifti(as, XOg_SHR, RID_ECX, 4);
+  /* cdata address from cell id */
   if (robj != RID_ECX) {
-    emit_rr(as, XO_MOV, tmp, robj);
+    celltop = robj;
+    emit_rr(as, XO_ARITH(XOg_ADD), robj, arena);
+  } else {
+    emit_rmrxo(as, XO_LEA, robj, arena, robj, XM_SCALE1, 0);
+  }
+  emit_shifti(as, XOg_SHL, robj, 4);
+  /* 
+    Set block bit for cell
+    shr  ecx, 5
+    and  ecx, 2047
+    or   [arena + 4*ecx + 8192], blockbit
+  */
+  emit_rmrxo(as, XO_ORto, blockbit, arena, RID_ECX, XM_SCALE4, 8192);
+  emit_gri(as, XG_ARITHi(XOg_AND), RID_ECX, 0x7FF);
+  emit_shifti(as, XOg_SHR, RID_ECX, 5);
+  /* Note shifted by tmp and upper bits of shift count are ignored by the cpu */
+  emit_rr(as, XO_SHIFTcl, XOg_SHL, blockbit);
+  emit_loadi(as, blockbit, 1);
+  if (robj != RID_ECX) {
+    emit_rr(as, XO_MOV, RID_ECX, robj);
+  } else {
+    lua_assert(0);
   }
 
   checkmclim(as);
+  emit_gmroi(as, XG_ARITHi(XOg_ADD), RID_NONE, (int32_t)(intptr_t)&J2G(as->J)->gc.total, sz);
 
-  /* Compute block word address */
-  emit_rr(as, XO_ARITH(XOg_ADD), arena, tmp);
-  emit_gri(as, XG_ARITHi(XOg_AND), tmp, 0x1FFC);
-  emit_shifti(as, XOg_SHR, tmp, 7);
-  emit_rr(as, XO_MOV, tmp, robj);
-  emit_gri(as, XG_ARITHi(XOg_ADD), arena, MaxBlockWord*4);
-
-  /* Increment bump pointer */
-  emit_rmro(as, XO_MOVto, tmp, arena, 0);
-  emit_gri(as, XG_ARITHi(XOg_ADD), tmp, roundedsz);
-
-  emit_gmroi(as, XG_ARITHi(XOg_ADD), RID_NONE, &J2G(as->J)->gc.total, sz);
+  emit_rr(as, XO_MOVZXw, robj, RID_ECX);
+  /* Increment arena cell top Id */
+  emit_rmro(as, XO_MOVto, celltop, arena, 0);
+  emit_rmro(as, XO_LEA, celltop, RID_ECX, cellcount);
 
   /* Test bump limit */
   asm_guardcc(as, CC_AE);
-  emit_gmrmi(as, XG_ARITHi(XOg_CMP), blockbit, (ArenaSize-32) - roundedsz);
-  emit_rr(as, XO_ARITH(XOg_SUB), blockbit, arena);
-  /* Load celltop from the currently active non traversable object arena */
-  emit_rr(as, XO_MOV, tmp, robj);
-  emit_rr(as, XO_MOV, blockbit, robj);
-  emit_rmro(as, XO_MOV, robj, arena, 0);
+  emit_rr(as, XO_ARITH(XOg_CMP), celltop, blockbit);
+  emit_rmro(as, XO_LEA, celltop, celltop, cellcount);
+  
+  /* Extract max cellid */
+  emit_shifti(as, XOg_SHR, blockbit, 16);
+  emit_rr(as, XO_MOV, blockbit, RID_ECX);
+  /* Extract min cellid */
+  emit_rr(as, XO_MOVZXw, celltop, RID_ECX);
+
+  /* Load combined celltop and cell max from the currently active non traversable object arena */
+  emit_rmro(as, XO_MOV, RID_ECX, arena, 0);
   emit_getgl(as, arena, arena);
   checkmclim(as);
 }

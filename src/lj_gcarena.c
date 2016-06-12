@@ -30,7 +30,8 @@ void gc_mark(global_State *g, GCobj *o, int gct);
 void arena_reset(GCArena *arena)
 {
   MSize blocksize = (MaxBlockWord-MinBlockWord) * sizeof(GCBlockword);
-  setmref(arena->celltop, arena->cells+MinCellId);
+  arena->celltopid = MinCellId;
+  arena->celltopmax = MaxUsableCellId;
   arena->firstfree = (GCCellID1)MaxCellId;
   arena->freecount = 0;
   memset(arena->block+MinBlockWord, 0, blocksize);
@@ -41,8 +42,8 @@ GCArena* arena_init(GCArena* arena)
 {
   /* Make sure block and mark bits are clear*/
   memset(arena, 0, sizeof(GCArena));
-
-  setmref(arena->celltop, arena->cells+MinCellId);
+  arena->celltopid = MinCellId; 
+  arena->celltopmax = MaxUsableCellId;
   arena->freecount = 0;
   arena->firstfree = MaxCellId-1;
   
@@ -323,7 +324,7 @@ void *arena_allocalign(GCArena *arena, MSize size, MSize align)
     return arena_allocslow(arena, size);
   }
 
-  setmref(arena->celltop, arena_celltop(arena)+numcells);
+  arena->celltopandmax += numcells;
 
   lua_assert(arena_cellstate(arena, cell) < CellState_White);
   arena_checkid(cell);
@@ -862,7 +863,6 @@ GCArena *arena_clonemeta(global_State *g, GCArena *arena)
 {
   GCArena *meta = lj_mem_newt(mainthread(g), sizeof(GCArena), GCArena);  
   memcpy(meta, arena, sizeof(GCArena));
-  setmref(meta->celltop, meta->cells+arena_topcellid(arena));
   setmref(meta->greybase, NULL);
   setmref(meta->greytop, NULL);
   setmref(meta->freelist, NULL);

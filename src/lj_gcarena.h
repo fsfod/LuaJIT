@@ -111,7 +111,13 @@ typedef union GCArena {
   struct {
     union{
       struct{
-        MRef celltop;
+        union {
+          struct {
+            GCCellID1 celltopid;
+            GCCellID1 celltopmax;
+          };
+          uint32_t celltopandmax;
+        };
         MRef freelist;
         ArenaExtra extra; /*FIXME: allocate separately */
       };
@@ -178,10 +184,10 @@ typedef struct HugeBlockTable {
 
 #define arena_cell(arena, cellidx) (&(arena)->cells[(cellidx)])
 #define arena_cellobj(arena, cellidx) ((GCobj *)&(arena)->cells[(cellidx)])
-#define arena_celltop(arena) (mref((arena)->celltop, GCCell))
+#define arena_celltop(arena) ((arena)->cells+arena_topcellid(arena))
 /* Can the arena bump allocate a min number of contiguous cells */
-#define arena_canbump(arena, mincells) ((arena_celltop(arena)+mincells) < arena_cell(arena, MaxUsableCellId))
-#define arena_topcellid(arena) (ptr2cell(mref((arena)->celltop, GCCell)))
+#define arena_canbump(arena, mincells) ((arena_topcellid(arena)+mincells) < MaxUsableCellId)
+#define arena_topcellid(arena) ((arena)->celltopid)
 #define arena_blocktop(arena) ((arena_topcellid(arena) & ~BlocksetMask)/BlocksetBits)
 #define arena_freelist(arena) mref((arena)->freelist, ArenaFreeList)
 
@@ -255,7 +261,7 @@ static LJ_AINLINE int arena_cellisallocated(GCArena *arena, GCCellID cell)
   return arena->block[arena_blockidx(cell)] & arena_blockbit(cell);
 }
 
-#define arena_freespace(arena) ((((arena)->cell+MaxCellId)-(arena)->celltop) * CellSize)
+#define arena_freespace(arena) (((arena)->celltopmax - arena_topcellid(arena)) * CellSize)
 
 static GCArena *ptr2arena(void* ptr);
 
@@ -276,8 +282,7 @@ static LJ_AINLINE GCArena *ptr2arena(void* ptr)
 {
   GCArena *arena = (GCArena*)(((uintptr_t)ptr) & ~(uintptr_t)ArenaCellMask);
   arena_checkptr(ptr);
-  lua_assert(ptr2cell(mref(arena->celltop, GCCell)) <= MaxCellId && 
-    ((GCCell*)ptr) < mref(arena->celltop, GCCell));
+  lua_assert(arena->celltopid >= MinCellId && arena->celltopid <= MaxUsableCellId);
   return arena;
 }
 
@@ -473,10 +478,10 @@ static LJ_AINLINE void *arena_alloc(GCArena *arena, MSize size)
     return arena_allocslow(arena, size);
   }
 
-  cell = ptr2cell(arena_celltop(arena));
+  cell = arena_topcellid(arena);
   lua_assert(arena_cellstate(arena, cell) < CellState_White);
 
-  setmref(arena->celltop, arena_celltop(arena)+numcells);
+  arena->celltopandmax += numcells;
   arena_checkid(cell);
 
   arena_getblock(arena, cell) |= arena_blockbit(cell);
