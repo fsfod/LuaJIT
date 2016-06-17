@@ -144,6 +144,22 @@ typedef union GCArena {
   };
 } GCArena;
 
+/* Sub arenas have a fixed object type with a fixed size object metadata(gct, Ctypeid) is pre filled in 
+** Custom sweep behaviour need min size either a GCBlockword or 128 bits worth(2Kb mem of cells) of GCBlockword for simd marking
+** Header embedded before objects of the sub arena 
+** SubArenas should be allocated top down from a normal GCArena so we can use a limit when marking
+ */
+typedef struct GCSubArena {
+  uint8_t gct;
+  uint8_t marked;
+  uint16_t flags;
+  GCCellID1 top;
+  GCCellID1 max;
+  uint16_t objsize;
+  uint16_t freelistid;
+  GCCell cell[0];
+} GCSubArena;
+
 LJ_STATIC_ASSERT((offsetof(GCArena, cellsstart) & 15) == 0);
 LJ_STATIC_ASSERT((MinCellId * 16) == offsetof(GCArena, cellsstart));
 
@@ -517,6 +533,26 @@ static LJ_AINLINE void *arena_alloc(GCArena *arena, MSize size)
   lua_assert(arena_cellstate(arena, cell) < CellState_White);
 
   arena->celltopandmax += numcells;
+  arena_checkid(cell);
+
+  arena_getblock(arena, cell) |= arena_blockbit(cell);
+  return arena_cell(arena, cell);
+}
+
+static LJ_AINLINE void *subarena_alloc(GCSubArena *subarena, MSize size)
+{
+  GCArena *arena = ptr2arena(subarena);
+  MSize numcells = arena_roundcells(size);
+  GCCellID cell = subarena->top;
+  lua_assert(numcells != 0 && numcells < MaxCellId);
+
+  if ((subarena->top+numcells) >= subarena->max) {
+    return NULL;
+  }
+
+  lua_assert(arena_cellstate(arena, cell) < CellState_White);
+
+  subarena->top += numcells;
   arena_checkid(cell);
 
   arena_getblock(arena, cell) |= arena_blockbit(cell);
