@@ -600,6 +600,7 @@ typedef struct GCState {
   GCSize estimate;	/* Estimate of memory actually in use. */
   MSize stepmul;	/* Incremental GC step granularity. */
   MSize pause;		/* Pause between successive GC cycles. */
+  MSize deadnum;        /* Number of dead objects swept this GC cycles. */
   union GCArena **arenas;/* List of currently allocated arenas */
   MSize curarena;	/* Current arena being processed by the GC */
   MSize arenassz;

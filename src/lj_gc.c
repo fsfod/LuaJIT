@@ -993,6 +993,7 @@ static void sweep_arena(global_State *g, MSize i)
 {
   lua_assert(!(lj_gc_arenaflags(g, i) & ArenaFlag_Swept));
   GCArena *arena = lj_gc_arenaref(g, i);
+  ArenaFreeList *freelist = g->gc.freelists+i;
   MSize count;
   PreSweepArena(g, arena, i);
   TicksStart();
@@ -1006,18 +1007,20 @@ static void sweep_arena(global_State *g, MSize i)
 #endif
   PostSweepArena(g, arena, i, count);
 
-  ArenaFreeList *freelist = g->gc.freelists+i;
-  freelist->freeobjcount += count & 0xffff;
-
   /* If there no more live cells left flag the arena as empty and reset its bump and block state */
   if (!(count & 0x10000)) {
     lj_gc_setarenaflag(g, i, ArenaFlag_Empty);
-    lj_gc_cleararenaflags(g, i, ArenaFlag_NoBump);
+    lj_gc_cleararenaflags(g, i, ArenaFlag_NoBump|ArenaFlag_ScanFreeSpace);
     arena_reset(arena);
     freelist->freeobjcount = 0;
     freelist->freecells = 0;
-  } else if (freelist->freeobjcount > 100) {
-
+  } else {
+    freelist->freeobjcount += count & 0xffff;
+    g->gc.deadnum += count & 0xffff;
+    /* FIXME: Decide and test the right size threshold to trigger freespace scan */
+    if (freelist->freeobjcount > 100) {
+      lj_gc_setarenaflag(g, i, ArenaFlag_ScanFreeSpace);
+    }
   }
 
   lj_gc_setarenaflag(g, i, ArenaFlag_Swept);

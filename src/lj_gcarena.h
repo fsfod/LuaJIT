@@ -84,15 +84,17 @@ typedef struct CellIdChunk {
 } CellIdChunk;
 
 enum ArenaFlags {
-  ArenaFlag_GGArena   = 1,
-  ArenaFlag_TravObjs  = 2,
-  ArenaFlag_Empty     = 4,    /* No reachable objects found in the arena */
-  ArenaFlag_SplitPage = 8,    /* Pages allocated for the arena were part of a larger allocation */
-  ArenaFlag_Explicit  = 0x10, /* Only allocate from this arena when explicitly asked to */
-  ArenaFlag_NoBump    = 0x20, /* Can't use bump allocation with this arena */
+  ArenaFlag_TravObjs  = 1, /* Arena contains traversable objects */
+  ArenaFlag_Empty     = 2, /* No reachable objects found in the arena */
+  ArenaFlag_NoBump    = 4, /* Can't use bump allocation with this arena */
+  ArenaFlag_Explicit  = 8, /* Only allocate from this arena when explicitly asked to */
+  ArenaFlag_Swept     = 0x10, /* Arena has been swept for the current GC cycle */
+  ArenaFlag_ScanFreeSpace = 0x20,
+
   ArenaFlag_FreeList  = 0x40, 
   ArenaFlag_FixedList = 0x80, /* Has a List of Fixed object cell ids */
-  ArenaFlag_Swept     = 0x100, 
+  ArenaFlag_GGArena   = 0x100,
+  ArenaFlag_SplitPage = 0x200,/* Pages allocated for the arena were part of a larger allocation */
 };
 
 typedef struct ArenaExtra {
