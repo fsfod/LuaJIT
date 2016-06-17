@@ -888,17 +888,21 @@ void lj_gc_freearena(global_State *g, GCArena *arena)
   }
 }
 
+void sweep_arena(global_State *g, MSize i);
+
 GCArena *lj_gc_setactive_arena(lua_State *L, GCArena *arena, int travobjs)
 {
   global_State *g = G(L);
-  GCArena *old;
+  GCArena *old = travobjs ? g->travarena : g->arena;
   lua_assert(lj_gc_getarenaid(g, arena) != -1);
 
+  if ((g->gc.state == GCSsweep || g->gc.state == GCSsweepstring) && !(lj_gc_arenaflags(g, arena->extra.id) & ArenaFlag_Swept)) {
+    sweep_arena(g, arena->extra.id);
+  }
+
   if (travobjs) {
-    old = g->travarena;
     g->travarena = arena;
   } else {
-    old = g->arena;
     g->arena = arena;
   }
   return old;
@@ -1046,20 +1050,16 @@ static void arenasweep_start(global_State *g)
     // arena_dumpwhitecells(g, lj_gc_arenaref(g, i));
   }
 
-  sweep_traces(g);
-  g->gc.curarena = 0;
-
-  for (MSize i = 0; i < g->gc.arenastop; i++) {
-    lj_gc_cleararenaflags(g, i, ArenaFlag_Swept);
-    if (lj_gc_arenaref(g, i) == g->arena) {
-      nontrav = i;
-    } else if (lj_gc_arenaref(g, i) == g->travarena) {
-      trav = i;
-    }
+  /* Don't try to sweep active arenas if they were created while the gc is past the mark phase
+  ** See lj_gc_setactive_arena where this checked and we flag the arena as swept.
+  */
+  if (!(lj_gc_arenaflags(g, g->arena->extra.id) & ArenaFlag_Swept)) {
+    sweep_arena(g, g->arena->extra.id);
   }
 
-  sweep_arena(g, nontrav);
-  sweep_arena(g, trav);
+  if (g->travarena != g->arena && !(lj_gc_arenaflags(g, g->travarena->extra.id) & ArenaFlag_Swept)) {
+    sweep_arena(g, g->travarena->extra.id);
+  }
   //g->gc.total -= g->gc.atotal;
   g->gc.atotal = 0;
 }
@@ -1078,6 +1078,18 @@ static int arenasweep_step(global_State *g)
   /* All arenas sweepable have been swept */
   hugeblock_sweep(g);
   return 0;
+}
+
+static void gc_sweepstart(global_State *g)
+{
+  g->gc.curarena = 0;
+  
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    lj_gc_cleararenaflags(g, i, ArenaFlag_Swept);
+  }
+
+  sweep_traces(g);
+  g->gc.sweepstr = 0;
 }
 
 /* GC state machine. Returns a cost estimate for each step performed. */
@@ -1101,15 +1113,13 @@ static size_t gc_onestep(lua_State *L)
     if (tvref(g->jit_base))  /* Don't run atomic phase on trace. */
       return LJ_MAX_MEM;
     atomic(g, L);
-    SetGCState(g, GCSsweepstring);  /* Start of sweep phase. */
-    g->gc.sweepstr = 0;
-    //return 0;
+    SetGCState(g, GCSsweepstring);/* Start of sweep phase. */
+    gc_sweepstart(g); 
+    return 0;
   case GCSsweepstring: {
     GCSize old = g->gc.total;
-    Section_Start(gc_sweepstring);
-    while (gc_sweepstring(g));
-    //gc_sweepstring(g);  /* Sweep one chain. */
-    Section_End(gc_sweepstring);
+    //while (gc_sweepstring(g));
+    gc_sweepstring(g);  /* Sweep one chain. */
     if (g->gc.sweepstr > g->strmask) {
       /* All string hash chains sweeped. */
       SetGCState(g, GCSsweep);
