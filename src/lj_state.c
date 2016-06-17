@@ -164,6 +164,7 @@ static void close_state(lua_State *L)
   global_State *g = G(L);
   GCArena *GGarena = lj_gc_arenaref(g, 0);
   lj_func_closeuv(L, tvref(L->stack));
+  lj_trace_freeall(g);
   lj_gc_freeall(g);
   lua_assert(gcref(g->gc.root) == obj2gco(L));
   lua_assert(g->strnum == 0);

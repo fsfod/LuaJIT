@@ -30,6 +30,7 @@ LJ_FUNC void lj_trace_flush(jit_State *J, TraceNo traceno);
 LJ_FUNC int lj_trace_flushall(lua_State *L);
 LJ_FUNC void lj_trace_initstate(global_State *g);
 LJ_FUNC void lj_trace_freestate(global_State *g);
+LJ_FUNC void lj_trace_freeall(global_State *g);
 
 /* Event handling. */
 LJ_FUNC void lj_trace_ins(jit_State *J, const BCIns *pc);

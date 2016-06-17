@@ -300,6 +300,17 @@ void lj_trace_initstate(global_State *g)
   tv[1].u64 = U64x(80000000,00000000);
 }
 
+void lj_trace_freeall(global_State *g)
+{
+  jit_State *J = G2J(g);
+  for (int i = J->sizetrace-1; i > 0; i--) {
+    GCtrace *t = (GCtrace *)gcref(J->trace[i]);
+    if (t) {
+      lj_trace_free(g, t);
+    }
+  }
+}
+
 /* Free everything associated with the JIT compiler state. */
 void lj_trace_freestate(global_State *g)
 {
@@ -307,12 +318,6 @@ void lj_trace_freestate(global_State *g)
 #ifdef LUA_USE_ASSERT
   {  /* This assumes all traces have already been freed. */
     ptrdiff_t i;
-    for (int i = J->sizetrace-1; i > 0; i--) {
-      GCtrace *t = (GCtrace *)gcref(J->trace[i]);
-      if (t) {
-        lj_trace_free(g, t);
-      }
-    }
     for (i = 1; i < (ptrdiff_t)J->sizetrace; i++)
       lua_assert(i == (ptrdiff_t)J->cur.traceno || traceref(J, i) == NULL);
   }
