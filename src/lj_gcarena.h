@@ -83,19 +83,20 @@ typedef struct CellIdChunk {
   struct CellIdChunk *next;
 } CellIdChunk;
 
-enum ArenaFlags {
+typedef enum ArenaFlags {
   ArenaFlag_TravObjs  = 1, /* Arena contains traversable objects */
   ArenaFlag_Empty     = 2, /* No reachable objects found in the arena */
   ArenaFlag_NoBump    = 4, /* Can't use bump allocation with this arena */
   ArenaFlag_Explicit  = 8, /* Only allocate from this arena when explicitly asked to */
   ArenaFlag_Swept     = 0x10, /* Arena has been swept for the current GC cycle */
   ArenaFlag_ScanFreeSpace = 0x20,
+  ArenaFlag_SweepNew = 0x40, /* Arena was created or active during current sweep */
 
-  ArenaFlag_FreeList  = 0x40, 
-  ArenaFlag_FixedList = 0x80, /* Has a List of Fixed object cell ids */
-  ArenaFlag_GGArena   = 0x100,
-  ArenaFlag_SplitPage = 0x200,/* Pages allocated for the arena were part of a larger allocation */
-};
+  ArenaFlag_FreeList  = 0x80,
+  ArenaFlag_FixedList = 0x100, /* Has a List of Fixed object cell ids */
+  ArenaFlag_GGArena   = 0x200,
+  ArenaFlag_SplitPage = 0x400,/* Pages allocated for the arena were part of a larger allocation */
+} ArenaFlags;
 
 typedef struct ArenaExtra {
   MSize id;
@@ -212,6 +213,7 @@ CellIdChunk *arena_separatefinalizers(global_State *g, GCArena *arena, CellIdChu
 GCArena* arena_create(lua_State *L, uint32_t flags);
 void arena_destroy(global_State *g, GCArena *arena);
 void arena_reset(GCArena *arena);
+void arena_setobjmode(lua_State *L, GCArena* arena, int travobjs);
 void* arena_createGG(GCArena** arena);
 void arena_destroyGG(global_State *g, GCArena* arena);
 void arena_creategreystack(lua_State *L, GCArena *arena);
@@ -234,9 +236,11 @@ MSize hugeblock_runfinalizers(global_State *g);
 
 void arena_markfixed(global_State *g, GCArena *arena);
 GCSize arena_propgrey(global_State *g, GCArena *arena, int limit, MSize *travcount);
-MSize arena_minorsweep(GCArena *arena);
-MSize arena_majorsweep(GCArena *arena);
+MSize arena_minorsweep(GCArena *arena, MSize limit);
+MSize arena_majorsweep(GCArena *arena, MSize limit);
 void arena_towhite(GCArena *arena);
+void arena_setrangewhite(GCArena *arena, GCCellID startid, GCCellID endid);
+void arena_setrangeblack(GCArena *arena, GCCellID startid, GCCellID endid);
 void arena_dumpwhitecells(global_State *g, GCArena *arena);
 typedef int(*arenavisitor)(GCobj *o, void *user);
 void arena_visitobjects(GCArena *arena, arenavisitor cb, void *user);

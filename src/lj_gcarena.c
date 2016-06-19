@@ -163,6 +163,26 @@ void arena_destroyGG(global_State *g, GCArena* arena)
   lj_freepages(allocud, arena, ArenaSize);
 }  
 
+void arena_setobjmode(lua_State *L, GCArena* arena, int travobjs)
+{
+  global_State *g = G(L);
+  int currmode = (arena->extra.flags & ArenaFlag_TravObjs) != 0;
+
+  if (currmode == travobjs) {
+    return;
+  }
+
+  if (!travobjs) {
+    if (mref(arena->greybase, GCCellID1)) {
+      lj_mem_freevec(g, mref(arena->greybase, GCCellID1)-2, arena_greycap(arena)+3, GCCellID1);
+    }
+    arena->extra.flags ^= ArenaFlag_TravObjs;
+  } else {
+    arena_creategreystack(L, arena);
+    arena->extra.flags |= ArenaFlag_TravObjs;
+  }
+}
+
 static void arena_setfreecell(GCArena *arena, GCCellID cell)
 {
   arena_checkid(cell);
@@ -283,6 +303,9 @@ void *arena_allocslow(GCArena *arena, MSize size)
   }
 
   lua_assert(cell);
+  /* TODO: Should we leave the mark bit left set the object would live for one  
+  ** extra cycle, but the mark bit will always need tobe set during the gc sweep phases
+  */
   arena_getmark(arena, cell) &= ~arena_blockbit(cell);
   if (arena_isextent(arena, cell+numcells)) {
     arena_setfreecell(arena, cell+numcells);
@@ -555,7 +578,7 @@ MSize arena_wbcount(GCArena *arena)
 MSize arena_totalobjmem(GCArena *arena)
 {
   /* FIXME: placeholder */
-  return (arena_topcellid(arena)-arena->freecount) * CellSize;
+  return (arena_topcellid(arena)-MinCellId -arena->freecount) * CellSize;
 }
 
 static GCCellID arena_findfreesingle(GCArena *arena)
@@ -617,6 +640,52 @@ void arena_setblacks(GCArena *arena, GCCellID1 *cells, MSize count)
   for (size_t i = 0; i < count; i++) {
     assert_allocated(arena, cells[i]);
     arena_markcell(arena, cells[i]);
+  }
+}
+
+void arena_setrangeblack(GCArena *arena, GCCellID startid, GCCellID endid)
+{
+  MSize i, start = arena_blockidx(startid);
+  MSize end = min(arena_blockidx(endid)+1, MaxBlockWord);
+  lua_assert(startid < endid && startid >= MinCellId && endid <= MaxCellId);
+
+  if (arena_blockbitidx(startid) != 0) {
+    GCBlockword mask = (~(GCBlockword)0) << arena_blockbitidx(startid);
+    arena->mark[start] |= arena->block[start] & mask;
+    start++;
+  }
+
+  if (arena_blockbitidx(endid) != 0) {
+    GCBlockword mask = (~(GCBlockword)0) << arena_blockbitidx(endid);
+    arena->mark[end] |= arena->block[end] & ~mask;
+    end--;
+  }
+
+  for (i = start; i < end; i++) {
+    arena->mark[i] |= arena->block[i];
+  }
+}
+
+void arena_setrangewhite(GCArena *arena, GCCellID startid, GCCellID endid)
+{
+  MSize i, start = arena_blockidx(startid);
+  MSize end = min(arena_blockidx(endid)+1, MaxBlockWord);
+  lua_assert(startid < endid && startid >= MinCellId && endid <= MaxCellId);
+
+  if (arena_blockbitidx(startid) != 0) {
+    GCBlockword mask = (~(GCBlockword)0) << arena_blockbitidx(startid);
+    arena->mark[start] &= ~(arena->block[start] & mask);
+    start++;
+  }
+
+  if (arena_blockbitidx(endid) != 0) {
+    GCBlockword mask = (~(GCBlockword)0) << arena_blockbitidx(endid);
+    arena->mark[end] &= ~(arena->block[end] & ~mask);
+    end--;
+  }
+
+  for (i = start; i < end; i++) {
+    arena->mark[i] &= ~arena->block[i];
   }
 }
 
@@ -707,9 +776,9 @@ static MSize sweep_simd(GCArena *arena, MSize start, MSize limit, int minor)
   __m128i count = _mm_setzero_si128();
   __m128i *pblock = (__m128i *)(arena->block+start), *pmark = (__m128i *)(arena->mark+start);
   __m128i used = _mm_setzero_si128();
+  limit = lj_round(limit, 4);/* Max block should be a multiple of 4*/
   pblock--;
   pmark--;
-
   for (i = start; i < limit; i += 4) {
     pblock++;
     pmark++;
@@ -793,13 +862,16 @@ static MSize majorsweep(GCArena *arena, MSize start, MSize limit)
     
   }
   /* Set the 16th bit if there are still any reachable objects in the arena */
-  return count | ((used && prevwhite) ? (1 << 16) : 0);
+  return count | (used ? (1 << 16) : 0);
 }
 
-MSize arena_majorsweep(GCArena *arena)
+MSize arena_majorsweep(GCArena *arena, GCCellID cellend)
 {
-  MSize limit = min(arena_blockidx(arena_topcellid(arena))+1, MaxBlockWord);
-  MSize count = 0;
+  MSize count = 0, limit;
+  if (!cellend)
+    cellend = arena_topcellid(arena);
+  limit = min(arena_blockidx(cellend)+1, MaxBlockWord);
+  
   lua_assert(arena_greysize(arena) == 0);
 #if 0
   count = majorsweep(arena, MinBlockWord, limit);
@@ -829,10 +901,13 @@ static MSize minorsweep(GCArena *arena)
   return used ? (1 << 16) : 0;
 }
 
-MSize arena_minorsweep(GCArena *arena)
+MSize arena_minorsweep(GCArena *arena, MSize limit)
 {
-  MSize limit = min(arena_blockidx(arena_topcellid(arena))+1, MaxBlockWord);
   MSize count = 0;
+  if (limit == 0) {
+    limit = min(arena_blockidx(arena_topcellid(arena))+1, MaxBlockWord);
+  }
+  
   lua_assert(arena_greysize(arena) == 0);
 #if 0
   count = minorsweep(arena, MinBlockWord, limit);
@@ -841,6 +916,7 @@ MSize arena_minorsweep(GCArena *arena)
 #else
   count = majorsweep_avx(arena, MinBlockWord, limit);
 #endif
+  return count;
 }
 
 void arena_copymeta(GCArena *arena, GCArena *meta)
