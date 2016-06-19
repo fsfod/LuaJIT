@@ -385,16 +385,7 @@ GCSize gc_traverse(global_State *g, GCobj *o)
   }
 }
 
-typedef struct pqueue {
-  MSize size;
-  MSize count;
-  GCArena** array;
-}pqueue;
-
-pqueue _greyqueu = { 0 };
-pqueue* greyqueu = &_greyqueu;
-
-void pqueue_init(lua_State *L, pqueue* q)
+void pqueue_init(lua_State *L, PQueue* q)
 {
   q->size = 16;
   q->count = 0;
@@ -405,7 +396,7 @@ void pqueue_init(lua_State *L, pqueue* q)
 #define child_right(idx) (idx * 2 + 2)
 #define parentidx(idx) ((idx - 1) / 2)
 
-void pqueue_pushup(pqueue* q, MSize idx)
+void pqueue_pushup(PQueue* q, MSize idx)
 {
   GCArena *arena = q->array[idx];
   MSize greylen = arena_greysize(arena);
@@ -425,7 +416,7 @@ void pqueue_pushup(pqueue* q, MSize idx)
   }
 }
 
-void pqueue_insert(lua_State *L, pqueue* q, GCArena *arena)
+void pqueue_insert(lua_State *L, PQueue* q, GCArena *arena)
 {
   /* TODO: cache queue size in the lower bits of the pointer with some refresh mechanism */
   if ((q->count+1) >= q->size) {
@@ -436,7 +427,7 @@ void pqueue_insert(lua_State *L, pqueue* q, GCArena *arena)
   q->count++;
 }
 
-void pqueue_pushdown(pqueue* q, MSize idx)
+static void pqueue_pushdown(PQueue* q, MSize idx)
 {
   MSize i = idx;
 
@@ -463,7 +454,7 @@ void pqueue_pushdown(pqueue* q, MSize idx)
 }
 
 /* Rotate tree now that max was emptied */
-void pqueue_rotatemax(pqueue* q)
+static void pqueue_rotatemax(PQueue* q)
 {
   GCArena *maxarena = q->array[0];
 
@@ -476,7 +467,7 @@ void pqueue_rotatemax(pqueue* q)
   pqueue_pushdown(q, 0);
 }
 
-GCArena *pqueue_peekmax(pqueue* q)
+static GCArena *pqueue_peekmax(PQueue* q)
 {
   if (arena_greysize(q->array[0]) == 0) {
     if (q->count == 1) {
@@ -560,10 +551,13 @@ static GCSize gc_propagate_gray(global_State *g)
   lua_State *L = mainthread(g);
   GCSize total = 0;
   GCArena *maxarena = NULL;
+  PQueue *greyqueu = &g->gc.greypq;
   Section_Start(propagate_gray);
 
   if (greyqueu->size == 0) {
     pqueue_init(mainthread(g), greyqueu);
+  } else {
+    greyqueu->count = 0;
   }
 
   for (MSize i = 0; i < g->gc.arenastop; i++) {

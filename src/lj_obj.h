@@ -575,6 +575,12 @@ typedef enum {
 #define basemt_obj(g, o)	((g)->gcroot[GCROOT_BASEMT+itypemap(o)])
 #define mmname_str(g, mm)	(strref((g)->gcroot[GCROOT_MMNAME+(mm)]))
 
+typedef struct PQueue {
+  MSize size;
+  MSize count;
+  union GCArena** array;
+} PQueue;
+
 typedef struct GCState {
   GCSize total;		/* Memory currently allocated. */
   GCSize atotal;	/* Memory currently allocated from arenas. */
@@ -606,6 +612,7 @@ typedef struct GCState {
   MSize arenassz;
   MSize arenastop; /* Top of the arena list */
   struct ArenaFreeList* freelists;
+  PQueue greypq;
 } GCState;
 
 
