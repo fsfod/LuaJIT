@@ -33,6 +33,23 @@
 #define GCSWEEPCOST	10
 #define GCFINALIZECOST	100
 
+#ifdef LJ_ENABLESTATS
+void loggcstate(global_State *g, int newstate)
+{
+  lua_State *L = mainthread(g);
+  if (newstate == GCSatomic || newstate == GCSsweepstring) {
+    log_markstats(perf_counter[Counter_gc_mark], 0, perf_counter[Counter_gc_traverse_tab],
+    perf_counter[Counter_gc_traverse_func], perf_counter[Counter_gc_traverse_proto], perf_counter[Counter_gc_traverse_thread],
+    perf_counter[Counter_gc_traverse_trace]);
+   // perf_printcounters();
+  }
+
+  perf_resetcounters();
+  log_gcstate(newstate, g->gc.state, g->gc.total);
+}
+#define TraceGC loggcstate
+#endif
+
 #ifdef TraceGC
 void TraceGC(global_State *g, int newstate);
 #define SetGCState(g, newstate) TraceGC(g, newstate); g->gc.state = newstate
@@ -63,6 +80,7 @@ void TraceGC(global_State *g, int newstate);
 static void gc_mark(global_State *g, GCobj *o)
 {
   int gct = o->gch.gct;
+  PerfCounter(gc_mark);
   lua_assert(iswhite(o) && !isdead(g, o));
   white2gray(o);
   if (LJ_UNLIKELY(gct == ~LJ_TUDATA)) {
@@ -168,6 +186,7 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
   int weak = 0;
   cTValue *mode;
   GCtab *mt = tabref(t->metatable);
+  PerfCounter(gc_traverse_tab);
   if (mt)
     gc_markobj(g, mt);
   mode = lj_meta_fastg(g, mt, MM_mode);
@@ -210,6 +229,7 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
 /* Traverse a function. */
 static void gc_traverse_func(global_State *g, GCfunc *fn)
 {
+  PerfCounter(gc_traverse_func);
   gc_markobj(g, tabref(fn->c.env));
   if (isluafunc(fn)) {
     uint32_t i;
@@ -242,6 +262,7 @@ static void gc_traverse_trace(global_State *g, GCtrace *T)
 {
   IRRef ref;
   if (T->traceno == 0) return;
+  PerfCounter(gc_traverse_trace);
   for (ref = T->nk; ref < REF_TRUE; ref++) {
     IRIns *ir = &T->ir[ref];
     if (ir->o == IR_KGC)
@@ -263,6 +284,7 @@ static void gc_traverse_trace(global_State *g, GCtrace *T)
 static void gc_traverse_proto(global_State *g, GCproto *pt)
 {
   ptrdiff_t i;
+  PerfCounter(gc_traverse_proto);
   gc_mark_str(proto_chunkname(pt));
   for (i = -(ptrdiff_t)pt->sizekgc; i < 0; i++)  /* Mark collectable consts. */
     gc_markobj(g, proto_kgc(pt, i));
@@ -292,6 +314,7 @@ static MSize gc_traverse_frames(global_State *g, lua_State *th)
 static void gc_traverse_thread(global_State *g, lua_State *th)
 {
   TValue *o, *top = th->top;
+  PerfCounter(gc_traverse_thread);
   for (o = tvref(th->stack)+1+LJ_FR2; o < top; o++)
     gc_marktv(g, o);
   if (g->gc.state == GCSatomic) {
@@ -768,6 +791,7 @@ void lj_gc_barrierf(global_State *g, GCobj *o, GCobj *v)
   lua_assert(isblack(o) && iswhite(v) && !isdead(g, v) && !isdead(g, o));
   lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);
   lua_assert(o->gch.gct != ~LJ_TTAB);
+  PerfCounter(gc_barrierf);
   /* Preserve invariant during propagation. Otherwise it doesn't matter. */
   if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic)
     gc_mark(g, v);  /* Move frontier forward. */
@@ -778,6 +802,7 @@ void lj_gc_barrierf(global_State *g, GCobj *o, GCobj *v)
 /* Specialized barrier for closed upvalue. Pass &uv->tv. */
 void LJ_FASTCALL lj_gc_barrieruv(global_State *g, TValue *tv)
 {
+  PerfCounter(gc_barrieruv);
 #define TV2MARKED(x) \
   (*((uint8_t *)(x) - offsetof(GCupval, tv) + offsetof(GCupval, marked)))
   if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic)

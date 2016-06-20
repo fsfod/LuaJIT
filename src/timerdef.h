@@ -6,10 +6,12 @@ enum MSGIDS{
   MSGID_marker,
   MSGID_time,
   MSGID_section,
+  MSGID_arenaactive,
   MSGID_arenacreated,
   MSGID_arenasweep,
   MSGID_gcobj,
   MSGID_gcstate,
+  MSGID_markstats,
   MSGID_stringmarker,
   MSGID_MAX
 };
@@ -18,13 +20,103 @@ static uint32_t msgsizes[] = {
   4, /* marker */
   8, /* time */
   12, /* section */
-  12, /* arenacreated */
+  8, /* arenaactive */
+  10, /* arenacreated */
   12, /* arenasweep */
   8, /* gcobj */
   16, /* gcstate */
+  32, /* markstats */
   0, /* stringmarker */
 };
 
+#define arenacreatedmsg_arenaid(msg) (((msg)->msgid >> 8) & 0xffffff)
+typedef struct MSG_arenacreated{
+  uint32_t msgid;
+  MRef address;
+/*  arenaid: 24;*/
+  uint16_t flags;
+} MSG_arenacreated;
+
+static LJ_AINLINE void log_arenacreated(void* address, uint32_t arenaid, uint32_t flags)
+{
+  SBuf *sb = &eventbuf;
+  MSG_arenacreated *msg = (MSG_arenacreated *)sbufP(sb);
+  msg->msgid = MSGID_arenacreated;
+  setmref(msg->address, address);
+  msg->msgid |= (arenaid << 8);
+  msg->flags = (uint16_t)flags;
+  setsbufP(sb, sbufP(sb)+sizeof(MSG_arenacreated));
+  lj_buf_more(sb, 16);
+}
+
+static LJ_AINLINE MSize print_arenacreated(void* msgptr)
+{
+  MSG_arenacreated *msg = (MSG_arenacreated *)msgptr;
+  lua_assert(((uint8_t)msg->msgid) == MSGID_arenacreated);
+  printf("arenacreated: address %p, arenaid %u, flags %i\n", (uintptr_t)msg->address.ptr32, ((msg->msgid >> 8) & 0xffffff), msg->flags);
+  return 10;
+}
+
+#define gcobjmsg_kind(msg) (((msg)->msgid >> 8) & 0xf)
+#define gcobjmsg_size(msg) (((msg)->msgid >> 12) & 0xfffff)
+typedef struct MSG_gcobj{
+  uint32_t msgid;
+/*  kind: 4;*/
+/*  size: 20;*/
+  GCRef address;
+} MSG_gcobj;
+
+static LJ_AINLINE void log_gcobj(uint32_t kind, uint32_t size, GCRef address)
+{
+  SBuf *sb = &eventbuf;
+  MSG_gcobj *msg = (MSG_gcobj *)sbufP(sb);
+  msg->msgid = MSGID_gcobj;
+  msg->msgid |= (kind << 8);
+  msg->msgid |= (size << 12);
+  msg->address = address;
+  setsbufP(sb, sbufP(sb)+sizeof(MSG_gcobj));
+  lj_buf_more(sb, 16);
+}
+
+static LJ_AINLINE MSize print_gcobj(void* msgptr)
+{
+  MSG_gcobj *msg = (MSG_gcobj *)msgptr;
+  lua_assert(((uint8_t)msg->msgid) == MSGID_gcobj);
+  printf("gcobj: kind %u, size %u, address %p\n", ((msg->msgid >> 8) & 0xf), ((msg->msgid >> 12) & 0xfffff), (uintptr_t)msg->address.gcptr32);
+  return 8;
+}
+
+#define arenasweepmsg_arenaid(msg) (((msg)->msgid >> 8) & 0xffffff)
+typedef struct MSG_arenasweep{
+  uint32_t msgid;
+/*  arenaid: 24;*/
+  uint32_t time;
+  uint16_t sweeped;
+  uint16_t celltop;
+} MSG_arenasweep;
+
+static LJ_AINLINE void log_arenasweep(uint32_t arenaid, uint32_t time, uint32_t sweeped, uint32_t celltop)
+{
+  SBuf *sb = &eventbuf;
+  MSG_arenasweep *msg = (MSG_arenasweep *)sbufP(sb);
+  msg->msgid = MSGID_arenasweep;
+  msg->msgid |= (arenaid << 8);
+  msg->time = time;
+  msg->sweeped = (uint16_t)sweeped;
+  msg->celltop = (uint16_t)celltop;
+  setsbufP(sb, sbufP(sb)+sizeof(MSG_arenasweep));
+  lj_buf_more(sb, 16);
+}
+
+static LJ_AINLINE MSize print_arenasweep(void* msgptr)
+{
+  MSG_arenasweep *msg = (MSG_arenasweep *)msgptr;
+  lua_assert(((uint8_t)msg->msgid) == MSGID_arenasweep);
+  printf("arenasweep: arenaid %u, time %u, sweeped %i, celltop %i\n", ((msg->msgid >> 8) & 0xffffff), msg->time, msg->sweeped, msg->celltop);
+  return 12;
+}
+
+#define stringmarkermsg_flags(msg) (((msg)->msgid >> 8) & 0xffff)
 typedef struct MSG_stringmarker{
   uint32_t msgid;
 /*  flags: 16;*/
@@ -57,33 +149,6 @@ static LJ_AINLINE MSize print_stringmarker(void* msgptr)
   return msg->size;
 }
 
-typedef struct MSG_arenacreated{
-  uint32_t msgid;
-  MRef address;
-  uint32_t id;
-/*  flags: 16;*/
-} MSG_arenacreated;
-
-static LJ_AINLINE void log_arenacreated(MRef address, uint32_t id, uint32_t flags)
-{
-  SBuf *sb = &eventbuf;
-  MSG_arenacreated *msg = (MSG_arenacreated *)sbufP(sb);
-  msg->msgid = MSGID_arenacreated;
-  msg->address = address;
-  msg->id = id;
-  msg->msgid |= (flags << 8);
-  setsbufP(sb, sbufP(sb)+sizeof(MSG_arenacreated));
-  lj_buf_more(sb, 16);
-}
-
-static LJ_AINLINE MSize print_arenacreated(void* msgptr)
-{
-  MSG_arenacreated *msg = (MSG_arenacreated *)msgptr;
-  lua_assert(((uint8_t)msg->msgid) == MSGID_arenacreated);
-  printf("arenacreated: address %p, id %u, flags %u\n", (uintptr_t)msg->address.ptr32, msg->id, ((msg->msgid >> 8) & 0xffff));
-  return 12;
-}
-
 enum SectionId{
   Section_gc_atomic,
   Section_gc_fullgc,
@@ -94,9 +159,11 @@ enum SectionId{
 static const char *sections_names[] = {
   "gc_atomic",
   "gc_fullgc",
-  "gc_step"
+  "gc_step",
 };
 
+#define sectionmsg_id(msg) (((msg)->msgid >> 8) & 0x7fffff)
+#define sectionmsg_start(msg) (((msg)->msgid >> 31) & 0x1)
 typedef struct MSG_section{
   uint32_t msgid;
 /*  id: 23;*/
@@ -124,6 +191,8 @@ static LJ_AINLINE MSize print_section(void* msgptr)
   return 12;
 }
 
+#define gcstatemsg_state(msg) (((msg)->msgid >> 8) & 0xff)
+#define gcstatemsg_prevstate(msg) (((msg)->msgid >> 16) & 0xff)
 typedef struct MSG_gcstate{
   uint32_t msgid;
 /*  state: 8;*/
@@ -153,31 +222,31 @@ static LJ_AINLINE MSize print_gcstate(void* msgptr)
   return 16;
 }
 
-typedef struct MSG_gcobj{
+#define markermsg_id(msg) (((msg)->msgid >> 8) & 0xffff)
+#define markermsg_flags(msg) (((msg)->msgid >> 24) & 0xff)
+typedef struct MSG_marker{
   uint32_t msgid;
-/*  kind: 4;*/
-/*  size: 20;*/
-  GCRef address;
-} MSG_gcobj;
+/*  id: 16;*/
+/*  flags: 8;*/
+} MSG_marker;
 
-static LJ_AINLINE void log_gcobj(uint32_t kind, uint32_t size, GCRef address)
+static LJ_AINLINE void log_marker(uint32_t id, uint32_t flags)
 {
   SBuf *sb = &eventbuf;
-  MSG_gcobj *msg = (MSG_gcobj *)sbufP(sb);
-  msg->msgid = MSGID_gcobj;
-  msg->msgid |= (kind << 8);
-  msg->msgid |= (size << 12);
-  msg->address = address;
-  setsbufP(sb, sbufP(sb)+sizeof(MSG_gcobj));
+  MSG_marker *msg = (MSG_marker *)sbufP(sb);
+  msg->msgid = MSGID_marker;
+  msg->msgid |= (id << 8);
+  msg->msgid |= (flags << 24);
+  setsbufP(sb, sbufP(sb)+sizeof(MSG_marker));
   lj_buf_more(sb, 16);
 }
 
-static LJ_AINLINE MSize print_gcobj(void* msgptr)
+static LJ_AINLINE MSize print_marker(void* msgptr)
 {
-  MSG_gcobj *msg = (MSG_gcobj *)msgptr;
-  lua_assert(((uint8_t)msg->msgid) == MSGID_gcobj);
-  printf("gcobj: kind %u, size %u, address %p\n", ((msg->msgid >> 8) & 0xf), ((msg->msgid >> 12) & 0xfffff), (uintptr_t)msg->address.gcptr32);
-  return 8;
+  MSG_marker *msg = (MSG_marker *)msgptr;
+  lua_assert(((uint8_t)msg->msgid) == MSGID_marker);
+  printf("marker: id %u, flags %u\n", ((msg->msgid >> 8) & 0xffff), ((msg->msgid >> 24) & 0xff));
+  return 4;
 }
 
 enum TimerId{
@@ -186,9 +255,11 @@ enum TimerId{
 };
 
 static const char *timers_names[] = {
-  "gc_propagate_gray"
+  "gc_propagate_gray",
 };
 
+#define timemsg_id(msg) (((msg)->msgid >> 8) & 0xffff)
+#define timemsg_flags(msg) (((msg)->msgid >> 24) & 0xff)
 typedef struct MSG_time{
   uint32_t msgid;
 /*  id: 16;*/
@@ -216,58 +287,67 @@ static LJ_AINLINE MSize print_time(void* msgptr)
   return 8;
 }
 
-typedef struct MSG_arenasweep{
+#define arenaactivemsg_arenaid(msg) (((msg)->msgid >> 8) & 0xffffff)
+typedef struct MSG_arenaactive{
   uint32_t msgid;
 /*  arenaid: 24;*/
-  uint32_t time;
-  uint16_t sweeped;
   uint16_t celltop;
-} MSG_arenasweep;
+  uint16_t flags;
+} MSG_arenaactive;
 
-static LJ_AINLINE void log_arenasweep(uint32_t arenaid, uint32_t time, uint32_t sweeped, uint32_t celltop)
+static LJ_AINLINE void log_arenaactive(uint32_t arenaid, uint32_t celltop, uint32_t flags)
 {
   SBuf *sb = &eventbuf;
-  MSG_arenasweep *msg = (MSG_arenasweep *)sbufP(sb);
-  msg->msgid = MSGID_arenasweep;
+  MSG_arenaactive *msg = (MSG_arenaactive *)sbufP(sb);
+  msg->msgid = MSGID_arenaactive;
   msg->msgid |= (arenaid << 8);
-  msg->time = time;
-  msg->sweeped = (uint16_t)sweeped;
   msg->celltop = (uint16_t)celltop;
-  setsbufP(sb, sbufP(sb)+sizeof(MSG_arenasweep));
+  msg->flags = (uint16_t)flags;
+  setsbufP(sb, sbufP(sb)+sizeof(MSG_arenaactive));
   lj_buf_more(sb, 16);
 }
 
-static LJ_AINLINE MSize print_arenasweep(void* msgptr)
+static LJ_AINLINE MSize print_arenaactive(void* msgptr)
 {
-  MSG_arenasweep *msg = (MSG_arenasweep *)msgptr;
-  lua_assert(((uint8_t)msg->msgid) == MSGID_arenasweep);
-  printf("arenasweep: arenaid %u, time %u, sweeped %i, celltop %i\n", ((msg->msgid >> 8) & 0xffffff), msg->time, msg->sweeped, msg->celltop);
-  return 12;
+  MSG_arenaactive *msg = (MSG_arenaactive *)msgptr;
+  lua_assert(((uint8_t)msg->msgid) == MSGID_arenaactive);
+  printf("arenaactive: arenaid %u, celltop %i, flags %i\n", ((msg->msgid >> 8) & 0xffffff), msg->celltop, msg->flags);
+  return 8;
 }
 
-typedef struct MSG_marker{
+typedef struct MSG_markstats{
   uint32_t msgid;
-/*  id: 16;*/
-/*  flags: 8;*/
-} MSG_marker;
+  uint32_t mark;
+  uint32_t mark_huge;
+  uint32_t trav_tab;
+  uint32_t trav_func;
+  uint32_t trav_proto;
+  uint32_t trav_thread;
+  uint32_t trav_trace;
+} MSG_markstats;
 
-static LJ_AINLINE void log_marker(uint32_t id, uint32_t flags)
+static LJ_AINLINE void log_markstats(uint32_t mark, uint32_t mark_huge, uint32_t trav_tab, uint32_t trav_func, uint32_t trav_proto, uint32_t trav_thread, uint32_t trav_trace)
 {
   SBuf *sb = &eventbuf;
-  MSG_marker *msg = (MSG_marker *)sbufP(sb);
-  msg->msgid = MSGID_marker;
-  msg->msgid |= (id << 8);
-  msg->msgid |= (flags << 24);
-  setsbufP(sb, sbufP(sb)+sizeof(MSG_marker));
+  MSG_markstats *msg = (MSG_markstats *)sbufP(sb);
+  msg->msgid = MSGID_markstats;
+  msg->mark = mark;
+  msg->mark_huge = mark_huge;
+  msg->trav_tab = trav_tab;
+  msg->trav_func = trav_func;
+  msg->trav_proto = trav_proto;
+  msg->trav_thread = trav_thread;
+  msg->trav_trace = trav_trace;
+  setsbufP(sb, sbufP(sb)+sizeof(MSG_markstats));
   lj_buf_more(sb, 16);
 }
 
-static LJ_AINLINE MSize print_marker(void* msgptr)
+static LJ_AINLINE MSize print_markstats(void* msgptr)
 {
-  MSG_marker *msg = (MSG_marker *)msgptr;
-  lua_assert(((uint8_t)msg->msgid) == MSGID_marker);
-  printf("marker: id %u, flags %u\n", ((msg->msgid >> 8) & 0xffff), ((msg->msgid >> 24) & 0xff));
-  return 4;
+  MSG_markstats *msg = (MSG_markstats *)msgptr;
+  lua_assert(((uint8_t)msg->msgid) == MSGID_markstats);
+  printf("markstats: mark %u, mark_huge %u, trav_tab %u, trav_func %u, trav_proto %u, trav_thread %u, trav_trace %u\n", msg->mark, msg->mark_huge, msg->trav_tab, msg->trav_func, msg->trav_proto, msg->trav_thread, msg->trav_trace);
+  return 32;
 }
 
 typedef MSize (*msgprinter)(void* msg);
@@ -276,11 +356,37 @@ static msgprinter msgprinters[] = {
   print_marker,
   print_time,
   print_section,
+  print_arenaactive,
   print_arenacreated,
   print_arenasweep,
   print_gcobj,
   print_gcstate,
+  print_markstats,
   print_stringmarker,
 };
 
+enum CounterId{
+  Counter_gc_barrierf,
+  Counter_gc_barrieruv,
+  Counter_gc_mark,
+  Counter_gc_traverse_func,
+  Counter_gc_traverse_proto,
+  Counter_gc_traverse_tab,
+  Counter_gc_traverse_thread,
+  Counter_gc_traverse_trace,
+  Counter_MAX
+};
+
+static const char *Counter_names[] = {
+  "gc_barrierf",
+  "gc_barrieruv",
+  "gc_mark",
+  "gc_traverse_func",
+  "gc_traverse_proto",
+  "gc_traverse_tab",
+  "gc_traverse_thread",
+  "gc_traverse_trace",
+};
+
+uint32_t perf_counter[Counter_MAX];
 #pragma pack(pop)
