@@ -1,19 +1,25 @@
 #pragma once
 
+void timers_setuplog(lua_State *L);
+void timers_freelog(global_State *g);
+
+#define LJ_ENABLESTATS
+
+#ifdef LJ_ENABLESTATS
 #include "lj_buf.h"
 
 #if !defined(_MSC_VER) || defined(__clang__)
 #include <x86intrin.h>
 #endif
 
-#define TraceGC recgcstate
 
 extern SBuf eventbuf;
 
-void timers_setuplog(lua_State *L);
-void timers_freelog(global_State *g);
 void timers_print(const char *name, uint64_t time);
 void timers_printlog();
+
+void perf_printcounters();
+void perf_resetcounters();
 
 #define TimerMode 2
 
@@ -40,8 +46,8 @@ void timers_printlog();
 #define TimerEnd(name)
 #endif
 
-#define TicksStart uint64_t ticks_start = __rdtsc()
-#define TicksEnd (__rdtsc()-ticks_start)
+#define TicksStart() uint64_t ticks_start = __rdtsc()
+#define TicksEnd() (__rdtsc()-ticks_start)
 
 #define Section_Start(name) log_section(Section_##name, 1)
 #define Section_End(name) log_section(Section_##name, 0)
@@ -77,10 +83,18 @@ enum GCStats {
   GCStat_hugesweep, /* sz swept, count swept*/
 };
 
-enum PerfCounters {
-  Counter_TabBarrier,
-  Counter_BarrierOther,
-  Counter_gcmark, /*gc mark calls */
-};
+#define PerfCounter(name) perf_counter[Counter_##name]++
 
 #include "timerdef.h"
+
+#else
+
+#define TimerStart(name)
+#define TimerEnd(name)
+#define PerfCounter(name) 
+#define Section_Start(name) 
+#define Section_End(name)
+#define TicksStart()
+#define TicksEnd()
+
+#endif
