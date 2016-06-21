@@ -1,22 +1,126 @@
 local format = string.format
-local msgs, outputfile
+local msgs, namescans, outputfile, outputlang
 msglist = msglist or {}
 msglookup = msglookup or {}
+
+local langdef = {
+  namelist = [[
+static const char *%s[] = {
+%s};
+
+]],
+
+  enum = [[
+enum %s{
+%s  %sMAX
+};
+
+]],
+
+  msgsizes = [[static uint8_t msgsizes[] = {
+%s
+};
+
+]],
+
+  struct = [[
+typedef struct MSG_{{name}}{
+  uint32_t msgid;{{fields}}
+} MSG_{{name}};
+
+]],
+  structfield = "\n  %s %s;",
+
+  printer = [[
+static LJ_AINLINE MSize print_{{name}}(void* msgptr)
+{
+  MSG_{{name}} *msg = (MSG_{{name}} *)msgptr;
+  lua_assert(((uint8_t)msg->msgid) == MSGID_{{name}});
+  printf("{{fmtstr}}\n", {{args}});
+  return {{msgsz}};
+}
+
+]],
+  fieldget = function(def, f, type)
+    if f.type == "string"  then
+      return "(const char*)(msg+1)"
+    elseif type.ref then
+      return format("(uintptr_t)msg->%s.%s", f.name, type.ref)
+    else
+      return "msg->"..f.name
+    end
+  end
+}
+
+local csdefs = {
+  namelist = [[
+  public static string[] %s = {
+%s};
+
+]],
+
+  enum = [[
+public enum %s{
+%s  %sMAX
+}
+
+]],
+
+  msgsizes = [[  public static byte[] MsgSizes = {
+%s
+  };
+
+]],
+
+  struct = [[
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct Msg_{{name}}{
+  public uint msgid;
+  public MsgId MsgId => (MsgId)(byte)msgid;{{fields}}};
+
+]],
+
+  structfield = "\n  public %s %s;",
+
+  stringfield = [[
+  public unsafe string %s {
+    get { 
+      fixed (Msg_stringmarker* p =  &this) {
+        return new string((sbyte*)(p+1));
+      }
+    }
+  }
+]],
+  
+  printer = [[
+  public static uint Print_{{name}}(void* msgptr)
+  {
+    Msg_{{name}} *msg = (Msg_{{name}} *)msgptr;
+    Debug.Assert(msg->MsgId == MsgId.{{name}});
+    Console.WriteLine($"{{fmtstr}}\n");
+    return {{msgsz}};
+  }
+
+]],
+  fieldget = function(def, f, type)
+    return "msg->"..f.name
+  end
+}
 
 local getticksstr = "__rdtsc()"
 
 local numtypes = {
-  int8_t  = {size = 8,   signed = true,   printf = "%i", ctype = "int8_t",   cstype = "sbyte", argtype = "int32_t"},
-  uint8_t = {size = 8,   signed = false,  printf = "%i", ctype = "uint8_t",  cstype = "byte",  argtype = "uint32_t"},
+  int8_t  = {size = 8,   signed = true,   printf = "%i", c = "int8_t",   cs = "sbyte", argtype = "int32_t"},
+  uint8_t = {size = 8,   signed = false,  printf = "%i", c = "uint8_t",  cs = "byte",  argtype = "uint32_t"},
   
-  int16_t  = {size = 16, signed = true,   printf = "%i", ctype = "int16_t",  cstype = "short",  argtype = "int32_t"},
-  uint16_t = {size = 16, signed = false,  printf = "%i", ctype = "uint16_t", cstype = "ushort", argtype = "uint32_t"},
+  int16_t  = {size = 16, signed = true,   printf = "%i", c = "int16_t",  cs = "short",  argtype = "int32_t"},
+  uint16_t = {size = 16, signed = false,  printf = "%i", c = "uint16_t", cs = "ushort", argtype = "uint32_t"},
   
-  int32_t  = {size = 32, signed = true,   printf = "%i", ctype = "int32_t",  cstype = "int"},
-  uint32_t = {size = 32, signed = false,  printf = "%u", ctype = "uint32_t", cstype = "uint"},
+  int32_t  = {size = 32, signed = true,   printf = "%i", c = "int32_t",  cs = "int"},
+  uint32_t = {size = 32, signed = false,  printf = "%u", c = "uint32_t", cs = "uint"},
   
-  int64_t  = {size = 64, signed = true,   printf = "%ill", ctype = "int64_t",  cstype = "long"},
-  uint64_t = {size = 64, signed = false,  printf = "%ull", ctype = "uint64_t", cstype = "ulong"},
+  int64_t  = {size = 64, signed = true,   printf = "%ill", c = "int64_t",  cs = "long"},
+  uint64_t = {size = 64, signed = false,  printf = "%ull", c = "uint64_t", cs = "ulong"},
 
   i8  = "int8_t",  u8  = "uint8_t",
   i16 = "int16_t", u16 = "uint16_t",
@@ -24,14 +128,15 @@ local numtypes = {
   i64 = "int64_t", u64 = "uint64_t",
   MSize = "uint32_t",
   bitfield = "uint32_t",
-  timestamp = {size = 64, signed = false,  printf = "%ull", ctype = "uint64_t", cstype = "ulong", customwrite = true, noarg = true},
-  smallticks = {size = 32, signed = false,  printf = "%u", ctype = "uint32_t", cstype = "uint", argtype = "uint64_t"},
+  bool = "uint32_t",
+  timestamp = {size = 64, signed = false,  printf = "%ull", c = "uint64_t", cs = "ulong", customwrite = true, noarg = true},
+  smallticks = {size = 32, signed = false,  printf = "%u", c = "uint32_t", cs = "uint", argtype = "uint64_t"},
 
-  GCRef = {size = 32, signed = false, ctype = "GCRef", printf = "%p", ref = "gcptr32"},
-  MRef =  {size = 32, signed = false, ctype = "MRef", printf = "%p", ref = "ptr32"},
-  ptr =  {size = 32, signed = false, ctype = "void*", ref = true},
+  GCRef = {size = 32, signed = false, c = "GCRef", printf = "%p", ref = "gcptr32"},
+  MRef  = {size = 32, signed = false, c = "MRef", printf = "%p", ref = "ptr32", customwrite = true, argtype = "ptr"},
+  ptr   = {size = 32, signed = false, c = "void *", ref = true},
 
-  string = {vsize = true, signed = false, printf = "%s", ctype = "void*", string = true, vsize = true, ctype = "uint64_t", cstype = "string",  argtype = "const char *", customwrite = true},
+  string = {vsize = true, signed = false, printf = "%s", ctype = "void*", string = true, vsize = true, c = "uint64_t", cs = "string",  argtype = "const char *", customwrite = true},
 }
 
 for name, def in pairs(numtypes) do
@@ -118,6 +223,11 @@ function parse_msg(msgname, def)
       size = tonumber(type)
       assert(size or size < 32, "invalid bitfield size")
       t.bitsize = size
+    elseif type == "bool" then
+      t.type = "bitfield"
+      size = 1
+      t.bitsize = 1
+      t.bool = true
     elseif numtypes[type].vsize then
       vsize = true
     else
@@ -147,7 +257,7 @@ function parse_msg(msgname, def)
     end
   end
 
-  --If message has barible sized fields and theres no field declared to specify the messages variable size
+  --If message has variable sized fields and there is no field declared to specify the messages variable size
   if vsize and not def.sizefield then
     sizefield = "msgsize"
     table.insert(fieldlist, 1, {name = "msgsize", type = "u32", order = 0})
@@ -178,25 +288,23 @@ function mkfield(f)
     ret = format("\n/*  %s: %d;*/", f.name, f.bitsize)
   else
     local type = numtypes[f.type]
-    if f.bitofs or f.idpart or f.type == "string" then
-      ret = format("/* %s %s;*/", type.ctype, f.name)
+    local langtype = type[outputlang] or type.c
+
+    if f.type == "string" and langdef.stringfield then
+      ret = format(langdef.stringfield, f.name)
+    elseif f.bitofs or f.idpart or f.type == "string" then
+      ret = format("/* %s %s;*/", langtype, f.name)
     else
-      ret = format("\n  %s %s;", type.ctype, f.name)
+      ret = format(langdef.structfield, langtype, f.name)
     end
   end
   return ret
 end
 
-local structdef = [[
-typedef struct MSG_{{name}}{
-  uint32_t msgid;{{fields}}
-} MSG_{{name}};
-
-]]
-
 function write_struct(name, def)
 
   local fieldstr = ""
+  local bitfields = ""
 
   if def.base then
     local base = msglookup[def.base]
@@ -209,11 +317,32 @@ function write_struct(name, def)
   for i, f in ipairs(def.fields) do   
     fieldstr = fieldstr..mkfield(f)
     if f.type == "bitfield" then
-      writef("#define %smsg_%s(msg) %s\n", name, f.name, mkbitget(f, "(msg)->msgid"))
+      if outputlang == "c" then
+        bitfields = bitfields .. format("#define %smsg_%s(msg) %s\n", name, f.name, mkbitget(f, "(msg)->msgid"))
+      else
+        local field, ret = mkbitget(f, "msgid"), "uint"
+        if f.bool then
+          ret = "bool"
+          field = field .." != 0"
+        elseif f.name == "id" and def.enumlist then
+          ret = namescans[def.enumlist].enumname
+          field = format("(%s)%s", ret, field)
+        end
+
+        bitfields = bitfields .. format("  public %s %s => %s;\n", ret , f.name, field)
+      end
     end
   end
+
+  if outputlang == "cs" then
+    fieldstr = fieldstr .. "\n" .. bitfields
+  end
   
-  writetemplate(structdef, {name = name, fields = fieldstr})
+  writetemplate(langdef.struct, {name = name, fields = fieldstr})
+
+  if outputlang == "c" then
+    write(bitfields)
+  end
 end
 
 local funcdef = [[
@@ -253,8 +382,8 @@ function write_logfunc(def)
     elseif type == "string" then
       argtype = numtypes[type].argtype
     else
-      type = typedef.ctype
-      argtype = typedef.argtype and numtypes[typedef.argtype].ctype
+      type = typedef.c
+      argtype = typedef.argtype and numtypes[typedef.argtype].c
     end
 
     --time stamp values are fetched inside the logger func so skip creating an arg for them
@@ -276,6 +405,8 @@ function write_logfunc(def)
     if typedef.customwrite then
       if f.type == "timestamp" then
         field = format("  msg->%s = %s;\n", f.name, getticksstr)
+      elseif f.type == "MRef" then
+        field = format("  setmref(msg->%s, %s);\n", f.name, f.name)
       elseif f.type == "string" then
         if vtotal == "" then
           vtotal = format("  MSize vtotal = sizeof(MSG_%s);\n", def.name)
@@ -300,19 +431,10 @@ function write_logfunc(def)
   writetemplate(funcdef, {name = def.name, args = args, fields = fieldstr, vtotal = vtotal, vwrite = vwrite})
 end
 
-local printdef = [[
-static LJ_AINLINE MSize print_{{name}}(void* msgptr)
-{
-  MSG_{{name}} *msg = (MSG_{{name}} *)msgptr;
-  lua_assert(((uint8_t)msg->msgid) == MSGID_{{name}});
-  printf("{{fmtstr}}\n", {{args}});
-  return {{msgsz}};
-}
-
-]]
-
 function write_printfunc(def)
+  local fmtstr = ""
   local msgid = def.msgid
+  local fieldget = langdef.fieldget
 
   if not msgid then
     local base = def.base and msglookup[def.base]
@@ -330,42 +452,46 @@ function write_printfunc(def)
   for i, f in ipairs(def.fields) do
     local type = numtypes[f.type]
     local fmtspec = type.printf
-    local arg 
+    local arg
 
-    if f.bitofs or f.idpart then
+    if outputlang == "c" and (f.bitofs or f.idpart) then
       arg = mkbitget(f, "msg->msgid")
+    else
+      arg = fieldget(def, f, type)
     end
 
     --translate known enum ids into a name
     if f.name == "id" and def.enumlist then
-      arg = format("%s_names[%s]", def.enumlist, arg)
+      if outputlang == "cs" then
+        arg = format("%s_names[(uint)%s]", def.enumlist, arg)
+      else
+        arg = format("%s_names[%s]", def.enumlist, arg)
+      end
       fmtspec = "%s"
-    elseif arg then
-      --arg = format("(msg->msgid >> %d) & %d", f.bitofs, bit.rshift(1, f.bitsize)-1)
-    elseif f.type == "string" then
-      arg = "(const char*)(msg+1)"
-    elseif type.ref then
-      arg = format("(uintptr_t)msg->%s.%s", f.name, type.ref)
-    else
-      arg = format("msg->%s", f.name)
     end
 
     if def.vsize and f.name == def.sizefield then
       msgsz = arg
     end
 
-    local comma = (i ~= #def.fields and ", ")
-
-    fmtlist[#fmtlist+1] = format("%s %s", f.name, fmtspec)
-
-    if i ~= #def.fields then 
-      arg = arg ..", "
+    if outputlang == "cs" then
+      fmtstr = fmtstr .. format("%s: {%s} ", f.name, arg)
+    else
+      fmtlist[#fmtlist+1] = format("%s %s", f.name, fmtspec)
+      if i ~= #def.fields then 
+        args = args .. arg .. ", "
+      else
+        args = args .. arg
+      end
     end
-    args = args .. arg
   end
 
-  local fmtstr = format('%s: %s', def.name, table.concat(fmtlist, ", "))
-  writetemplate(printdef, {name = def.name, fmtstr = fmtstr, args = args, msgsz = msgsz})
+  if fmtstr == "" then
+    fmtstr = format('%s: %s', def.name, table.concat(fmtlist, ", "))
+  else
+    fmtstr = def.name .. ": " .. fmtstr
+  end
+  writetemplate(langdef.printer, {name = def.name, fmtstr = fmtstr, args = args, msgsz = msgsz})
 end
 
 local filecache = {}
@@ -414,41 +540,24 @@ function getnames(patten)
   return t
 end
 
-local enumdef = [[
-enum %s{
-%s  %sMAX
-};
-
-]]
-
-local luaenumdef = [[
-local %s = {
-%s
-  %sMAX
-}
-
-]]
-
 function write_enum(name, names, prefix)
   prefix = prefix and (prefix .. "_") or name
+
+  if outputlang ~= "c" then
+    prefix = ""
+  end
   local entries = joinlist(names, "  " .. prefix, ",\n")
-  local enum = format(enumdef, name, entries, prefix);
+  local enum = format(langdef.enum, name, entries, prefix);
   write(enum)
 end
-
-local namedef = [[
-static const char *%s[] = {
-%s};
-
-]]
 
 function write_namelist(name, names)
   local names = joinlist(names, '  "', '",\n')
-  local enum = format(namedef, name, names);
+  local enum = format(langdef.namelist, name, names);
   write(enum)
 end
 
-local namescans = {
+namescans = {
   timers = {
     patten = "TimerStart%(([^%,)]+)", 
     enumname = "TimerId",
@@ -491,7 +600,7 @@ msgs = {
   section = {
     "id : 23",
     "time : timestamp",
-    "start : 1",
+    "start : bool",
     enumlist = "sections",
   },
 
@@ -508,16 +617,26 @@ msgs = {
   },
 
   arenacreated = {
+    "arenaid : 12",
     "address : MRef",
-    "id : u32",
-    "flags : 16",
+    "time : timestamp",
+    "flags : u16",
+  },
+
+  arenaactive = {
+    "arenaid : 12",
+    "celltop : u16",
+    "flags : u16",
+    "time : timestamp",
   },
 
   arenasweep = {
-    "arenaid : 24",
+    "arenaid : 12",
+    "empty : bool",
     "time : u32",
     "sweeped : u16",
     "celltop : u16",
+    "flags : u32",
   },
 
   gcobj = {
@@ -532,6 +651,16 @@ msgs = {
     "label : string",
     "time : timestamp",
     sizefield = "size",
+  },
+
+  markstats = {
+    "mark : u32",
+    "mark_huge : u32",
+    "trav_tab : u32",
+    "trav_func : u32",
+    "trav_proto : u32",
+    "trav_thread : u32",
+    "trav_trace : u32",
   },
 --[[
   trace = {
@@ -554,8 +683,6 @@ msgs = {
 
 parse_msglist()
 
-outputfile = io.open("timerdef.h", "w")
-
 local msgorder = {
   marker = 1,
   time = 2,
@@ -577,59 +704,144 @@ table.sort(names, function(a, b)
   end
 end)
 
-write([[#include <stdio.h>
+function write_msgsizes()
+
+  local sizes = ""
+
+  for _, name in ipairs(names) do
+    local size = msglookup[name].size + 4
+    if msglookup[name].vsize then
+      size = 0
+    end
+    sizes = sizes .. format("  %d, /* %s */\n", size, name)
+  end
+
+  writef(langdef.msgsizes, sizes)
+end
+
+function write_msgdefs()
+  for key, def in ipairs(msglist) do
+  
+    if def.enumlist then
+      local names = namescans[def.enumlist]
+      write_enum(names.enumname, names.matches, names.enumprefix)
+      write_namelist(def.enumlist.."_names", names.matches)
+    end
+  
+    write_struct(def.name, def)
+    if outputlang == "c" then
+      write_logfunc(def)
+    end
+    write_printfunc(def)
+  end
+end
+
+local counterdef = "uint32_t perf_counter[Counter_MAX];\n"
+
+function write_counters()
+  local counters = namescans.counters
+  write_enum(counters.enumname, counters.matches, counters.enumprefix)
+  write_namelist("Counter_names", counters.matches)
+  write(counterdef)
+end
+
+function write_cheader()
+  outputfile = io.open("timerdef.h", "w")
+  outputlang = "c"
+
+  write([[#include <stdio.h>
 
 #pragma pack(push, 1)
 
 ]])
 
-write_enum("MSGIDS", names, "MSGID")
+  write_enum("MSGIDS", names, "MSGID")
+  write_msgsizes()
 
-write("static uint32_t msgsizes[] = {\n")
-for _, name in ipairs(names) do
-  local size = msglookup[name].size + 4
-  if msglookup[name].vsize then
-    size = 0
-  end
-  write(format("  %d, /* %s */\n", size, name))
-end
-write("};\n\n")
+  write_msgdefs()
 
-for key, def in ipairs(msglist) do
-
-  if def.enumlist then
-    local names = namescans[def.enumlist]
-    write_enum(names.enumname, names.matches, names.enumprefix)
-    write_namelist(def.enumlist.."_names", names.matches)
-  end
-
-  write_struct(def.name, def)
-  write_logfunc(def)
-  write_printfunc(def)
+  write([[
+  typedef MSize (*msgprinter)(void* msg);
+  
+  static msgprinter msgprinters[] = {
+  ]])
+  
+  write(joinlist(names, "  print_", ",\n"))
+  write("};\n\n")
+  
+  write_counters()
+  
+  write("#pragma pack(pop)")
+  outputfile:close()
 end
 
-write([[
-typedef MSize (*msgprinter)(void* msg);
+function write_cs()
+  outputfile = io.open("timerdef.cs", "w")
+  outputlang = "cs"
 
-static msgprinter msgprinters[] = {
+  write([[using System;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+
+using MRef = System.UInt32;
+using GCRef = System.UInt32;
+
 ]])
 
-write(joinlist(names, "  print_", ",\n"))
-write("};\n\n")
+  write_enum("MsgId", names)
+  local counters = namescans.counters.matches
+  write_enum(namescans.counters.enumname, counters)
 
-local counterdef = "uint32_t perf_counter[Counter_MAX];\n"
+  local union = ""
 
-function writercounters()
-  local names = namescans.counters
-  write_enum(names.enumname, names.matches, names.enumprefix)
-  write_namelist("Counter_names", names.matches)
-  write(counterdef)
+  for key, def in ipairs(msglist) do
+  
+    if def.enumlist then
+      local names = namescans[def.enumlist]
+      write_enum(names.enumname, names.matches)
+    end 
+    write_struct(def.name, def)
+    union = union .. format("  [FieldOffset(0)] public Msg_%s %s;\n", def.name, def.name)
+  end
+
+  writef([[[StructLayout(LayoutKind.Explicit)]
+public struct AllMsgs
+{
+  [FieldOffset(0)] public uint msgid;
+%s
+}
+]], union)
+
+  write("public unsafe class MsgInfo{\n")
+  write_msgsizes()
+
+  writef([[
+  public delegate uint MsgPrinter(void* msg);
+  
+  public static MsgPrinter[] MsgPrinters = {
+%s
+};
+
+]], joinlist(names, "  Print_", ",\n"))
+
+  for key, def in ipairs(msglist) do
+    if def.enumlist then
+      local names = namescans[def.enumlist]
+      write_namelist(def.enumlist.."_names", names.matches)
+    end
+    write_printfunc(def)
+  end
+  
+  write_namelist("Counter_names", counters)
+  write("};\n\n")
+
+  outputfile:close()
 end
 
-writercounters()
-
-write("#pragma pack(pop)")
-outputfile:close()
+write_cheader()
+langdef = csdefs
+write_cs()
 
 return
 
