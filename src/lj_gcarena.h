@@ -251,6 +251,9 @@ void arena_free(global_State *g, GCArena *arena, void* mem, MSize size);
 void arena_shrinkobj(void* obj, MSize newsize);
 MSize arena_cellextent(GCArena *arena, MSize cell);
 
+LUA_API uint32_t arenaobj_cellcount(void *o);
+LUA_API CellState arenaobj_cellstate(void *o);
+
 GCCellID arena_firstallocated(GCArena *arena);
 MSize arena_objcount(GCArena *arena);
 MSize arena_totalobjmem(GCArena *arena);
@@ -317,6 +320,8 @@ static LJ_AINLINE int arenaobj_iswhite(void* o)
   lua_assert(!gc_ishugeblock(o));
   return !((arena_getmark(arena, cell) >> arena_blockbitidx(cell)) & 1);
 }
+
+GCBlockword* arenaobj_blockword(void* o);
 
 #define arenaobj_isblack(o) (!arenaobj_iswhite(o))
 

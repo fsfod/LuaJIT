@@ -1135,7 +1135,7 @@ LUA_API CellState arenaobj_cellstate(void *o)
   return arena_cellstate(arena, cell);
 }
 
-LUA_API uint32_t arenaobj_getcellcount(void *o)
+LUA_API uint32_t arenaobj_cellcount(void *o)
 {
   GCArena *arena = (GCArena*)(((uintptr_t)o) & ~(uintptr_t)ArenaCellMask);
   GCCellID cell = arenaobj_getcellid(o);

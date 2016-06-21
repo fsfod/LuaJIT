@@ -32,7 +32,24 @@ GCobj *getarenacell(lua_State *L, int i, int cell)
 GCobj *getarenacellG(global_State *g, int i, int cell)
 {
   GCArena *arena = lj_gc_arenaref(g, i);
+  if (i >= g->gc.arenastop) {
+    return NULL;
+  }
+  arena = lj_gc_arenaref(g, i);
+  if (cell > arena_topcellid(arena)) {
+    return NULL;
+  }
+
   return arena_cellobj(arena, cell);
+}
+
+int getcellextent(global_State *g, int i, int cell)
+{
+  GCArena *arena = lj_gc_arenaref(g, i);
+  if (arena_cellstate(arena, cell) == CellState_Extent) {
+    return 0;
+  }
+  return arena_cellextent(arena, cell);
 }
 
 #define tvisdead(g, tv) (tvisgcv(tv) && isdead(g, gcV(tv)))
@@ -77,7 +94,7 @@ int livechecker(GCobj *o, void *user) {
   } else if (o->gch.gct == ~LJ_TTRACE) {
     GCtrace *T = gco2trace(o);
     IRRef ref;
-    if (T->traceno == 0) return;
+    if (T->traceno == 0) return 0;
     
     for (ref = T->nk; ref < REF_TRUE; ref++) {
       IRIns *ir = &T->ir[ref];
@@ -148,52 +165,70 @@ void checkarenas(global_State *g) {
 
   for (MSize i = 0; i < g->gc.arenastop; i++) {
     GCArena *arena = lj_gc_arenaref(g, i);
+    ArenaFlags flags = lj_gc_arenaflags(g, i);
 
-    if ((lj_gc_arenaflags(g, i) & (ArenaFlag_TravObjs|ArenaFlag_Empty)) == ArenaFlag_TravObjs) {
-      arena_visitobjects(arena, livechecker, g);
+    if ((flags & (ArenaFlag_TravObjs|ArenaFlag_Empty)) == ArenaFlag_TravObjs) {
+
+      //if (arena != g->arena) {
+        arena_visitobjects(arena, livechecker, g);
+     // }
+    } else if(flags & ArenaFlag_Empty) {
+      lua_assert(arena_topcellid(arena) == MinCellId && arena_greysize(arena) == 0);
     }
   }
 }
 
 MSize GCCount = 0;
 const char *getgcsname(int gcs);
+int prevcelllen = 0;
 
 void TraceGC(global_State *g, int newstate)
 {
   lua_State *L = mainthread(g);
-/*
+
   if (newstate == GCSpropagate) {
     // timers_printlog();
     printf("---------------GC Start %d-------------------------\n", GCCount);
     GCCount++;
+  } else if (newstate == GCSatomic) {
+    log_markstats(perf_counter[Counter_gc_mark], perf_counter[Counter_gc_markhuge], perf_counter[Counter_gc_traverse_tab], 
+                  perf_counter[Counter_gc_traverse_func], perf_counter[Counter_gc_traverse_proto], perf_counter[Counter_gc_traverse_thread],
+                  perf_counter[Counter_gc_traverse_trace]);
+  }
+/*
+  if (GCCount >= 0) {
+    int celllen = getcellextent(g, 1, 18991);
+    if (celllen != prevcelllen) {
+      lua_assert(celllen == 2);
+      prevcelllen = celllen;
+    }
+
+    //GCobj *o = getarenacellG(g, 7, 65515);
+    //CellState state_t = arenaobj_cellstate(t);
+    //CellState state_o = arenaobj_cellstate(o);
+    //lua_assert(state_t >= 0);
+    //lua_assert(state_o >= 0);
   }
 
-  if (GCCount >= 10) {
-    GCobj *t = getarenacellG(g, 3, 1024);
-    GCobj *o = getarenacellG(g, 7, 65515);
-    CellState state_t = arenaobj_cellstate(t);
-    CellState state_o = arenaobj_cellstate(o);
-    lua_assert(state_t >= 0);
-    lua_assert(state_o >= 0);
-  }
-
-  if (g->gc.state == GCSsweep || g->gc.isminor) {
-    checkarenas(g);
-  }
 
   perf_printcounters();
 
   perf_resetcounters();
-
+*/ 
+#if defined(DEBUG) || defined(GCDEBUG)
+  if (g->gc.state == GCSsweep || g->gc.isminor) {
+    checkarenas(g);
+  }
+#endif
 #ifdef DEBUG
   if (IsDebuggerPresent()) {
     char buf[100];
     sprintf(buf, "GC State = %s\n", getgcsname(newstate));
     OutputDebugStringA(buf);
   }
-#endif 
+
   printf("GC State = %s\n", getgcsname(newstate));
-*/
+#endif 
 #ifdef LJ_ENABLESTATS
   log_gcstate(newstate, g->gc.state, g->gc.total);
 #endif
@@ -203,25 +238,32 @@ void checkalloc();
 
 void sweepcallback(global_State *g, GCArena *arena, MSize i, int count)
 {
-  /*
-  checkalloc();
+#if defined(DEBUG) || defined(GCDEBUG)
+  //checkalloc();
   if (count == -1) {
-    arena_dumpwhitecells(g, arena);
+   // arena_dumpwhitecells(g, arena);
   } else {
     if (count & 0x10000) {
-      printf("Arena %d is now empty\n", i);
-    } else {
       printf("Swept arena %d\n", i);
+    } else {
+      printf("Arena %d is now empty\n", i);
     }
   }
-  */
+#endif
 }
 
 void* check = NULL;
 MSize extent = 0;
 
-void checkalloc()
+void checkalloc(global_State *g)
 {
+/*
+  int celllen = getcellextent(g, 1, 18991);
+  if (celllen != prevcelllen) {
+    lua_assert(celllen == 3);
+    prevcelllen = celllen;
+  }
+
   GCArena *arena;
   GCCellID cell;
   if (check == NULL)return;
@@ -241,5 +283,23 @@ void checkalloc()
     }
   } else {
     extent = arena_cellextent(arena, ptr2cell(check));
+  }
+  */
+}
+
+void strings_toblack(global_State *g)
+{
+  for (size_t i = 0; i <= g->strmask; i++) {
+    GCRef str = g->strhash[i]; /* Sweep one chain. */
+    GCstr *prev = NULL;
+
+    while (gcref(str)) {
+      GCstr *s = strref(str);
+      str = s->nextgc;
+      if (iswhite(g, s)) {
+        arenaobj_toblack(s);
+        prev = s;
+      }
+    }
   }
 }
