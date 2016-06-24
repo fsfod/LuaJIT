@@ -602,6 +602,7 @@ static int gc_sweepstring(global_State *g)
     str = s->nextgc;
     if (iswhite(g, s)) {
       PerfCounter(sweptstring);
+      g->strnum--;
       *(prev ? &prev->nextgc : &g->strhash[g->gc.sweepstr]) = s->nextgc;
     } else {
       prev = s;
