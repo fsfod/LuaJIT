@@ -182,6 +182,27 @@ MSize GCCount = 0;
 const char *getgcsname(int gcs);
 int prevcelllen = 0;
 
+static int norm_gcstateid(int gcs)
+{
+  switch (gcs) {
+  case GCSpause:
+    return 0;
+  case GCSpropagate:
+    return 1;
+  case GCSatomic:
+    return 2;
+  case GCSsweepstring:
+    return 3;
+  case GCSsweep:
+    return 4;
+  case GCSfinalize:
+    return 5;
+  default:
+    return 0;
+    break;
+  }
+}
+
 void TraceGC(global_State *g, int newstate)
 {
   lua_State *L = mainthread(g);
@@ -230,7 +251,7 @@ void TraceGC(global_State *g, int newstate)
   printf("GC State = %s\n", getgcsname(newstate));
 #endif 
 #ifdef LJ_ENABLESTATS
-  log_gcstate(newstate, g->gc.state, g->gc.total);
+  log_gcstate(norm_gcstateid(newstate), norm_gcstateid(g->gc.state), g->gc.total, g->gc.hugemem, g->strnum);
 #endif
 }
 

@@ -40,7 +40,7 @@ const char *getgcsname(int gcs)
 
 SBuf eventbuf = { 0 };
 
-void timers_setuplog(lua_State *L)
+void perflog_setup(lua_State *L)
 {
   if (mref(eventbuf.L, lua_State) == NULL) {
     MSize total = G(L)->gc.total;
@@ -51,10 +51,11 @@ void timers_setuplog(lua_State *L)
   }
 }
 
-void timers_freelog(global_State *g)
+void perflog_shutdown(global_State *g)
 {
   if (sbufB(&eventbuf)) {
-    timers_printlog();
+    perflog_dumptofile("perflog.bin");
+    perflog_print();
     g->gc.total += sbufsz(&eventbuf);
     lj_buf_free(g, &eventbuf);
   }
@@ -133,7 +134,7 @@ void printsectotals()
   }
 }
 
-void timers_printlog()
+void perflog_print()
 {
   char* pos = sbufB(&eventbuf);
   uint64_t steptime = 0;/* Acculated step time for current GC state */
@@ -149,7 +150,7 @@ void timers_printlog()
         MSG_gcstate *msg = (MSG_gcstate *)pos;
         MSize gcs = gcstatemsg_state(msg);
         MSize prevgcs = gcstatemsg_prevstate(msg);
-        printf("GC State = %s, mem = %ukb\n", getgcsname(gcs), msg->totalmem/1024);
+        printf("GC State = %s, mem = %ukb\n", gcstates[gcs], msg->totalmem/1024);
         pos += msgsizes[MSGID_gcstate];
 
         uint64_t start = secstart[Section_gc_step] ? secstart[Section_gc_step] : secstart[Section_gc_fullgc];
@@ -220,6 +221,14 @@ void timers_printlog()
   lj_buf_reset(&eventbuf);
 }
 
+void perflog_dumptofile(const char *path)
+{
+  SBuf *sb = &eventbuf;
+  FILE* dumpfile = fopen(path, "wb");
+  fwrite(sbufB(sb), 1, sbuflen(sb), dumpfile);
+  fclose(dumpfile);
+}
+
 void recgcstate(global_State *g, int newstate)
 {
   lua_State *L = mainthread(g);
@@ -228,12 +237,12 @@ void recgcstate(global_State *g, int newstate)
 
 #else
 
-void timers_setuplog(lua_State *L)
+void perflog_setup(lua_State *L)
 {
   UNUSED(L);
 }
 
-void timers_freelog(global_State *g)
+void perflog_shutdown(global_State *g)
 {
   UNUSED(g);
 }

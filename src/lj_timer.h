@@ -1,7 +1,8 @@
 #pragma once
 
-void timers_setuplog(lua_State *L);
-void timers_freelog(global_State *g);
+void perflog_setup(lua_State *L);
+void perflog_shutdown(global_State *g);
+void perflog_dumptofile(const char *path);
 
 #define LJ_ENABLESTATS
 
@@ -16,7 +17,7 @@ void timers_freelog(global_State *g);
 extern SBuf eventbuf;
 
 void timers_print(const char *name, uint64_t time);
-void timers_printlog();
+void perflog_print();
 
 void perf_printcounters();
 void perf_resetcounters();
@@ -76,12 +77,6 @@ void LJ_AINLINE *celllist_end(uint32_t cellcount)
   e->cellcount = (uint16_t)cellcount;
   setsbufP(sb, e->celllist+cellcount);
 }
-
-enum GCStats {
-  GCStat_arenasweep, /* celltop, count swept */
-  GCStat_greyssb, /* total, whites, hugeblock count */
-  GCStat_hugesweep, /* sz swept, count swept*/
-};
 
 #define PerfCounter(name) perf_counter[Counter_##name]++
 
