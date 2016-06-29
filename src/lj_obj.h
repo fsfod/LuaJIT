@@ -583,7 +583,7 @@ typedef struct PQueue {
 
 typedef struct GCState {
   GCSize total;		/* Memory currently allocated. */
-  GCSize atotal;	/* Memory currently allocated from arenas. */
+  GCSize hugemem;	/* Memory currently allocated for huge objects. */
   GCSize threshold;	/* Memory threshold. */
   union {
     struct {

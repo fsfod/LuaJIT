@@ -174,7 +174,6 @@ typedef struct HugeBlockTable {
   MSize hmask;
   HugeBlock* node;
   MSize count;
-  MSize total;
   MSize finalizersize;
   MRef *finalizers;
   MRef *finalizertop;
@@ -248,7 +247,7 @@ void arena_visitobjects(GCArena *arena, arenavisitor cb, void *user);
 void *arena_allocalign(GCArena *arena, MSize size, MSize align);
 void* arena_allocslow(GCArena *arena, MSize size);
 void arena_free(global_State *g, GCArena *arena, void* mem, MSize size);
-void arena_shrinkobj(void* obj, MSize newsize);
+MSize arena_shrinkobj(void* obj, MSize newsize);
 MSize arena_cellextent(GCArena *arena, MSize cell);
 
 LUA_API uint32_t arenaobj_cellcount(void *o);
@@ -256,6 +255,7 @@ LUA_API CellState arenaobj_cellstate(void *o);
 
 GCCellID arena_firstallocated(GCArena *arena);
 MSize arena_objcount(GCArena *arena);
+/* Arena space occupied by live objects */
 MSize arena_totalobjmem(GCArena *arena);
 void arena_copymeta(GCArena *arena, GCArena *meta);
 

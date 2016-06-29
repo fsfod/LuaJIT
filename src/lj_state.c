@@ -196,6 +196,7 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
   L->dummy_ffid = FF_C;
   setmref(L->glref, g);
   g->strempty.gct = ~LJ_TSTR;
+  g->gc.total = arena_totalobjmem(GGarena);
   g->allocf = f;
   g->allocd = ud;
   setgcref(g->mainthref, obj2gco(L));

@@ -1486,7 +1486,7 @@ static void asm_bumpalloc(ASMState *as, IRIns *ir, MSize sz)
   }
 
   checkmclim(as);
-  emit_gmroi(as, XG_ARITHi(XOg_ADD), RID_NONE, (int32_t)(intptr_t)&J2G(as->J)->gc.total, sz);
+  emit_gmroi(as, XG_ARITHi(XOg_ADD), RID_NONE, (int32_t)(intptr_t)&J2G(as->J)->gc.total, cellcount * 16);
 
   emit_rr(as, XO_MOVZXw, robj, RID_ECX);
   /* Increment arena cell top Id */

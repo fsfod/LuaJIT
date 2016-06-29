@@ -803,9 +803,11 @@ void lj_gc_freeall(global_State *g)
   MSize i;
   setgcref(g->gc.root, obj2gco(mainthread(g)));
   g->strnum = 0;
+  g->gc.total -= arena_totalobjmem(lj_gc_arenaref(g, 0));
   /* Skip GG arena */
   for (i = 1; i < g->gc.arenastop; i++) {
     GCArena *arena = lj_gc_arenaref(g, i);
+    g->gc.total -= arena_totalobjmem(arena);
     arena_destroy(g, arena);
   }
   hugeblock_freeall(g);
@@ -1050,7 +1052,7 @@ static void sweep_arena(global_State *g, MSize i, MSize celltop)
   lua_assert(!(lj_gc_arenaflags(g, i) & ArenaFlag_Swept));
   GCArena *arena = lj_gc_arenaref(g, i);
   ArenaFreeList *freelist = g->gc.freelists+i;
-  MSize count;
+  MSize count, empty, currtop = arena_topcellid(arena);
   PreSweepArena(g, arena, i);
   TicksStart();
 
@@ -1066,34 +1068,35 @@ static void sweep_arena(global_State *g, MSize i, MSize celltop)
   if (celltop) {
     //arena_setrangewhite(arena, celltop, celltop+256);
   }
+  empty = (count & 0x10000) == 0;
 #ifdef LJ_ENABLESTATS
   log_arenasweep(i, (uint32_t)TicksEnd(), count & 0xffff, arena_topcellid(arena));
 #endif
-  PostSweepArena(g, arena, i, count);
 
+  PostSweepArena(g, arena, i, count);
+  count &= 0xffff;
   /* If there no more live cells left flag the arena as empty and reset its bump and block state */
-  if (!(count & 0x10000)) {
+  if (empty) {
+    lua_assert(g->gc.total > arena_totalobjmem(arena) && currtop > freelist->freecells);
+    MSize amem = arena_totalobjmem(arena);
     /* Don't flag active arenas as empty because the empty flag is cleared
     ** on setting an arena active and is used to filter out arenas for grey queue
-    ** processing during mark propergation.
+    ** processing during mark propagation.
     */
     if (arena != g->arena && arena != g->travarena) {
       lj_gc_setarenaflag(g, i, ArenaFlag_Empty);
     }
-    
     lj_gc_cleararenaflags(g, i, ArenaFlag_NoBump|ArenaFlag_ScanFreeSpace);
     arena_reset(arena);
-    freelist->freeobjcount = 0;
-    freelist->freecells = 0;
+    g->gc.total -= amem;
   } else {
-    freelist->freeobjcount += count & 0xffff;
-    g->gc.deadnum += count & 0xffff;
+    freelist->freeobjcount += count;
+    g->gc.deadnum += count;
     /* FIXME: Decide and test the right size threshold to trigger freespace scan */
     if (freelist->freeobjcount > 100) {
       lj_gc_setarenaflag(g, i, ArenaFlag_ScanFreeSpace);
     }
   }
-
   lj_gc_setarenaflag(g, i, ArenaFlag_Swept);
 }
 
@@ -1546,10 +1549,7 @@ void *lj_mem_grow(lua_State *L, void *p, MSize *szp, MSize lim, MSize esz)
 /* Allocate new GC object and link it to the root set. */
 void * LJ_FASTCALL lj_mem_newgco(lua_State *L, GCSize size)
 {
-  global_State *g = G(L);
   GCobj *o = lj_mem_newgco_t(L, size, ~LJ_TCDATA);
-  g->gc.atotal += size;
-  g->gc.total += size;
   return o;
 }
 
@@ -1585,78 +1585,88 @@ GCobj *lj_mem_newgco_t(lua_State *L, GCSize osize, uint32_t gct)
 {
   global_State *g = G(L);
   GCobj *o ;
+  VERIFYGC(g);
 
   if (osize < ArenaOversized) {
-    o = (GCobj*)arena_alloc(istrav(gct) ? G(L)->travarena : G(L)->arena, osize);  
-    if (o == NULL) {
+    MSize realsz = lj_round(osize, 16);
+    o = (GCobj*)arena_alloc(istrav(gct) ? G(L)->travarena : G(L)->arena, osize);
+    if (LJ_UNLIKELY(o == NULL)) {
       o = findarenaspace(L, osize, istrav(gct));
     }
-    //printf("Alloc(%d, %d) %s\n", ptr2arena(o)->extra.id, ptr2cell(o), lj_obj_itypename[gct]);
-    
-    g->gc.atotal += osize;
+
+    //GCDEBUG("Alloc(%d, %d) %s\n", ptr2arena(o)->extra.id, ptr2cell(o), lj_obj_itypename[gct]);
+    g->gc.total += realsz;
   } else {
     o = hugeblock_alloc(L, osize, gct);
   }
+  VERIFYGC(g);
+  setgray(o);
 
-  /* Set created object black while the gc is sweeping */
-  if (g->gc.state > GCSpropagate && g->gc.state < GCSfinalize) {
-    arena_markcell(ptr2arena(o), ptr2cell(o));
-  } else {
-    setgray(o);
-  }
-  
-  g->gc.total += osize;
   return o;
 }
 
 void lj_mem_freegco(global_State *g, void *p, GCSize osize)
 {
-  if (ptr2cell(p) != 0) {
+  VERIFYGC(g);
+  if (!gc_ishugeblock(p)) {
     /* TODO: Free cell list */
     lua_assert(!arenaobj_isdead(p));
 
     arena_free(g, ptr2arena(p), p, osize);
+    osize = lj_round(osize, 16);
     g->gc.total -= (GCSize)osize;
   } else {
     hugeblock_free(g, p, osize);
   }
+  VERIFYGC(g);
 }
 
 void *lj_mem_reallocgc(lua_State *L, GCobj *owner, void *p, GCSize oldsz, GCSize newsz)
 {
   global_State *g = G(L);
   void* mem;
+  VERIFYGC(g);
 
-  if (newsz < ArenaOversized) {
-    mem = arena_alloc(g->arena, newsz);
-
-    if (oldsz && oldsz < ArenaOversized) {
-      GCArena *arena = ptr2arena(p);
-      if (oldsz < newsz) {
-        /*if(arena_tryext(arena, oldsz, newsz))*/
-      } else {
-        //arena_shrinkobj(arena, newsz);
-        //mem = p;
+  if (newsz) {
+    if (newsz < ArenaOversized) {
+      /* Try to shrink or extend the object inplace if theres free space after the object in the arena */
+      if (oldsz && oldsz < ArenaOversized) {
+        GCArena *arena = ptr2arena(p);
+        if (oldsz < newsz) {
+          /*if(arena_tryext(arena, oldsz, newsz))*/
+        } else {
+          lj_mem_shrinkobj(L, p, (MSize)oldsz, (MSize)newsz);
+          return p;
+        }
       }
-    }
-    if (mem == NULL) {
-      mem = findarenaspace(L, newsz, 0);
-    }
 
-    /* Set created object black while the gc is sweeping */
-    if ((g->gc.statebits & GCSneedsbarrier) && arenaobj_isblack(owner)) {
-      arena_markcell(ptr2arena(mem), ptr2cell(mem));
-    }
-    g->gc.total += (GCSize)newsz;
-  } else {
-    mem = hugeblock_alloc(L, newsz, LJ_TTAB);
-  } 
+      mem = arena_alloc(g->arena, newsz);
+      if (mem == NULL) {
+        mem = findarenaspace(L, newsz, 0);
+      }
+      //GCDEBUG("Alloc(%d, %d) %s\n", ptr2arena(mem)->extra.id, ptr2cell(mem), "TabPart");
 
-  lua_assert(!p || oldsz > 0);
-  if (p) {
-    memcpy(mem, p, oldsz);
+      /* Set created object black while the gc is sweeping */
+      if (((g->gc.statebits & GCSneedsbarrier) && arenaobj_isblack(owner)) || (g->gc.statebits & GCSmakeblack)) {
+        arena_markcell(ptr2arena(mem), ptr2cell(mem));
+      }
+      newsz = lj_round(newsz, 16);
+      g->gc.total += (GCSize)newsz;
+    } else {
+      mem = hugeblock_alloc(L, newsz, LJ_TTAB);
+    }
+  }
+
+  //lua_assert(!p || oldsz > 0);
+  if (oldsz) {
+    if (newsz) {
+      memcpy(mem, p, oldsz);
+    } else {
+      mem = NULL;
+    }
     lj_mem_freegco(G(L), p, oldsz);
   }
+  VERIFYGC(g);
   return mem;
 }
 
@@ -1666,19 +1676,20 @@ GCobj *lj_mem_newagco(lua_State *L, GCSize osize, MSize align)
   global_State *g = G(L);
   GCobj *o;
   lua_assert(osize > 0 && align > 0 && align < ArenaMetadataSize);
-
+  VERIFYGC(g);
   if ((osize+align) < ArenaOversized) {
+    MSize arenasz = lj_round(osize, 16);
     o = (GCobj *)arena_allocalign(g->arena, osize, align);
     if (o == NULL) {
       lua_assert(0);/*FIXME rety for aligned allocations */
       o = findarenaspace(L, osize, 0);
     }
+
+    g->gc.total += osize;
   } else {
     o = hugeblock_alloc(L, osize, ~LJ_TCDATA);
   }
-
-  g->gc.atotal += osize;
-  g->gc.total += osize;
+  VERIFYGC(g);
   return o;
 }
 
@@ -1686,21 +1697,18 @@ void lj_mem_shrinkobj(lua_State *L, GCobj *o, MSize osize, MSize newsz)
 {
   global_State *g = G(L);
   GCSize slack = osize-newsz;
-  lua_assert(osize > newsz);
-
-  g->gc.total -= osize-newsz;
-
+  GCArena *arena = ptr2arena(o);
+  lua_assert(!gc_ishugeblock(o) && !arenaobj_isdead(o) && osize > newsz);
+  VERIFYGC(g);
   /* Don't needlessly fragment free space if the returned memory is small */
   if (slack <= (CellSize*2)) {
     return;
   }
 
-  if (!gc_ishugeblock(o)) {
-    /* TODO: set to correct mark color based on gc state */
-    lua_assert(!arenaobj_isdead(o));
-    //arena_shrinkobj(o, newsz);
-  } else {
-    lua_assert(o->gch.gct != LJ_TTRACE);
-    hugeblock_free(g, o, osize);
-  }
+  /* TODO: set to correct mark color based on gc state */
+  lua_assert(!arenaobj_isdead(o));
+
+  slack = arena_shrinkobj(o, newsz);
+  g->gc.total -= slack;
+  VERIFYGC(g);
 }

@@ -36,6 +36,13 @@ void arena_reset(GCArena *arena)
   arena->freecount = 0;
   memset(arena->block+MinBlockWord, 0, blocksize);
   memset(arena->mark+MinBlockWord, 0, blocksize);
+
+  if (arena_freelist(arena)) {
+    ArenaFreeList *freelist = arena_freelist(arena);
+    freelist->freeobjcount = 0;
+    freelist->freecells = 0;
+    freelist->binmask = 0;
+  }
 }
 
 GCArena* arena_init(GCArena* arena)
@@ -190,14 +197,19 @@ static void arena_setfreecell(GCArena *arena, GCCellID cell)
   arena_getblock(arena, cell) &= ~arena_blockbit(cell);
 }
 
-void arena_shrinkobj(void* obj, MSize newsize)
+MSize arena_shrinkobj(void* obj, MSize newsize)
 {
   GCArena *arena = ptr2arena(obj);
   GCCellID cell = ptr2cell(obj);
   MSize numcells = arena_roundcells(newsize);
+  MSize oldcellnum = arena_cellextent(arena, cell);
   assert_allocated(arena, cell);
   lua_assert(arena_cellstate(arena, cell+numcells) == CellState_Extent);
+
   arena_setfreecell(arena, cell+numcells);
+  /* TODO: add to free list */
+  arena_freelist(arena)->freecells += oldcellnum-numcells;
+  return (oldcellnum-numcells) * 16;
 }
 
 static void arena_setextent(GCArena *arena, GCCellID cell)
@@ -577,8 +589,12 @@ MSize arena_wbcount(GCArena *arena)
 
 MSize arena_totalobjmem(GCArena *arena)
 {
+  MSize cellcount = arena_topcellid(arena)-MinCellId;
   /* FIXME: placeholder */
-  return (arena_topcellid(arena)-MinCellId -arena->freecount) * CellSize;
+  if (arena_freelist(arena)) {
+    cellcount -= arena_freelist(arena)->freecells;
+  }
+  return cellcount * CellSize;
 }
 
 static GCCellID arena_findfreesingle(GCArena *arena)
@@ -1203,7 +1219,7 @@ enum HugeFlags {
 
 HugeBlock _nodes[64] = { 0 };
 MRef hugefinalizers[256] = { 0 };
-HugeBlockTable _tab = { 64-1, _nodes, 0, 0, 0, hugefinalizers, hugefinalizers };
+HugeBlockTable _tab = { 64-1, _nodes, 0, 0, hugefinalizers, hugefinalizers };
 
 #define gettab(g) (&_tab)
 
@@ -1268,7 +1284,7 @@ void *hugeblock_alloc(lua_State *L, GCSize size, MSize gct)
   lua_assert((((intptr_t)o)&ArenaCellMask) == 0);
   node = hugeblock_register(tab, o);
   G(L)->gc.total += size;
-  tab->total += size;
+  G(L)->gc.hugemem += size;
   tab->count++;
 
   if (node == NULL) {
@@ -1286,7 +1302,7 @@ void *hugeblock_allocalign(lua_State *L, GCSize size, MSize align, MSize gct)
   HugeBlockTable *tab = gettab(G(L));
   char *o = (char* )lj_alloc_memalign(G(L)->allocd, ArenaSize, size+align);
   HugeBlock *node = hugeblock_register(tab, o);
-  tab->total += size;
+  G(L)->gc.hugemem += size;
 
   if (node == NULL) {
     hugeblock_rehash(L, tab);
@@ -1303,7 +1319,8 @@ static MSize freehugeblock(global_State *g, HugeBlockTable *tab, HugeBlock *node
   lj_mem_free(g, (void*)hbnode_ptr(node), node->size);
   setmref(node->obj, (intptr_t)-1);
   tab->count--;
-  tab->total -= node->size;
+  g->gc.hugemem -= node->size;
+  g->gc.total -= node->size;
   return node->size;
 }
 
@@ -1391,7 +1408,7 @@ MSize hugeblock_runfinalizers(global_State *g)
       hbnode_clearflag(node, HugeFlag_Black);
 
       if (hbnode_gct(node) == LJ_TCDATA) {
-        tab->total -= freehugeblock(g, tab, node);
+        freehugeblock(g, tab, node);
       }
       --tab->finalizertop;
     }
@@ -1417,7 +1434,7 @@ GCSize hugeblock_sweep(global_State *g)
 {
   HugeBlockTable *tab = gettab(g);
   MSize count = tab->count;
-  GCSize total = tab->total;
+  GCSize total = g->gc.hugemem;
 
   if (count == 0) {
     return 0;
@@ -1430,14 +1447,14 @@ GCSize hugeblock_sweep(global_State *g)
     }
   }
 
-  return total - tab->total;
+  return total - g->gc.hugemem;
 }
 
 GCSize hugeblock_freeall(global_State *g)
 {
   HugeBlockTable *tab = gettab(g);
   MSize i;
-  GCSize total = tab->total;
+  GCSize total = g->gc.hugemem;
 
   if (tab->count == 0) {
     return 0;
@@ -1450,5 +1467,5 @@ GCSize hugeblock_freeall(global_State *g)
     }
   }
 
-  return total - tab->total;
+  return total - g->gc.hugemem;
 }
