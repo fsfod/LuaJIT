@@ -72,19 +72,19 @@ int perf_getcounters(lua_State *L)
 {
   GCtab *t = lj_tab_new(L, 0, Counter_MAX*2);
   settabV(L, L->top++, t);
-  
+
   for (MSize i = 0; i < Counter_MAX; i++) {
     TValue *tv = lj_tab_setstr(L, t, lj_str_newz(L, Counter_names[i]));
     setintV(tv, (int32_t)perf_counter[i]);
   }
-  
+
   return 1;
 }
 
 void perf_printcounters()
 {
   int seenfirst = 0;
-  
+
   for (MSize i = 0; i < Counter_MAX; i++) {
     if (perf_counter[i] == 0) continue;
     if (!seenfirst) {
@@ -138,7 +138,7 @@ void perflog_print()
 {
   char* pos = sbufB(&eventbuf);
   uint64_t steptime = 0;/* Acculated step time for current GC state */
-  uint64_t laststatets = 0; 
+  uint64_t laststatets = 0;
   FILE* dumpfile = fopen("gcstats.csv", "a+");
 
   for (; pos < sbufP(&eventbuf); ) {

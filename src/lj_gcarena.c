@@ -49,11 +49,11 @@ GCArena* arena_init(GCArena* arena)
 {
   /* Make sure block and mark bits are clear*/
   memset(arena, 0, sizeof(GCArena));
-  arena->celltopid = MinCellId; 
+  arena->celltopid = MinCellId;
   arena->celltopmax = MaxUsableCellId;
   arena->freecount = 0;
   arena->firstfree = MaxCellId-1;
-  
+
   return arena;
 }
 
@@ -180,7 +180,7 @@ void arena_destroyGG(global_State *g, GCArena* arena)
   arena_freemem(g, arena);
   lua_assert(g->gc.total == sizeof(GG_State));
   lj_freepages(allocud, arena, ArenaSize);
-}  
+}
 
 void arena_setobjmode(lua_State *L, GCArena* arena, int travobjs)
 {
@@ -271,7 +271,7 @@ void *arena_allocslow(GCArena *arena, MSize size)
   GCCellID cell;
   lua_assert(numcells != 0 && numcells < MaxCellId);
   ArenaFreeList *freelist = arena_freelist(arena);
-  
+
   cell = 0; //arena_findfree(arena, numblocks);
 
   if (1) {
@@ -285,18 +285,18 @@ void *arena_allocslow(GCArena *arena, MSize size)
         cell = freelist->bins[bin][freelist->bincounts[bin]--];
       }
     }
-    
+
     if(!cell) {
       if (!freelist->oversized || freelist->top == 0) {
         return NULL;
       }
-      
+
       uint32_t sizecell = freelist->oversized[freelist->top-1];
       cell = sizecell & 0xffff;
 
       /* Put the trailing cells back into a bin */
       bin = (sizecell >> 16) -  numcells;
-      
+
       if (bin > MaxBinSize || freelist->bincounts[bin] == 0) {
         uint32_t minpair = numcells << 16;
         MSize bestsize = 0, besti = 0;
@@ -327,7 +327,7 @@ void *arena_allocslow(GCArena *arena, MSize size)
   }
 
   lua_assert(cell);
-  /* TODO: Should we leave the mark bit left set the object would live for one  
+  /* TODO: Should we leave the mark bit left set the object would live for one
   ** extra cycle, but the mark bit will always need tobe set during the gc sweep phases
   */
   arena_getmark(arena, cell) &= ~arena_blockbit(cell);
@@ -354,7 +354,7 @@ void *arena_allocalign(GCArena *arena, MSize size, MSize align)
 
   if (align > 16) {
     cellmem = (char *)lj_round((uintptr_t)cellmem, align-subcell_align);
-    if (subcell_align) 
+    if (subcell_align)
       cellmem -= (16-subcell_align);
     cell = ptr2cell(cellmem);
 
@@ -454,7 +454,7 @@ MSize arena_cellextent(GCArena *arena, MSize cell)
   /* Quickly test if the next cell is not an extent */
   if ((i + 1) < BlocksetBits) {
     extents = arena_getmark(arena, cell) | arena_getblock(arena, cell);
-    if (extents & idx2bit(i + 1)) 
+    if (extents & idx2bit(i + 1))
       return 1;
   } else {
     extents = arena_getmark(arena, cell+1) | arena_getblock(arena, cell+1);
@@ -513,7 +513,7 @@ uint32_t* arena_getfreerangs(lua_State *L, GCArena *arena)
 
     for (; freecell < (BlocksetBits-1);) {
       GCBlockword extents = (arena->mark[i] | arena->block[i]) & mask;
-      MSize extend; 
+      MSize extend;
 
       if (extents == 0) {
         /* Try to skip trying to find the end if we already have enough cells */
@@ -768,7 +768,7 @@ static GCBlockword majorsweep_word(GCArena *arena, MSize i)
 {
   GCBlockword block = arena->block[i];
   GCBlockword mark = arena->mark[i];
-  
+
   arena->mark[i] = block ^ mark;
   block = block & mark;
   arena->block[i] = block;
@@ -792,7 +792,7 @@ static __m128i simd_popcntbytes(__m128i vec)
   const __m128i popcnt1 = _mm_shuffle_epi8(lookup, lo);
   const __m128i popcnt2 = _mm_shuffle_epi8(lookup, hi);
   //__m128i count = _mm_add_epi8(_mm_srli_epi16(vec, 8), _mm_and_si128(local, _mm_set1_epi16(0xff)));
- 
+
 //_mm_add_epi64(acc, _mm_sad_epu8(local, _mm_setzero_si128()));
   return _mm_add_epi8(popcnt1, popcnt2);
 }
@@ -874,20 +874,20 @@ static MSize majorsweep(GCArena *arena, MSize start, MSize limit)
     used |= block;
 
    // GCBlockword nprev = block < mark ? 0 : (~(GCBlockword)0);
-    /* If previous block ended in white and the current block is all white clear mark bits of free cells 
+    /* If previous block ended in white and the current block is all white clear mark bits of free cells
     ** turning them into extents
     */
     //mark = (block == 0 ? (prevwhite & mark) : mark);
-   
+
     //prevwhite = nprev;
-    
+
 #if !defined(_MSC_VER) && defined(__clang__)
     //arena->mark[i] = mark & (block == 0 ? prevwhite : mark);
 #else
     //arena->mark[i] = (block == 0 ? (prevwhite & mark) : mark);
 #endif
-    
-    
+
+
   }
   /* Set the 16th bit if there are still any reachable objects in the arena */
   return count | (used ? (1 << 16) : 0);
@@ -899,7 +899,7 @@ MSize arena_majorsweep(GCArena *arena, GCCellID cellend)
   if (!cellend)
     cellend = arena_topcellid(arena);
   limit = min(arena_blockidx(cellend)+1, MaxBlockWord);
-  
+
   lua_assert(arena_greysize(arena) == 0);
 #if 0
   count = majorsweep(arena, MinBlockWord, limit);
@@ -908,7 +908,7 @@ MSize arena_majorsweep(GCArena *arena, GCCellID cellend)
 #else
   count = majorsweep_avx(arena, MinBlockWord, limit);
 #endif
-  
+
   return count;
 }
 
@@ -924,7 +924,7 @@ static MSize minorsweep(GCArena *arena)
     block = block & mark;
     used |= block;
     arena->block[i] = block;
-    
+
   }
   return used ? (1 << 16) : 0;
 }
@@ -935,7 +935,7 @@ MSize arena_minorsweep(GCArena *arena, MSize limit)
   if (limit == 0) {
     limit = min(arena_blockidx(arena_topcellid(arena))+1, MaxBlockWord);
   }
-  
+
   lua_assert(arena_greysize(arena) == 0);
 #if 0
   count = minorsweep(arena, MinBlockWord, limit);
@@ -965,7 +965,7 @@ GCArena *arena_clone(global_State *g, GCArena *arena)
 
 GCArena *arena_clonemeta(global_State *g, GCArena *arena)
 {
-  GCArena *meta = lj_mem_newt(mainthread(g), sizeof(GCArena), GCArena);  
+  GCArena *meta = lj_mem_newt(mainthread(g), sizeof(GCArena), GCArena);
   memcpy(meta, arena, sizeof(GCArena));
   setmref(meta->greybase, NULL);
   setmref(meta->greytop, NULL);
@@ -1011,7 +1011,7 @@ void arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o)
     setmref(arena_extrainfo(arena)->finalizers, chunk);
   }
   /* Flag item as needing a meta lookup so we don't need to touch the memory
-  ** of cdata that needs finalizing 
+  ** of cdata that needs finalizing
   */
   idlist_add(L, chunk, ptr2cell(o), o->gch.gct == ~LJ_TTAB || o->gch.gct == ~LJ_TUDATA);
 }
@@ -1021,7 +1021,7 @@ CellIdChunk *arena_separatefinalizers(global_State *g, GCArena *arena, CellIdChu
   lua_State *L = mainthread(g);
   CellIdChunk *chunk = arena_finalizers(arena);
 
-  for (; chunk != NULL;) { 
+  for (; chunk != NULL;) {
     MSize count = idlist_count(chunk);
     for (size_t i = 0; i < count; i++) {
       GCCellID cell = chunk->cells[i];
@@ -1035,7 +1035,7 @@ CellIdChunk *arena_separatefinalizers(global_State *g, GCArena *arena, CellIdChu
         */
         chunk->cells[i] = chunk->cells[--count];
         /* If theres no __gc meta skip saving the cell */
-        if (!idlist_getmark(chunk, i) || 
+        if (!idlist_getmark(chunk, i) ||
             lj_meta_fastg(g, tabref(o->gch.metatable), MM_gc)) {
           /* Temporally mark black before the sweep */
           arena_markcell(arena, cell);
@@ -1186,11 +1186,11 @@ const char* arena_dumpwordstate(GCArena *arena, int blockidx)
   memset(pos, '-', 64);
   pos += 64;
   *(pos++) = '\n';
-  
+
   for (size_t i = 0; i < 32; i++) {
     GCBlockword bit = 1 << i;
     *(pos++) = '|';
-    
+
     if (!(bit & (mark | block))) {
       *(pos++) = ' ';/* Extent cell */
     } else if (free & bit) {
@@ -1289,7 +1289,7 @@ void *hugeblock_alloc(lua_State *L, GCSize size, MSize gct)
   HugeBlockTable *tab = gettab(G(L));
   void *o = lj_alloc_memalign(G(L)->allocd, ArenaSize, size);
   HugeBlock *node;
-  
+
   if (o == NULL) {
     lj_err_mem(L);
   }
@@ -1303,7 +1303,7 @@ void *hugeblock_alloc(lua_State *L, GCSize size, MSize gct)
     hugeblock_rehash(L, tab);
     node = hugeblock_register(tab, o);
   }
-  
+
   setmref(node->obj, o);
   node->size = size;
   return o;
@@ -1399,7 +1399,7 @@ MSize hugeblock_checkfinalizers(global_State *g)
   HugeBlockTable *tab = gettab(g);
   for (size_t i = 0; i < tab->hmask; i++) {
     HugeBlock *node = tab->node+i;
-    if (hbnode_getflags(node, HugeFlag_Finalizer|HugeFlag_Black) == 
+    if (hbnode_getflags(node, HugeFlag_Finalizer|HugeFlag_Black) ==
         HugeFlag_Finalizer) {
       hbnode_setflag(node, HugeFlag_Black);
       gc_mark(g, hbnode_ptr(node), hbnode_gct(node));

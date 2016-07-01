@@ -1467,7 +1467,7 @@ static void asm_bumpalloc(ASMState *as, IRIns *ir, MSize sz)
     emit_rmrxo(as, XO_LEA, robj, arena, robj, XM_SCALE1, 0);
   }
   emit_shifti(as, XOg_SHL, robj, 4);
-  /* 
+  /*
     Set block bit for cell
     shr  ecx, 5
     and  ecx, 2047
@@ -1497,7 +1497,7 @@ static void asm_bumpalloc(ASMState *as, IRIns *ir, MSize sz)
   asm_guardcc(as, CC_AE);
   emit_rr(as, XO_ARITH(XOg_CMP), celltop, blockbit);
   emit_rmro(as, XO_LEA, celltop, celltop, cellcount);
-  
+
   /* Extract max cellid */
   emit_shifti(as, XOg_SHR, blockbit, 16);
   emit_rr(as, XO_MOV, blockbit, RID_ECX);
@@ -1592,7 +1592,7 @@ static void asm_cnew(ASMState *as, IRIns *ir)
   /* Combine initialization of marked, gct and ctypeid. */
   emit_i32(as, (int32_t)((~LJ_TCDATA<<8)+(id<<16)));
   emit_rmro(as, XO_MOVmi, 0, rcd, offsetof(GCcdata, marked));
-  
+
   if (usebump) {
     asm_bumpalloc(as, ir, sz+8);
   } else {
@@ -1615,7 +1615,7 @@ static void asm_barrier(ASMState *as, Reg obj, Reg tmp, MCLabel l_end)
   emit_sjcc(as, CC_Z, l_end);
   emit_i32(as, GCSneedsbarrier);
   emit_opgl(as, XO_GROUP3, XOg_TEST, gc.statebits);
- 
+
   /* mark gray so barrier is not triggered again */
   emit_i8(as, LJ_GC_GRAY);
   emit_rmro(as, XO_ARITHib, XOg_OR, obj, offsetof(GChead, marked));
@@ -1667,7 +1667,7 @@ static void asm_obar(ASMState *as, IRIns *ir)
   asm_gencall(as, ci, args);
   emit_loada(as, ra_releasetmp(as, ASMREF_TMP1), J2G(as->J));
   obj = IR(ir->op1)->r;
-  /* TODO: new barrier for upvalues 
+  /* TODO: new barrier for upvalues
   emit_sjcc(as, CC_Z, l_end);
   emit_i8(as, LJ_GC_WHITES);
   if (irref_isk(ir->op2)) {

@@ -126,7 +126,7 @@ typedef union GCArena {
       };
       GCBlockword mark[MaxBlockWord];
     };
-    
+
     union {
       struct {
         MRef greytop;
@@ -309,8 +309,8 @@ static CellState arena_cellstate(GCArena *arena, GCCellID cell)
   return mark | block;
 }
 
-/* Must never be passed huge block pointers. 
-** A fast pre-check for cellid zero can quickly filter out huge blocks. 
+/* Must never be passed huge block pointers.
+** A fast pre-check for cellid zero can quickly filter out huge blocks.
 */
 static LJ_AINLINE int arenaobj_iswhite(void* o)
 {
@@ -415,7 +415,7 @@ static LJ_AINLINE void arena_markgco(global_State *g, void *o)
   GCArena *arena = ptr2arena(o);
   GCCellID cell = ptr2cell(o);
   lua_assert(cell >= MinCellId && arena_cellisallocated(arena, cell));
-  
+
   /* Only really needed for traversable objects */
   if (((GCCell*)o)->gct == ~LJ_TSTR || ((GCCell*)o)->gct == ~LJ_TCDATA || ((GCCell*)o)->gct == ~LJ_TUDATA) {
     arena_markcell(arena, cell);
@@ -429,7 +429,7 @@ static LJ_AINLINE void arenaobj_markcdstr(void* o)
   GCArena *arena = ptr2arena(o);
   GCCellID cell = ptr2cell(o);
   lua_assert(arena_cellisallocated(arena, cell));
-  lua_assert(((GCCell*)o)->gct == ~LJ_TSTR || ((GCCell*)o)->gct == ~LJ_TCDATA || 
+  lua_assert(((GCCell*)o)->gct == ~LJ_TSTR || ((GCCell*)o)->gct == ~LJ_TCDATA ||
              ((GCCell*)o)->gct == ~LJ_TUDATA);
 
   arena_markcell(arena, cell);

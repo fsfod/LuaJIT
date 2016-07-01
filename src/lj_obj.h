@@ -593,7 +593,7 @@ typedef struct GCState {
       uint8_t unused1;
     };
     uint32_t statebits;
-  };  
+  };
   MSize sweepstr;	/* Sweep position in string table. */
   GCRef root;		/* List of all collectable objects. */
   MRef sweep;		/* Sweep position in root list. */

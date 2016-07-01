@@ -70,7 +70,7 @@ int livechecker(GCobj *o, void *user) {
     if (t->asize && !hascolo_array(t)) {
       checklive(tvref(t->array));
     }
-    
+
     for (i = 0; i < t->asize; i++) {
       TValue *tv = arrayslot(t, i);
       checklivetv(tv);
@@ -95,14 +95,14 @@ int livechecker(GCobj *o, void *user) {
     GCtrace *T = gco2trace(o);
     IRRef ref;
     if (T->traceno == 0) return 0;
-    
+
     for (ref = T->nk; ref < REF_TRUE; ref++) {
       IRIns *ir = &T->ir[ref];
       if (ir->o == IR_KGC) {
         checklive(ir_kgc(ir));
       }
     }
-    
+
     checklivecon(T->link, traceref(G2J(g), T->link));
     checklivecon(T->nextroot, traceref(G2J(g), T->nextroot));
     checklivecon(T->nextside, traceref(G2J(g), T->nextside));
@@ -111,7 +111,7 @@ int livechecker(GCobj *o, void *user) {
     GCproto *pt = gco2pt(o);
     ptrdiff_t i;
     /* Scan the proto's GC constants. */
-    for (i = -(ptrdiff_t)pt->sizekgc; i < 0; i++) { 
+    for (i = -(ptrdiff_t)pt->sizekgc; i < 0; i++) {
       checklive(proto_kgc(pt, i));
     }
 #if LJ_HASJIT
@@ -249,7 +249,7 @@ void TraceGC(global_State *g, int newstate)
   }
 
   printf("GC State = %s\n", getgcsname(newstate));
-#endif 
+#endif
 #ifdef LJ_ENABLESTATS
   log_gcstate(norm_gcstateid(newstate), norm_gcstateid(g->gc.state), g->gc.total, g->gc.hugemem, g->strnum);
 #endif
