@@ -37,6 +37,12 @@
 
 #define TraceGC TraceGC
 
+#if DEBUG
+#define GCDEBUG(fmt, ...)  printf(fmt, __VA_ARGS__)
+#else
+#define GCDEBUG(fmt, ...)
+#endif
+
 #ifdef TraceGC
 void TraceGC(global_State *g, int newstate);
 #define SetGCState(g, newstate) TraceGC(g, newstate); g->gc.state = newstate
@@ -869,6 +875,7 @@ GCArena* lj_gc_newarena(lua_State *L, uint32_t flags)
     pqueue_insert(L, &G(L)->gc.greypq, arena);
   }
   log_arenacreated(arena, id, flags);
+  GCDEBUG("Arena %d created\n", id);
   return arena;
 }
 
@@ -957,6 +964,7 @@ GCArena *lj_gc_setactive_arena(lua_State *L, GCArena *arena, int travobjs)
       sweep_arena(g, id);
     }
   }
+  GCDEBUG("setactive_arena: %d\n", id);
 
   if (travobjs) {
     g->travarena = arena;
@@ -1473,7 +1481,7 @@ void LJ_FASTCALL lj_gc_emptygrayssb(global_State *g)
     list = (GCRef *)(((intptr_t)list) & ~GRAYSSB_MASK);
     limit = (MSize)(mask/sizeof(GCRef));
   }
-
+  GCDEBUG("lj_gc_emptygrayssb\n");
   if (!g->gc.isminor && g->gc.state != GCSpropagate && g->gc.state != GCSatomic) {
     lj_gc_resetgrayssb(g);
     return;
