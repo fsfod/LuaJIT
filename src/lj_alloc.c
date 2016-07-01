@@ -169,7 +169,55 @@ static void *DIRECT_MMAP(size_t size)
 
   if (st && (flags & MEM_LARGE_PAGES)) {
     st = ntavm(INVALID_HANDLE_VALUE, &ptr, 0, &size,
-               MEM_RESERVE|MEM_COMMIT|MEM_TOP_DOWN, PAGE_READWRITE); 
+               MEM_RESERVE|MEM_COMMIT|MEM_TOP_DOWN, PAGE_READWRITE);
+  }
+
+  SetLastError(olderr);
+  return st == 0 ? ptr : MFAIL;
+}
+
+
+static void *DIRECT_MMAP_NEAR(void* address, size_t size, size_t alignment)
+{
+  MSize failues = 0;
+  uintptr_t probe = lj_round((uintptr_t)address, alignment), limit;
+  DWORD olderr = GetLastError();
+  void *ptr = NULL;
+  ULONG flags = MEM_RESERVE|MEM_COMMIT;
+  LONG st = 0;
+
+#if LJ_64
+  limit = (uint32_t)0x7fffffff;
+#else
+  limit = (uint32_t)0xffffffff;
+#endif
+restart:
+  for (; probe < limit; probe += alignment) {
+    MEMORY_BASIC_INFORMATION info = {0};
+    size_t result = VirtualQuery((void*)probe, &info, sizeof(info));
+
+    if (!result) {
+      if (++failues < 5) {
+        continue;
+      }
+      st = 1;
+      break;
+    }
+
+    if (info.State == MEM_FREE && (info.RegionSize == 0 || info.RegionSize >= size)) {
+      ptr = VirtualAlloc((void*)probe, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+     // st = ntavm(INVALID_HANDLE_VALUE, &ptr, 0, &size, flags, PAGE_READWRITE);
+
+      if (ptr != NULL) {
+        break;
+      }
+    }
+  }
+
+  if (ptr == NULL) {
+    limit = lj_round((uintptr_t)address, alignment);
+    probe = 0;
+    goto restart;
   }
 
   SetLastError(olderr);
@@ -421,7 +469,11 @@ uint32_t enablelargepages()
   tp.PrivilegeCount = 1;
   tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
   status = AdjustTokenPrivileges(hToken, FALSE, &tp, 0, (PTOKEN_PRIVILEGES)NULL, 0);
-  error = GetLastError();
+
+  if (status != 0) {
+    error = GetLastError();
+  }
+
   CloseHandle(hToken);
   return error;
 }
@@ -433,13 +485,16 @@ typedef struct PageHeader{
   size_t size;
 } PageHeader;
 
-void *lj_allocpages(size_t alignment, size_t size, void** handle)
+void *lj_allocpages(void* hint, size_t alignment, size_t size, void** handle)
 {
   size_t allocsize = size;
+  uintptr_t mem = 0;
+  void* base = NULL;
   if (priv == -1) {
     priv = enablelargepages();
   }
 
+#if 0
   if (alignment < size) {
     allocsize = size+alignment+sizeof(PageHeader);
   } else {
@@ -447,17 +502,25 @@ void *lj_allocpages(size_t alignment, size_t size, void** handle)
     allocsize += sizeof(PageHeader);
   }
 
-  void* base = DIRECT_MMAP(allocsize);
-  if (base == MFAIL) {
-    return NULL;
-  }
+  base = DIRECT_MMAP(allocsize);
   *handle = base;
 
   uintptr_t mem = lj_round(((uintptr_t)base)+sizeof(PageHeader), alignment);
   ((PageHeader*)mem)[-1].base = base;
   ((PageHeader*)mem)[-1].size = allocsize;
-  
+#else
+  base = DIRECT_MMAP_NEAR(hint, size, alignment);
+  mem = (uintptr_t)base;
   lua_assert((mem & ArenaCellMask) == 0);
+
+  if (base == MFAIL) {
+    return NULL;
+  }
+
+  *handle = (void*)(mem | 1);
+#endif
+
+
   return (void *)mem;
 }
 

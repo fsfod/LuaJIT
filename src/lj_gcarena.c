@@ -81,14 +81,23 @@ void arena_creategreystack(lua_State *L, GCArena *arena)
 
 GCArena* arena_create(lua_State *L, uint32_t flags)
 {
-  //(GCArena*)lj_allocpages(G(L)->allocd, ArenaSize, ArenaSize);
-  GCArena* arena = (GCArena*)lj_alloc_memalign(G(L)->allocd, ArenaSize, ArenaSize); 
+  global_State *g = G(L);
+  void *handle = NULL;
+  GCArena* arena;
+#if 0
+  arena = (GCArena*)lj_alloc_memalign(G(L)->allocd, ArenaSize, ArenaSize);
+#else
+
+  arena = lj_allocpages(lj_gc_arenaref(g, g->gc.arenastop-1) , ArenaSize, ArenaSize, &handle);
+#endif
+
   lua_assert((((uintptr_t)arena) & (ArenaSize-1)) == 0);
   if (arena == NULL) {
     lj_err_mem(L);
   }
   arena_init(arena);
-  
+  arena->extra.allocud = handle;
+
   if (flags & ArenaFlag_TravObjs) {
     arena_creategreystack(L, arena);
   }
@@ -131,8 +140,11 @@ static void arena_freemem(global_State *g, GCArena* arena)
 void arena_destroy(global_State *g, GCArena* arena)
 {
   arena_freemem(g, arena);
-  //lj_freepages(g->allocd, arena, ArenaSize);
+#if 1
+  lj_freepages(arena->extra.allocud, arena, ArenaSize);
+#else
   g->allocf(g->allocd, arena, ArenaSize, 0);
+#endif
 }
 
 LJ_STATIC_ASSERT((offsetof(GG_State, L) & 15) == 0);
@@ -141,7 +153,7 @@ LJ_STATIC_ASSERT(((offsetof(GG_State, g) + offsetof(global_State, strempty)) & 1
 void* arena_createGG(GCArena** GGarena)
 {
   void *memhandle;
-  GCArena* arena = (GCArena*)lj_allocpages(ArenaSize, ArenaSize, &memhandle);
+  GCArena* arena = (GCArena*)lj_allocpages(0, ArenaSize, ArenaSize, &memhandle);
   GG_State *GG;
   GCCellID cell;
   lua_assert((((uintptr_t)arena) & (ArenaSize-1)) == 0);
