@@ -839,6 +839,10 @@ int LJ_FASTCALL lj_trace_exit(jit_State *J, void *exptr)
   setcframe_pc(cf, pc);
   if (LJ_HASPROFILE && (G(L)->hookmask & HOOK_PROFILE)) {
     /* Just exit to interpreter. */
+  } else if (bumpoverflow && G(L)->gc.state == GCSpause) {
+    if (!arena_canbump(G(L)->arena, 3)) {
+      lj_gc_findnewarena(L, 0);
+    }
   } else if (bumpoverflow || G(L)->gc.state == GCSatomic || G(L)->gc.state == GCSfinalize) {
     if (!(G(L)->hookmask & HOOK_GC))
       lj_gc_step(L);  /* Exited because of GC: drive GC forward. */
