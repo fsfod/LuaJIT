@@ -52,11 +52,13 @@ int getcellextent(global_State *g, int i, int cell)
   return arena_cellextent(arena, cell);
 }
 
+#define gc_assert(cond) do { if (!(cond)) __debugbreak(); } while(0)
+
 #define tvisdead(g, tv) (tvisgcv(tv) && isdead(g, gcV(tv)))
 
-#define checklive(o) lua_assert(!isdead(g, obj2gco(o)))
-#define checklivetv(tv) lua_assert(!tvisgcv(tv) || !isdead(g, gcV(tv)))
-#define checklivecon(cond, o) lua_assert(!(cond) || !isdead(g, obj2gco(o)))
+#define checklive(o) gc_assert(!isdead(g, obj2gco(o)))
+#define checklivetv(tv) gc_assert(!tvisgcv(tv) || !isdead(g, gcV(tv)))
+#define checklivecon(cond, o) gc_assert(!(cond) || !isdead(g, obj2gco(o)))
 
 int livechecker(GCobj *o, void *user) {
   global_State *g = (global_State *)user;
@@ -85,7 +87,7 @@ int livechecker(GCobj *o, void *user) {
       for (i = 0; i <= hmask; i++) {
         Node *n = &node[i];
         if (!tvisnil(&n->val)) {  /* Mark non-empty slot. */
-          lua_assert(!tvisnil(&n->key));
+          gc_assert(!tvisnil(&n->key));
           checklivetv(&n->key);
           checklivetv(&n->val);
         }
@@ -118,7 +120,7 @@ int livechecker(GCobj *o, void *user) {
     checklivecon(pt->trace, traceref(G2J(g), pt->trace));
 
     if (!pt->trace) {
-      lua_assert(bc_op(proto_bc(pt)[0]) != BC_JFUNCF);
+      gc_assert(bc_op(proto_bc(pt)[0]) != BC_JFUNCF);
     }
 
 #endif
@@ -127,7 +129,7 @@ int livechecker(GCobj *o, void *user) {
     checklive(tabref(fn->c.env));
     if (isluafunc(fn)) {
       uint32_t i;
-      lua_assert(fn->l.nupvalues <= funcproto(fn)->sizeuv);
+      gc_assert(fn->l.nupvalues <= funcproto(fn)->sizeuv);
       checklive(funcproto(fn));
       for (i = 0; i < fn->l.nupvalues; i++) {  /* Check Lua function upvalues. */
         checklive(&gcref(fn->l.uvptr[i])->uv);
@@ -173,7 +175,7 @@ void checkarenas(global_State *g) {
         arena_visitobjects(arena, livechecker, g);
      // }
     } else if(flags & ArenaFlag_Empty) {
-      lua_assert(arena_topcellid(arena) == MinCellId && arena_greysize(arena) == 0);
+      gc_assert(arena_topcellid(arena) == MinCellId && arena_greysize(arena) == 0);
     }
   }
 }
