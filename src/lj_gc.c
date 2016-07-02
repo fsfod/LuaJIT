@@ -120,7 +120,8 @@ static void gc_mark_gcroot(global_State *g)
 
 /* Start a GC cycle and mark the root set. */
 static void gc_mark_start(global_State *g)
-{ 
+{
+  SetGCState(g, GCSpropagate);
   if (!g->gc.isminor) {
     lj_gc_resetgrayssb(g);
     setgcrefnull(g->gc.grayagain);
@@ -129,7 +130,7 @@ static void gc_mark_start(global_State *g)
     arenaobj_towhite(obj2gco(&G2GG(g)->L));
     arenaobj_towhite(obj2gco(mainthread(g)));
   }
-  
+
   gc_markobj(g, &G2GG(g)->L);
   gc_mark_str(g, &g->strempty);
   gc_markobj(g, mainthread(g));
@@ -145,7 +146,6 @@ static void gc_mark_start(global_State *g)
       lua_assert(!mref(arena_extrainfo(arena)->fixedcells, GCCellID1));
     }
   }
-  SetGCState(g, GCSpropagate);
 }
 
 /* Mark open upvalues. */
