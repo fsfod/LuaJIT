@@ -32,7 +32,7 @@ GCobj *getarenacell(lua_State *L, int i, int cell)
 GCobj *getarenacellG(global_State *g, int i, int cell)
 {
   GCArena *arena = lj_gc_arenaref(g, i);
-  if (i >= g->gc.arenastop) {
+  if (i < 0 || i >= (int)g->gc.arenastop) {
     return NULL;
   }
   arena = lj_gc_arenaref(g, i);
@@ -210,13 +210,16 @@ void TraceGC(global_State *g, int newstate)
   lua_State *L = mainthread(g);
 
   if (newstate == GCSpropagate) {
-    // timers_printlog();
-    printf("---------------GC Start %d-------------------------\n", GCCount);
+    //perflog_print();
+    printf("---------------GC Start %d----------Total %dKb------Threshold %dKb---------\n", GCCount, g->gc.total/1024, g->gc.threshold/1024);
     GCCount++;
-  } else if (newstate == GCSatomic) {
-    log_markstats(perf_counter[Counter_gc_mark], perf_counter[Counter_gc_markhuge], perf_counter[Counter_gc_traverse_tab], 
+  }
+
+  if (newstate == GCSpropagate || newstate == GCSatomic) {
+    log_markstats(perf_counter[Counter_gc_mark], perf_counter[Counter_gc_markhuge], perf_counter[Counter_gc_traverse_tab],
                   perf_counter[Counter_gc_traverse_func], perf_counter[Counter_gc_traverse_proto], perf_counter[Counter_gc_traverse_thread],
                   perf_counter[Counter_gc_traverse_trace]);
+    perf_resetcounters();
   }
 /*
   if (GCCount >= 0) {
@@ -235,9 +238,7 @@ void TraceGC(global_State *g, int newstate)
 
 
   perf_printcounters();
-
-  perf_resetcounters();
-*/ 
+*/
 #if defined(DEBUG) || defined(GCDEBUG)
   if (g->gc.state == GCSsweep || g->gc.isminor) {
     checkarenas(g);
@@ -257,12 +258,12 @@ void TraceGC(global_State *g, int newstate)
 #endif
 }
 
-void checkalloc();
+void VERIFYGC(global_State *g);
 
 void sweepcallback(global_State *g, GCArena *arena, MSize i, int count)
 {
 #if defined(DEBUG) || defined(GCDEBUG)
-  //checkalloc();
+  VERIFYGC(g);
   if (count == -1) {
    // arena_dumpwhitecells(g, arena);
   } else {
@@ -278,8 +279,10 @@ void sweepcallback(global_State *g, GCArena *arena, MSize i, int count)
 void* check = NULL;
 MSize extent = 0;
 
-void checkalloc(global_State *g)
+void VERIFYGC(global_State *g)
 {
+
+  check_arenamemused(g);
 /*
   int celllen = getcellextent(g, 1, 18991);
   if (celllen != prevcelllen) {
@@ -320,7 +323,7 @@ void strings_toblack(global_State *g)
       GCstr *s = strref(str);
       str = s->nextgc;
       if (iswhite(g, s)) {
-        arenaobj_toblack(s);
+        arenaobj_toblack((GCobj *)s);
         prev = s;
       }
     }

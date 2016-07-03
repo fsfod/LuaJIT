@@ -16,9 +16,10 @@ enum {
   GCSatomic      = 3,
   GCSsweepstring = 4,
   GCSsweep       = 6,
-  GCSfinalize    = 8,
+  GCSfinalize    = 16,
   /* GC state is GCSpropagate/atomic or GC is in minor collection mode */
   GCSneedsbarrier = 0xff01,
+  GCSmakeblack = 4,
 };
 
 /* Bitmasks for marked field of GCobj. */

@@ -30,10 +30,8 @@ void gc_mark(global_State *g, GCobj *o, int gct);
 void arena_reset(GCArena *arena)
 {
   MSize blocksize = (MaxBlockWord-MinBlockWord) * sizeof(GCBlockword);
-  arena->celltopid = MinCellId;
-  arena->celltopmax = MaxUsableCellId;
-  arena->firstfree = (GCCellID1)MaxCellId;
-  arena->freecount = 0;
+  arena->celltopid = (GCCellID1)MinCellId;
+  arena->celltopmax = (GCCellID1)MaxUsableCellId;
   memset(arena->block+MinBlockWord, 0, blocksize);
   memset(arena->mark+MinBlockWord, 0, blocksize);
 
@@ -49,10 +47,8 @@ GCArena* arena_init(GCArena* arena)
 {
   /* Make sure block and mark bits are clear*/
   memset(arena, 0, sizeof(GCArena));
-  arena->celltopid = MinCellId;
-  arena->celltopmax = MaxUsableCellId;
-  arena->freecount = 0;
-  arena->firstfree = MaxCellId-1;
+  arena->celltopid = (GCCellID1)MinCellId;
+  arena->celltopmax = (GCCellID1)MaxUsableCellId;
 
   return arena;
 }

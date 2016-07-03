@@ -34,6 +34,7 @@ LJ_STATIC_ASSERT((ArenaSize & 0xffff) == 0);
 typedef struct GCCell {
   union {
     uint8_t data[CellSize];
+    uint16_t idlist[8];
     struct {
       GCHeader;
     };
@@ -146,14 +147,14 @@ LJ_STATIC_ASSERT((MinCellId * 16) == offsetof(GCArena, cellsstart));
 
 typedef struct ArenaFreeList {
   uint32_t binmask;
-  uint16_t freecells;
-  uint16_t freeobjcount;
   GCCellID1 *bins[8];
   uint8_t bincounts[8];
   uint32_t *oversized;
   MSize top;
   MSize listsz;
   GCArena *owner;
+  uint16_t freecells;
+  uint16_t freeobjcount;
   CellIdChunk *finalizbles;
 } ArenaFreeList;
 
@@ -182,7 +183,7 @@ typedef struct HugeBlockTable {
 //LJ_STATIC_ASSERT(((offsetof(GCArena, cellsstart)) / 16) == MinCellId);
 
 #define arena_roundcells(size) (round_alloc(size) >> 4)
-#define arena_containsobj(arena, o) (((GCArena *)(o)) >= (arena) && ((char*)(o)) < (((char*)(arena))+ArenaSize)) 
+#define arena_containsobj(arena, o) (((GCArena *)(o)) >= (arena) && ((char*)(o)) < (((char*)(arena))+ArenaSize))
 
 #define arena_cell(arena, cellidx) (&(arena)->cells[(cellidx)])
 #define arena_cellobj(arena, cellidx) ((GCobj *)&(arena)->cells[(cellidx)])
@@ -291,6 +292,7 @@ static LJ_AINLINE GCArena *ptr2arena(void* ptr)
 {
   GCArena *arena = (GCArena*)(((uintptr_t)ptr) & ~(uintptr_t)ArenaCellMask);
   arena_checkptr(ptr);
+  lua_assert(arena != NULL);
   lua_assert(arena->celltopid >= MinCellId && arena->celltopid <= MaxUsableCellId);
   return arena;
 }
@@ -361,6 +363,14 @@ static LJ_AINLINE void arenaobj_toblack(GCobj *o)
   GCCellID cell = ptr2cell(o);
   lua_assert(arena_cellisallocated(arena, cell));
   arena_markcell(arena, cell);
+}
+
+static LJ_AINLINE void arenaobj_towhite(GCobj *o)
+{
+  GCArena *arena = ptr2arena(o);
+  GCCellID cell = ptr2cell(o);
+  lua_assert(arena_cellisallocated(arena, cell));
+  arena->mark[arena_blockidx(cell)] &= ~arena_blockbit(cell);
 }
 
 static LJ_AINLINE void toblack(global_State *g, GCobj *o)
