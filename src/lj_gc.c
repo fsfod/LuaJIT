@@ -1172,7 +1172,7 @@ static int arenasweep_step(global_State *g)
     if (!(lj_gc_arenaflags(g, i) & (ArenaFlag_Swept|ArenaFlag_Empty))) {
       sweep_arena(g, i, 0);
       g->gc.curarena = i+1;
-      return 1;
+      return GCSWEEPCOST;
     }
   }
   g->gc.curarena = g->gc.arenastop;
@@ -1246,9 +1246,13 @@ static size_t gc_onestep(lua_State *L)
   }
   case GCSsweep: {
     GCSize old = g->gc.total;
-    while (arenasweep_step(g));
-    //lua_assert(old >= g->gc.total);
+    int sweepcost = arenasweep_step(g);
+    lua_assert(old >= g->gc.total);
     g->gc.estimate -= old - g->gc.total;
+
+    if (sweepcost != 0) {
+      return sweepcost;
+    }
 
     if (g->strnum <= (g->strmask >> 2) && g->strmask > LJ_MIN_STRTAB*2-1)
       lj_str_resize(L, g->strmask >> 1);  /* Shrink string table. */
