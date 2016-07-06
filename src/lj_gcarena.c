@@ -810,8 +810,9 @@ static MSize sweep_simd(GCArena *arena, MSize start, MSize limit, int minor)
     __m128i block = _mm_load_si128(pblock);
     __m128i mark = _mm_load_si128(pmark);
     __m128i newmark;
-    /* Count whites that are swept to away */ 
-    count = _mm_add_epi8(count, simd_popcntbytes(_mm_andnot_si128(mark, block)));
+    /* Count whites that are swept to away */
+    __m128i dead = _mm_andnot_si128(mark, block);
+
     if (!minor) {
       newmark = _mm_xor_si128(block, mark);
     } else {
@@ -822,6 +823,16 @@ static MSize sweep_simd(GCArena *arena, MSize start, MSize limit, int minor)
     used = _mm_or_si128(block, used);
     _mm_store_si128(pblock, block);
     
+    __m128i bytecount = simd_popcntbytes(dead);
+#if 0
+    const __m128i lowbyte = _mm_set1_epi32(0x00ff00ff);
+    __m128i high = _mm_srli_epi16(bytecount, 8);
+    __m128i low = _mm_and_si128(bytecount, lowbyte);
+    count = _mm_adds_epu16(count, _mm_adds_epu16(low, high));
+#else
+    count = _mm_add_epi64(count, _mm_sad_epu8(bytecount, _mm_setzero_si128()));
+#endif
+
     /* if block < mark word ends in a white */
     //__m128i whiteend = _mm_cmplt_epi8(block, mark);
     //
@@ -841,16 +852,16 @@ static MSize sweep_simd(GCArena *arena, MSize start, MSize limit, int minor)
   used = _mm_or_si128(used, _mm_srli_si128(used, 8));
   used = _mm_or_si128(used, _mm_srli_si128(used, 4));
 
-  count = _mm_sad_epu8(count, _mm_setzero_si128());
+#if 1
   count = _mm_add_epi64(count, _mm_srli_si128(count, 8));
+#else
+  count = _mm_add_epi32(count, _mm_srli_epi32(count, 16));
+  count = _mm_add_epi32(_mm_srli_si128(count, 8), count);
+  count = _mm_add_epi32(_mm_srli_si128(count, 4), count);
+#endif
 
-//count = _mm_add_epi8(_mm_srli_epi16(count, 8), _mm_and_si128(count, _mm_set1_epi16(0xff)));
-   // _mm_add_epi8(_mm_srli_epi16(count, 8), _mm_and_si128(count, _mm_set1_epi16(0xff)));
-  //count = _mm_add_epi32(count, _mm_srli_si128(count, 8));
-  //count = _mm_or_si128(count, _mm_srli_si128(count, 4));
-  
   /* Set the 16th bit if there are still any reachable objects in the arena */
-  return _mm_cvtsi128_si32(count) | (_mm_cvtsi128_si32(used) ? (1 << 16) : 0);
+  return (_mm_cvtsi128_si32(count) &  0xffff) | (_mm_cvtsi128_si32(used) ? (1 << 16) : 0);
 }
 
 static MSize majorsweep(GCArena *arena, MSize start, MSize limit)
