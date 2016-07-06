@@ -1689,7 +1689,7 @@ void *lj_mem_reallocgc(lua_State *L, GCobj *owner, void *p, GCSize oldsz, GCSize
       newsz = lj_round(newsz, 16);
       g->gc.total += (GCSize)newsz;
     } else {
-      mem = hugeblock_alloc(L, newsz, LJ_TTAB);
+      mem = hugeblock_alloc(L, newsz, 0);
     }
   }
 

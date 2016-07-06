@@ -1209,7 +1209,8 @@ enum HugeFlags {
   HugeFlag_Fixed     = 0x2,
   HugeFlag_TravObj   = 0x4,
   HugeFlag_Finalizer = 0x8,
-  HugeFlag_Aligned   = 0xf,
+  HugeFlag_Aligned   = 0x10,
+  HugeFlag_GCVector  = 0x20,
   HugeFlag_GCTMask   = 0xf00,
   HugeFlag_GCTShift  = 8,
 };
@@ -1221,6 +1222,7 @@ enum HugeFlags {
 
 #define hbnode_getflags(node, flags) (((uintptr_t)mref((node)->obj, void)) & (flags))
 #define hbnode_setflag(node, flag) setmref((node)->obj, (((uintptr_t)mref((node)->obj, void)) | (flag)))
+#define hbnode_setgct(node, gct) setmref((node)->obj, (((uintptr_t)mref((node)->obj, void)) | ((gct) << HugeFlag_GCTShift)))
 #define hbnode_clearflag(node, flag) setmref((node)->obj, (((uintptr_t)mref((node)->obj, void)) & ~(flag)))
 
 #define hashptr(p) (((uintptr_t)(p)) >> 20)
@@ -1301,6 +1303,12 @@ void *hugeblock_alloc(lua_State *L, GCSize size, MSize gct)
   }
 
   setmref(node->obj, o);
+  hbnode_setgct(node, gct);
+  if (gct == 0) {
+    hbnode_setflag(node, HugeFlag_GCVector);
+  }else if (!(gct == ~LJ_TSTR || gct == ~LJ_TCDATA)) {
+    hbnode_setflag(node, HugeFlag_TravObj);
+  }
   node->size = size;
   return o;
 }
@@ -1310,6 +1318,7 @@ void *hugeblock_allocalign(lua_State *L, GCSize size, MSize align, MSize gct)
   HugeBlockTable *tab = gettab(G(L));
   char *o = (char* )lj_alloc_memalign(G(L)->allocd, ArenaSize, size+align);
   HugeBlock *node = hugeblock_register(tab, o);
+  G(L)->gc.total += size;
   G(L)->gc.hugemem += size;
 
   if (node == NULL) {
@@ -1318,13 +1327,15 @@ void *hugeblock_allocalign(lua_State *L, GCSize size, MSize align, MSize gct)
   }
   setmref(node->obj, o);
   hbnode_setflag(node, HugeFlag_Aligned);
+
   return o;
 }
 
 static MSize freehugeblock(global_State *g, HugeBlockTable *tab, HugeBlock *node)
 {
   lua_assert(!hbnode_isempty(node));
-  lj_mem_free(g, (void*)hbnode_ptr(node), node->size);
+
+  g->allocf(g->allocd, (void*)hbnode_ptr(node), node->size, 0);
   setmref(node->obj, (intptr_t)-1);
   tab->count--;
   g->gc.hugemem -= node->size;
