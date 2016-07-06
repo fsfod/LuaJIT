@@ -900,6 +900,39 @@ static MSize majorsweep(GCArena *arena, MSize start, MSize limit)
   return count | (used ? (1 << 16) : 0);
 }
 
+/* Best case sweep time 2k cycles real world seems tobe the same as simd 4-5k */
+static MSize sweep_avx(GCArena *arena, MSize start, MSize limit, int minor)
+{
+  MSize i;
+  __m128i count = _mm_setzero_si128();
+  float *pblock = (float *)(arena->block), *pmark = (float *)(arena->mark);
+  __m256 used = _mm256_setzero_ps();
+  limit = lj_round(limit, 8);/* Max block should be a multiple of 4*/
+
+  for (i = start; i < limit; i += 8) {
+    __m256 block = _mm256_load_ps(pblock+i);
+    __m256 mark = _mm256_load_ps(pmark+i);
+    __m256 newmark;
+    /* Count whites that are swept to away */
+    if (!minor) {
+      newmark = _mm256_xor_ps(block, mark);
+    } else {
+      newmark = _mm256_or_ps(block, mark);
+    }
+    _mm256_store_ps(pmark+i, newmark);
+    block = _mm256_and_ps(block, mark);
+    _mm256_store_ps(pblock+i, block);
+    used = _mm256_or_ps(block, used);
+  }
+
+  __m128i used128 = _mm_castps_si128(_mm_or_ps(_mm256_extractf128_ps(used, 0), _mm256_extractf128_ps(used, 1)));
+  used128 = _mm_or_si128(used128, _mm_srli_si128(used128, 8));
+  used128 = _mm_or_si128(used128, _mm_srli_si128(used128, 4));
+
+  /* Set the 16th bit if there are still any reachable objects in the arena */
+  return (_mm_cvtsi128_si32(count) &  0xffff) | (_mm_cvtsi128_si32(used128) ? (1 << 16) : 0);
+}
+
 MSize arena_majorsweep(GCArena *arena, GCCellID cellend)
 {
   MSize count = 0, limit;
@@ -913,7 +946,7 @@ MSize arena_majorsweep(GCArena *arena, GCCellID cellend)
 #elif 1
   count = sweep_simd(arena, MinBlockWord, limit, 0);
 #else
-  count = majorsweep_avx(arena, MinBlockWord, limit);
+  count = sweep_avx(arena, MinBlockWord, limit, 0);
 #endif
 
   return count;
