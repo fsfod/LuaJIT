@@ -1281,7 +1281,7 @@ static HugeBlock *hugeblock_register(HugeBlockTable *tab, void *o)
 {
   uint32_t idx = hashptr(o) & tab->hmask;//hashgcref(o);
 
-  for (size_t i = idx; i < tab->hmask; i++) {
+  for (size_t i = idx; i <= tab->hmask; i++) {
     HugeBlock *node = tab->node+i;
 
     if (hbnode_isempty(node)) {
@@ -1296,7 +1296,7 @@ static HugeBlock *hugeblock_find(HugeBlockTable *tab, void *o)
 {
   uint32_t idx = hashptr(o) & tab->hmask;//hashgcref(o);
 
-  for (size_t i = idx; i < tab->hmask;) {
+  for (size_t i = idx; i <= tab->hmask;) {
     if (hbnode_ptr(tab->node+i) == (GCobj *)o)
       return tab->node+i;
     i++;
@@ -1309,12 +1309,13 @@ static HugeBlock *hugeblock_find(HugeBlockTable *tab, void *o)
 
 void hugeblock_rehash(lua_State *L, HugeBlockTable *tab)
 {
+  MSize oldmask = tab->hmask;
   MSize size = (tab->hmask+1) << 1;
   HugeBlock *nodes = tab->node;
   tab->hmask = ((tab->hmask+1) << 1)-1;
   tab->node = lj_mem_newvec(L, size, HugeBlock);
 
-  for (size_t i = 0; i < size; i++) {
+  for (size_t i = 0; i <= oldmask; i++) {
     HugeBlock *old = (nodes+i), *node;
     if (hbnode_isempty(old)) continue;
 
@@ -1448,7 +1449,7 @@ void hugeblock_setfinalizable(global_State *g, GCobj *o)
 MSize hugeblock_checkfinalizers(global_State *g)
 {
   HugeBlockTable *tab = gettab(g);
-  for (size_t i = 0; i < tab->hmask; i++) {
+  for (size_t i = 0; i <= tab->hmask; i++) {
     HugeBlock *node = tab->node+i;
     if (hbnode_getflags(node, HugeFlag_Finalizer|HugeFlag_Black) ==
         HugeFlag_Finalizer) {
@@ -1465,7 +1466,7 @@ MSize hugeblock_runfinalizers(global_State *g)
 {
   HugeBlockTable *tab = gettab(g);
 
-  for (size_t i = 0; i < tab->hmask; i++) {
+  for (size_t i = 0; i <= tab->hmask; i++) {
     HugeBlock *node = tab->node+i;
     if (!hbnode_isempty(node) && hbnode_getflags(node, HugeFlag_Finalizer)) {
       hbnode_clearflag(node, HugeFlag_Black);
@@ -1484,7 +1485,7 @@ void hugeblock_markfixed(global_State *g)
   HugeBlockTable *tab = gettab(g);
   MSize count = tab->count;
   GCSize total = 0;
-  for (size_t i = 0; i < tab->hmask; i++) {
+  for (size_t i = 0; i <= tab->hmask; i++) {
     HugeBlock *node = tab->node+i;
     if (!hbnode_isempty(node) && hbnode_getflags(node, HugeFlag_Fixed)) {
       hbnode_mark(g, node);
@@ -1503,7 +1504,7 @@ GCSize hugeblock_sweep(global_State *g)
     return 0;
   }
 
-  for (size_t i = 0; i < tab->hmask; i++) {
+  for (size_t i = 0; i <= tab->hmask; i++) {
     HugeBlock *node = tab->node+i;
     if (!hbnode_isempty(node) && !hbnode_getflags(node, HugeFlag_Finalizer|HugeFlag_Black)) {
       freehugeblock(g, tab, node);
@@ -1523,7 +1524,7 @@ GCSize hugeblock_freeall(global_State *g)
     return 0;
   }
 
-  for (i = 0; i < tab->hmask; i++) {
+  for (i = 0; i <= tab->hmask; i++) {
     HugeBlock *node = tab->node+i;
     if (!hbnode_isempty(node)) {
       freehugeblock(g, tab, node);
