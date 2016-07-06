@@ -54,8 +54,14 @@ void perflog_setup(lua_State *L)
 void perflog_shutdown(global_State *g)
 {
   if (sbufB(&eventbuf)) {
-    perflog_dumptofile("perflog.bin");
-    perflog_print();
+    const char *path = getenv("PERFLOG_PATH");
+    if (path == NULL) {
+      path = "perflog.bin";
+    }
+    perflog_dumptofile(path);
+#ifdef DEBUG
+    perflog_print(3);
+#endif
     g->gc.total += sbufsz(&eventbuf);
     lj_buf_free(g, &eventbuf);
   }
@@ -134,12 +140,14 @@ void printsectotals()
   }
 }
 
-void perflog_print()
+void perflog_print(int printlevel)
 {
   char* pos = sbufB(&eventbuf);
   uint64_t steptime = 0;/* Acculated step time for current GC state */
   uint64_t laststatets = 0;
   FILE* dumpfile = fopen("gcstats.csv", "a+");
+  uint64_t sweeptotal = 0;
+  uint32_t sweepcount = 0;
 
   for (; pos < sbufP(&eventbuf); ) {
     uint32_t header = *(uint32_t*)pos;
@@ -150,7 +158,9 @@ void perflog_print()
         MSG_gcstate *msg = (MSG_gcstate *)pos;
         MSize gcs = gcstatemsg_state(msg);
         MSize prevgcs = gcstatemsg_prevstate(msg);
-        printf("GC State = %s, mem = %ukb\n", gcstates[gcs], msg->totalmem/1024);
+        if (printlevel > 0) {
+          printf("GC State = %s, mem = %ukb\n", gcstates[gcs], msg->totalmem/1024);
+        }
         pos += msgsizes[MSGID_gcstate];
 
         uint64_t start = secstart[Section_gc_step] ? secstart[Section_gc_step] : secstart[Section_gc_fullgc];
@@ -160,7 +170,7 @@ void perflog_print()
           steptime = msg->time-laststatets;
         }
         statetime[prevgcs] += steptime;
-        if (prevgcs != GCSpause) {
+        if (dumpfile && prevgcs != GCSpause) {
           fprintf(dumpfile, "%s%llu", prevgcs != GCSpropagate ? ", " : "\n", steptime);
         }
         steptime = 0;
@@ -172,15 +182,19 @@ void perflog_print()
         MSize secid = ((msg->msgid >> 8) & 0x7fffff);
 
         if ((msg->msgid >> 31)) {
-          if(secid != Section_gc_step)printf("Start(%s)\n", sections_names[secid]);
+          if (printlevel > 1 && secid != Section_gc_step) {
+            printf("Start(%s)\n", sections_names[secid]);
+          }
           secstart[secid] = msg->time;
         } else {
           uint64_t time = msg->time-secstart[secid];
           lua_assert(secstart[secid] > 0 && secstart[secid] < msg->time);
 
           if (secid != Section_gc_step) {
-            printf("End(%s) ", sections_names[secid]);
-            printtickms(time);
+            if (printlevel > 1) {
+              printf("End(%s) ", sections_names[secid]);
+              printtickms(time);
+            }
           } else {
             /* If a new GC state started part the way through the step only record the
             ** step time from when it started to the step end
@@ -196,14 +210,29 @@ void perflog_print()
         }
         pos += sizeof(MSG_section);
       }break;
+
       case MSGID_stringmarker: {
         MSG_stringmarker *msg = (MSG_stringmarker *)pos;
-        printf("@%s - %llu\n", (const char*)(msg+1), msg->time);
-        fprintf(dumpfile, "\n\n@%s - %llu", (const char*)(msg+1), msg->time);
-        // printf("stringmarker: flags %u, size %u, label %s, time %ull\n", ((msg->msgid >> 8) & 0xffff), msg->size, (const char*)(msg+1), msg->time);
+        //printf("@%s - %llu\n", (const char*)(msg+1), msg->time);
+        if (dumpfile) {
+          fprintf(dumpfile, "\n\n@%s - %llu", (const char*)(msg+1), msg->time);
+        }
+        if (printlevel > 0) {
+          printf("stringmarker: flags %u, size %u, label %s, time %ull\n", ((msg->msgid >> 8) & 0xffff), msg->size, (const char*)(msg+1), msg->time);
+        }
         pos += msg->size;
         break;
       }
+
+      case MSGID_arenasweep:
+        if (((MSG_arenasweep *)pos)->celltop > 64000) {
+          sweeptotal += ((MSG_arenasweep *)pos)->time;
+          sweepcount++;
+        }
+        if (printlevel > 1) {
+          pos += msgprinters[id](pos);
+        }
+        break;
       case MSGID_time: {
         MSG_time *msg = (MSG_time *)pos;
         uint32_t id = timemsg_id(msg);
@@ -212,12 +241,21 @@ void perflog_print()
         break;
       }
       default:
-        pos += msgprinters[id](pos);
+        if (printlevel > 1) {
+          pos += msgprinters[id](pos);
+        } else {
+          pos += msgsizes[id];
+        }
+        break;
     }
   }
-  printsectotals();
+  if (printlevel > 0) {
+    printsectotals();
+    printf("Avg arena sweep time %g", sweeptotal/(double)sweepcount);
+  }
   fflush(dumpfile);
   fclose(dumpfile);
+
   lj_buf_reset(&eventbuf);
 }
 
