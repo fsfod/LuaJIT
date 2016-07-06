@@ -1,5 +1,11 @@
 Better align page allocation methord for arenas. request arenasize -1 cell to leave space for book keeping of dl malloc 
 
+Add per Lua state allocators maybe set them to global allocators when entering the jit and restore the oldones when exiting the jit
+
+a special preallocate jit only api call to pass in a list of sizes of objects tobe allocated for the trace and a pointer to a buffer a that gets gets filled in with a list of cellids. See independent_calloc from 
+ptmalloc
+
+Could store arena grey queue pointers negative of tha arena address some 64 byte multiple based on hased upper bits of the arena address to avoid cache aliasing at the expense more complex address calculations
 
 How to handle losing 2 whites which allowed allocating and sweeping at the same time but avoiding sweeping new objects 
  every object allocated while the gc is in either sweep phase must be allocated black or otherwise every sweep step would need to walk the stack and mark everything
@@ -7,6 +13,8 @@ How to handle losing 2 whites which allowed allocating and sweeping at the same 
  
 
 Custom arenas with a user provided callback function to call for every object sweape/dead instead of finalizers, fixed object size to translate object address/cellid into ids
+
+Could allocate mcarenas inside a GCArena to allow gc'able intrinsic code and the cdata and code is treated as one object so when the cdata for the intrinsic is dead the code is as well
 
 Could allocate arena object memory as uncommited to start with until its used. Could use a fast check where when allocating from an arena check if the new cell top passed a 4k boundry
 
