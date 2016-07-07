@@ -270,7 +270,7 @@ void perflog_dumptofile(const char *path)
 void recgcstate(global_State *g, int newstate)
 {
   lua_State *L = mainthread(g);
-  log_gcstate(newstate, g->gc.state, g->gc.total);
+  log_gcstate(newstate, g->gc.state, g->gc.total, 0, g->strnum);
 }
 
 #else

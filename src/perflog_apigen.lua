@@ -84,14 +84,14 @@ public struct Msg_{{name}}{
 
   stringfield = [[
   public unsafe string %s {
-    get { 
+    get {
       fixed (Msg_stringmarker* p =  &this) {
         return new string((sbyte*)(p+1));
       }
     }
   }
 ]],
-  
+
   printer = [[
   public static uint Print_{{name}}(void* msgptr)
   {
@@ -112,13 +112,14 @@ local getticksstr = "__rdtsc()"
 local numtypes = {
   int8_t  = {size = 8,   signed = true,   printf = "%i", c = "int8_t",   cs = "sbyte", argtype = "int32_t"},
   uint8_t = {size = 8,   signed = false,  printf = "%i", c = "uint8_t",  cs = "byte",  argtype = "uint32_t"},
-  
+
   int16_t  = {size = 16, signed = true,   printf = "%i", c = "int16_t",  cs = "short",  argtype = "int32_t"},
   uint16_t = {size = 16, signed = false,  printf = "%i", c = "uint16_t", cs = "ushort", argtype = "uint32_t"},
-  
+
   int32_t  = {size = 32, signed = true,   printf = "%i", c = "int32_t",  cs = "int"},
   uint32_t = {size = 32, signed = false,  printf = "%u", c = "uint32_t", cs = "uint"},
-  
+  GCSize = {size = 32, signed = false,  printf = "%u", c = "GCSize", cs = "uint"},
+
   int64_t  = {size = 64, signed = true,   printf = "%ill", c = "int64_t",  cs = "long"},
   uint64_t = {size = 64, signed = false,  printf = "%ull", c = "uint64_t", cs = "ulong"},
 
@@ -138,6 +139,18 @@ local numtypes = {
 
   string = {vsize = true, signed = false, printf = "%s", ctype = "void*", string = true, vsize = true, c = "uint64_t", cs = "string",  argtype = "const char *", customwrite = true},
 }
+
+if GC64 then
+  numtypes.MSize = "uint64_t"
+  numtypes.GCSize.size = 64
+  numtypes.GCSize.cs = "ulong"
+
+  numtypes.GCRef.size = 64
+  numtypes.GCRef.ref = "gcptr64"
+
+  numtypes.MRef.size = 64
+  numtypes.MRef.ref = "ptr64"
+end
 
 for name, def in pairs(numtypes) do
   if type(def) == "string" then
@@ -210,7 +223,7 @@ function parse_msg(msgname, def)
   local msgsize = 0
   local idsize = 8 -- bits used in the message id field 24 left
   local vsize, sizefield = false, nil
-  
+
   for i, field in ipairs(def) do
     local name, type = parse_field(field)
     local t = {name = name, type = type, order = i}
@@ -309,12 +322,12 @@ function write_struct(name, def)
   if def.base then
     local base = msglookup[def.base]
     assert(base, "Missing base message "..def.base)
-    for i, f in ipairs(base.fields) do   
+    for i, f in ipairs(base.fields) do
       fieldstr = fieldstr..mkfield(f)
     end
   end
 
-  for i, f in ipairs(def.fields) do   
+  for i, f in ipairs(def.fields) do
     fieldstr = fieldstr..mkfield(f)
     if f.type == "bitfield" then
       if outputlang == "c" then
@@ -337,7 +350,7 @@ function write_struct(name, def)
   if outputlang == "cs" then
     fieldstr = fieldstr .. "\n" .. bitfields
   end
-  
+
   writetemplate(langdef.struct, {name = name, fields = fieldstr})
 
   if outputlang == "c" then
@@ -371,7 +384,7 @@ function write_logfunc(def)
 
   local fieldstr = format("msg->msgid = MSGID_%s;\n", msgid)
   local vtotal, vwrite, args = "", "", ""
-    
+
   for i, f in ipairs(def.fields) do
     local type = f.type
     local argtype
@@ -390,7 +403,7 @@ function write_logfunc(def)
     if not typedef.noarg and not f.noarg then
       args = args .. format("%s%s %s", args ~= "" and ", " or "", argtype or type, f.name)
     end
-    
+
     local field = f.name
     if f.sizefield then
       field = "vtotal"
@@ -423,9 +436,9 @@ function write_logfunc(def)
     end
     fieldstr = fieldstr .. field
   end
-  
+
   if vtotal then
-    
+
   end
 
   writetemplate(funcdef, {name = def.name, args = args, fields = fieldstr, vtotal = vtotal, vwrite = vwrite})
@@ -448,7 +461,7 @@ function write_printfunc(def)
 
   local msgsz, args = def.size + 4, ""
   local fmtlist = {}
-    
+
   for i, f in ipairs(def.fields) do
     local type = numtypes[f.type]
     local fmtspec = type.printf
@@ -478,7 +491,7 @@ function write_printfunc(def)
       fmtstr = fmtstr .. format("%s: {%s} ", f.name, arg)
     else
       fmtlist[#fmtlist+1] = format("%s %s", f.name, fmtspec)
-      if i ~= #def.fields then 
+      if i ~= #def.fields then
         args = args .. arg .. ", "
       else
         args = args .. arg
@@ -513,7 +526,7 @@ function file_getnames(path, patten, t, seen)
   local file = readfile(path)
   seen = seen or {}
   t = t or {}
-  
+
   for name in string.gmatch(file, patten) do
     name = trim(name)
     if not seen[name] then
@@ -531,7 +544,7 @@ local paths = {
 
 function getnames(patten)
   local t, seen
-  
+
   for _, path in ipairs(paths) do
     t, seen = file_getnames(path, patten, t, seen)
   end
@@ -559,19 +572,19 @@ end
 
 namescans = {
   timers = {
-    patten = "TimerStart%(([^%,)]+)", 
+    patten = "TimerStart%(([^%,)]+)",
     enumname = "TimerId",
     enumprefix = "Timer",
   },
 
   sections = {
-    patten = "Section_Start%(([^%,)]+)", 
+    patten = "Section_Start%(([^%,)]+)",
     enumname = "SectionId",
     enumprefix = "Section",
   },
 
   counters = {
-    patten = "PerfCounter%(([^%,)]+)", 
+    patten = "PerfCounter%(([^%,)]+)",
     enumname = "CounterId",
     enumprefix = "Counter",
   }
@@ -609,10 +622,18 @@ msgs = {
     "flags : 8",
   },
 
+  nummarker = {
+    "id : 16",
+    "flags : 8",
+    "number : u32"
+  },
+
   gcstate = {
     "state : 8",
     "prevstate : 8",
     "totalmem : u32",
+    "hugemem : u32",
+    "strnum : u32",
     "time : timestamp",
   },
 
@@ -620,6 +641,7 @@ msgs = {
     "arenaid : 12",
     "address : MRef",
     "time : timestamp",
+    "totalmem : GCSize",
     "flags : u16",
   },
 
@@ -671,7 +693,7 @@ msgs = {
     "nks : u16",
     "szmcode : u32",
     "rootid : u16",
-    "nsnap : u16",   
+    "nsnap : u16",
     "spadjust : u16",
     "link : u16",
     "startpc : u32",
@@ -691,11 +713,11 @@ local msgorder = {
 
 local names = map(msglist, function(def) return def.name end)
 
---Order fixed builtin messages before the 
-table.sort(names, function(a, b) 
+--Order fixed builtin messages before the
+table.sort(names, function(a, b)
   if not msgorder[a] and not msgorder[b] then
    return a < b
-  else  
+  else
    if msgorder[a] and msgorder[b] then
      return msgorder[a] < msgorder[b]
    else
@@ -721,13 +743,13 @@ end
 
 function write_msgdefs()
   for key, def in ipairs(msglist) do
-  
+
     if def.enumlist then
       local names = namescans[def.enumlist]
       write_enum(names.enumname, names.matches, names.enumprefix)
       write_namelist(def.enumlist.."_names", names.matches)
     end
-  
+
     write_struct(def.name, def)
     if outputlang == "c" then
       write_logfunc(def)
@@ -762,15 +784,15 @@ function write_cheader()
 
   write([[
   typedef MSize (*msgprinter)(void* msg);
-  
+
   static msgprinter msgprinters[] = {
   ]])
-  
+
   write(joinlist(names, "  print_", ",\n"))
   write("};\n\n")
-  
+
   write_counters()
-  
+
   write("#pragma pack(pop)")
   outputfile:close()
 end
@@ -796,11 +818,11 @@ using GCRef = System.UInt32;
   local union = ""
 
   for key, def in ipairs(msglist) do
-  
+
     if def.enumlist then
       local names = namescans[def.enumlist]
       write_enum(names.enumname, names.matches)
-    end 
+    end
     write_struct(def.name, def)
     union = union .. format("  [FieldOffset(0)] public Msg_%s %s;\n", def.name, def.name)
   end
@@ -818,7 +840,7 @@ public struct AllMsgs
 
   writef([[
   public delegate uint MsgPrinter(void* msg);
-  
+
   public static MsgPrinter[] MsgPrinters = {
 %s
 };
@@ -832,7 +854,7 @@ public struct AllMsgs
     end
     write_printfunc(def)
   end
-  
+
   write_namelist("Counter_names", counters)
   write("};\n\n")
 
