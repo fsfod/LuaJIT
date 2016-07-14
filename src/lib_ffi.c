@@ -831,7 +831,7 @@ static MSize getcdvecsz(CTState *cts, CType *ct)
 {
   if(ctype_ispointer(ct->info) && !ctype_isvector(ct->info)){
     ct = ctype_rawchild(cts, ct);
-  } 
+  }
 
   if (ctype_isvector(ct->info)) {
     return ct->size;
@@ -840,6 +840,15 @@ static MSize getcdvecsz(CTState *cts, CType *ct)
   }
 
   return 0;
+}
+
+static CType *getvectype(CTState *cts, CType *ct)
+{
+  if (ctype_ispointer(ct->info) && !ctype_isvector(ct->info)) {
+    ct = ctype_rawchild(cts, ct);
+  }
+
+  return ctype_isvector(ct->info) ? ct : NULL;
 }
 
 LJLIB_CF(ffi_vtest)	LJLIB_REC(.)
@@ -868,12 +877,52 @@ LJLIB_CF(ffi_vtest)	LJLIB_REC(.)
   if (vecsz == 16) {
     result = _mm_testz_si128(_mm_loadu_si128((__m128i*)v1), _mm_loadu_si128((__m128i*)v2));
   } else {
-    result = _mm256_testz_si256(_mm256_castps_si256(_mm256_loadu_ps((float*)v1)), 
+    result = _mm256_testz_si256(_mm256_castps_si256(_mm256_loadu_ps((float*)v1)),
                                 _mm256_castps_si256(_mm256_loadu_ps((float*)v2)));
   }
 
   setboolV(&G(L)->tmptv2, !result);
   setboolV(L->top++, !result);
+  return 1;
+}
+
+LJLIB_CF(ffi_maskload)	LJLIB_REC(.)
+{
+  CTState *cts = ctype_cts(L);
+  GCcdata *cd1 = ffi_checkcdata(L, 1);
+  GCcdata *ret;
+  CType *ct1 = ctype_raw(cts, cd1->ctypeid);
+  void* v1, *v2;
+  __m128i vmask;
+  MSize vecsz = 0;
+
+  if (!getvectype(cts, ct1)) {
+    /* Needs tobe a vector or a pointer to a vector */
+    lj_err_arg(L, 1, LJ_ERR_FFI_INVTYPE);
+  }
+
+  vecsz = getcdvecsz(cts, ct1);
+
+  lj_cconv_ct_tv(cts, ctype_get(cts, CTID_P_CVOID), (uint8_t *)&v1, L->base,
+                 CCF_ARG(1) | CCF_INTRINS_ARG);
+
+  if (tvisnumber(L->base+1)) {
+    int32_t mask = lj_lib_checkint(L, 1);
+    vmask = _mm_cvtepi8_epi32(_mm_set1_epi32(mask));
+  } else {
+    GCcdata *cd2 = ffi_checkcdata(L, 2);
+    CType *ct2 = ctype_raw(cts, cd2->ctypeid);
+
+    if (!getvectype(cts, ct2)) {
+      lj_err_arg(L, 2, LJ_ERR_FFI_INVTYPE);
+    }
+
+    lj_cconv_ct_tv(cts, ctype_get(cts, CTID_P_CVOID), (uint8_t *)&v2, L->base+1, CCF_ARG(2) | CCF_INTRINS_ARG);
+    vmask = *(__m128i*)v2;
+  }
+
+  (*(__m128*)cdataptr(ret)) = _mm_maskload_ps((float*)v1, *(__m128i*)v2);
+
   return 1;
 }
 

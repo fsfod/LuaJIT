@@ -176,7 +176,7 @@ typedef union ExitFPR {
     lua_Number unused;
     lua_Number n;
   };
-  
+
   char v[16];
 }ExitFPR;
 
@@ -374,6 +374,7 @@ typedef enum {
   XO_ADDSS =	XO_f30f(58),
   XO_MOVD =	XO_660f(6e),
   XO_MOVDto =	XO_660f(7e),
+  XO_PSLLDQ =	XO_660f(73),
 
   XO_FLDd =	XO_(d9), XOg_FLDd = 0,
   XO_FLDq =	XO_(dd), XOg_FLDq = 0,

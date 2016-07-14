@@ -1313,7 +1313,7 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *func)
     TRef tr = emitir(IRT(IR_FLOAD, IRT_INTP), J->base[0], IRFL_CDATA_PTR);
     emitir(IRTG(IR_EQ, IRT_INTP), tr, lj_ir_kintp(J, target));
   }
-  
+
   /* Convert parameters and load them into the input registers */
   for (i = 0; i < intrins->insz; i++) {
     CType *ct = ctype_get(cts, sib);
@@ -1370,7 +1370,7 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *func)
 
   sib = retid;
   /* Second pass to box values after all ASMRET have run to shuffle/spill the
-   * output registers. 
+   * output registers.
    */
   for (i = 0; i < intrins->outsz; i++) {
     CType *ct = ctype_get(cts, sib);
@@ -1407,7 +1407,7 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *func)
       }
     }
   }
-  
+
   if (intrin_sideeff(intrins)) {
     J->needsnap = 1;
   }
@@ -1899,7 +1899,7 @@ void LJ_FASTCALL recff_ffi_gc(jit_State *J, RecordFFData *rd)
 }
 
 static TRef loadvector(jit_State *J, RecordFFData *rd, int arg)
-{ 
+{
   CTState *cts = ctype_ctsG(J2G(J));
   CType *ct;
   GCcdata *cd = argv2cdata(J, J->base[arg], &rd->argv[arg]);
@@ -1941,6 +1941,23 @@ void LJ_FASTCALL recff_ffi_vtest(jit_State *J, RecordFFData *rd)
   lj_ir_set(J, IRTG(IR_VTEST, IRT_TRUE), tr1, tr2);
   J->postproc = LJ_POST_FIXGUARD;
   J->base[0] = TREF_TRUE;
+}
+
+void LJ_FASTCALL recff_ffi_maskload(jit_State *J, RecordFFData *rd)
+{
+  TRef vmask, vptr = loadvector(J, rd, 0);
+
+  if (tref_isnumber(J->base[1])) {
+    vmask = lj_opt_narrow_toint(J, J->base[1]);
+    if (!tref_isk(J->base[1])) {
+
+    }
+  } else {
+    vmask = loadvector(J, rd, 1);
+  }
+
+  vptr = emitir(IRT(IR_MSKREF, IRT_PTR), vptr, vmask);
+  J->base[0] = emitir(IRT(IR_XLOAD, IRT_V128), vptr, IRXLOAD_VMASKLOAD);
 }
 
 /* -- 64 bit bit.* library functions -------------------------------------- */

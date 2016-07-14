@@ -679,7 +679,7 @@ typedef struct IntrinsInfo {
   uint8_t inregs[LJ_INTRINS_MAXREG];
   RegSet inset, outset, modset;
   /* First CARG ref used as limit for duplicate load checking when fusing */
-  IRRef a1; 
+  IRRef a1;
 } IntrinsInfo;
 
 static int asm_swaprefs(ASMState *as, IRIns *ir, IRRef lref, IRRef rref);
@@ -782,7 +782,7 @@ static void asm_intrin_opcode(ASMState *as, IRIns *ir, IntrinsInfo *ininfo)
 
   if (intrins->dyninsz > 1 && dynreg != DYNREG_TWOSTORE) {
     if (lref == rref) {
-      if (dynreg == DYNREG_INOUT) 
+      if (dynreg == DYNREG_INOUT)
         right = dest;
       /* Only load/move the value to register once.
       ** ra_left will do the move for INOUT.
@@ -797,7 +797,7 @@ static void asm_intrin_opcode(ASMState *as, IRIns *ir, IntrinsInfo *ininfo)
 
         args[0] = rref;
         args[1] = lref;
-        /* lref(now swapped to rref) may already have a register set so update 
+        /* lref(now swapped to rref) may already have a register set so update
         ** the right register to it in case we don't fuse a load.
         */
         right = IR(rref)->r;
@@ -874,7 +874,7 @@ static void asm_intrin_opcode(ASMState *as, IRIns *ir, IntrinsInfo *ininfo)
 
   lua_assert(ra_hasreg(right) && (ra_hasreg(dest) || intrins->dyninsz < 2));
   emit_intrins(as, intrins, right, dest, vvvv);
-  
+
   if (dynreg == DYNREG_INOUT || (dynreg == DYNREG_TWOSTORE && dynrout)) {
     lua_assert(lref);
     ra_left(as, dest, lref);
@@ -916,11 +916,11 @@ int asm_intrin_results(ASMState *as, IRIns *ir, CIntrinsic* intrins, IntrinsInfo
 
       if (irret->o == IR_INTRN) {
         break;
-      }    
+      }
       irret = IR(irret->op1);
     }
   }
-  
+
   if (!used && !intrin_sideeff(intrins)) {
     /* IR is dead code */
     return 0;
@@ -1007,7 +1007,7 @@ static void asm_intrinsic(ASMState *as, IRIns *ir, IRIns *asmend)
     ira = IR(ira->op1);
     lua_assert(ira->o == IR_CARG);
     ininfo.args[--n] = ira->op2;
-    /* Save the ref of our first CARG so we can use it to skip the arg chain 
+    /* Save the ref of our first CARG so we can use it to skip the arg chain
     ** when looking for conflicts during when fusing a XLOAD.
     */
     if (n == 0)
@@ -1794,10 +1794,43 @@ static void asm_fxload(ASMState *as, IRIns *ir)
 {
   Reg dest = ra_dest(as, ir, irt_isfp(ir->t) ? RSET_FPR : RSET_GPR);
   x86Op xo;
-  if (ir->o == IR_FLOAD)
+
+  if (ir->o == IR_FLOAD) {
     asm_fusefref(as, ir, RSET_GPR);
-  else
-    asm_fusexref(as, ir->op1, RSET_GPR);
+  } else {
+    if (ir->op2 & IRXLOAD_VMASKLOAD) {
+      IRIns *maskref = IR(ir->op1);
+      IRIns *mask = IR(ir->op2);
+      asm_fusexref(as, maskref->op1, RSET_GPR);
+
+      if (tref_isk(maskref->op2) && irt_type(mask->t) == IRT_INT) {
+        /* TODO: can load data 4 bytes lower check */
+        if (mask->i == 0x00ffffff && 1) {
+          as->mrm.ofs -= 4;
+          emit_mrm(as, XO_PSLLDQ, dest, dest);
+          emit_i8(as, 4);
+        } else {
+
+          if ((mask->i & 0xff0000) == 0xff0000) {
+            emit_mrm(as, XO_MOVSD, dest, RID_MRM);
+          }
+
+          /* Lower two lanes wanted */
+          if ((mask->i & 0xffff) == 0xffff) {
+            emit_mrm(as, XO_MOVSD, dest, RID_MRM);
+          }
+          emit_mrm(as, XO_XORPS, dest, dest);
+        }
+        return;
+      } else {
+        lua_assert(0);
+      }
+
+      emit_mrm(as, xo, dest, RID_MRM);
+    } else {
+      asm_fusexref(as, ir->op1, RSET_GPR);
+    }
+  }
   /* ir->op2 is ignored for non vectors -- unaligned loads are ok on x86. */
   switch (irt_type(ir->t)) {
   case IRT_I8: xo = XO_MOVSXb; break;
@@ -2437,7 +2470,7 @@ static int asm_swaprefs(ASMState *as, IRIns *ir, IRRef lref, IRRef rref)
 {
   IRIns *irl = IR(lref);
   IRIns *irr = IR(rref);
-  lua_assert(ra_noreg(irr->r)); 
+  lua_assert(ra_noreg(irr->r));
   if (irref_isk(rref))
     return 0;  /* Don't swap constants to the left. */
   if (ra_hasreg(irl->r))

@@ -100,6 +100,10 @@
   _(STRREF,	N , ref, ref) \
   _(LREF,	L , ___, ___) \
   \
+  /* Either use a ref value with op2 being the mask thats CSE which is used as the value for into xload/xstore */ \
+  \
+  _(MSKREF,	R , ref, ref) \
+  \
   /* Loads and Stores. These must be in the same order. */ \
   _(ALOAD,	L , ref, ___) \
   _(HLOAD,	L , ref, ___) \
@@ -108,6 +112,7 @@
   _(XLOAD,	L , ref, lit) \
   _(SLOAD,	L , lit, lit) \
   _(VLOAD,	L , ref, ___) \
+  _(MLOAD,	L , ref, ref) \
   \
   _(ASTORE,	S , ref, ref) \
   _(HSTORE,	S , ref, ref) \
@@ -237,6 +242,7 @@ IRFLDEF(FLENUM)
 #define IRXLOAD_VOLATILE	2	/* Load from volatile data. */
 #define IRXLOAD_UNALIGNED	4	/* Unaligned load. */
 #define IRXLOAD_INTDOMAIN       8       /* Use integer domain vector loads. */
+#define IRXLOAD_VMASKLOAD	4	/* Masked vector load. */
 
 /* BUFHDR mode, stored in op2. */
 #define IRBUFHDR_RESET		0	/* Reset buffer. */
