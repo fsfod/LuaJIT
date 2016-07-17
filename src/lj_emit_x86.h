@@ -881,9 +881,9 @@ static void emit_savegpr(ASMState *as, Reg reg, Reg base, int ofs)
 {
   Reg temp, r = reg_rid(reg);
   uint32_t kind = reg_kind(reg);
-  lua_assert(r < RID_NUM_GPR);
+  lua_assert(r < RID_NUM_GPR || kind == REGKIND_FLAGBIT);
 
-  if (kind == REGKIND_GPRI32) {
+  if (kind == REGKIND_GPRI32 || kind == REGKIND_FLAGBIT) {
 #if LJ_DUALNUM
     emit_i32(as, LJ_TISNUM);
     emit_rmro(as, XO_MOVmi, 0, base, ofs+4);
@@ -893,6 +893,12 @@ static void emit_savegpr(ASMState *as, Reg reg, Reg base, int ofs)
     emit_rmro(as, XO_MOVSDto, temp, base, ofs);
     emit_mrm(as, XO_CVTSI2SD, temp, r);
 #endif
+
+    if (kind == REGKIND_FLAGBIT) {
+      /* CF = 2, ZF = 4, */
+      emit_rr(as, XO_MOVZXb, r, r);
+      emit_rr(as, XO_SETCC + (reg & 0xff000000), 0, r);
+    }
     return;
   }
 

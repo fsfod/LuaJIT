@@ -1208,6 +1208,33 @@ context("Intrinsic CSE", function()
 
 end)
 
+it("flags register", function()
+
+  assert_cdef([[void ptest(int4 n1, int4 n2) __mcode("660F3817rM") __reglist(out, int ZF, int CF);]], "ptest")
+
+  local ptest = ffi.C.ptest
+  
+  local vone = ffi.new("int4", 1, 1, 1, 1)
+  local vzero = ffi.new("int4", 0)
+  
+  local zf, cf = ptest(vzero, vzero)
+  assert_equal(zf, 1)
+  assert_equal(cf, 1)
+  
+  zf, cf = ptest(vzero, vone)
+  assert_equal(zf, 1)
+  assert_equal(cf, 0)
+  
+  zf, cf = ptest(vone, vone)
+  assert_equal(zf, 0)
+  assert_equal(cf, 1)
+
+  function test_ptest(v1, v2)
+    return (ptest(v1, v2))
+  end
+
+end)
+
 end)
 
 

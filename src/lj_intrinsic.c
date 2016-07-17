@@ -23,8 +23,9 @@
 
 typedef enum RegFlags {
   REGFLAG_64BIT = REGKIND_GPR64 << 6, /* 64 bit override */
-  REGFLAG_BLACKLIST = 1 << 17,
-  REGFLAG_DYN = 1 << 18,
+  REGFLAG_DYN = 1 << 17,
+  REGFLAG_BLACKLIST =  1 << 30,
+  REGFLAG_FLAGSBIT = reg_make(0, REGKIND_FLAGBIT),
 }RegFlags;
 
 typedef struct RegEntry {
@@ -51,13 +52,19 @@ typedef struct RegEntry {
   _(EAX, eax) _(ECX, ecx) _(EDX, edx) _(EBX, ebx) _(ESP|REGFLAG_BLACKLIST, esp) _(EBP, ebp) _(ESI, esi) _(EDI, edi) 
 #endif
 
+#define FLAGSREGDEF(_) \
+  _(0, OF) _(2, CF) _(4, ZF) _(8, SF) _(a, PF)
+
+#define MKREG_FLAGS(reg, name) {#name, REGFLAG_FLAGSBIT|REGFLAG_DYN|0x##reg},
+
 RegEntry reglut[] = {
   GPRDEF2(MKREGGPR)
 #if LJ_64
   GPRDEF_R64(MKREG_GPR64)
 #endif
   {"gpr32", REGFLAG_DYN|RID_DYN_GPR},
-  {"gpr64", REGFLAG_64BIT|REGFLAG_DYN|RID_DYN_GPR}
+  {"gpr64", REGFLAG_64BIT|REGFLAG_DYN|RID_DYN_GPR},
+  FLAGSREGDEF(MKREG_FLAGS)
 };
 
 static CTypeID register_intrinsic(lua_State *L, CIntrinsic* src, CType *func)
@@ -241,7 +248,9 @@ static RegSet process_reglist(lua_State *L, CIntrinsic *intrins, int regsetid,
       if (regsetid == REGSET_MOD)
         lj_err_callerv(L, LJ_ERR_FFI_BADREG, "cannot use dynamic register", strdata(str), listname);
 
-      if (++dyncount > LJ_INTRINS_MAXDYNREG) {
+      dyncount++;
+
+      if (!reg_isflag(reg) && dyncount > LJ_INTRINS_MAXDYNREG) {
         lj_err_callerv(L, LJ_ERR_FFI_BADREG, "too many dynamic", strdata(str), listname);
       }
     } else {

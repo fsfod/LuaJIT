@@ -124,7 +124,7 @@ typedef struct AsmHeader {
   _(GPRI32,  IRT_INT, CTID_INT32) \
   _(GPR32CD, IRT_U32, CTID_UINT32) \
   _(GPR64,   IRT_U64, CTID_UINT64) \
-  _(GPR3,    0,       0) \
+  _(FLAGBIT, IRT_INT, CTID_INT32) \
   _(GPR4,    0,       0) \
   _(GPR5,    0,       0) \
   _(GPR6,    0,       0) \
@@ -150,6 +150,7 @@ CTypeID1 regkind_ct[16];
 #define reg_setrid(reg, rid) (((reg)&0xc0) | reg_rid(rid))
 #define reg_isgpr(reg) (reg_rid(reg) < RID_MAX_GPR)
 #define reg_isfp(reg) (reg_rid(reg) >= RID_MIN_FPR)
+#define reg_isflag(reg) (reg_rid(reg) < RID_MAX_GPR && reg_kind(reg) == REGKIND_FLAGBIT)
 #define reg_isvec(reg) (reg_rid(reg) >= RID_MIN_FPR && reg_kind(reg) >= REGKIND_VEC_START)
 #define reg_isdyn(reg) (reg_rid(reg) == RID_DYN_GPR || reg_rid(reg) == RID_DYN_FPR)
 #define reg_torset(reg) (reg_isgpr(reg) ? RSET_GPR : RSET_FPR)

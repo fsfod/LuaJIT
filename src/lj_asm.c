@@ -2498,31 +2498,34 @@ static void intrins_setup(CIntrinsic *intrins, IntrinBuildState *info)
               !(intrins->flags & (INTRINSFLAG_NOFUSE|INTRINSFLAG_INDIRECT));
 
   for (i = 0; i < intrins->insz; i++) {
-    Reg r = reg_rid(info->in[i]);
-    int isdyn = dynreg && i < intrins->dyninsz;
-    lua_assert(!isdyn || reg_isdyn(info->in[i]));
-    
-    if (reg_kind(info->in[i]) == REGKIND_V256)
+    uint32_t reg = info->in[i];
+    int isdyn = reg_isflag(reg) || (dynreg && i < intrins->dyninsz);
+    lua_assert(!isdyn || reg_isdyn(reg));
+
+    if (reg_isfp(reg) && reg_kind(reg) == REGKIND_V256)
       info->vzeroupper = 1;
 
-    if (reg_isgpr(info->in[i])) {
-      if (!isdyn && r == RID_CONTEXT) {
+    if (reg_isgpr(reg)) {
+      if (!isdyn && reg_rid(reg) == RID_CONTEXT) {
         /* Save the offset in the input context so we can load it last */
         info->contexofs = offset;
       }
       offset += sizeof(intptr_t);
     }
 
-    if (!isdyn) 
-      rset_set(info->inset, r);
+    if (!isdyn)
+      rset_set(info->inset, reg_rid(reg));
   }
 
   for (i = 0; i < intrins->outsz; i++) {
-    if (reg_kind(info->out[i]) == REGKIND_V256)
+    uint32_t reg = info->out[i];
+    if (reg_isfp(reg) && reg_kind(reg) == REGKIND_V256)
       info->vzeroupper = 1;
-    if (i == 0 && dynout) continue;
 
-    rset_set(info->outset, reg_rid(info->out[i]));
+    if (reg_isflag(reg) || (i == 0 && dynout))
+      continue;
+
+    rset_set(info->outset, reg_rid(reg));
   }
 
   /* Don't try to fuse if a fixed register is the same as the input context */
@@ -2597,11 +2600,15 @@ static void intrins_saveregs(ASMState *as, CIntrinsic *intrins, IntrinBuildState
     uint32_t reg = info->out[i];
     Reg r = reg_rid(reg);
 
-    if (r != outcontext) {
+    if (r != outcontext || (reg_isgpr(reg) && reg_kind(reg) == REGKIND_FLAGBIT)) {
       /* Exclude this register from the scratch set since its now live */
       rset_clear(as->freeset, r);
 
       if (r < RID_MAX_GPR) {
+        if (reg_kind(reg) == REGKIND_FLAGBIT) {
+          /* Pass in the flag bit id in the top most bits */
+          reg |= reg_rid(intrins->out[i]) << 24;
+        }
         emit_savegpr(as, reg, outcontext, offset);
       } else {
         emit_savefpr(as, reg, outcontext, offset);
@@ -2699,8 +2706,26 @@ static void wrap_intrins(jit_State *J, CIntrinsic *intrins, IntrinWrapState *sta
     if (rin == RID_NONE)
       rin = reg_rid(in[0]);
 
+    if (1) {
+      int start = 1, count = 0;
+
+      if (reg_isflag(intrins->out[0])) {
+        start = 0;
+      }
+
+      for (MSize i = start; i < intrins->outsz; i++) {
+        if (reg_isflag(intrins->out[i])) {
+          count++;
+        }
+      }
+
+      if (count) {
+        info.outset |= pickdynlist(out+start, count, scatch);
+      }
+    }
+
     /* Allocate the dynamic output register */
-    if (intrins->outsz > 0 && intrin_dynrout(intrins)) {
+    if (intrins->outsz > 0 && intrin_dynrout(intrins) && !reg_isflag(intrins->out[0])) {
       if (dynreg == DYNREG_INOUT || dynreg == DYNREG_TWOSTORE) {
         rout = reg_rid(in[1]);
         out[0] = reg_setrid(out[0], rout);
