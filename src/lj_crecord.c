@@ -1337,7 +1337,7 @@ void crec_call_intrins(jit_State *J, RecordFFData *rd, CType *func)
 
     if (reg_isgpr(reg)) {
       CTypeID cid = ctype_typeid(cts, ctype_raw(cts, id));
-      if (cid != CTID_INT32) {
+      if (cid < CTID_INT8 || cid > CTID_INT32) {
         /* Box the u32/64 bit value in the register */
         J->base[i] = emitir(IRT(IR_CNEWI, IRT_CDATA), lj_ir_kint(J, id), J->base[i]);
       }

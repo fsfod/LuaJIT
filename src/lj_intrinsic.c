@@ -629,8 +629,8 @@ static MSize parse_templateins(lua_State *L, GCtab *inslist, CIntrinsic *intrins
     ins = (AsmEntry*)&ins->reg[count];
     i += count+1;
   }
-
-  return ((char*)ins)-(char*)&insarray;
+  /* Return size of instruction list in bytes */
+  return (MSize)(((char*)ins) - (char*)&insarray);
 }
 
 int lj_intrinsic_create(lua_State *L)
@@ -686,6 +686,9 @@ static int inferreg(CTState *cts, CType *ct) {
           return -1; /* NYI: 64 bit pair registers */
         kind = REGKIND_GPR64;
         rid |= INTRINSFLAG_REXW;
+      } else if(sz == 1) {
+        kind = REGKIND_GPRI8;
+        rid |= INTRINSFLAG_REG8BIT;
       } else {
         kind = ct->info & CTF_UNSIGNED ? REGKIND_GPR32CD : REGKIND_GPRI32;
       }
@@ -793,7 +796,7 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
       setarg_casttype(cts, arg, ct);
 
       /* Merge shared register flags */
-      intrins->flags |= reg & 0xff00;
+      intrins->flags |= reg & 0xffffff00;
 
       intrins->in[intrins->insz++] = reg & 0xff;
       intrins->dyninsz++;
@@ -820,7 +823,7 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
         return 0;
       }
       /* Merge shared register flags */
-      intrins->flags |= reg & 0xff00;
+      intrins->flags |= reg & 0xffffff00;
 
       /* Create a field entry for the return value that we make the ctype child
       ** of the function.
