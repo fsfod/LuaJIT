@@ -740,6 +740,11 @@ static MCode* emit_intrins(ASMState *as, CIntrinsic *intrins, Reg r1,
       r2 |= OP4B;
     }
 
+    /* Force REX for bit registers since normal modrm can only supports al, bl, cl, dl registers */
+    if (LJ_64 && (intrins->flags & INTRINSFLAG_REG8BIT) && (r1 > 3 || r2 > 3)) {
+      r2 |= FORCE_REX;
+    }
+
     if (intrins->flags & INTRINSFLAG_VEX) {
       x86Op op = intrins->opcode;
       if (r3 != RID_NONE) {
@@ -947,7 +952,7 @@ static void emit_savegpr(ASMState *as, Reg reg, Reg base, int ofs)
   uint32_t kind = reg_kind(reg);
   lua_assert(r < RID_NUM_GPR);
 
-  if (kind == REGKIND_GPRI32) {
+  if (kind == REGKIND_GPRI32 || kind == REGKIND_GPRI8) {
 #if LJ_DUALNUM
     emit_i32(as, LJ_TISNUM);
     emit_rmro(as, XO_MOVmi, 0, base, ofs+4);
@@ -957,6 +962,9 @@ static void emit_savegpr(ASMState *as, Reg reg, Reg base, int ofs)
     emit_rmro(as, XO_MOVSDto, temp, base, ofs);
     emit_mrm(as, XO_CVTSI2SD, temp, r);
 #endif
+    if (kind == REGKIND_GPRI8) {
+      emit_rr(as, XO_MOVSXb, r, r);
+    }
     return;
   }
 

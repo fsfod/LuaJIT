@@ -71,6 +71,8 @@ typedef enum INTRINSFLAGS {
   INTRINSFLAG_VEX256   = 0x4000,
 
   INTRINSFLAG_IMM32 = 0x8000,
+  /* Uses 8 bit registers */
+  INTRINSFLAG_REG8BIT = 0x100000,
 
   /* Input parameters names explicitly declare input registers */
   INTRINSFLAG_EXPLICTREGS = 0x10000,
@@ -127,8 +129,8 @@ typedef struct AsmHeader {
 #define RKDEF_GPR(_) \
   _(GPRI32,  IRT_INT, CTID_INT32) \
   _(GPR32CD, IRT_U32, CTID_UINT32) \
+  _(GPRI8,   IRT_I8,  CTID_INT8) \
   _(GPR64,   IRT_U64, CTID_UINT64) \
-  _(GPR3,    0,       0) \
   _(GPR4,    0,       0) \
   _(GPR5,    0,       0) \
   _(GPR6,    0,       0) \
@@ -156,7 +158,7 @@ CTypeID1 regkind_ct[16];
 #define reg_isfp(reg) (reg_rid(reg) >= RID_MIN_FPR)
 #define reg_isvec(reg) (reg_rid(reg) >= RID_MIN_FPR && reg_kind(reg) >= REGKIND_VEC_START)
 #define reg_isdyn(reg) (reg_rid(reg) == RID_DYN_GPR || reg_rid(reg) == RID_DYN_FPR)
-#define reg_torset(reg) (reg_isgpr(reg) ? RSET_GPR : RSET_FPR)
+#define reg_torset(reg) (reg_isgpr(reg) ? (reg_kind(reg) == REGKIND_GPRI8 ? RSET_GPR8 : RSET_GPR) : RSET_FPR)
 
 #define reg_irt(reg) (reg_isgpr(reg) ? rk_irtgpr(reg_kind(reg)) : rk_irtfpr(reg_kind(reg)))
 #define rk_irtgpr(kind) ((IRType)regkind_it[(kind)])

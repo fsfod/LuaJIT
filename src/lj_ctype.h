@@ -193,8 +193,8 @@ typedef struct CIntrinsic {
   };
   uint8_t insz;
   uint8_t outsz;
-  uint16_t flags;
-  CTypeID1 id; 
+  CTypeID1 id;
+  uint32_t flags;
 } CIntrinsic;
 
 typedef struct IntrinsicState {
