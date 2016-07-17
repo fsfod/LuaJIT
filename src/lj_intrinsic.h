@@ -32,7 +32,7 @@ typedef enum REGMODE {
   DYNREG_TWOSTORE,
   /* one input(M) register and the second is part of part of the opcode */
   DYNREG_OPEXT,
-  /* Two input register and one output same register that's same RID the second input */ 
+  /* Two input register and one output same register that's same RID the second input */
   DYNREG_INOUT,
   /* 2 in, 1 out */
   DYNREG_VEX3,
@@ -65,8 +65,8 @@ typedef enum INTRINSFLAGS {
   /* Opcode is commutative allowing the input registers to be swapped to allow better fusing */
   INTRINSFLAG_ISCOMM = 0x1000,
   /* Instruction has non obvious side effects */
-  INTRINSFLAG_HASSIDE  = 0x2000, 
- 
+  INTRINSFLAG_HASSIDE  = 0x2000,
+
   /* Opcode uses ymm registers */
   INTRINSFLAG_VEX256   = 0x4000,
 
@@ -135,7 +135,7 @@ typedef struct AsmHeader {
   _(GPR5,    0,       0) \
   _(GPR6,    0,       0) \
   _(GPR7,    0,       0) \
-                
+
 #define MKREGKIND(name, irt, ct) REGKIND_##name,
 
 typedef enum REGKINDGPR {

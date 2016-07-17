@@ -48,7 +48,7 @@ typedef struct RegEntry {
   _(EAX, rax) _(ECX, rcx) _(EDX, rdx) _(EBX, rbx) _(ESP|REGFLAG_BLACKLIST, rsp) _(EBP, rbp) _(ESI, rsi) _(EDI, rdi)
 #else
 #define GPRDEF2(_) \
-  _(EAX, eax) _(ECX, ecx) _(EDX, edx) _(EBX, ebx) _(ESP|REGFLAG_BLACKLIST, esp) _(EBP, ebp) _(ESI, esi) _(EDI, edi) 
+  _(EAX, eax) _(ECX, ecx) _(EDX, edx) _(EBX, ebx) _(ESP|REGFLAG_BLACKLIST, esp) _(EBP, ebp) _(ESI, esi) _(EDI, edi)
 #endif
 
 RegEntry reglut[] = {
@@ -102,7 +102,7 @@ static int parse_fprreg(const char *name, uint32_t len)
   uint32_t pos = 3;
   int flags = 0;
 
-  if (len < 3 || (name[0] != 'x' && name[0] != 'y') || 
+  if (len < 3 || (name[0] != 'x' && name[0] != 'y') ||
       name[1] != 'm' || name[2] != 'm')
     return -1;
 
@@ -187,13 +187,13 @@ enum IntrinsRegSet {
   REGSET_MOD,
 };
 
-/* Walks through either a Lua table(array) of register names or ctype linked list 
+/* Walks through either a Lua table(array) of register names or ctype linked list
 ** of typed parameters  who's name will be the register for that specific parameter.
-** The register names are converted into a register id\kind which are packed 
-** together into a uint8_t that is saved into one of the register lists of the 
+** The register names are converted into a register id\kind which are packed
+** together into a uint8_t that is saved into one of the register lists of the
 ** CIntrinsic passed in.
 */
-static RegSet process_reglist(lua_State *L, CIntrinsic *intrins, int regsetid, 
+static RegSet process_reglist(lua_State *L, CIntrinsic *intrins, int regsetid,
                               CTypeID liststart)
 {
   CTState *cts = ctype_cts(L);
@@ -236,7 +236,7 @@ static RegSet process_reglist(lua_State *L, CIntrinsic *intrins, int regsetid,
     setarg_casttype(cts, ctarg, ctype_rawchild(cts, ctarg));
 
     r = reg_rid(reg);
-    
+
     if (reg & REGFLAG_DYN) {
       if (regsetid == REGSET_MOD)
         lj_err_callerv(L, LJ_ERR_FFI_BADREG, "cannot use dynamic register", strdata(str), listname);
@@ -349,7 +349,7 @@ static int parse_opmode(const char *op, MSize len)
   }
 
   if ((r || m) & !(flags & INTRINSFLAG_REGMODEMASK)) {
-    
+
     /* 'Rm' mem/r is left reg is right */
     if (r == 2 && m == 1) {
       flags |= DYNREG_TWOSTORE; /* MR */
@@ -364,7 +364,7 @@ static int parse_opmode(const char *op, MSize len)
     /* if neither of the operands is listed as memory disable trying to fuse a load in */
     if (r == 3) {
       flags |= INTRINSFLAG_NOFUSE; /* rR */
-    } 
+    }
   }
 
   return flags;
@@ -407,7 +407,7 @@ static void setopcode(lua_State *L, CIntrinsic *intrins, uint32_t opcode)
   if (intrin_regmode(intrins) == DYNREG_OPEXT) {
     intrin_setopextb(intrins, opext);
   }
-#endif 
+#endif
 
   intrins->opcode = opcode;
 }
@@ -450,7 +450,7 @@ static int parse_opstr(lua_State *L, GCstr *opstr, CIntrinsic *intrins, int* bui
   }
   /* Flags only used during construction of the intrinsic in the upper bits*/
   *buildflags |= flags & 0xffff0000;
-  
+
   return opcode;
 }
 
@@ -504,7 +504,7 @@ CTypeID lj_intrinsic_template(lua_State *L, int narg)
   intrins = lj_intrinsic_get(cts, ct->size);
 
   /* Can't be a template if it an opcode */
-  if (intrin_regmode(intrins) != DYNREG_FIXED || (intrins->opcode && intrins->outsz <= 4) || 
+  if (intrin_regmode(intrins) != DYNREG_FIXED || (intrins->opcode && intrins->outsz <= 4) ||
       intrins->wrapped)
     lj_err_arg(L, narg, LJ_ERR_FFI_INVTYPE);
 
@@ -573,7 +573,7 @@ static MSize parse_templateins(lua_State *L, GCtab *inslist, CIntrinsic *intrins
         rset_set(fixedset, reg_rid(op->out[j]));
       }
     }
-    
+
     dynreg = intrin_regmode(op);
 
     MSize count = op->dyninsz + (dynreg != DYNREG_OPEXT ? dynout : 0);
@@ -586,7 +586,7 @@ static MSize parse_templateins(lua_State *L, GCtab *inslist, CIntrinsic *intrins
 
     for (size_t j = 0; j < count; j++) {
       GCstr *regname;
-      
+
       if (tvisnil(slot+j) || !tvisstr(slot+j)) {
         break;
       }
@@ -635,12 +635,12 @@ static MSize parse_templateins(lua_State *L, GCtab *inslist, CIntrinsic *intrins
 
 int lj_intrinsic_create(lua_State *L)
 {
-  CTState *cts = ctype_cts(L);  
+  CTState *cts = ctype_cts(L);
   CTypeID id = lj_intrinsic_template(L, 1);
   void *intrinsmc;
   MSize asmsz;
   CIntrinsic* intrins = lj_intrinsic_get(cts, ctype_get(cts, id)->size);
-  
+
   if (tvistab(L->base+1)) {
     int count = parse_templateins(L, tabV(L->base+1), intrins);
 
@@ -661,7 +661,7 @@ int lj_intrinsic_create(lua_State *L)
       asmsz > (MSize)(L2J(L)->param[JIT_P_sizemcode] << 10)) {
       lj_err_callermsg(L, "bad code size");
     }
-    intrinsmc = lj_intrinsic_buildwrap(L, intrins, intrinsmc, asmsz, 
+    intrinsmc = lj_intrinsic_buildwrap(L, intrins, intrinsmc, asmsz,
                                        intrin_getmodrset(cts, intrins));
   }
 
@@ -704,7 +704,7 @@ static int inferreg(CTState *cts, CType *ct) {
   } else if (ctype_isvector(ct->info)) {
     CType *vtype;
   vec:
-    vtype = ctype_raw(cts, ctype_cid(ct->info));    
+    vtype = ctype_raw(cts, ctype_cid(ct->info));
     if (ctype_typeid(cts, vtype) < CTID_BOOL || ctype_typeid(cts, vtype) > CTID_DOUBLE ||
        (ct->size != 16 && ct->size != 32)) {
       return -1;
@@ -717,7 +717,7 @@ static int inferreg(CTState *cts, CType *ct) {
       kind = REGKIND_V128;
       rid = RID_DYN_FPR;
     }
-    
+
   } else {
     lua_assert(ctype_iscomplex(ct->info));
     return -1;
@@ -750,7 +750,7 @@ GCcdata *lj_intrinsic_createffi(CTState *cts, CType *func)
                                               intrin_oplen(intrins), mod);
   } else {
     intrins->wrapped = lj_intrinsic_buildwrap(cts->L, intrins, NULL, 0, mod);
-  }   
+  }
 
   cd = lj_cdata_new(cts, id, CTSIZE_PTR);
   *(void **)cdataptr(cd) = intrins->wrapped;
@@ -770,7 +770,7 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
   CIntrinsic _intrins;
   CIntrinsic* intrins = &_intrins;
   memset(intrins, 0, sizeof(CIntrinsic));
-  
+
   opcode = parse_opstr(L, opstr, intrins, &buildflags);
 
   if (!opcode && !(buildflags & INTRINSFLAG_TEMPLATE)) {
@@ -807,7 +807,7 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
         return 0;
       }
     }
-  } 
+  }
 
   if (retid != CTID_VOID) {
     CType *ct = ctype_get(cts, retid);
@@ -841,14 +841,14 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
   /* If were a template theres no opcode to set */
   if (opcode) {
     setopcode(L, intrins, opcode);
-  } 
+  }
 
-  if (intrin_iscomm(intrins) && 
+  if (intrin_iscomm(intrins) &&
       (intrins->insz < 2 || intrins->in[0] != intrins->in[1])) {
-    lj_err_callerv(L, LJ_ERR_FFI_BADOPSTR, strdata(opstr), 
+    lj_err_callerv(L, LJ_ERR_FFI_BADOPSTR, strdata(opstr),
                    "bad registers for commutative mode");
   }
-  
+
   if (intrin_regmode(intrins) == DYNREG_FIXED) {
     /* dyninsz is overlapped by input registers 6/7/8 */
     if ((intrins->insz < 6 && intrins->dyninsz > 0) || dynout) {
@@ -865,7 +865,7 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
       intrin_setregmode(intrins, DYNREG_INOUT);
     } else if(intrins->dyninsz == 2){
       intrin_setregmode(intrins, DYNREG_TWOIN);
-    } else if (intrins->dyninsz == 0 || intrins->outsz == 0 || 
+    } else if (intrins->dyninsz == 0 || intrins->outsz == 0 ||
                !reg_isdyn(intrins->out[0])) {
       return 0;
     }
@@ -880,7 +880,7 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
     if (intrins->dyninsz != 1)
       return 0;
   }
-  
+
   /* Swap the registers from there declared order to match how there
   ** processed
   */
@@ -891,7 +891,7 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
 
   if (intrins->flags & INTRINSFLAG_VEX) {
     int vex_w = 0;
-  
+
     /* Set the VEX.W/E bit if the X flag is set */
     if (intrins->flags & INTRINSFLAG_REXW) {
       vex_w = 1;
@@ -925,7 +925,7 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
 
   if (intrins->flags & INTRINSFLAG_PREFIX) {
     intrins->prefix = (uint8_t)imm;
-    /* Prefix value should be declared before an immediate value in the 
+    /* Prefix value should be declared before an immediate value in the
     ** __mcode definition the second number declared is shifted right when
     ** packed in the ctype.
     */
@@ -943,9 +943,9 @@ int lj_intrinsic_fromcdef(lua_State *L, CTypeID fid, GCstr *opstr, uint32_t imm)
 }
 
 /* Pre-create cdata for any output values that need boxing the wrapper will directly
- * save the values into the cdata 
+ * save the values into the cdata
  */
-static void *setup_results(lua_State *L, CIntrinsic *intrins, CTypeID id) 
+static void *setup_results(lua_State *L, CIntrinsic *intrins, CTypeID id)
 {
   MSize i;
   CTState *cts = ctype_cts(L);
@@ -1008,9 +1008,9 @@ int lj_intrinsic_call(CTState *cts, CType *ct)
 
   /* Check for wrong number of arguments passed in. */
   if (narg < intrins->insz || narg > intrins->insz) {
-    lj_err_caller(L, LJ_ERR_FFI_NUMARG);  
+    lj_err_caller(L, LJ_ERR_FFI_NUMARG);
   }
-    
+
   /* Walk through all passed arguments. */
   for (o = L->base+1, narg = 0; narg < intrins->insz; o++, narg++) {
     CType *ctf = ctype_get(cts, fid);

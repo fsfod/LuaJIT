@@ -80,7 +80,7 @@ uint32_t sse2vex(uint32_t op, uint32_t len, uint32_t vex_w)
     vo = VEX_OP2(vo, pp);
   } else {
     vo = VEX_OP3(vo, pp, mode);
-    if(vex_w) 
+    if(vex_w)
       vo |= VEX_64;
   }
   return vo;
@@ -677,7 +677,7 @@ static void emit_addptr(ASMState *as, Reg r, int32_t ofs)
 #define CONTEXTSPILL (0)
 
 
-static MCode* emit_intrins(ASMState *as, CIntrinsic *intrins, Reg r1, 
+static MCode* emit_intrins(ASMState *as, CIntrinsic *intrins, Reg r1,
                            uintptr_t r2, Reg r3)
 {
   uint32_t regmode = intrin_regmode(intrins);
@@ -712,7 +712,7 @@ static MCode* emit_intrins(ASMState *as, CIntrinsic *intrins, Reg r1,
       x86Op op = intrins->opcode;
       if (r3 != RID_NONE) {
         op = VEXOP_SETVVVV(op, r3);
-      } 
+      }
       emit_mrm(as, op, (Reg)r2, r1);
     } else {
       emit_mrm(as, intrins->opcode, (Reg)r2, r1);
@@ -824,13 +824,13 @@ static void emit_epilogue(ASMState *as, int spadj, RegSet modregs, int32_t ret)
     emit_pop(as, RID_EBP);
   /* Save volatile registers after requested stack space */
   offset = spadj;
-  
+
   spadj = alignsp(spadj, savereg);
 
   if (spadj != 0) {
     emit_spsub(as, -spadj);
   }
- 
+
   as->mcp -= 4;
   *(int32_t *)as->mcp = ret;
   *--as->mcp = XI_MOVri + RID_RET;
@@ -860,8 +860,8 @@ static void emit_epilogue(ASMState *as, int spadj, RegSet modregs, int32_t ret)
 #endif
 }
 
-/* Trys to pick free register from the scratch or modified set first 
- * before resorting to register that will need tobe saved. 
+/* Trys to pick free register from the scratch or modified set first
+ * before resorting to register that will need tobe saved.
  */
 static Reg intrinsic_scratch(ASMState *as, RegSet allow)
 {
@@ -870,12 +870,12 @@ static Reg intrinsic_scratch(ASMState *as, RegSet allow)
 
   if (!pick) {
     pick = as->freeset & allow;
-    
+
     if (pick == 0) {
       /* No free registers */
       lj_trace_err(as->J, LJ_TRERR_BADRA);
     }
-    
+
     r = rset_pickbot(pick);
     as->modset |= RID2RSET(r);
   } else {
@@ -1020,7 +1020,7 @@ void emit_dyntemplate(ASMState *as, CIntrinsic *intrins, uint8_t *reglut, AsmEnt
     if (rset_test(inset, rin) && 1) {
 
     } else {
-      
+
     }
 
     emit_intrins(as, op, reglut[rin], reglut[rout], r3);
