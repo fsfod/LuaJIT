@@ -60,7 +60,7 @@ static LJ_AINLINE MSize print_arenacreated(void* msgptr)
 {
   MSG_arenacreated *msg = (MSG_arenacreated *)msgptr;
   lua_assert(((uint8_t)msg->msgid) == MSGID_arenacreated);
-  printf("arenacreated: arenaid %u, address %p, time %ull, totalmem %u, flags %i\n", ((msg->msgid >> 8) & 0xfff), (uintptr_t)msg->address.ptr32, msg->time, msg->totalmem, msg->flags);
+  printf("arenacreated: arenaid %u, address 0x%llx, time %llu, totalmem %u, flags %i\n", ((msg->msgid >> 8) & 0xfff), (uintptr_t)msg->address.ptr32, msg->time, msg->totalmem, msg->flags);
   return 22;
 }
 
@@ -160,7 +160,7 @@ static LJ_AINLINE MSize print_section(void* msgptr)
 {
   MSG_section *msg = (MSG_section *)msgptr;
   lua_assert(((uint8_t)msg->msgid) == MSGID_section);
-  printf("section: id %s, time %ull, start %u\n", sections_names[((msg->msgid >> 8) & 0x7fffff)], msg->time, ((msg->msgid >> 31) & 0x1));
+  printf("section: id %s, time %llu, start %u\n", sections_names[((msg->msgid >> 8) & 0x7fffff)], msg->time, ((msg->msgid >> 31) & 0x1));
   return 12;
 }
 
@@ -193,7 +193,7 @@ static LJ_AINLINE MSize print_stringmarker(void* msgptr)
 {
   MSG_stringmarker *msg = (MSG_stringmarker *)msgptr;
   lua_assert(((uint8_t)msg->msgid) == MSGID_stringmarker);
-  printf("stringmarker: flags %u, size %u, label %s, time %ull\n", ((msg->msgid >> 8) & 0xffff), msg->size, (const char*)(msg+1), msg->time);
+  printf("stringmarker: flags %u, size %u, label %s, time %llu\n", ((msg->msgid >> 8) & 0xffff), msg->size, (const char*)(msg+1), msg->time);
   return msg->size;
 }
 
@@ -263,7 +263,7 @@ static LJ_AINLINE MSize print_gcstate(void* msgptr)
 {
   MSG_gcstate *msg = (MSG_gcstate *)msgptr;
   lua_assert(((uint8_t)msg->msgid) == MSGID_gcstate);
-  printf("gcstate: state %u, prevstate %u, totalmem %u, hugemem %u, strnum %u, time %ull\n", ((msg->msgid >> 8) & 0xff), ((msg->msgid >> 16) & 0xff), msg->totalmem, msg->hugemem, msg->strnum, msg->time);
+  printf("gcstate: state %u, prevstate %u, totalmem %u, hugemem %u, strnum %u, time %llu\n", ((msg->msgid >> 8) & 0xff), ((msg->msgid >> 16) & 0xff), msg->totalmem, msg->hugemem, msg->strnum, msg->time);
   return 24;
 }
 
@@ -292,7 +292,7 @@ static LJ_AINLINE MSize print_gcobj(void* msgptr)
 {
   MSG_gcobj *msg = (MSG_gcobj *)msgptr;
   lua_assert(((uint8_t)msg->msgid) == MSGID_gcobj);
-  printf("gcobj: kind %u, size %u, address %p\n", ((msg->msgid >> 8) & 0xf), ((msg->msgid >> 12) & 0xfffff), (uintptr_t)msg->address.gcptr32);
+  printf("gcobj: kind %u, size %u, address 0x%llx\n", ((msg->msgid >> 8) & 0xf), ((msg->msgid >> 12) & 0xfffff), (uintptr_t)msg->address.gcptr32);
   return 8;
 }
 
@@ -364,7 +364,7 @@ static LJ_AINLINE MSize print_arenaactive(void* msgptr)
 {
   MSG_arenaactive *msg = (MSG_arenaactive *)msgptr;
   lua_assert(((uint8_t)msg->msgid) == MSGID_arenaactive);
-  printf("arenaactive: arenaid %u, celltop %i, flags %i, time %ull\n", ((msg->msgid >> 8) & 0xfff), msg->celltop, msg->flags, msg->time);
+  printf("arenaactive: arenaid %u, celltop %i, flags %i, time %llu\n", ((msg->msgid >> 8) & 0xfff), msg->celltop, msg->flags, msg->time);
   return 16;
 }
 

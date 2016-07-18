@@ -130,11 +130,11 @@ local numtypes = {
   MSize = "uint32_t",
   bitfield = "uint32_t",
   bool = "uint32_t",
-  timestamp = {size = 64, signed = false,  printf = "%ull", c = "uint64_t", cs = "ulong", customwrite = true, noarg = true},
+  timestamp = {size = 64, signed = false,  printf = "%llu", c = "uint64_t", cs = "ulong", customwrite = true, noarg = true},
   smallticks = {size = 32, signed = false,  printf = "%u", c = "uint32_t", cs = "uint", argtype = "uint64_t"},
 
-  GCRef = {size = 32, signed = false, c = "GCRef", printf = "%p", ref = "gcptr32"},
-  MRef  = {size = 32, signed = false, c = "MRef", printf = "%p", ref = "ptr32", customwrite = true, argtype = "ptr"},
+  GCRef = {size = 32, signed = false, c = "GCRef", printf = "0x%llx", ref = "gcptr32"},
+  MRef  = {size = 32, signed = false, c = "MRef", printf = "0x%llx", ref = "ptr32", customwrite = true, argtype = "ptr"},
   ptr   = {size = 32, signed = false, c = "void *", ref = true},
 
   string = {vsize = true, signed = false, printf = "%s", ctype = "void*", string = true, vsize = true, c = "uint64_t", cs = "string",  argtype = "const char *", customwrite = true},

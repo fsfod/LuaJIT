@@ -113,7 +113,7 @@ void printtickms(uint64_t time)
 void timers_print(const char *name, uint64_t time)
 {
   double t = ((double)time)/(tscfrequency/1000);
-  printf("took %.4g ms(%ull)", name, t, time);
+  printf("%s took %.4g ms(%llu)", name, t, time);
 }
 
 uint64_t secstart[Section_MAX] = { 0 };
@@ -143,7 +143,7 @@ void printsectotals()
 void perflog_print(int printlevel)
 {
   char* pos = sbufB(&eventbuf);
-  uint64_t steptime = 0;/* Acculated step time for current GC state */
+  uint64_t steptime = 0;/* Accumulated step time for current GC state */
   uint64_t laststatets = 0;
   FILE* dumpfile = fopen("gcstats.csv", "a+");
   uint64_t sweeptotal = 0;
@@ -218,7 +218,7 @@ void perflog_print(int printlevel)
           fprintf(dumpfile, "\n\n@%s - %llu", (const char*)(msg+1), msg->time);
         }
         if (printlevel > 0) {
-          printf("stringmarker: flags %u, size %u, label %s, time %ull\n", ((msg->msgid >> 8) & 0xffff), msg->size, (const char*)(msg+1), msg->time);
+          printf("stringmarker: %s, time %llu, flags %u\n", (const char*)(msg+1), msg->time,  stringmarkermsg_flags(msg));
         }
         pos += msg->size;
         break;
