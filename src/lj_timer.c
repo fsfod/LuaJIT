@@ -87,6 +87,19 @@ int perf_getcounters(lua_State *L)
   return 1;
 }
 
+int perf_gettimers(lua_State *L)
+{
+  GCtab *t = lj_tab_new(L, 0, Timer_MAX*2);
+  settabV(L, L->top++, t);
+
+  for (MSize i = 0; i < Timer_MAX; i++) {
+    TValue *tv = lj_tab_setstr(L, t, lj_str_newz(L, timers_names[i]));
+    setnumV(tv, (double)timertotals[i]);
+  }
+
+  return 1;
+}
+
 void perf_printcounters()
 {
   int seenfirst = 0;
@@ -118,7 +131,7 @@ void timers_print(const char *name, uint64_t time)
 
 uint64_t secstart[Section_MAX] = { 0 };
 uint64_t sectotal[Section_MAX] = { 0 };
-uint64_t timertotal[Timer_MAX] = { 0 };
+uint64_t timertotals[Timer_MAX] = { 0 };
 uint64_t laststatets = 0;
 uint64_t statetime[GCSfinalize+1] = { 0 };
 
@@ -131,7 +144,7 @@ void printsectotals()
 
   for (MSize i = 0; i < Timer_MAX; i++) {
     printf("Timer %s total ", timers_names[i]);
-    printtickms(timertotal[i]);
+    printtickms(timertotals[i]);
   }
 
   for (MSize i = 0; i < 6; i++) {
@@ -236,7 +249,7 @@ void perflog_print(int printlevel)
       case MSGID_time: {
         MSG_time *msg = (MSG_time *)pos;
         uint32_t id = timemsg_id(msg);
-        timertotal[id] += msg->time;
+        timertotals[id] += msg->time;
         pos += sizeof(MSG_time);
         break;
       }

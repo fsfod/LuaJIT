@@ -41,7 +41,7 @@ void perf_resetcounters();
 
 #define TimerEnd(evtname) \
   evtname##_end = __rdtsc(); \
-  log_time(Timer_##evtname, (uint32_t)(evtname##_end-evtname##_start), 0)
+  timertotals[Timer_##evtname] += evtname##_end-evtname##_start
 #else
 #define TimerStart(name)
 #define TimerEnd(name)
@@ -53,7 +53,8 @@ void perf_resetcounters();
 #define Section_Start(name) log_section(Section_##name, 1)
 #define Section_End(name) log_section(Section_##name, 0)
 
-static uint32_t timercounters[256];
+
+static uint64_t timers[256];
 
 typedef struct MSG_CellList {
   uint32_t arena;
@@ -81,6 +82,8 @@ void LJ_AINLINE *celllist_end(uint32_t cellcount)
 #define PerfCounter(name) perf_counter[Counter_##name]++
 
 #include "timerdef.h"
+
+extern uint64_t timertotals[Timer_MAX];
 
 #else
 
