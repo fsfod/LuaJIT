@@ -70,6 +70,8 @@ void TraceGC(global_State *g, int newstate);
 #define gc_markgct(g, o, gct) \
   { if (gc_ishugeblock(o) || arenaobj_iswhite(obj2gco(o))) gc_mark(g, obj2gco(o), gct); }
 
+#define gc_markthread(g, o, gct)  gc_markgct(g, o, ~LJ_TTHREAD)
+
 #define gc_mark_tab(g, o) \
   { if (arenaobj_iswhite(obj2gco(o))) gc_mark(g, obj2gco(o), ~LJ_TTAB); }
 
@@ -133,9 +135,9 @@ static void gc_mark_start(global_State *g)
     arenaobj_towhite(obj2gco(mainthread(g)));
   }
 
-  gc_markobj(g, &G2GG(g)->L);
+  gc_markthread(g, &G2GG(g)->L);
   gc_mark_str(g, &g->strempty);
-  gc_markobj(g, mainthread(g));
+  gc_markthread(g, mainthread(g));
   gc_mark_tab(g, tabref(mainthread(g)->env));
   gc_marktv(g, &g->registrytv);
   gc_mark_gcroot(g);
@@ -207,12 +209,11 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
   int weak = 0;
   cTValue *mode;
   GCtab *mt = tabref(t->metatable);
-  cleargray(obj2gco(t));
   PerfCounter(gc_traverse_tab);
   if (mt)
     gc_mark_tab(g, mt);
   mode = lj_meta_fastg(g, mt, MM_mode);
-  if (mode && tvisstr(mode)) {  /* Valid __mode field? */
+  if (mode && tvisstr(mode) && 0) {  /* Valid __mode field? */
     const char *modestr = strVdata(mode);
     int c;
     while ((c = *modestr++)) {
@@ -222,19 +223,33 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
     }
     if (weak > 0) {  /* Weak tables are cleared in the atomic phase. */
       t->marked = (uint8_t)((t->marked & ~LJ_GC_WEAK) | weak);
-      //FIXME: weaktables setgcrefr(t->gclist, g->gc.weak);
-      //setgcref(g->gc.weak, obj2gco(t));
     }
   }
+  if (t->asize && !hascolo_array(t))
+    arena_markgcvec(g, arrayslot(t, 0), t->asize * sizeof(TValue));
   if (weak == LJ_GC_WEAK)  /* Nothing to mark if both keys/values are weak. */
     return 1;
   if (!(weak & LJ_GC_WEAKVAL)) {  /* Mark array part. */
     MSize i, asize = t->asize;
-    for (i = 0; i < asize; i++)
-      gc_marktv(g, arrayslot(t, i));
+    for (i = 0; i < asize; i++) {
+      TValue *tv = arrayslot(t, i);
+      //gc_marktv(g, arrayslot(t, i));
+
+      if (tvisgcv(tv) && (gc_ishugeblock(gcV(tv)) || arenaobj_iswhite(gcV(tv)))) {
+        if (!gc_ishugeblock(gcV(tv)) && (itype(tv) == LJ_TSTR || itype(tv) == LJ_TCDATA ||
+                                         itype(tv) == LJ_TFUNC || itype(tv) == LJ_TTAB)) {
+          PerfCounter(gc_mark);
+          arenaobj_markgct(g, gcV(tv), ~itype(tv));
+        } else {
+          gc_mark(g, gcV(tv), ~itype(tv));
+        }
+      }
+    }
   }
-  if (t->asize && !hascolo_array(t))
-    arena_markgcvec(g, arrayslot(t, 0), t->asize * sizeof(TValue));
+  if (weak == 0) {
+    cleargray(t);
+  }
+
   if (t->hmask > 0) {  /* Mark hash part. */
     Node *node = noderef(t->node);
     MSize i, hmask = t->hmask;
@@ -352,15 +367,14 @@ static void gc_traverse_thread(global_State *g, lua_State *th)
 GCSize gc_traverse(global_State *g, GCobj *o)
 {
   int gct = o->gch.gct;
-
   if (LJ_LIKELY(gct == ~LJ_TTAB)) {
     GCtab *t = gco2tab(o);
-    TimerStart(gc_traverse_tab);
+    //TimerStart(gc_traverse_tab);
     if (gc_traverse_tab(g, t) > 0) {
      // lua_assert(0);
       //black2gray(o);  /* Keep weak tables gray. */
     }
-    TimerEnd(gc_traverse_tab);
+   // TimerEnd(gc_traverse_tab);
     return sizeof(GCtab) + sizeof(TValue) * t->asize +
 			   sizeof(Node) * (t->hmask + 1);
   } else if (LJ_LIKELY(gct == ~LJ_TFUNC)) {
@@ -525,6 +539,7 @@ static GCSize propagate_arenagrays(global_State *g, GCArena *arena, int limit, M
   if (mref(arena->greytop, GCCellID1) == NULL) {
     return 0;
   }
+  PerfCounter(propagate_queues);
 
   for (; *mref(arena->greytop, GCCellID1) != 0;) {
     GCCellID1 *top = mref(arena->greytop, GCCellID1);
@@ -532,7 +547,9 @@ static GCSize propagate_arenagrays(global_State *g, GCArena *arena, int limit, M
     MSize gct = arena_cell(arena, cellid)->gct;
     lua_assert(cellid >= MinCellId && cellid < MaxCellId);
     lua_assert(arena_cellstate(arena, cellid) == CellState_Black);
+
     setmref(arena->greytop, top+1);
+    _mm_prefetch((char *)(arena->cells + *(top)), _MM_HINT_T0);
     total += gc_traverse(g, arena_cellobj(arena, cellid));
 
     if (gct == ~LJ_TTAB && (arena_cell(arena, cellid)->marked & LJ_GC_WEAK)) {
@@ -871,13 +888,14 @@ GCArena* lj_gc_newarena(lua_State *L, uint32_t flags)
 {
   GCArena *arena = arena_create(L, flags);
   MSize id = register_arena(L, arena, flags);
+  global_State *g = G(L);
   /* If the GC is propagating make sure to add the arena to the grey queue since
   ** objects created in it could ref objects in other arenas
   */
-  if ((flags & ArenaFlag_TravObjs) && (G(L)->gc.state & 1)) {
-    pqueue_insert(L, &G(L)->gc.greypq, arena);
+  if ((flags & ArenaFlag_TravObjs) && (g->gc.state & 1)) {
+    pqueue_insert(L, &g->gc.greypq, arena);
   }
-  log_arenacreated(id, arena, flags);
+  log_arenacreated(id, arena,  g->gc.total, flags);
   GCDEBUG("Arena %d created\n", id);
   return arena;
 }
@@ -1040,7 +1058,7 @@ static void atomic(global_State *g, lua_State *L)
 
   /* Empty the list of weak tables. */
   lua_assert(!iswhite(g, obj2gco(mainthread(g))));
-  gc_markobj(g, L);  /* Mark running thread. */
+  gc_markthread(g, L);  /* Mark running thread. */
   gc_traverse_curtrace(g);  /* Traverse current trace. */
   gc_mark_gcroot(g);  /* Mark GC roots (again). */
   gc_propagate_gray(g);  /* Propagate all of the above. */
@@ -1228,8 +1246,8 @@ static size_t gc_onestep(lua_State *L)
     if (tvref(g->jit_base))  /* Don't run atomic phase on trace. */
       return LJ_MAX_MEM;
     atomic(g, L);
+    gc_sweepstart(g);
     SetGCState(g, GCSsweepstring);/* Start of sweep phase. */
-    gc_sweepstart(g); 
     return 0;
   case GCSsweepstring: {
     GCSize old = g->gc.total;
@@ -1375,7 +1393,7 @@ void lj_gc_fullgc(lua_State *L)
       gc_onestep(L);  /* Finish sweep. */
   }
 
-  if (!g->gc.isminor) {
+  if (0) {
     g->gc.isminor = 3;
   }
 

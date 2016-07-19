@@ -23,25 +23,26 @@ local mindepth = 4
 local maxdepth = mindepth + 2
 if maxdepth < N then maxdepth = N end
 
+perfmarker("stretch tree:")
 do
   local stretchdepth = maxdepth + 1
   local stretchtree = BottomUpTree(0, stretchdepth)
-  collectgarbage()
   io.write(string.format("stretch tree of depth %d\t check: %d\n",
     stretchdepth, ItemCheck(stretchtree)))
-  collectgarbage()
 end
 
 local longlivedtree = BottomUpTree(0, maxdepth)
-collectgarbage()
+
+perfmarker("test depths:")
+
 for depth=mindepth,maxdepth,2 do
   local iterations = 2 ^ (maxdepth - depth + mindepth)
   local check = 0
-  for i=1,iterations do
+  for i=1,4 do
     local tree1 = BottomUpTree(1, depth)
     local tree2 = BottomUpTree(-1, depth)
     check = check + ItemCheck(tree1) + ItemCheck(tree2)
-     
+    tree1, tree2 = nil, nil
   end
   io.write(string.format("%d\t trees of depth %d\t check: %d\n",
     iterations*2, depth, check))
@@ -49,3 +50,4 @@ end
 
 io.write(string.format("long lived tree of depth %d\t check: %d\n",
   maxdepth, ItemCheck(longlivedtree)))
+collectgarbage()

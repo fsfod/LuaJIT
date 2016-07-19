@@ -227,7 +227,7 @@ static TValue *cpfinalize(lua_State *L, lua_CFunction dummy, void *ud)
 {
   UNUSED(dummy);
   UNUSED(ud);
-  lj_gc_finalize_cdata(L);
+  //lj_gc_finalize_cdata(L);
  // lj_gc_finalize_udata(L);
   /* Frame pop omitted. */
   return NULL;
@@ -277,6 +277,7 @@ lua_State *lj_state_new(lua_State *L)
   setgcrefnull(L1->openupval);
   setmrefr(L1->glref, L->glref);
   setgcrefr(L1->env, L->env);
+  arena_adddefermark(L, ptr2arena(L1), L1);
   stack_init(L1, L);  /* init stack */
   return L1;
 }

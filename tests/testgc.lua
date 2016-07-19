@@ -33,25 +33,11 @@ end
 local curarena = collectgarbage
 
 printmem(curarena)
---[[
-arena = createarena()
-setarena(arena)
-
-dofile("J:/LuaJITTests/bench/binary-trees.lua")
-
-printmem(arena)
-
-printmem(curarena)
-]]
-
---collectgarbage()
---collectgarbage()
-
 
 local benchlist = {
 --  "array3d.lua",
-  "binary-trees.lua",
-  "cdata_array.lua",
+  "binary-trees",
+  "cdata_array",
  -- "chameneos.lua",
 --  "coroutine-ring.lua",
 --  "euler14-bit.lua",
@@ -86,18 +72,27 @@ local benchlist = {
 
 }
 
+collectgarbage()
+collectgarbage("stop")
+
+--require("jit").off()
 
 for i, name in pairs(benchlist) do
   print("Starting ", name)
   --arena = createarena()
   --setarena(arena)
-  arg = {16}
-  dofile("bench/"..name)
+  arg = {19}
+  local chunk = loadfile("bench/"..name.. ".lua")
+  collectgarbage()
+  perfmarker("@test_start " .. name)
+  chunk()
+  perfmarker("@test_end " .. name)
   --printmem("")
   --printmem({})
   arena = nil
   jit.flush()
   collectgarbage()
+  collectgarbage("stop")
 end
 
 

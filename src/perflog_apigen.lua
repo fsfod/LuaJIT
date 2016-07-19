@@ -120,8 +120,8 @@ local numtypes = {
   uint32_t = {size = 32, signed = false,  printf = "%u", c = "uint32_t", cs = "uint"},
   GCSize = {size = 32, signed = false,  printf = "%u", c = "GCSize", cs = "uint"},
 
-  int64_t  = {size = 64, signed = true,   printf = "%ill", c = "int64_t",  cs = "long"},
-  uint64_t = {size = 64, signed = false,  printf = "%ull", c = "uint64_t", cs = "ulong"},
+  int64_t  = {size = 64, signed = true,   printf = "%lli", c = "int64_t",  cs = "long"},
+  uint64_t = {size = 64, signed = false,  printf = "%llu", c = "uint64_t", cs = "ulong"},
 
   i8  = "int8_t",  u8  = "uint8_t",
   i16 = "int16_t", u16 = "uint16_t",
@@ -170,6 +170,18 @@ local function joinlist(list, prefix, suffix)
   prefix = prefix or ""
   suffix = suffix or ""
   return prefix .. table.concat(list, suffix .. prefix) .. suffix
+end
+
+function mergetables(dest, src)
+  for k, v in pairs(src) do  
+    if type(v) == "table" and dest[k] ~= nil then
+      mergetable(dest[k], v)
+    else
+      dest[k] = v
+    end
+  end
+  
+  return dest
 end
 
 function write(s)

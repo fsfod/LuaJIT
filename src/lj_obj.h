@@ -575,6 +575,10 @@ typedef enum {
 #define basemt_obj(g, o)	((g)->gcroot[GCROOT_BASEMT+itypemap(o)])
 #define mmname_str(g, mm)	(strref((g)->gcroot[GCROOT_MMNAME+(mm)]))
 
+typedef enum {
+  GCFLAG_TOMINOR,
+} GCFlag;
+
 typedef struct PQueue {
   MSize size;
   MSize count;
@@ -590,7 +594,7 @@ typedef struct GCState {
       uint8_t state;	/* GC state. */
       uint8_t isminor;      /* Current GC cycle is a minor collection. */
       uint8_t nocdatafin;	/* No cdata finalizer called. */
-      uint8_t unused1;
+      uint8_t stateflags;
     };
     uint32_t statebits;
   };

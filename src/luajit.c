@@ -23,6 +23,7 @@
 #include <unistd.h>
 #define lua_stdin_is_tty()	isatty(0)
 #elif LJ_TARGET_WINDOWS
+#include <Windows.h>
 #include <io.h>
 #ifdef __BORLANDC__
 #define lua_stdin_is_tty()	isatty(_fileno(stdin))
@@ -555,6 +556,7 @@ static int pmain(lua_State *L)
 int main(int argc, char **argv)
 {
   int status;
+  SetProcessAffinityMask(GetCurrentProcess(), 8);
   lua_State *L = lua_open();  /* create state */
   if (L == NULL) {
     l_message(argv[0], "cannot create state: not enough memory");

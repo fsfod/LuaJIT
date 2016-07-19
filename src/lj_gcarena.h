@@ -22,8 +22,10 @@ enum {
   BlocksetBits = 32,
   BlocksetMask = BlocksetBits - 1,
   UnusedBlockWords = MinCellId / BlocksetBits,
+  MinMarkWord = UnusedBlockWords,
+  MaxMarkWord = ((ArenaMetadataSize/2) / (BlocksetBits /8)),
   MinBlockWord = UnusedBlockWords,
-  MaxBlockWord = ((ArenaMetadataSize/2) / (BlocksetBits /8)),
+  MaxBlockWord = MaxMarkWord,
 
   MaxBinSize = 8,
 };
@@ -156,6 +158,7 @@ typedef struct ArenaFreeList {
   uint16_t freecells;
   uint16_t freeobjcount;
   CellIdChunk *finalizbles;
+  CellIdChunk *defermark;
 } ArenaFreeList;
 
 typedef struct FreeChunk {
@@ -219,6 +222,7 @@ void arena_destroyGG(global_State *g, GCArena* arena);
 void arena_creategreystack(lua_State *L, GCArena *arena);
 void arena_growgreystack(global_State *L, GCArena *arena);
 void arean_setfixed(lua_State *L, GCArena *arena, GCobj *o);
+void arena_adddefermark(lua_State *L, GCArena *arena, GCobj *o);
 
 void *hugeblock_alloc(lua_State *L, GCSize size, MSize gct);
 void hugeblock_free(global_State *g, void *o, GCSize size);
@@ -320,7 +324,14 @@ static LJ_AINLINE int arenaobj_iswhite(void* o)
   GCCellID cell = ptr2cell(o);
   arena_checkid(cell);
   lua_assert(!gc_ishugeblock(o));
+#if 0
+  MSize blockofs = ((((uintptr_t)o) >> 7) & 0x1FFC);
+  GCBlockword word = *(GCBlockword*)(((char*)arena)+blockofs);
+
+  return (word & (1 << arena_blockbitidx(cell))) == 0;;
+#else
   return !((arena_getmark(arena, cell) >> arena_blockbitidx(cell)) & 1);
+#endif
 }
 
 GCBlockword* arenaobj_blockword(void* o);
@@ -438,9 +449,12 @@ static LJ_AINLINE void arenaobj_markcdstr(void* o)
 {
   GCArena *arena = ptr2arena(o);
   GCCellID cell = ptr2cell(o);
+  MSize blockofs = ((((uintptr_t)o) >> 7) & 0x1FFC);
   lua_assert(arena_cellisallocated(arena, cell));
   lua_assert(((GCCell*)o)->gct == ~LJ_TSTR || ((GCCell*)o)->gct == ~LJ_TCDATA ||
              ((GCCell*)o)->gct == ~LJ_TUDATA);
+
+  //*(GCBlockword*)(((char*)arena)+blockofs) |= arena_blockbit(cell);
 
   arena_markcell(arena, cell);
 }

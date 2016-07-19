@@ -180,6 +180,22 @@ void checkarenas(global_State *g) {
   }
 }
 
+void check_arenamemused(global_State *g)
+{
+  GCSize atotal = 0;
+
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+    ArenaFlags flags = lj_gc_arenaflags(g, i);
+
+    if (!(flags & ArenaFlag_Empty)) {
+      atotal += arena_totalobjmem(arena);
+    }
+  }
+
+  gc_assert(atotal < (g->gc.total - g->gc.hugemem));
+}
+
 MSize GCCount = 0;
 const char *getgcsname(int gcs);
 int prevcelllen = 0;
@@ -211,16 +227,11 @@ void TraceGC(global_State *g, int newstate)
 
   if (newstate == GCSpropagate) {
     //perflog_print();
-    printf("---------------GC Start %d----------Total %dKb------Threshold %dKb---------\n", GCCount, g->gc.total/1024, g->gc.threshold/1024);
+    //printf("---------------GC Start %d----------Total %dKb------Threshold %dKb---------\n", GCCount, g->gc.total/1024, g->gc.threshold/1024);
     GCCount++;
   }
 
-  if (newstate == GCSpropagate || newstate == GCSatomic) {
-    log_markstats(perf_counter[Counter_gc_mark], perf_counter[Counter_gc_markhuge], perf_counter[Counter_gc_traverse_tab],
-                  perf_counter[Counter_gc_traverse_func], perf_counter[Counter_gc_traverse_proto], perf_counter[Counter_gc_traverse_thread],
-                  perf_counter[Counter_gc_traverse_trace]);
-    perf_resetcounters();
-  }
+
 /*
   if (GCCount >= 0) {
     int celllen = getcellextent(g, 1, 18991);
@@ -240,6 +251,8 @@ void TraceGC(global_State *g, int newstate)
   perf_printcounters();
 */
 #if defined(DEBUG) || defined(GCDEBUG)
+  check_arenamemused(g);
+
   if (g->gc.state == GCSsweep || g->gc.isminor) {
     checkarenas(g);
   }
@@ -253,7 +266,14 @@ void TraceGC(global_State *g, int newstate)
 
   printf("GC State = %s\n", getgcsname(newstate));
 #endif
+
 #ifdef LJ_ENABLESTATS
+  if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic) {
+    log_markstats(perf_counter[Counter_gc_mark], perf_counter[Counter_gc_markhuge], perf_counter[Counter_gc_traverse_tab],
+                  perf_counter[Counter_gc_traverse_func], perf_counter[Counter_gc_traverse_proto], perf_counter[Counter_gc_traverse_thread],
+                  perf_counter[Counter_gc_traverse_trace]);
+    perf_resetcounters();
+  }
   log_gcstate(norm_gcstateid(newstate), norm_gcstateid(g->gc.state), g->gc.total, g->gc.hugemem, g->strnum);
 #endif
 }
@@ -329,3 +349,32 @@ void strings_toblack(global_State *g)
     }
   }
 }
+
+void setarenas_black(global_State *g, int mode)
+{
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+    ArenaFlags flags = lj_gc_arenaflags(g, i);
+    int toblack = 0;
+
+    switch (mode) {
+      case 0:
+        toblack = 1;
+        break;
+      case 1:
+        toblack = (flags & ArenaFlag_TravObjs);
+        break;
+      case 2:
+        toblack = !(flags & ArenaFlag_TravObjs);
+        break;
+
+      default:
+        break;
+    }
+
+    if (toblack && !(flags & ArenaFlag_Empty)) {
+      arena_setrangeblack(arena, MinCellId, MaxCellId);
+    }
+  }
+}
+

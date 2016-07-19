@@ -17,6 +17,7 @@
 #define idx2bit(i)		((uint32_t)(1) << (i))
 #define bitset_range(lo, hi)	((idx2bit((hi)-(lo))-1) << (lo))
 #define left_bits(x)		(((x) << 1) | (~((x) << 1)+1))
+#define singlebitset(x) (!((x) & ((x)-1)))
 
 void assert_allocated(GCArena *arena, GCCellID cell)
 {
@@ -174,7 +175,7 @@ void arena_destroyGG(global_State *g, GCArena* arena)
   setmref(arena->freelist, NULL);
   perflog_shutdown(g);
   arena_freemem(g, arena);
-  lua_assert(g->gc.total == sizeof(GG_State));
+  //lua_assert(g->gc.total == sizeof(GG_State));
   lj_freepages(allocud, arena, ArenaSize);
 }
 
@@ -392,8 +393,8 @@ void arena_free(global_State *g, GCArena *arena, void* mem, MSize size)
   lua_assert(cell < arena_topcellid(arena) && cell >= MinCellId);
   lua_assert(arena_cellstate(arena, cell) > CellState_Allocated);
   lua_assert(numcells > 0 && (cell + numcells) < MaxCellId);
-  lua_assert(numcells == arena_cellextent(arena, cell));
- 
+  lua_assert(numcells == arena_cellextent(arena, cell) || (!(arena->extra.flags & ArenaFlag_TravObjs) && numcells < arena_cellextent(arena, cell)));
+
   arena_setfreecell(arena, cell);
 
   if (freelist && 0) {
@@ -798,17 +799,15 @@ static MSize sweep_simd(GCArena *arena, MSize start, MSize limit, int minor)
 {
   MSize i;
   __m128i count = _mm_setzero_si128();
-  __m128i *pblock = (__m128i *)(arena->block+start), *pmark = (__m128i *)(arena->mark+start);
+  __m128i *pblock = (__m128i *)(arena->block), *pmark = (__m128i *)(arena->mark);
   __m128i used = _mm_setzero_si128();
-  limit = lj_round(limit, 4);/* Max block should be a multiple of 4*/
-  pblock--;
-  pmark--;
-  for (i = start; i < limit; i += 4) {
-    pblock++;
-    pmark++;
-    //_mm_prefetch((char *)(pmark+i+4), 1);
-    __m128i block = _mm_load_si128(pblock);
-    __m128i mark = _mm_load_si128(pmark);
+  limit = lj_round(limit, 4)/4;/* Max block should be a multiple of 4*/
+  MSize blockoffset = 0;// (MinBlockWord/4);
+
+  for (i = start/4; i < limit; i += 1) {
+   // _mm_prefetch((char *)(pmark+i+4), 1);
+    __m128i block = _mm_load_si128(pblock+i-blockoffset);
+    __m128i mark = _mm_load_si128(pmark+i);
     __m128i newmark;
     /* Count whites that are swept to away */
     __m128i dead = _mm_andnot_si128(mark, block);
@@ -818,11 +817,11 @@ static MSize sweep_simd(GCArena *arena, MSize start, MSize limit, int minor)
     } else {
       newmark = _mm_or_si128(block, mark);
     }
-    _mm_store_si128(pmark, newmark);
+    _mm_store_si128(pmark+i, newmark);
     block = _mm_and_si128(block, mark);
     used = _mm_or_si128(block, used);
-    _mm_store_si128(pblock, block);
-    
+    _mm_store_si128(pblock+i - blockoffset, block);
+
     __m128i bytecount = simd_popcntbytes(dead);
 #if 0
     const __m128i lowbyte = _mm_set1_epi32(0x00ff00ff);
@@ -866,7 +865,7 @@ static MSize sweep_simd(GCArena *arena, MSize start, MSize limit, int minor)
 
 static MSize majorsweep(GCArena *arena, MSize start, MSize limit)
 {
-  MSize count = 1;
+  MSize count = 0;
   GCBlockword used = 0, prevwhite = 0;
 
   for (size_t i = start; i < limit; i++) {
@@ -974,6 +973,8 @@ MSize arena_minorsweep(GCArena *arena, MSize limit)
   MSize count = 0;
   if (limit == 0) {
     limit = min(arena_blockidx(arena_topcellid(arena))+1, MaxBlockWord);
+  } else {
+
   }
 
   lua_assert(arena_greysize(arena) == 0);
@@ -1037,6 +1038,20 @@ MSize arena_comparemeta(GCArena *arena, GCArena *meta)
   }
 
   return 0;
+}
+
+void arena_adddefermark(lua_State *L, GCArena *arena, GCobj *o)
+{
+  ArenaFreeList *freelist = arena_freelist(arena);
+  CellIdChunk *chunk = freelist->defermark;
+  lua_assert(arena_containsobj(arena, o));
+  assert_allocated(arena, ptr2cell(o));
+
+  if (LJ_UNLIKELY(!chunk)) {
+    chunk = idlist_new(L);
+  }
+
+  freelist->defermark = idlist_add(L, chunk, ptr2cell(o), o->gch.gct == ~LJ_TTAB);
 }
 
 void arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o)
@@ -1107,12 +1122,12 @@ void arena_dumpwhitecells(global_State *g, GCArena *arena)
         GCobj *cell = arena_cellobj(arena, cellid);
 
         if (count == 0) {
-          printf("Dead Cell ");
+        //  printf("Dead Cell ");
         }
-        printf("%d, ", cellid, arenaid);
+      //  printf("%d, ", cellid, arenaid);
         count++;
 
-        memset(cell, 0xff, 16);
+        memset(cell, 0, 16);
 
         /* Create a mask to remove the bits to the LSB backwards the end of the free segment */
         GCBlockword mask = ((GCBlockword)0xffffffff) << (bit+1);
@@ -1128,7 +1143,7 @@ void arena_dumpwhitecells(global_State *g, GCArena *arena)
   }
 
   if (count) {
-    printf(" in arena %d\n", arenaid);
+   // printf(" in arena %d\n", arenaid);
   }
 }
 
@@ -1209,7 +1224,7 @@ LUA_API uint32_t arenaobj_cellcount(void *o)
   GCCellID cell = arenaobj_getcellid(o);
 
   if (o == NULL || (((uintptr_t)o) & 0x7) != 0 || cell < MinCellId || cell > MaxCellId) {
-    return NULL;
+    return 0;
   }
   return arena_cellextent(arena, cell);
 }
