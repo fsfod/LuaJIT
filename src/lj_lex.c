@@ -28,13 +28,30 @@
 #include "lj_strfmt.h"
 
 /* Lua lexer token names. */
-static const char *const tokennames[] = {
-#define TKSTR1(name)		#name,
-#define TKSTR2(name, sym)	#sym,
+static const char tokennames[] = 
+#define TKSTR1(name, lenchar)	lenchar #name "\0"
+#define TKSTR2(name, sym)	"\0" #sym
 TKDEF(TKSTR1, TKSTR2)
 #undef TKSTR1
 #undef TKSTR2
-  NULL
+;
+
+enum {
+#define TKENUM1(name, lenchar)	tokenname_offset_##name, \
+  tokenname_offset_##name##_ = tokenname_offset_##name + sizeof(#name),
+#define TKENUM2(name, sym)	tokenname_offset_##name, \
+  tokenname_offset_##name##_ = tokenname_offset_##name + sizeof(#sym)-1,
+TKDEF(TKENUM1, TKENUM2)
+#undef TKENUM1
+#undef TKENUM2
+  tokenname_offset_
+};
+
+static const uint8_t tokennames_offset[] ={
+#define TKOFFSET(name, x)	(uint8_t)(1 + (int)tokenname_offset_##name),
+TKDEF(TKOFFSET, TKOFFSET)
+#undef TKOFFSET
+  0
 };
 
 /* -- Buffer handling ----------------------------------------------------- */
@@ -290,6 +307,7 @@ static LexToken lex_scan(LexState *ls, TValue *tv)
   for (;;) {
     if (lj_char_isident(ls->c)) {
       GCstr *s;
+      size_t idx;
       if (lj_char_isdigit(ls->c)) {  /* Numeric literal. */
 	lex_number(ls, tv);
 	return TK_number;
@@ -300,8 +318,9 @@ static LexToken lex_scan(LexState *ls, TValue *tv)
       } while (lj_char_isident(ls->c));
       s = lj_parse_keepstr(ls, sbufB(&ls->sb), sbuflen(&ls->sb));
       setstrV(ls->L, tv, s);
-      if (s->reserved > 0)  /* Reserved word? */
-	return TK_OFS + s->reserved;
+      idx = (size_t)((char*)s - G(ls->L)->lexstrings);
+      if (idx < sizeof(G(ls->L)->lexstrings))  /* Reserved word? */
+	return TK_RESERVED + TK_OFS - ((int)idx >> 4);
       return TK_name;
     }
     switch (ls->c) {
@@ -441,8 +460,8 @@ int lj_lex_setup(lua_State *L, LexState *ls)
 void lj_lex_cleanup(lua_State *L, LexState *ls)
 {
   global_State *g = G(L);
-  lj_mem_freevec(g, ls->bcstack, ls->sizebcstack, BCInsLine);
-  lj_mem_freevec(g, ls->vstack, ls->sizevstack, VarInfo);
+  lj_cmem_freevec(g, ls->bcstack, ls->sizebcstack, BCInsLine);
+  lj_cmem_freevec(g, ls->vstack, ls->sizevstack, VarInfo);
   lj_buf_free(g, &ls->sb);
 }
 
@@ -471,7 +490,7 @@ LexToken lj_lex_lookahead(LexState *ls)
 const char *lj_lex_token2str(LexState *ls, LexToken tok)
 {
   if (tok > TK_OFS)
-    return tokennames[tok-TK_OFS-1];
+    return tokennames + tokennames_offset[tok-TK_OFS-1];
   else if (!lj_char_iscntrl(tok))
     return lj_strfmt_pushf(ls->L, "%c", tok);
   else
@@ -499,11 +518,20 @@ void lj_lex_error(LexState *ls, LexToken tok, ErrMsg em, ...)
 /* Initialize strings for reserved words. */
 void lj_lex_init(lua_State *L)
 {
-  uint32_t i;
-  for (i = 0; i < TK_RESERVED; i++) {
-    GCstr *s = lj_str_newz(L, tokennames[i]);
-    fixstring(s);  /* Reserved words are never collected. */
-    s->reserved = (uint8_t)(i+1);
+  global_State *g = G(L);
+  const char* strs = tokennames;
+  size_t len;
+#define TKCHECK1(name, lenchar) lua_assert((size_t)(lenchar[0]) == sizeof(#name)-1);
+#define TKCHECK2(name, sym)
+TKDEF(TKCHECK1, TKCHECK2)
+#undef TKCHECK1
+#undef TKCHECK2
+  setmref(g->gc.pool[GCPOOL_LEAF].bump, g->lexstrings + LEXSTRINGS_LEN);
+  setmref(g->gc.pool[GCPOOL_LEAF].bumpbase, g->lexstrings);
+  for (; (len = (size_t)*strs); strs += 2 + len) {
+    (void)lj_str_new(L, strs + 1, len);
   }
+  lua_assert(mref(g->gc.pool[GCPOOL_LEAF].bump, char) == g->lexstrings);
+  lua_assert(mref(g->gc.pool[GCPOOL_LEAF].bumpbase, char) == g->lexstrings);
 }
 

@@ -939,8 +939,6 @@ static CTypeID cp_decl_intern(CPState *cp, CPDecl *decl)
 
 /* -- C declaration parser ------------------------------------------------ */
 
-#define H_(le, be)	LJ_ENDIAN_SELECT(0x##le, 0x##be)
-
 /* Reset declaration state to declaration specifier. */
 static void cp_decl_reset(CPDecl *decl)
 {
@@ -1069,48 +1067,50 @@ static void cp_decl_gccattribute(CPState *cp, CPDecl *decl)
     if (cp->tok == CTOK_IDENT) {
       GCstr *attrstr = cp->str;
       cp_next(cp);
-      switch (attrstr->hash) {
-      case H_(64a9208e,8ce14319): case H_(8e6331b2,95a282af):  /* aligned */
+      switch ((uintptr_t)((char*)attrstr - G(cp->L)->pinstrings) >> 4) {
+#define ATTR(x) PINSTR_OFFSET_##x >> 4: case PINSTR_OFFSET___##x##__ >> 4
+      case ATTR(aligned):
 	cp_decl_align(cp, decl);
 	break;
-      case H_(42eb47de,f0ede26c): case H_(29f48a09,cf383e0c):  /* packed */
+      case ATTR(packed):
 	decl->attr |= CTFP_PACKED;
 	break;
-      case H_(0a84eef6,8dfab04c): case H_(995cf92c,d5696591):  /* mode */
+      case ATTR(mode):
 	cp_decl_mode(cp, decl);
 	break;
-      case H_(0ab31997,2d5213fa): case H_(bf875611,200e9990):  /* vector_size */
+      case ATTR(vector_size):
 	{
 	  CTSize vsize = cp_decl_sizeattr(cp);
 	  if (vsize) CTF_INSERT(decl->attr, VSIZEP, lj_fls(vsize));
 	}
 	break;
 #if LJ_TARGET_X86
-      case H_(5ad22db8,c689b848): case H_(439150fa,65ea78cb):  /* regparm */
+      case ATTR(regparm):
 	CTF_INSERT(decl->fattr, REGPARM, cp_decl_sizeattr(cp));
 	decl->fattr |= CTFP_CCONV;
 	break;
-      case H_(18fc0b98,7ff4c074): case H_(4e62abed,0a747424):  /* cdecl */
+      case ATTR(cdecl):
 	CTF_INSERT(decl->fattr, CCONV, CTCC_CDECL);
 	decl->fattr |= CTFP_CCONV;
 	break;
-      case H_(72b2e41b,494c5a44): case H_(f2356d59,f25fc9bd):  /* thiscall */
+      case ATTR(thiscall):
 	CTF_INSERT(decl->fattr, CCONV, CTCC_THISCALL);
 	decl->fattr |= CTFP_CCONV;
 	break;
-      case H_(0d0ffc42,ab746f88): case H_(21c54ba1,7f0ca7e3):  /* fastcall */
+      case ATTR(fastcall):
 	CTF_INSERT(decl->fattr, CCONV, CTCC_FASTCALL);
 	decl->fattr |= CTFP_CCONV;
 	break;
-      case H_(ef76b040,9412e06a): case H_(de56697b,c750e6e1):  /* stdcall */
+      case ATTR(stdcall):
 	CTF_INSERT(decl->fattr, CCONV, CTCC_STDCALL);
 	decl->fattr |= CTFP_CCONV;
 	break;
-      case H_(ea78b622,f234bd8e): case H_(252ffb06,8d50f34b):  /* sseregparm */
+      case ATTR(sseregparm):
 	decl->fattr |= CTF_SSEREGPARM;
 	decl->fattr |= CTFP_CCONV;
 	break;
 #endif
+#undef ATTR
       default:  /* Skip all other attributes. */
 	goto skip_attr;
       }
@@ -1138,8 +1138,8 @@ static void cp_decl_msvcattribute(CPState *cp, CPDecl *decl)
   while (cp->tok == CTOK_IDENT) {
     GCstr *attrstr = cp->str;
     cp_next(cp);
-    switch (attrstr->hash) {
-    case H_(bc2395fa,98f267f8):  /* align */
+    switch ((uintptr_t)((char*)attrstr - G(cp->L)->pinstrings)) {
+    case PINSTR_OFFSET_align:
       cp_decl_align(cp, decl);
       break;
     default:  /* Ignore all other attributes. */
@@ -1723,21 +1723,30 @@ static CTypeID cp_decl_abstract(CPState *cp)
   return cp_decl_intern(cp, &decl);
 }
 
+#if LJ_LE
+#define fourcc(c0, c1, c2, c3) \
+  ((uint32_t)c0 | ((uint32_t)c1 << 8) | ((uint32_t)c2 << 16) | ((uint32_t)c3 << 24))
+#else
+#define fourcc(c0, c1, c2, c3) \
+  ((uint32_t)c3 | ((uint32_t)c2 << 8) | ((uint32_t)c1 << 16) | ((uint32_t)c0 << 24))
+#endif
+#define stris(s, c0, c1, c2, c3, lenx) \
+  (*(uint32_t*)strdata(s) == fourcc(c0, c1, c2, c3) && s->len == lenx)
+
 /* Handle pragmas. */
 static void cp_pragma(CPState *cp, BCLine pragmaline)
 {
   cp_next(cp);
-  if (cp->tok == CTOK_IDENT &&
-      cp->str->hash == H_(e79b999f,42ca3e85))  {  /* pack */
+  if (cp->tok == CTOK_IDENT && stris(cp->str, 'p', 'a', 'c', 'k', 4)) {
     cp_next(cp);
     cp_check(cp, '(');
     if (cp->tok == CTOK_IDENT) {
-      if (cp->str->hash == H_(738e923c,a1b65954)) {  /* push */
+      if (stris(cp->str, 'p', 'u', 's', 'h', 4)) {
 	if (cp->curpack < CPARSE_MAX_PACKSTACK) {
 	  cp->packstack[cp->curpack+1] = cp->packstack[cp->curpack];
 	  cp->curpack++;
 	}
-      } else if (cp->str->hash == H_(6c71cf27,6c71cf27)) {  /* pop */
+      } else if (stris(cp->str, 'p', 'o', 'p', 0, 3)) {
 	if (cp->curpack > 0) cp->curpack--;
       } else {
 	cp_errmsg(cp, cp->tok, LJ_ERR_XSYMBOL);
@@ -1786,13 +1795,12 @@ static void cp_decl_multi(CPState *cp)
       if (tok == CTOK_INTEGER) {
 	cp_line(cp, hashline);
 	continue;
-      } else if (tok == CTOK_IDENT &&
-		 cp->str->hash == H_(187aab88,fcb60b42)) { /* line */
+      } else if (tok == CTOK_IDENT && stris(cp->str, 'l', 'i', 'n', 'e', 4)) {
 	if (cp_next(cp) != CTOK_INTEGER) cp_err_token(cp, tok);
 	cp_line(cp, hashline);
 	continue;
       } else if (tok == CTOK_IDENT &&
-	  cp->str->hash == H_(f5e6b4f8,1d509107)) { /* pragma */
+	  stris(cp->str, 'p', 'r', 'a', 'g', /* 'm', 'a', */ 6)) {
 	cp_pragma(cp, hashline);
 	continue;
       } else {

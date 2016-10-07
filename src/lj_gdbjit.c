@@ -343,7 +343,6 @@ typedef struct GDBJITobj {
 /* Combined structure for GDB JIT entry and ELF object. */
 typedef struct GDBJITentryobj {
   GDBJITentry entry;
-  size_t sz;
   GDBJITobj obj;
 } GDBJITentryobj;
 
@@ -746,14 +745,16 @@ static void gdbjit_lock_release()
 }
 
 /* Add new entry to GDB JIT symbol chain. */
-static void gdbjit_newentry(lua_State *L, GDBJITctx *ctx)
+static void gdbjit_newentry(jit_State *J, GDBJITctx *ctx)
 {
   /* Allocate memory for GDB JIT entry and ELF object. */
+  TraceNo no;
   MSize sz = (MSize)(sizeof(GDBJITentryobj) - sizeof(GDBJITobj) + ctx->objsize);
-  GDBJITentryobj *eo = lj_mem_newt(L, sz, GDBJITentryobj);
+  GDBJITentryobj *eo = lj_mem_newt(J->L, sz, GDBJITentryobj, GCPOOL_LEAF);
   memcpy(&eo->obj, &ctx->obj, ctx->objsize);  /* Copy ELF object. */
-  eo->sz = sz;
-  ctx->T->gdbjit_entry = (void *)eo;
+  no = ctx->T->traceno;
+  lua_assert(!mrefu(J->gdbjit_entries[no]));
+  setmref(J->gdbjit_entries[no], eo);
   /* Link new entry to chain and register it. */
   eo->entry.prev_entry = NULL;
   gdbjit_lock_acquire();
@@ -790,14 +791,15 @@ void lj_gdbjit_addtrace(jit_State *J, GCtrace *T)
   else
     ctx.filename = "(string)";
   gdbjit_buildobj(&ctx);
-  gdbjit_newentry(J->L, &ctx);
+  gdbjit_newentry(J, &ctx);
 }
 
 /* Delete debug info for trace and notify GDB. */
-void lj_gdbjit_deltrace(jit_State *J, GCtrace *T)
+void lj_gdbjit_deltraceno(jit_State *J, TraceNo no)
 {
-  GDBJITentryobj *eo = (GDBJITentryobj *)T->gdbjit_entry;
+  GDBJITentryobj *eo = mref(J->gdbjit_entries[no], GDBJITentryobj);
   if (eo) {
+    setmref(J->gdbjit_entries[no], NULL);
     gdbjit_lock_acquire();
     if (eo->entry.prev_entry)
       eo->entry.prev_entry->next_entry = eo->entry.next_entry;
@@ -809,7 +811,6 @@ void lj_gdbjit_deltrace(jit_State *J, GCtrace *T)
     __jit_debug_descriptor.action_flag = GDBJIT_UNREGISTER;
     __jit_debug_register_code();
     gdbjit_lock_release();
-    lj_mem_free(J2G(J), eo, eo->sz);
   }
 }
 

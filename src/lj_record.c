@@ -1544,13 +1544,13 @@ static void rec_tsetm(jit_State *J, BCReg ra, BCReg rn, int32_t i)
 /* Check whether upvalue is immutable and ok to constify. */
 static int rec_upvalue_constify(jit_State *J, GCupval *uvp)
 {
-  if (uvp->immutable) {
+  if (uvp->uvflags & UVFLAG_IMMUTABLE) {
     cTValue *o = uvval(uvp);
     /* Don't constify objects that may retain large amounts of memory. */
 #if LJ_HASFFI
     if (tviscdata(o)) {
       GCcdata *cd = cdataV(o);
-      if (!cdataisv(cd) && !(cd->marked & LJ_GC_CDATA_FIN)) {
+      if (!(cd->gcflags & (LJ_GCFLAG_CDATA_VAR | LJ_GCFLAG_CDATA_FIN))) {
 	CType *ct = ctype_raw(ctype_ctsG(J2G(J)), cd->ctypeid);
 	if (!ctype_hassize(ct->info) || ct->size <= 16)
 	  return 1;
@@ -1572,6 +1572,7 @@ static TRef rec_upvalue(jit_State *J, uint32_t uv, TRef val)
   GCupval *uvp = &gcref(J->fn->l.uvptr[uv])->uv;
   TRef fn = getcurrf(J);
   IRRef uref;
+  uint32_t dhash;
   int needbarrier = 0;
   if (rec_upvalue_constify(J, uvp)) {  /* Try to constify immutable upvalue. */
     TRef tr, kfunc;
@@ -1594,8 +1595,9 @@ static TRef rec_upvalue(jit_State *J, uint32_t uv, TRef val)
   }
 noconstify:
   /* Note: this effectively limits LJ_MAX_UPVAL to 127. */
-  uv = (uv << 8) | (hashrot(uvp->dhash, uvp->dhash + HASH_BIAS) & 0xff);
-  if (!uvp->closed) {
+  dhash = uvp->uvflags & UVFLAG_DHASHMASK;
+  uv = (uv << 8) | (hashrot(dhash, dhash + HASH_BIAS) & 0xff);
+  if (!(uvp->uvflags & UVFLAG_CLOSED)) {
     uref = tref_ref(emitir(IRTG(IR_UREFO, IRT_PGC), fn, uv));
     /* In current stack? */
     if (uvval(uvp) >= tvref(J->L->stack) &&
@@ -2273,7 +2275,7 @@ void lj_record_ins(jit_State *J)
     break;
 #if LJ_HASFFI
   case BC_KCDATA:
-    rc = lj_ir_kgc(J, proto_kgc(J->pt, ~(ptrdiff_t)rc), IRT_CDATA);
+    rc = lj_ir_kgc(J, (GCobj*)((uintptr_t)proto_kgc(J->pt, ~(ptrdiff_t)rc) - PROTO_KGC_CDATA), IRT_CDATA);
     break;
 #endif
 
@@ -2315,15 +2317,16 @@ void lj_record_ins(jit_State *J)
   case BC_TNEW:
     rc = rec_tnew(J, rc);
     break;
-  case BC_TDUP:
-    rc = emitir(IRTG(IR_TDUP, IRT_TAB),
-		lj_ir_ktab(J, gco2tab(proto_kgc(J->pt, ~(ptrdiff_t)rc))), 0);
+  case BC_TDUP: {
+    GCobj* t = proto_kgc(J->pt, ~(ptrdiff_t)rc);
+    t = (GCobj*)((uintptr_t)t - PROTO_KGC_TABLE);
+    rc = emitir(IRTG(IR_TDUP, IRT_TAB), lj_ir_ktab(J, gco2tab(t)), 0);
 #ifdef LUAJIT_ENABLE_TABLE_BUMP
     J->rbchash[(rc & (RBCHASH_SLOTS-1))].ref = tref_ref(rc);
     setmref(J->rbchash[(rc & (RBCHASH_SLOTS-1))].pc, pc);
     setgcref(J->rbchash[(rc & (RBCHASH_SLOTS-1))].pt, obj2gco(J->pt));
 #endif
-    break;
+    break; }
 
   /* -- Calls and vararg handling ----------------------------------------- */
 

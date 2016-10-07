@@ -28,19 +28,21 @@
 /* String interning of metamethod names for fast indexing. */
 void lj_meta_init(lua_State *L)
 {
-#define MMNAME(name)	"__" #name
-  const char *metanames = MMDEF(MMNAME);
+#define MMNAME(name, lenchar)	lenchar "__" #name
+  const char *p = MMDEF(MMNAME);
 #undef MMNAME
   global_State *g = G(L);
-  const char *p, *q;
-  uint32_t mm;
-  for (mm = 0, p = metanames; *p; mm++, p = q) {
-    GCstr *s;
-    for (q = p+2; *q && *q != '_'; q++) ;
-    s = lj_str_new(L, p, (size_t)(q-p));
-    /* NOBARRIER: g->gcroot[] is a GC root. */
-    setgcref(g->gcroot[GCROOT_MMNAME+mm], obj2gco(s));
+  size_t len;
+#define MMCHECK(name, lenchar) lua_assert((size_t)(lenchar[0]) == sizeof(#name)-1);
+MMDEF(MMCHECK)
+#undef MMCHECK
+  setmref(g->gc.pool[GCPOOL_LEAF].bump, g->metastrings + METASTRINGS_LEN);
+  setmref(g->gc.pool[GCPOOL_LEAF].bumpbase, g->metastrings);
+  for (; (len = (uint8_t)*p); p += len + 3) {
+    (void)lj_str_new(L, p + 1, len + 2);
   }
+  lua_assert(mref(g->gc.pool[GCPOOL_LEAF].bump, char) == g->metastrings);
+  lua_assert(mref(g->gc.pool[GCPOOL_LEAF].bumpbase, char) == g->metastrings);
 }
 
 /* Negative caching of a few fast metamethods. See the lj_meta_fast() macro. */
@@ -338,7 +340,7 @@ TValue *lj_meta_equal(lua_State *L, GCobj *o1, GCobj *o2, int ne)
     if (LJ_FR2) setnilV(top++);
     copyTV(L, top++, mo);
     if (LJ_FR2) setnilV(top++);
-    it = ~(uint32_t)o1->gch.gct;
+    it = (uint32_t)(int32_t)o1->gch.gctype;
     setgcV(L, top, o1, it);
     setgcV(L, top+1, o2, it);
     return top;  /* Trigger metamethod call. */

@@ -86,7 +86,7 @@ typedef uint16_t HotCount;
 #define GG_LEN_DISP	(GG_LEN_DDISP + GG_LEN_SDISP)
 
 /* Global state, main thread and extra fields are allocated together. */
-typedef struct GG_State {
+typedef LJ_ALIGN(16) struct GG_State {
   lua_State L;				/* Main thread. */
   global_State g;			/* Global state. */
 #if LJ_TARGET_MIPS
@@ -136,7 +136,7 @@ LJ_FUNCA void LJ_FASTCALL lj_dispatch_stitch(jit_State *J, const BCIns *pc);
 LJ_FUNCA void LJ_FASTCALL lj_dispatch_profile(lua_State *L, const BCIns *pc);
 #endif
 
-#if LJ_HASFFI && !defined(_BUILDVM_H)
+#if !defined(_BUILDVM_H)
 /* Save/restore errno and GetLastError() around hooks, exits and recording. */
 #include <errno.h>
 #if LJ_TARGET_WINDOWS

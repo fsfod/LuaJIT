@@ -116,16 +116,24 @@ static void bcwrite_kgc(BCWriteCtx *ctx, GCproto *pt)
     GCobj *o = gcref(*kr);
     MSize tp, need = 1;
     char *p;
+#if LJ_HASFFI
+    CTypeID id;
+#endif
     /* Determine constant type and needed size. */
-    if (o->gch.gct == ~LJ_TSTR) {
+    switch ((uintptr_t)o & PROTO_KGC_MASK) {
+    case PROTO_KGC_STR:
       tp = BCDUMP_KGC_STR + gco2str(o)->len;
       need = 5+gco2str(o)->len;
-    } else if (o->gch.gct == ~LJ_TPROTO) {
+      break;
+    case PROTO_KGC_PROTO:
       lua_assert((pt->flags & PROTO_CHILD));
       tp = BCDUMP_KGC_CHILD;
+      o = (GCobj*)((uintptr_t)o - PROTO_KGC_PROTO);
+      break;
 #if LJ_HASFFI
-    } else if (o->gch.gct == ~LJ_TCDATA) {
-      CTypeID id = gco2cd(o)->ctypeid;
+    case PROTO_KGC_CDATA:
+      o = (GCobj*)((uintptr_t)o - PROTO_KGC_CDATA);
+      id = gco2cd(o)->ctypeid;
       need = 1+4*5;
       if (id == CTID_INT64) {
 	tp = BCDUMP_KGC_I64;
@@ -135,11 +143,14 @@ static void bcwrite_kgc(BCWriteCtx *ctx, GCproto *pt)
 	lua_assert(id == CTID_COMPLEX_DOUBLE);
 	tp = BCDUMP_KGC_COMPLEX;
       }
+      break;
 #endif
-    } else {
-      lua_assert(o->gch.gct == ~LJ_TTAB);
+    default:
+      lua_assert(((uintptr_t)o & PROTO_KGC_MASK) == PROTO_KGC_TABLE);
       tp = BCDUMP_KGC_TAB;
       need = 1+2*5;
+      o = (GCobj*)((uintptr_t)o - PROTO_KGC_TABLE);
+      break;
     }
     /* Write constant type. */
     p = lj_buf_more(&ctx->sb, need);
@@ -242,8 +253,10 @@ static void bcwrite_proto(BCWriteCtx *ctx, GCproto *pt)
     GCRef *kr = mref(pt->k, GCRef) - 1;
     for (i = 0; i < n; i++, kr--) {
       GCobj *o = gcref(*kr);
-      if (o->gch.gct == ~LJ_TPROTO)
+      if (((uintptr_t)o & PROTO_KGC_MASK) == PROTO_KGC_PROTO) {
+	o = (GCobj*)((uintptr_t)o - PROTO_KGC_PROTO);
 	bcwrite_proto(ctx, gco2pt(o));
+      }
     }
   }
 

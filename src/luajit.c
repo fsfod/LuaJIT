@@ -581,7 +581,7 @@ int main(int argc, char **argv)
   smain.argv = argv;
   status = lua_cpcall(L, pmain, NULL);
   report(L, status);
-  lua_close(L);
+  luaJIT_preclose(L);
   return (status || smain.status > 0) ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 

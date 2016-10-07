@@ -8,7 +8,6 @@
 
 #include "lj_obj.h"
 
-LJ_FUNC GCudata *lj_udata_new(lua_State *L, MSize sz, GCtab *env);
-LJ_FUNC void LJ_FASTCALL lj_udata_free(global_State *g, GCudata *ud);
+LJ_FUNC GCudata *lj_udata_new(lua_State *L, MSize sz, GCtab *env, GCPoolID p);
 
 #endif

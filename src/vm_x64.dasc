@@ -317,6 +317,7 @@
 |// Assumes DISPATCH is relative to GL.
 #define DISPATCH_GL(field)	(GG_DISP2G + (int)offsetof(global_State, field))
 #define DISPATCH_J(field)	(GG_DISP2J + (int)offsetof(jit_State, field))
+#define DISPATCH_MMSTR(mm) (GG_DISP2G+i32ptr(mmname_str((global_State*)0, mm)))
 |
 #define PC2PROTO(field)  ((int)offsetof(GCproto, field)-(int)sizeof(GCproto))
 |
@@ -370,11 +371,12 @@
 |.endmacro
 |
 |// Move table write barrier back. Overwrites reg.
+|// Must flush SSB afterwards if SF set.
 |.macro barrierback, tab, reg
-|  and byte tab->marked, (uint8_t)~LJ_GC_BLACK	// black2gray(tab)
-|  mov reg, [DISPATCH+DISPATCH_GL(gc.grayagain)]
-|  mov [DISPATCH+DISPATCH_GL(gc.grayagain)], tab
-|  mov tab->gclist, reg
+|  movzx reg, byte [DISPATCH+DISPATCH_GL(gc.ssbsize)]
+|  or byte tab->gcflags, LJ_GCFLAG_GREY
+|  add byte [DISPATCH+DISPATCH_GL(gc.ssbsize)], 1
+|  mov [DISPATCH+reg*8+DISPATCH_GL(gc.ssb)], tab
 |.endmacro
 |
 |//-----------------------------------------------------------------------
@@ -876,19 +878,19 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov L:CARG1, SAVE_L
   |  mov CARG3d, RCd
   |  mov L:CARG1->base, BASE
-  |  xchg CARG2, TAB:RB			// Caveat: CARG2 == BASE.
+  |  mov CARG2, TAB:RB			// Caveat: CARG2 == BASE.
   |.else
   |  mov L:CARG1, SAVE_L
   |  mov CARG2, TAB:RB
   |  mov L:CARG1->base, BASE
-  |  mov RB, BASE			// Save BASE.
   |  mov CARG3d, RCd			// Caveat: CARG3 == BASE.
   |.endif
   |  mov SAVE_PC, PC
   |  call extern lj_tab_setinth  // (lua_State *L, GCtab *t, int32_t key)
   |  // TValue * returned in eax (RC).
+  |  mov L:TMPR, SAVE_L
   |  movzx RAd, PC_RA
-  |  mov BASE, RB			// Restore BASE.
+  |  mov BASE, L:TMPR->base             // Restore BASE.
   |  jmp ->BC_TSETR_Z
   |
   |//-- Comparison metamethods ---------------------------------------------
@@ -1228,7 +1230,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  jz ->fff_res1
   |  settp TAB:RC, TAB:RB, LJ_TTAB
   |  mov [BASE-16], TAB:RC		// Store metatable as default result.
-  |  mov STR:RC, [DISPATCH+DISPATCH_GL(gcroot)+8*(GCROOT_MMNAME+MM_metatable)]
+  |  lea STR:RC, [DISPATCH+DISPATCH_MMSTR(MM_metatable)]
   |  mov RAd, TAB:RB->hmask
   |  and RAd, STR:RC->hash
   |  settp STR:RC, LJ_TSTR
@@ -1268,10 +1270,14 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov TAB:RB->metatable, TAB:RA
   |  mov PC, [BASE-8]
   |  mov [BASE-16], TAB:TMPR			// Return original table.
-  |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
-  |  jz >1
-  |  // Possible write barrier. Table is black, but skip iswhite(mt) check.
+  |  test byte TAB:RB->gcflags, LJ_GCFLAG_GREY
+  |  jnz >1
   |  barrierback TAB:RB, RC
+  |  jns >1
+  |  mov RB, BASE
+  |  lea GL:CARG1, [DISPATCH+GG_DISP2G]
+  |  call extern lj_gc_drain_ssb
+  |  mov BASE, RB
   |1:
   |  jmp ->fff_res1
   |
@@ -3366,6 +3372,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |.if FFI
     |  ins_AND	// RA = dst, RD = cdata const (~)
     |  mov RD, [KBASE+RD*8]
+    |  and RD, -4
     |  settp RD, LJ_TCDATA
     |  mov [BASE+RA*8], RD
     |  ins_next
@@ -3424,45 +3431,31 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_next
     break;
   case BC_USETV:
-#define TV2MARKOFS \
- ((int32_t)offsetof(GCupval, marked)-(int32_t)offsetof(GCupval, tv))
     |  ins_AD	// RA = upvalue #, RD = src
     |  mov LFUNC:RB, [BASE-16]
     |  cleartp LFUNC:RB
     |  mov UPVAL:RB, [LFUNC:RB+RA*8+offsetof(GCfuncL, uvptr)]
-    |  cmp byte UPVAL:RB->closed, 0
-    |  mov RB, UPVAL:RB->v
+    |  test byte UPVAL:RB->uvflags, UVFLAG_NOTGREY
     |  mov RA, [BASE+RD*8]
-    |  mov [RB], RA
-    |  jz >1
-    |  // Check barrier for closed upvalue.
-    |  test byte [RB+TV2MARKOFS], LJ_GC_BLACK		// isblack(uv)
+    |  mov RD, UPVAL:RB->v
+    |  mov [RD], RA
     |  jnz >2
     |1:
     |  ins_next
     |
-    |2:  // Upvalue is black. Check if new value is collectable and white.
-    |  mov RD, RA
-    |  sar RD, 47
-    |  sub RDd, LJ_TISGCV
-    |  cmp RDd, LJ_TNUMX - LJ_TISGCV			// tvisgcv(v)
+    |2:  // Upvalue might be black. Check if new value is collectable.
+    |  sar RA, 47
+    |  sub RAd, LJ_TISGCV
+    |  cmp RAd, LJ_TNUMX - LJ_TISGCV			// tvisgcv(v)
     |  jbe <1
-    |  cleartp GCOBJ:RA
-    |  test byte GCOBJ:RA->gch.marked, LJ_GC_WHITES	// iswhite(v)
-    |  jz <1
     |  // Crossed a write barrier. Move the barrier forward.
-    |.if not X64WIN
-    |  mov CARG2, RB
     |  mov RB, BASE			// Save BASE.
-    |.else
-    |  xchg CARG2, RB			// Save BASE (CARG2 == BASE).
-    |.endif
+    |  mov CARG2, RD
     |  lea GL:CARG1, [DISPATCH+GG_DISP2G]
     |  call extern lj_gc_barrieruv	// (global_State *g, TValue *tv)
     |  mov BASE, RB			// Restore BASE.
     |  jmp <1
     break;
-#undef TV2MARKOFS
   case BC_USETS:
     |  ins_AND	// RA = upvalue #, RD = str const (~)
     |  mov LFUNC:RB, [BASE-16]
@@ -3472,16 +3465,12 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov RD, UPVAL:RB->v
     |  settp STR:ITYPE, STR:RA, LJ_TSTR
     |  mov [RD], STR:ITYPE
-    |  test byte UPVAL:RB->marked, LJ_GC_BLACK		// isblack(uv)
+    |  test byte UPVAL:RB->uvflags, UVFLAG_NOTGREY
     |  jnz >2
     |1:
     |  ins_next
     |
-    |2:  // Check if string is white and ensure upvalue is closed.
-    |  test byte GCOBJ:RA->gch.marked, LJ_GC_WHITES	// iswhite(str)
-    |  jz <1
-    |  cmp byte UPVAL:RB->closed, 0
-    |  jz <1
+    |2:
     |  // Crossed a write barrier. Move the barrier forward.
     |  mov RB, BASE			// Save BASE (CARG2 == BASE).
     |  mov CARG2, RD
@@ -3535,7 +3524,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov CARG2, [KBASE+RD*8]		// Fetch GCproto *.
     |  mov CARG1, L:RB
     |  mov SAVE_PC, PC
-    |  // (lua_State *L, GCproto *pt, GCfuncL *parent)
+    |  // (lua_State *L, uintptr_t pt_, GCfuncL *parent)
     |  call extern lj_func_newL_gc
     |  // GCfuncL * returned in eax (RC).
     |  mov BASE, L:RB->base
@@ -3590,6 +3579,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  jae >3
     |2:
     |  mov TAB:CARG2, [KBASE+RD*8]	// Caveat: CARG2 == BASE
+    |  and TAB:CARG2, -4
     |  mov L:CARG1, L:RB		// Caveat: CARG1 == RA
     |  call extern lj_tab_dup		// (lua_State *L, Table *kt)
     |  // Table * returned in eax (RC).
@@ -3774,8 +3764,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cmp aword [RC], LJ_TNIL
     |  je >3				// Previous value is nil?
     |1:
-    |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
-    |  jnz >7
+    |  test byte TAB:RB->gcflags, LJ_GCFLAG_GREY
+    |  jz >7
     |2:  // Set array slot.
     |  mov RB, [BASE+RA*8]
     |  mov [RC], RB
@@ -3796,7 +3786,15 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |
     |7:  // Possible table write barrier for the value. Skip valiswhite check.
     |  barrierback TAB:RB, TMPR
-    |  jmp <2
+    |  jns <2
+    |->BC_TSETV_FLUSH_SSB:
+    |  mov RA, [BASE+RA*8]
+    |  mov [RC], RA
+    |  mov RB, BASE
+    |  lea GL:CARG1, [DISPATCH+GG_DISP2G]
+    |  call extern lj_gc_drain_ssb
+    |  mov BASE, RB
+    |  ins_next
     break;
   case BC_TSETS:
     |  ins_ABC	// RA = src, RB = table, RC = str const (~)
@@ -3818,8 +3816,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cmp aword [TMPR], LJ_TNIL
     |  je >4				// Previous value is nil?
     |2:
-    |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
-    |  jnz >7
+    |  test byte TAB:RB->gcflags, LJ_GCFLAG_GREY
+    |  jz >7
     |3:  // Set node value.
     |  mov ITYPE, [BASE+RA*8]
     |  mov [TMPR], ITYPE
@@ -3862,7 +3860,14 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |
     |7:  // Possible table write barrier for the value. Skip valiswhite check.
     |  barrierback TAB:RB, ITYPE
-    |  jmp <3
+    |  jns <3
+    |  mov ITYPE, [BASE+RA*8]
+    |  mov [TMPR], ITYPE
+    |  mov RB, BASE
+    |  lea GL:CARG1, [DISPATCH+GG_DISP2G]
+    |  call extern lj_gc_drain_ssb
+    |  mov BASE, RB
+    |  ins_next
     break;
   case BC_TSETB:
     |  ins_ABC	// RA = src, RB = table, RC = byte literal
@@ -3875,8 +3880,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cmp aword [RC], LJ_TNIL
     |  je >3				// Previous value is nil?
     |1:
-    |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
-    |  jnz >7
+    |  test byte TAB:RB->gcflags, LJ_GCFLAG_GREY
+    |  jz >7
     |2:	 // Set array slot.
     |  mov ITYPE, [BASE+RA*8]
     |  mov [RC], ITYPE
@@ -3892,7 +3897,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |
     |7:  // Possible table write barrier for the value. Skip valiswhite check.
     |  barrierback TAB:RB, TMPR
-    |  jmp <2
+    |  jns <2
+    |  jmp ->BC_TSETV_FLUSH_SSB
     break;
   case BC_TSETR:
     |  ins_ABC	// RA = src, RB = table, RC = key
@@ -3903,21 +3909,26 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |.else
     |  cvttsd2si RCd, qword [BASE+RC*8]
     |.endif
-    |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
-    |  jnz >7
-    |2:
     |  cmp RCd, TAB:RB->asize
     |  jae ->vmeta_tsetr
     |  shl RCd, 3
     |  add RC, TAB:RB->array
     |  // Set array slot.
     |->BC_TSETR_Z:
+    |  test byte TAB:RB->gcflags, LJ_GCFLAG_GREY
     |  mov ITYPE, [BASE+RA*8]
     |  mov [RC], ITYPE
+    |  jz >7
+    |2:
     |  ins_next
     |
     |7:  // Possible table write barrier for the value. Skip valiswhite check.
     |  barrierback TAB:RB, TMPR
+    |  jns <2
+    |  mov RB, BASE
+    |  lea GL:CARG1, [DISPATCH+GG_DISP2G]
+    |  call extern lj_gc_drain_ssb
+    |  mov BASE, RB
     |  jmp <2
     break;
 
@@ -3925,15 +3936,12 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_AD	// RA = base (table at base-1), RD = num const (start index)
     |1:
     |  mov TMPRd, dword [KBASE+RD*8]	// Integer constant is in lo-word.
-    |  lea RA, [BASE+RA*8]
-    |  mov TAB:RB, [RA-8]		// Guaranteed to be a table.
-    |  cleartp TAB:RB
-    |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
-    |  jnz >7
-    |2:
     |  mov RDd, MULTRES
     |  sub RDd, 1
     |  jz >4				// Nothing to copy?
+    |  lea RA, [BASE+RA*8]
+    |  mov TAB:RB, [RA-8]               // Guaranteed to be a table.
+    |  cleartp TAB:RB
     |  add RDd, TMPRd			// Compute needed size.
     |  cmp RDd, TAB:RB->asize
     |  ja >5				// Doesn't fit into array part?
@@ -3941,12 +3949,14 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  shl TMPRd, 3
     |  add TMPR, TAB:RB->array
     |3:  // Copy result slots to table.
-    |  mov RB, [RA]
+    |  mov ITYPE, [RA]
     |  add RA, 8
-    |  mov [TMPR], RB
+    |  mov [TMPR], ITYPE
     |  add TMPR, 8
     |  sub RDd, 1
     |  jnz <3
+    |  test byte TAB:RB->gcflags, LJ_GCFLAG_GREY
+    |  jz >7
     |4:
     |  ins_next
     |
@@ -3965,7 +3975,12 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |
     |7:  // Possible table write barrier for any value. Skip valiswhite check.
     |  barrierback TAB:RB, RD
-    |  jmp <2
+    |  jns <4
+    |  mov RB, BASE
+    |  lea GL:CARG1, [DISPATCH+GG_DISP2G]
+    |  call extern lj_gc_drain_ssb
+    |  mov BASE, RB
+    |  jmp <4
     break;
 
   /* -- Calls and vararg handling ----------------------------------------- */
@@ -4487,6 +4502,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_AD	// RA = base (ignored), RD = traceno
     |  mov RA, [DISPATCH+DISPATCH_J(trace)]
     |  mov TRACE:RD, [RA+RD*8]
+    |  and TRACE:RD, -16
     |  mov RD, TRACE:RD->mcode
     |  mov L:RB, SAVE_L
     |  mov [DISPATCH+DISPATCH_GL(jit_base)], BASE

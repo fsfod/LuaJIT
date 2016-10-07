@@ -47,7 +47,7 @@ static TValue *index2adr(lua_State *L, int idx)
     return registry(L);
   } else {
     GCfunc *fn = curr_func(L);
-    api_check(L, fn->c.gct == ~LJ_TFUNC && !isluafunc(fn));
+    api_check(L, fn->c.gctype == (int8_t)(uint8_t)LJ_TFUNC && !isluafunc(fn));
     if (idx == LUA_ENVIRONINDEX) {
       TValue *o = &G(L)->tmptv;
       settabV(L, o, tabref(fn->c.env));
@@ -73,7 +73,8 @@ static TValue *stkindex2adr(lua_State *L, int idx)
 static GCtab *getcurrenv(lua_State *L)
 {
   GCfunc *fn = curr_func(L);
-  return fn->c.gct == ~LJ_TFUNC ? tabref(fn->c.env) : tabref(L->env);
+  return fn->c.gctype == (int8_t)(uint8_t)LJ_TFUNC ? tabref(fn->c.env)
+						   : tabref(L->env);
 }
 
 /* -- Miscellaneous API functions ----------------------------------------- */
@@ -167,7 +168,7 @@ static void copy_slot(lua_State *L, TValue *f, int idx)
     setgcref(L->env, obj2gco(tabV(f)));
   } else if (idx == LUA_ENVIRONINDEX) {
     GCfunc *fn = curr_func(L);
-    if (fn->c.gct != ~LJ_TFUNC)
+    if (fn->c.gctype != (int8_t)(uint8_t)LJ_TFUNC)
       lj_err_msg(L, LJ_ERR_NOENV);
     api_check(L, tvistab(f));
     setgcref(fn->c.env, obj2gco(tabV(f)));
@@ -684,7 +685,6 @@ LUA_API void lua_pushcclosure(lua_State *L, lua_CFunction f, int n)
   while (n--)
     copyTV(L, &fn->c.upvalue[n], L->top+n);
   setfuncV(L, L->top, fn);
-  lua_assert(iswhite(obj2gco(fn)));
   incr_top(L);
 }
 
@@ -727,7 +727,7 @@ LUA_API int lua_pushthread(lua_State *L)
 {
   setthreadV(L, L->top, L);
   incr_top(L);
-  return (mainthread(G(L)) == L);
+  return (&G2GG(G(L))->L == L);
 }
 
 LUA_API lua_State *lua_newthread(lua_State *L)
@@ -740,16 +740,26 @@ LUA_API lua_State *lua_newthread(lua_State *L)
   return L1;
 }
 
-LUA_API void *lua_newuserdata(lua_State *L, size_t size)
+static void *lua_newuserdata_(lua_State *L, size_t size, GCPoolID p)
 {
   GCudata *ud;
   lj_gc_check(L);
   if (size > LJ_MAX_UDATA)
     lj_err_msg(L, LJ_ERR_UDATAOV);
-  ud = lj_udata_new(L, (MSize)size, getcurrenv(L));
+  ud = lj_udata_new(L, (MSize)size, getcurrenv(L), p);
   setudataV(L, L->top, ud);
   incr_top(L);
   return uddata(ud);
+}
+
+LUA_API void *lua_newuserdata(lua_State *L, size_t size)
+{
+  return lua_newuserdata_(L, size, GCPOOL_GCMM);
+}
+
+LUA_API void *luaJIT_newuserdata_nogc(lua_State *L, size_t size)
+{
+  return lua_newuserdata_(L, size, GCPOOL_GREY);
 }
 
 LUA_API void lua_concat(lua_State *L, int n)
@@ -863,12 +873,8 @@ LUA_API void lua_getfenv(lua_State *L, int idx)
 {
   cTValue *o = index2adr(L, idx);
   api_checkvalidindex(L, o);
-  if (tvisfunc(o)) {
-    settabV(L, L->top, tabref(funcV(o)->c.env));
-  } else if (tvisudata(o)) {
-    settabV(L, L->top, tabref(udataV(o)->env));
-  } else if (tvisthread(o)) {
-    settabV(L, L->top, tabref(threadV(o)->env));
+  if (tvisfunc(o) || tvisudata(o) || tvisthread(o)) {
+    settabV(L, L->top, tabref(gcV(o)->gch.env));
   } else {
     setnilV(L->top);
   }
@@ -917,7 +923,7 @@ LUA_API void lua_upvaluejoin(lua_State *L, int idx1, int n1, int idx2, int n2)
   api_check(L, isluafunc(fn1) && (uint32_t)n1 < fn1->l.nupvalues);
   api_check(L, isluafunc(fn2) && (uint32_t)n2 < fn2->l.nupvalues);
   setgcrefr(fn1->l.uvptr[n1], fn2->l.uvptr[n2]);
-  lj_gc_objbarrier(L, fn1, gcref(fn1->l.uvptr[n1]));
+  lj_gc_objbarrier(L, fn1, gcref(fn1->l.uvptr[n1]), LJ_TUPVAL);
 }
 
 LUALIB_API void *luaL_testudata(lua_State *L, int idx, const char *tname)
@@ -1027,7 +1033,7 @@ LUA_API int lua_setmetatable(lua_State *L, int idx)
   } else if (tvisudata(o)) {
     setgcref(udataV(o)->metatable, obj2gco(mt));
     if (mt)
-      lj_gc_objbarrier(L, udataV(o), mt);
+      lj_gc_objbarrier(L, udataV(o), mt, LJ_TTAB);
   } else {
     /* Flush cache, since traces specialize to basemt. But not during __gc. */
     if (lj_trace_flushall(L))
@@ -1059,17 +1065,13 @@ LUA_API int lua_setfenv(lua_State *L, int idx)
   api_checkvalidindex(L, o);
   api_check(L, tvistab(L->top-1));
   t = tabV(L->top-1);
-  if (tvisfunc(o)) {
-    setgcref(funcV(o)->c.env, obj2gco(t));
-  } else if (tvisudata(o)) {
-    setgcref(udataV(o)->env, obj2gco(t));
-  } else if (tvisthread(o)) {
-    setgcref(threadV(o)->env, obj2gco(t));
+  if (tvisfunc(o) || tvisudata(o) || tvisthread(o)) {
+    setgcref(gcV(o)->gch.env, obj2gco(t));
   } else {
     L->top--;
     return 0;
   }
-  lj_gc_objbarrier(L, gcV(o), t);
+  lj_gc_objbarrier(L, gcV(o), t, LJ_TTAB);
   L->top--;
   return 1;
 }
@@ -1249,16 +1251,17 @@ LUA_API int lua_gc(lua_State *L, int what, int data)
   case LUA_GCCOUNTB:
     res = (int)(g->gc.total & 0x3ff);
     break;
-  case LUA_GCSTEP: {
-    GCSize a = (GCSize)data << 10;
-    g->gc.threshold = (a <= g->gc.total) ? (g->gc.total - a) : 0;
-    while (g->gc.total >= g->gc.threshold)
+  case LUA_GCSTEP:
+    if (data < 0)
+      data = LJ_MAX_MEM32;
+    do {
       if (lj_gc_step(L) > 0) {
 	res = 1;
 	break;
       }
+      data -= 1024;
+    } while (data > 0);
     break;
-  }
   case LUA_GCSETPAUSE:
     res = (int)(g->gc.pause);
     g->gc.pause = (MSize)data;
@@ -1278,15 +1281,17 @@ LUA_API int lua_gc(lua_State *L, int what, int data)
 
 LUA_API lua_Alloc lua_getallocf(lua_State *L, void **ud)
 {
+  /* Provided for C libraries which try to play nice with the Lua allocator. */
   global_State *g = G(L);
-  if (ud) *ud = g->allocd;
-  return g->allocf;
+  if (ud) *ud = g->callocd;
+  return g->callocf;
 }
 
 LUA_API void lua_setallocf(lua_State *L, lua_Alloc f, void *ud)
 {
+  /* Only provided for symmetry with lua_getallocf; won't be used by LuaJIT. */
   global_State *g = G(L);
-  g->allocd = ud;
-  g->allocf = f;
+  g->callocd = ud;
+  g->callocf = f;
 }
 

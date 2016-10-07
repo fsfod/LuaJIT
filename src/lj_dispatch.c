@@ -227,7 +227,8 @@ static void setptmode_all(global_State *g, GCproto *pt, int mode)
   if (!(pt->flags & PROTO_CHILD)) return;
   for (i = -(ptrdiff_t)pt->sizekgc; i < 0; i++) {
     GCobj *o = proto_kgc(pt, i);
-    if (o->gch.gct == ~LJ_TPROTO) {
+    if (((uintptr_t)o & PROTO_KGC_MASK) == PROTO_KGC_PROTO) {
+      o = (GCobj*)((uintptr_t)o - PROTO_KGC_PROTO);
       setptmode(g, gco2pt(o), mode);
       setptmode_all(g, gco2pt(o), mode);
     }

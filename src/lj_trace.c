@@ -71,9 +71,17 @@ static TraceNo trace_findfree(jit_State *J)
   osz = J->sizetrace;
   if (osz >= lim)
     return 0;  /* Too many traces. */
-  lj_mem_growvec(J->L, J->trace, J->sizetrace, lim, GCRef);
-  for (; osz < J->sizetrace; osz++)
+  lj_mem_growvec(J->L, J->trace, J->sizetrace, lim, GCRef, GCPOOL_GREY);
+#ifdef LUAJIT_USE_GDBJIT
+  J->gdbjit_entries = (MRef*)lj_mem_realloc(J->L, J->gdbjit_entries,
+      osz * sizeof(MRef), J->sizetrace * sizeof(MRef), GCPOOL_GREY);
+#endif
+  for (; osz < J->sizetrace; osz++) {
     setgcrefnull(J->trace[osz]);
+#ifdef LUAJIT_USE_GDBJIT
+    setmref(J->gdbjit_entries[osz], NULL);
+#endif
+  }
   return J->freetrace;
 }
 
@@ -125,10 +133,10 @@ GCtrace * LJ_FASTCALL lj_trace_alloc(lua_State *L, GCtrace *T)
   size_t sz = sztr + szins +
 	      T->nsnap*sizeof(SnapShot) +
 	      T->nsnapmap*sizeof(SnapEntry);
-  GCtrace *T2 = lj_mem_newt(L, (MSize)sz, GCtrace);
+  GCtrace *T2 = lj_mem_newt(L, (MSize)sz, GCtrace, GCPOOL_GREY);
   char *p = (char *)T2 + sztr;
-  T2->gct = ~LJ_TTRACE;
-  T2->marked = 0;
+  T2->gcflags = LJ_GCFLAG_GREY;
+  T2->gctype = (int8_t)(uint8_t)LJ_TTRACE;
   T2->traceno = 0;
   T2->ir = (IRIns *)p - T->nk;
   T2->nins = T->nins;
@@ -146,10 +154,8 @@ static void trace_save(jit_State *J, GCtrace *T)
   size_t szins = (J->cur.nins-J->cur.nk)*sizeof(IRIns);
   char *p = (char *)T + sztr;
   memcpy(T, &J->cur, sizeof(GCtrace));
-  setgcrefr(T->nextgc, J2G(J)->gc.root);
-  setgcrefp(J2G(J)->gc.root, T);
-  newwhite(J2G(J), T);
-  T->gct = ~LJ_TTRACE;
+  T->gcflags = LJ_GCFLAG_GREY;
+  T->gctype = (int8_t)(uint8_t)LJ_TTRACE;
   T->ir = (IRIns *)p - J->cur.nk;  /* The IR has already been copied above. */
   p += szins;
   TRACE_APPENDVEC(snap, nsnap, SnapShot)
@@ -164,18 +170,21 @@ static void trace_save(jit_State *J, GCtrace *T)
 #endif
 }
 
-void LJ_FASTCALL lj_trace_free(global_State *g, GCtrace *T)
+void lj_trace_freeno(global_State *g, TraceNo no)
 {
   jit_State *J = G2J(g);
+  if (no < J->freetrace)
+    J->freetrace = no;
+  lj_gdbjit_deltraceno(J, no);
+}
+
+void LJ_FASTCALL lj_trace_free(global_State *g, GCtrace *T)
+{
   if (T->traceno) {
-    lj_gdbjit_deltrace(J, T);
-    if (T->traceno < J->freetrace)
-      J->freetrace = T->traceno;
-    setgcrefnull(J->trace[T->traceno]);
+    GCRef *ref = &G2J(g)->trace[T->traceno];
+    lj_trace_freeno(g, T->traceno);
+    setgcrefnull(*ref);
   }
-  lj_mem_free(g, T,
-    ((sizeof(GCtrace)+7)&~7) + (T->nins-T->nk)*sizeof(IRIns) +
-    T->nsnap*sizeof(SnapShot) + T->nsnapmap*sizeof(SnapEntry));
 }
 
 /* Re-enable compiling a prototype by unpatching any modified bytecode. */
@@ -284,7 +293,7 @@ int lj_trace_flushall(lua_State *L)
     if (T) {
       if (T->root == 0)
 	trace_flushroot(J, T);
-      lj_gdbjit_deltrace(J, T);
+      lj_gdbjit_deltraceno(J, (TraceNo)i);
       T->traceno = T->link = 0;  /* Blacklist the link for cont_stitch. */
       setgcrefnull(J->trace[i]);
     }
@@ -349,18 +358,13 @@ void lj_trace_initstate(global_State *g)
 void lj_trace_freestate(global_State *g)
 {
   jit_State *J = G2J(g);
-#ifdef LUA_USE_ASSERT
-  {  /* This assumes all traces have already been freed. */
-    ptrdiff_t i;
-    for (i = 1; i < (ptrdiff_t)J->sizetrace; i++)
-      lua_assert(i == (ptrdiff_t)J->cur.traceno || traceref(J, i) == NULL);
+#if LUAJIT_USE_GDBJIT
+  TraceNo i;
+  for (i = 1; i < J->sizetrace; i++) {
+    lj_gdbjit_deltraceno(J, i);
   }
 #endif
   lj_mcode_free(J);
-  lj_mem_freevec(g, J->snapmapbuf, J->sizesnapmap, SnapEntry);
-  lj_mem_freevec(g, J->snapbuf, J->sizesnap, SnapShot);
-  lj_mem_freevec(g, J->irbuf + J->irbotlim, J->irtoplim - J->irbotlim, IRIns);
-  lj_mem_freevec(g, J->trace, J->sizetrace, GCRef);
 }
 
 /* -- Penalties and blacklisting ------------------------------------------ */
@@ -870,7 +874,7 @@ int LJ_FASTCALL lj_trace_exit(jit_State *J, void *exptr)
   setcframe_pc(cf, pc);
   if (LJ_HASPROFILE && (G(L)->hookmask & HOOK_PROFILE)) {
     /* Just exit to interpreter. */
-  } else if (G(L)->gc.state == GCSatomic || G(L)->gc.state == GCSfinalize) {
+  } else if ((G(L)->gc.state & GCS_nojit)) {
     if (!(G(L)->hookmask & HOOK_GC))
       lj_gc_step(L);  /* Exited because of GC: drive GC forward. */
   } else {

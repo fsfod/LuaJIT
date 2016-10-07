@@ -22,7 +22,7 @@ static void buf_grow(SBuf *sb, MSize sz)
   char *b;
   if (nsz < LJ_MIN_SBUF) nsz = LJ_MIN_SBUF;
   while (nsz < sz) nsz += nsz;
-  b = (char *)lj_mem_realloc(sbufL(sb), sbufB(sb), osz, nsz);
+  b = (char *)lj_cmem_realloc(sbufL(sb), sbufB(sb), osz, nsz);
   setmref(sb->b, b);
   setmref(sb->p, b + len);
   setmref(sb->e, b + nsz);
@@ -53,7 +53,7 @@ void LJ_FASTCALL lj_buf_shrink(lua_State *L, SBuf *sb)
   MSize osz = (MSize)(sbufE(sb) - b);
   if (osz > 2*LJ_MIN_SBUF) {
     MSize n = (MSize)(sbufP(sb) - b);
-    b = lj_mem_realloc(L, b, osz, (osz >> 1));
+    b = lj_cmem_realloc(L, b, osz, (osz >> 1));
     setmref(sb->b, b);
     setmref(sb->p, b + n);
     setmref(sb->e, b + (osz >> 1));

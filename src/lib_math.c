@@ -218,7 +218,7 @@ LJLIB_CF(math_randomseed)
 LUALIB_API int luaopen_math(lua_State *L)
 {
   RandomState *rs;
-  rs = (RandomState *)lua_newuserdata(L, sizeof(RandomState));
+  rs = (RandomState *)luaJIT_newuserdata_nogc(L, sizeof(RandomState));
   rs->valid = 0;  /* Use lazy initialization to save some time on startup. */
   LJ_LIB_REG(L, LUA_MATHLIBNAME, math);
   return 1;

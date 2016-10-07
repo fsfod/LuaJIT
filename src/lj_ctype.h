@@ -258,7 +258,7 @@ typedef struct CTState {
 #define CTINFO_REF(ref) \
   CTINFO(CT_PTR, (CTF_CONST|CTF_REF|CTALIGN_PTR) + (ref))
 
-#define CT_MEMALIGN	3	/* Alignment guaranteed by memory allocator. */
+#define CT_MEMALIGN	4	/* Alignment guaranteed by memory allocator. */
 
 /* -- Predefined types ---------------------------------------------------- */
 
@@ -432,7 +432,6 @@ static LJ_AINLINE CType *ctype_rawchild(CTState *cts, CType *ct)
 static LJ_AINLINE void ctype_setname(CType *ct, GCstr *s)
 {
   /* NOBARRIER: mark string as fixed -- the C type table is never collected. */
-  fixstring(s);
   setgcref(ct->name, obj2gco(s));
 }
 

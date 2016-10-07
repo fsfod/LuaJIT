@@ -40,7 +40,7 @@ void lj_snap_grow_buf_(jit_State *J, MSize need)
   MSize maxsnap = (MSize)J->param[JIT_P_maxsnap];
   if (need > maxsnap)
     lj_trace_err(J, LJ_TRERR_SNAPOV);
-  lj_mem_growvec(J->L, J->snapbuf, J->sizesnap, maxsnap, SnapShot);
+  lj_mem_growvec(J->L, J->snapbuf, J->sizesnap, maxsnap, SnapShot, GCPOOL_LEAF);
   J->cur.snap = J->snapbuf;
 }
 
@@ -52,7 +52,8 @@ void lj_snap_grow_map_(jit_State *J, MSize need)
   else if (need < 64)
     need = 64;
   J->snapmapbuf = (SnapEntry *)lj_mem_realloc(J->L, J->snapmapbuf,
-		    J->sizesnapmap*sizeof(SnapEntry), need*sizeof(SnapEntry));
+		    J->sizesnapmap*sizeof(SnapEntry), need*sizeof(SnapEntry),
+		    GCPOOL_LEAF);
   J->cur.snapmap = J->snapmapbuf;
   J->sizesnapmap = need;
 }
@@ -215,7 +216,7 @@ static BCReg snap_usedef(jit_State *J, uint8_t *udf,
   while (o) {
     if (uvval(gco2uv(o)) < J->L->base) break;
     udf[uvval(gco2uv(o)) - J->L->base] = 0;
-    o = gcref(o->gch.nextgc);
+    o = gcref(o->uv.nextgc);
   }
 
 #define USE_SLOT(s)		udf[(s)] &= ~1

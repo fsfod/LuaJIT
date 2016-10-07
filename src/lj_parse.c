@@ -415,7 +415,8 @@ static BCPos bcemit_INS(FuncState *fs, BCIns ins)
   if (LJ_UNLIKELY(pc >= fs->bclim)) {
     ptrdiff_t base = fs->bcbase - ls->bcstack;
     checklimit(fs, ls->sizebcstack, LJ_MAX_BCINS, "bytecode instructions");
-    lj_mem_growvec(fs->L, ls->bcstack, ls->sizebcstack, LJ_MAX_BCINS,BCInsLine);
+    lj_cmem_growvec(fs->L, ls->bcstack, ls->sizebcstack, LJ_MAX_BCINS,
+		    BCInsLine);
     fs->bclim = (BCPos)(ls->sizebcstack - base);
     fs->bcbase = ls->bcstack + base;
   }
@@ -1038,7 +1039,7 @@ static void var_new(LexState *ls, BCReg n, GCstr *name)
   if (LJ_UNLIKELY(vtop >= ls->sizevstack)) {
     if (ls->sizevstack >= LJ_MAX_VSTACK)
       lj_lex_error(ls, 0, LJ_ERR_XLIMC, LJ_MAX_VSTACK);
-    lj_mem_growvec(ls->L, ls->vstack, ls->sizevstack, LJ_MAX_VSTACK, VarInfo);
+    lj_cmem_growvec(ls->L, ls->vstack, ls->sizevstack, LJ_MAX_VSTACK, VarInfo);
   }
   lua_assert((uintptr_t)name < VARNAME__MAX ||
 	     lj_tab_getstr(fs->kt, name) != NULL);
@@ -1145,7 +1146,7 @@ static MSize gola_new(LexState *ls, GCstr *name, uint8_t info, BCPos pc)
   if (LJ_UNLIKELY(vtop >= ls->sizevstack)) {
     if (ls->sizevstack >= LJ_MAX_VSTACK)
       lj_lex_error(ls, 0, LJ_ERR_XLIMC, LJ_MAX_VSTACK);
-    lj_mem_growvec(ls->L, ls->vstack, ls->sizevstack, LJ_MAX_VSTACK, VarInfo);
+    lj_cmem_growvec(ls->L, ls->vstack, ls->sizevstack, LJ_MAX_VSTACK, VarInfo);
   }
   lua_assert(name == NAME_BREAK || lj_tab_getstr(fs->kt, name) != NULL);
   /* NOBARRIER: name is anchored in fs->kt and ls->vstack is not a GCobj. */
@@ -1377,10 +1378,23 @@ static void fs_fixup_k(FuncState *fs, GCproto *pt, void *kptr)
 	}
       } else {
 	GCobj *o = gcV(&n->key);
-	setgcref(((GCRef *)kptr)[~kidx], o);
-	lj_gc_objbarrier(fs->L, pt, o);
-	if (tvisproto(&n->key))
+	uintptr_t ot = (uintptr_t)o;
+	lua_assert(!(ot & PROTO_KGC_MASK));
+	if (tvisstr(&n->key)) {
+	  lua_assert(PROTO_KGC_STR == 0);
+	} else if (tvisproto(&n->key)) {
 	  fs_fixup_uv2(fs, gco2pt(o));
+	  ot |= PROTO_KGC_PROTO;
+#if LJ_HASFFI
+	} else if (tviscdata(&n->key)) {
+	  ot |= PROTO_KGC_CDATA;
+#endif
+	} else {
+	  lua_assert(tvistab(&n->key));
+	  ot |= PROTO_KGC_TABLE;
+	}
+	setgcrefp(((GCRef *)kptr)[~kidx], ot);
+	lj_gc_barrier(fs->L, pt, &n->key);
       }
     }
   }
@@ -1567,8 +1581,9 @@ static GCproto *fs_finish(LexState *ls, BCLine line)
   ofsdbg = sizept; sizept += fs_prep_var(ls, fs, &ofsvar);
 
   /* Allocate prototype and initialize its fields. */
-  pt = (GCproto *)lj_mem_newgco(L, (MSize)sizept);
-  pt->gct = ~LJ_TPROTO;
+  pt = lj_mem_newt(L, (MSize)sizept, GCproto, GCPOOL_GREY);
+  pt->gcflags = LJ_GCFLAG_GREY;
+  pt->gctype = (int8_t)(uint8_t)LJ_TPROTO;
   pt->sizept = (MSize)sizept;
   pt->trace = 0;
   pt->flags = (uint8_t)(fs->flags & ~(PROTO_HAS_RETURN|PROTO_FIXUP_RETURN));

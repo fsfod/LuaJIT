@@ -75,10 +75,11 @@ void LJ_FASTCALL lj_ir_growtop(jit_State *J)
   MSize szins = J->irtoplim - J->irbotlim;
   if (szins) {
     baseir = (IRIns *)lj_mem_realloc(J->L, baseir, szins*sizeof(IRIns),
-				     2*szins*sizeof(IRIns));
+				     2*szins*sizeof(IRIns), GCPOOL_LEAF);
     J->irtoplim = J->irbotlim + 2*szins;
   } else {
-    baseir = (IRIns *)lj_mem_realloc(J->L, NULL, 0, LJ_MIN_IRSZ*sizeof(IRIns));
+    baseir = (IRIns *)lj_mem_realloc(J->L, NULL, 0, LJ_MIN_IRSZ*sizeof(IRIns),
+				     GCPOOL_LEAF);
     J->irbotlim = REF_BASE - LJ_MIN_IRSZ/4;
     J->irtoplim = J->irbotlim + LJ_MIN_IRSZ;
   }
@@ -101,10 +102,9 @@ static void lj_ir_growbot(jit_State *J)
     J->cur.ir = J->irbuf = baseir - J->irbotlim;
   } else {
     /* Double the buffer size, but split the growth amongst top/bottom. */
-    IRIns *newbase = lj_mem_newt(J->L, 2*szins*sizeof(IRIns), IRIns);
+    IRIns *newbase = lj_mem_newt(J->L, 2*szins*sizeof(IRIns), IRIns, GCPOOL_LEAF);
     MSize ofs = szins >= 256 ? 128 : (szins >> 1);  /* Limit bottom growth. */
     memcpy(newbase + ofs, baseir, (J->cur.nins - J->irbotlim)*sizeof(IRIns));
-    lj_mem_free(G(J->L), baseir, szins*sizeof(IRIns));
     J->irbotlim -= ofs;
     J->irtoplim = J->irbotlim + 2*szins;
     J->cur.ir = J->irbuf = newbase - J->irbotlim;
@@ -277,7 +277,6 @@ TRef lj_ir_kgc(jit_State *J, GCobj *o, IRType t)
 {
   IRIns *ir, *cir = J->cur.ir;
   IRRef ref;
-  lua_assert(!isdead(J2G(J), o));
   for (ref = J->chain[IR_KGC]; ref; ref = cir[ref].prev)
     if (ir_kgc(&cir[ref]) == o)
       goto found;

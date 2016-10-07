@@ -48,7 +48,7 @@ static LJ_AINLINE SBuf *lj_buf_tmp_(lua_State *L)
 
 static LJ_AINLINE void lj_buf_free(global_State *g, SBuf *sb)
 {
-  lj_mem_free(g, sbufB(sb), sbufsz(sb));
+  lj_cmem_free(g, sbufB(sb), sbufsz(sb));
 }
 
 static LJ_AINLINE char *lj_buf_need(SBuf *sb, MSize sz)

@@ -92,28 +92,92 @@ int lj_str_haspattern(GCstr *s)
 
 /* -- String interning ---------------------------------------------------- */
 
+static GCRef* lj_str_resize_insert(lua_State *L, GCRef *newhash, MSize newmask,
+                                   GCstr *sx, GCRef *freelist)
+{
+  GCRef *slot = &newhash[sx->hash & newmask];
+  uintptr_t i;
+  if (!gcrefu(*slot)) {
+    setgcrefp(*slot, sx);
+  } else {
+    i = gcrefu(*slot) & 15;
+    if (i & 14) {
+      GCRef *strs = (GCRef*)(gcrefu(*slot) & ~(uintptr_t)15);
+      setgcrefp(strs[i - 1], sx);
+      --gcrefu(*slot);
+    } else {
+      GCRef *strs = freelist;
+      if (strs) {
+	freelist = gcrefp(strs[0], GCRef);
+      } else {
+	strs = lj_mem_newvec(L, 16, GCRef, GCPOOL_GREY);
+      }
+      setgcrefp(strs[15], sx);
+      setgcrefr(strs[0], *slot);
+      setgcrefp(*slot, (uintptr_t)strs | 15);
+    }
+  }
+  return freelist;
+}
+
+static void lj_str_resize_cleanup(lua_State *L, uintptr_t x)
+{
+  GCRef *head = (GCRef*)(x & ~(uintptr_t)15);
+  x = (x & 15) - 1;
+  if (gcrefu(*head) & 15) {
+    GCRef *tail = (GCRef*)(gcrefu(*head) & ~(uintptr_t)15);
+    while (gcrefu(*tail) & 15) {
+      tail = (GCRef*)(gcrefu(*tail) & ~(uintptr_t)15);
+    }
+    for (; x; --x) {
+      setgcrefr(head[x], tail[x-1]);
+      setgcrefnull(tail[x-1]);
+    }
+  } else {
+    setgcrefr(head[x], *head);
+    memset(head, 0, sizeof(GCRef) * x);
+  }
+}
+
+#include <stdio.h>
+
 /* Resize the string hash table (grow and shrink). */
 void lj_str_resize(lua_State *L, MSize newmask)
 {
   global_State *g = G(L);
   GCRef *newhash;
+  GCRef *freelist;
   MSize i;
   if (g->gc.state == GCSsweepstring || newmask >= LJ_MAX_STRTAB-1)
     return;  /* No resizing during GC traversal or if already too big. */
-  newhash = lj_mem_newvec(L, newmask+1, GCRef);
+  newhash = lj_mem_newvec(L, newmask+1, GCRef, GCPOOL_GREY);
   memset(newhash, 0, (newmask+1)*sizeof(GCRef));
+  freelist = NULL;
   for (i = g->strmask; i != ~(MSize)0; i--) {  /* Rehash old table. */
-    GCobj *p = gcref(g->strhash[i]);
-    while (p) {  /* Follow each hash chain and reinsert all strings. */
-      MSize h = gco2str(p)->hash & newmask;
-      GCobj *next = gcnext(p);
-      /* NOBARRIER: The string table is a GC root. */
-      setgcrefr(p->gch.nextgc, newhash[h]);
-      setgcref(newhash[h], p);
-      p = next;
+    GCstr *sx = gcrefp(g->strhash[i], GCstr);
+    while ((uintptr_t)sx & 15) {
+      GCRef *strs = (GCRef*)((uintptr_t)sx & ~(uintptr_t)15);
+      uintptr_t j;
+      for (j = 15; j > 0; --j) {
+	sx = gcrefp(strs[j], GCstr);
+	if (!sx)
+	  goto strs_done;
+	freelist = lj_str_resize_insert(L, newhash, newmask, sx, freelist);
+      }
+      sx = gcrefp(*strs, GCstr);
+    strs_done:
+      setgcrefp(strs[0], freelist);
+      freelist = strs;
+    }
+    if (sx) {
+      freelist = lj_str_resize_insert(L, newhash, newmask, sx, freelist);
     }
   }
-  lj_mem_freevec(g, g->strhash, g->strmask+1, GCRef);
+  for (i = newmask; i != ~(MSize)0; i--) {
+    if (gcrefu(newhash[i]) & 14) {
+      lj_str_resize_cleanup(L, gcrefu(newhash[i]));
+    }
+  }
   g->strmask = newmask;
   g->strhash = newhash;
 }
@@ -123,7 +187,8 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
 {
   global_State *g;
   GCstr *s;
-  GCobj *o;
+  GCRef *optr;
+  uintptr_t i;
   MSize len = (MSize)lenx;
   MSize a, b, h = len;
   if (lenx >= LJ_MAX_STR)
@@ -148,50 +213,61 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
   b ^= a; b -= lj_rol(a, 25);
   h ^= b; h -= lj_rol(b, 16);
   /* Check if the string has already been interned. */
-  o = gcref(g->strhash[h & g->strmask]);
+  optr = &g->strhash[h & g->strmask];
+  i = 0;
   if (LJ_LIKELY((((uintptr_t)str+len-1) & (LJ_PAGESIZE-1)) <= LJ_PAGESIZE-4)) {
-    while (o != NULL) {
-      GCstr *sx = gco2str(o);
-      if (sx->len == len && str_fastcmp(str, strdata(sx), len) == 0) {
-	/* Resurrect if dead. Can only happen with fixstring() (keywords). */
-	if (isdead(g, o)) flipwhite(o);
-	return sx;  /* Return existing string. */
+    do {
+      GCstr *sx = gcrefp(optr[i], GCstr);
+      if ((uintptr_t)sx & 15) {
+	optr = (GCRef*)((uintptr_t)sx & ~(uintptr_t)15);
+	i = 15;
+      } else if (sx) {
+	if (sx->len == len && str_fastcmp(str, strdata(sx), len) == 0) {
+	  if (LJ_UNLIKELY(g->gc.state == GCSsweepstring))
+	    lj_gc_markleaf(g, sx);
+	  return sx;  /* Return existing string. */
+	}
+	--i;
+      } else {
+	break;
       }
-      o = gcnext(o);
-    }
+    } while ((intptr_t)i >= 0);
   } else {  /* Slow path: end of string is too close to a page boundary. */
-    while (o != NULL) {
-      GCstr *sx = gco2str(o);
-      if (sx->len == len && memcmp(str, strdata(sx), len) == 0) {
-	/* Resurrect if dead. Can only happen with fixstring() (keywords). */
-	if (isdead(g, o)) flipwhite(o);
-	return sx;  /* Return existing string. */
+    do {
+      GCstr *sx = gcrefp(optr[i], GCstr);
+      if ((uintptr_t)sx & 15) {
+	optr = (GCRef*)((uintptr_t)sx & ~(uintptr_t)15);
+	i = 15;
+      } else if (sx) {
+	if (sx->len == len && memcmp(str, strdata(sx), len) == 0) {
+	  if (LJ_UNLIKELY(g->gc.state == GCSsweepstring))
+	    lj_gc_markleaf(g, sx);
+	  return sx;  /* Return existing string. */
+	}
+	--i;
+      } else {
+	break;
       }
-      o = gcnext(o);
-    }
+    } while ((intptr_t)i >= 0);
   }
   /* Nope, create a new string. */
-  s = lj_mem_newt(L, sizeof(GCstr)+len+1, GCstr);
-  newwhite(g, s);
-  s->gct = ~LJ_TSTR;
+  s = lj_mem_newt(L, sizeof(GCstr)+len+1, GCstr, GCPOOL_LEAF);
   s->len = len;
   s->hash = h;
-  s->reserved = 0;
   memcpy(strdatawr(s), str, len);
   strdatawr(s)[len] = '\0';  /* Zero-terminate string. */
   /* Add it to string hash table. */
-  h &= g->strmask;
-  s->nextgc = g->strhash[h];
+  if ((intptr_t)i < 0) {
+    GCRef *newlist = lj_mem_newvec(L, 16, GCRef, GCPOOL_GREY);
+    setgcrefr(newlist[15], *optr);
+    setgcrefp(*optr, (uintptr_t)newlist | 1);
+    memset(newlist, 0, sizeof(GCRef) * 14);
+    optr = newlist;
+    i = 14;
+  }
   /* NOBARRIER: The string table is a GC root. */
-  setgcref(g->strhash[h], obj2gco(s));
+  setgcrefp(optr[i], s);
   if (g->strnum++ > g->strmask)  /* Allow a 100% load factor. */
     lj_str_resize(L, (g->strmask<<1)+1);  /* Grow string table. */
   return s;  /* Return newly interned string. */
 }
-
-void LJ_FASTCALL lj_str_free(global_State *g, GCstr *s)
-{
-  g->strnum--;
-  lj_mem_free(g, s, sizestring(s));
-}
-

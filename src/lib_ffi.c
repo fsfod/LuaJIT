@@ -207,11 +207,6 @@ LJLIB_CF(ffi_meta___le)		LJLIB_REC(cdata_arith MM_le)
   return ffi_arith(L);
 }
 
-LJLIB_CF(ffi_meta___concat)	LJLIB_REC(cdata_arith MM_concat)
-{
-  return ffi_arith(L);
-}
-
 /* Forward declaration. */
 static int lj_cf_ffi_new(lua_State *L);
 
@@ -273,6 +268,11 @@ LJLIB_CF(ffi_meta___pow)	LJLIB_REC(cdata_arith MM_pow)
 }
 
 LJLIB_CF(ffi_meta___unm)	LJLIB_REC(cdata_arith MM_unm)
+{
+  return ffi_arith(L);
+}
+
+LJLIB_CF(ffi_meta___concat)	LJLIB_REC(cdata_arith MM_concat)
 {
   return ffi_arith(L);
 }
@@ -516,9 +516,9 @@ LJLIB_CF(ffi_new)	LJLIB_REC(.)
       GCtab *t = cts->finalizer;
       if (gcref(t->metatable)) {
 	/* Add to finalizer table, if still enabled. */
+	cd->gcflags |= LJ_GCFLAG_CDATA_FIN;
 	copyTV(L, lj_tab_set(L, t, o-1), tv);
 	lj_gc_anybarriert(L, t);
-	cd->marked |= LJ_GC_CDATA_FIN;
       }
     }
   }
@@ -720,40 +720,32 @@ LJLIB_CF(ffi_fill)	LJLIB_REC(.)
   return 0;
 }
 
-#define H_(le, be)	LJ_ENDIAN_SELECT(0x##le, 0x##be)
-
 /* Test ABI string. */
 LJLIB_CF(ffi_abi)	LJLIB_REC(.)
 {
   GCstr *s = lj_lib_checkstr(L, 1);
   int b = 0;
-  switch (s->hash) {
-#if LJ_64
-  case H_(849858eb,ad35fd06): b = 1; break;  /* 64bit */
-#else
-  case H_(662d3c79,d0e22477): b = 1; break;  /* 32bit */
-#endif
+  switch ((uintptr_t)((char*)s - G(L)->pinstrings) >> 4) {
+  case PINSTR_OFFSET_NNbit >> 4:  /* 32bit / 64bit */
 #if LJ_ARCH_HASFPU
-  case H_(e33ee463,e33ee463): b = 1; break;  /* fpu */
+  case PINSTR_OFFSET_fpu >> 4:
 #endif
-#if LJ_ABI_SOFTFP
-  case H_(61211a23,c2e8c81c): b = 1; break;  /* softfp */
-#else
-  case H_(539417a8,8ce0812f): b = 1; break;  /* hardfp */
-#endif
+  case PINSTR_OFFSET_XXXXfp >> 4: /* softfp / hardfp */
 #if LJ_ABI_EABI
-  case H_(2182df8f,f2ed1152): b = 1; break;  /* eabi */
+  case PINSTR_OFFSET_eabi >> 4:
 #endif
 #if LJ_ABI_WIN
-  case H_(4ab624a8,4ab624a8): b = 1; break;  /* win */
+  case PINSTR_OFFSET_win >> 4:
 #endif
 #if LJ_TARGET_UWP
-  case H_(a40f0bcb,a40f0bcb): b = 1; break;  /* uwp */
+  case PINSTR_OFFSET_uwp >> 4: /* uwp */
 #endif
-  case H_(3af93066,1f001464): b = 1; break;  /* le/be */
+  case PINSTR_OFFSET_Xe >> 4:	  /* le / be */
 #if LJ_GC64
-  case H_(9e89d2c9,13c83c92): b = 1; break;  /* gc64 */
+  case PINSTR_OFFSET_gc64 >> 4:
 #endif
+    b = 1;
+    break;
   default:
     break;
   }
@@ -831,7 +823,7 @@ static GCtab *ffi_finalizer(lua_State *L)
   GCtab *t = lj_tab_new(L, 0, 1);
   settabV(L, L->top++, t);
   setgcref(t->metatable, obj2gco(t));
-  setstrV(L, lj_tab_setstr(L, t, lj_str_newlit(L, "__mode")),
+  setstrV(L, lj_tab_setstr(L, t, mmname_str(G(L), MM_mode)),
 	  lj_str_newlit(L, "k"));
   t->nomm = (uint8_t)(~(1u<<MM_mode));
   return t;

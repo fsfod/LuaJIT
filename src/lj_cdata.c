@@ -28,23 +28,12 @@ GCcdata *lj_cdata_newref(CTState *cts, const void *p, CTypeID id)
 /* Allocate variable-sized or specially aligned C data object. */
 GCcdata *lj_cdata_newv(lua_State *L, CTypeID id, CTSize sz, CTSize align)
 {
-  global_State *g;
-  MSize extra = sizeof(GCcdataVar) + sizeof(GCcdata) +
-		(align > CT_MEMALIGN ? (1u<<align) - (1u<<CT_MEMALIGN) : 0);
-  char *p = lj_mem_newt(L, extra + sz, char);
-  uintptr_t adata = (uintptr_t)p + sizeof(GCcdataVar) + sizeof(GCcdata);
-  uintptr_t almask = (1u << align) - 1u;
-  GCcdata *cd = (GCcdata *)(((adata + almask) & ~almask) - sizeof(GCcdata));
-  lua_assert((char *)cd - p < 65536);
-  cdatav(cd)->offset = (uint16_t)((char *)cd - p);
-  cdatav(cd)->extra = extra;
+  char *p = lj_mem_newaligned(L, sizeof(GCcdataVar) + sizeof(GCcdata),
+			      align > 3 ? 1u<<align : 8, sz, GCPOOL_LEAF);
+  GCcdata *cd = (GCcdata *)(p + sizeof(GCcdataVar));
   cdatav(cd)->len = sz;
-  g = G(L);
-  setgcrefr(cd->nextgc, g->gc.root);
-  setgcref(g->gc.root, obj2gco(cd));
-  newwhite(g, obj2gco(cd));
-  cd->marked |= 0x80;
-  cd->gct = ~LJ_TCDATA;
+  cd->gcflags = LJ_GCFLAG_CDATA_VAR;
+  cd->gctype = (int8_t)(uint8_t)LJ_TCDATA;
   cd->ctypeid = id;
   return cd;
 }
@@ -58,32 +47,6 @@ GCcdata *lj_cdata_newx(CTState *cts, CTypeID id, CTSize sz, CTInfo info)
     return lj_cdata_newv(cts->L, id, sz, ctype_align(info));
 }
 
-/* Free a C data object. */
-void LJ_FASTCALL lj_cdata_free(global_State *g, GCcdata *cd)
-{
-  if (LJ_UNLIKELY(cd->marked & LJ_GC_CDATA_FIN)) {
-    GCobj *root;
-    makewhite(g, obj2gco(cd));
-    markfinalized(obj2gco(cd));
-    if ((root = gcref(g->gc.mmudata)) != NULL) {
-      setgcrefr(cd->nextgc, root->gch.nextgc);
-      setgcref(root->gch.nextgc, obj2gco(cd));
-      setgcref(g->gc.mmudata, obj2gco(cd));
-    } else {
-      setgcref(cd->nextgc, obj2gco(cd));
-      setgcref(g->gc.mmudata, obj2gco(cd));
-    }
-  } else if (LJ_LIKELY(!cdataisv(cd))) {
-    CType *ct = ctype_raw(ctype_ctsG(g), cd->ctypeid);
-    CTSize sz = ctype_hassize(ct->info) ? ct->size : CTSIZE_PTR;
-    lua_assert(ctype_hassize(ct->info) || ctype_isfunc(ct->info) ||
-	       ctype_isextern(ct->info));
-    lj_mem_free(g, cd, sizeof(GCcdata) + sz);
-  } else {
-    lj_mem_free(g, memcdatav(cd), sizecdatav(cd));
-  }
-}
-
 void lj_cdata_setfin(lua_State *L, GCcdata *cd, GCobj *obj, uint32_t it)
 {
   GCtab *t = ctype_ctsG(G(L))->finalizer;
@@ -94,11 +57,11 @@ void lj_cdata_setfin(lua_State *L, GCcdata *cd, GCobj *obj, uint32_t it)
     lj_gc_anybarriert(L, t);
     tv = lj_tab_set(L, t, &tmp);
     if (it == LJ_TNIL) {
+      cd->gcflags &= ~LJ_GCFLAG_CDATA_FIN;
       setnilV(tv);
-      cd->marked &= ~LJ_GC_CDATA_FIN;
     } else {
+      cd->gcflags |= LJ_GCFLAG_CDATA_FIN;
       setgcV(L, tv, obj, it);
-      cd->marked |= LJ_GC_CDATA_FIN;
     }
   }
 }

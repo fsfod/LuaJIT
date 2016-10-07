@@ -6,7 +6,7 @@
 /* This file may be included multiple times with different ERRDEF macros. */
 
 /* Basic error handling. */
-ERRDEF(ERRMEM,	"not enough memory")
+ERRDEF(ERRMEM,	ERRMEM_MSG)
 ERRDEF(ERRERR,	"error in error handling")
 ERRDEF(ERRCPP,	"C++ exception")
 

@@ -15,6 +15,7 @@
 #include "lj_ctype.h"
 #include "lj_ccallback.h"
 #include "lj_buf.h"
+#include "lj_clib.h"
 
 /* -- C type definitions -------------------------------------------------- */
 
@@ -157,14 +158,15 @@ CTypeID lj_ctype_new(CTState *cts, CType **ctp)
   if (LJ_UNLIKELY(id >= cts->sizetab)) {
     if (id >= CTID_MAX) lj_err_msg(cts->L, LJ_ERR_TABOV);
 #ifdef LUAJIT_CTYPE_CHECK_ANCHOR
-    ct = lj_mem_newvec(cts->L, id+1, CType);
+    ct = lj_mem_newvec(cts->L, id+1, CType, GCPOOL_GREY);
     memcpy(ct, cts->tab, id*sizeof(CType));
     memset(cts->tab, 0, id*sizeof(CType));
     lj_mem_freevec(cts->g, cts->tab, cts->sizetab, CType);
     cts->tab = ct;
     cts->sizetab = id+1;
 #else
-    lj_mem_growvec(cts->L, cts->tab, cts->sizetab, CTID_MAX, CType);
+    lj_mem_growvec(cts->L, cts->tab, cts->sizetab, CTID_MAX, CType,
+		   GCPOOL_GREY);
 #endif
   }
   cts->top = id+1;
@@ -192,7 +194,8 @@ CTypeID lj_ctype_intern(CTState *cts, CTInfo info, CTSize size)
   id = cts->top;
   if (LJ_UNLIKELY(id >= cts->sizetab)) {
     if (id >= CTID_MAX) lj_err_msg(cts->L, LJ_ERR_TABOV);
-    lj_mem_growvec(cts->L, cts->tab, cts->sizetab, CTID_MAX, CType);
+    lj_mem_growvec(cts->L, cts->tab, cts->sizetab, CTID_MAX, CType,
+                   GCPOOL_GREY);
   }
   cts->top = id+1;
   cts->tab[id].info = info;
@@ -591,8 +594,8 @@ GCstr *lj_ctype_repr_complex(lua_State *L, void *sp, CTSize size)
 /* Initialize C type table and state. */
 CTState *lj_ctype_init(lua_State *L)
 {
-  CTState *cts = lj_mem_newt(L, sizeof(CTState), CTState);
-  CType *ct = lj_mem_newvec(L, CTTYPETAB_MIN, CType);
+  CTState *cts = lj_mem_newobj(L, CTState, GCPOOL_GREY);
+  CType *ct = lj_mem_newvec(L, CTTYPETAB_MIN, CType, GCPOOL_GREY);
   const char *name = lj_ctype_typenames;
   CTypeID id;
   memset(cts, 0, sizeof(CTState));
@@ -627,10 +630,8 @@ void lj_ctype_freestate(global_State *g)
 {
   CTState *cts = ctype_ctsG(g);
   if (cts) {
+    lj_clib_unloaddefault();
     lj_ccallback_mcode_free(cts);
-    lj_mem_freevec(g, cts->tab, cts->sizetab, CType);
-    lj_mem_freevec(g, cts->cb.cbid, cts->cb.sizeid, CTypeID1);
-    lj_mem_freet(g, cts);
   }
 }
 

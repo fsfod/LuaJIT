@@ -236,10 +236,6 @@ typedef struct GCtrace {
   uint8_t topslot;	/* Top stack slot already checked to be allocated. */
   uint8_t linktype;	/* Type of link. */
   IRRef nins;		/* Next IR instruction. Biased with REF_BIAS. */
-#if LJ_GC64
-  uint32_t unused_gc64;
-#endif
-  GCRef gclist;
   IRIns *ir;		/* IR instructions/constants. Biased with REF_BIAS. */
   IRRef nk;		/* Lowest IR constant. Biased with REF_BIAS. */
   uint16_t nsnap;	/* Number of snapshots. */
@@ -261,16 +257,13 @@ typedef struct GCtrace {
   TraceNo1 nextside;	/* Next side trace of same root trace. */
   uint8_t sinktags;	/* Trace has SINK tags. */
   uint8_t unused1;
-#ifdef LUAJIT_USE_GDBJIT
-  void *gdbjit_entry;	/* GDB JIT entry. */
-#endif
 } GCtrace;
 
-#define gco2trace(o)	check_exp((o)->gch.gct == ~LJ_TTRACE, (GCtrace *)(o))
+#define gco2trace(o) \
+  check_exp((o)->gch.gctype == (int8_t)(uint8_t)LJ_TTRACE, (GCtrace *)(o))
 #define traceref(J, n) \
-  check_exp((n)>0 && (MSize)(n)<J->sizetrace, (GCtrace *)gcref(J->trace[(n)]))
-
-LJ_STATIC_ASSERT(offsetof(GChead, gclist) == offsetof(GCtrace, gclist));
+  check_exp((n)>0 && (MSize)(n)<J->sizetrace, \
+    (GCtrace *)((uintptr_t)gcrefu(J->trace[(n)]) & ~(uintptr_t)15))
 
 static LJ_AINLINE MSize snap_nextofs(GCtrace *T, SnapShot *snap)
 {
@@ -487,6 +480,10 @@ typedef struct jit_State {
   GCproto *prev_pt;	/* Previous prototype. */
   BCLine prev_line;	/* Previous line. */
   int prof_mode;	/* Profiling mode: 0, 'f', 'l'. */
+#endif
+
+#ifdef LUAJIT_USE_GDBJIT
+  MRef *gdbjit_entries; /* GDB JIT entries (same size as trace array). */
 #endif
 }
 #if LJ_TARGET_ARM
