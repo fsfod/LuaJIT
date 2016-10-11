@@ -229,7 +229,7 @@ const char *lj_debug_uvnamev(cTValue *o, uint32_t idx, TValue **tvp)
     if (isluafunc(fn)) {
       GCproto *pt = funcproto(fn);
       if (idx < pt->sizeuv) {
-	*tvp = uvval(&gcref(fn->l.uvptr[idx])->uv);
+	*tvp = uvval(gco2uv(gcref(fn->l.uvptr[idx])));
 	return lj_debug_uvname(pt, idx);
       }
     } else {

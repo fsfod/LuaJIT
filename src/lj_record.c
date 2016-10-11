@@ -1569,7 +1569,7 @@ static int rec_upvalue_constify(jit_State *J, GCupval *uvp)
 /* Record upvalue load/store. */
 static TRef rec_upvalue(jit_State *J, uint32_t uv, TRef val)
 {
-  GCupval *uvp = &gcref(J->fn->l.uvptr[uv])->uv;
+  GCupval *uvp = gco2uv(gcref(J->fn->l.uvptr[uv]));
   TRef fn = getcurrf(J);
   IRRef uref;
   uint32_t dhash;

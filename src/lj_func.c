@@ -137,7 +137,7 @@ GCfunc *lj_func_newL_gc(lua_State *L, uintptr_t pt_, GCfuncL *parent)
       uv->uvflags = (uint32_t)(uintptr_t)mref(parent->pc, char) ^ (v << 24) ^
 	(((v / PROTO_UV_IMMUTABLE) & 1) * UVFLAG_IMMUTABLE);
     } else {
-      uv = &gcref(puv[v])->uv;
+      uv = gco2uv(gcref(puv[v]));
     }
     setgcref(fn->l.uvptr[i], obj2gco(uv));
   }

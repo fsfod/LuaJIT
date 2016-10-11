@@ -763,10 +763,10 @@ static void atomic_traverse_threads(global_State* g)
     if (L->gcflags & LJ_GCFLAG_GREY) {
       gc_traverse_thread(g, L);
     } else {
-      GCobj *uv = gcref(L->openupval);
-      for (; uv; uv = gcref(gco2uv(uv)->nextgc)) {
-	if (uv->gch.gcflags & LJ_GCFLAG_GREY)
-	  gc_marktv(g, uvval(gco2uv(uv)));
+      GCupval *uv = gco2uv(gcref(L->openupval));
+      for (; uv; uv = gco2uv(gcref(uv->nextgc))) {
+	if (!(uv->uvflags & UVFLAG_NOTGREY))
+	  gc_marktv(g, uvval(uv));
       }
     }
   }
@@ -919,6 +919,7 @@ static void atomic_enqueue_gcmm(global_State *g)
       uint32_t mask = a->block32[i] &~ a->mark32[i];
       while (mask) {
 	GCobj *c = obj2gco(&a->cell[i*32 + lj_ffs(mask)]);
+	mask &= (mask-1);
 	lua_assert(c->gch.gctype == (int8_t)(uint8_t)LJ_TUDATA ||
 	           c->gch.gctype == (int8_t)(uint8_t)LJ_TTAB);
 	if (!(c->gch.gcflags & LJ_GCFLAG_FINALIZED)) {
@@ -931,7 +932,6 @@ static void atomic_enqueue_gcmm(global_State *g)
 	    continue;
 	  }
 	}
-	mask &= (mask-1);
       }
     }
   }

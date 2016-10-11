@@ -139,8 +139,6 @@ static void lj_str_resize_cleanup(lua_State *L, uintptr_t x)
   }
 }
 
-#include <stdio.h>
-
 /* Resize the string hash table (grow and shrink). */
 void lj_str_resize(lua_State *L, MSize newmask)
 {

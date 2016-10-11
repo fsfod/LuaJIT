@@ -200,7 +200,7 @@ static void asm_fuseahuref(ASMState *as, IRRef ref, RegSet allow)
     case IR_UREFC:
       if (irref_isk(ir->op1)) {
 	GCfunc *fn = ir_kfunc(IR(ir->op1));
-	GCupval *uv = &gcref(fn->l.uvptr[(ir->op2 >> 8)])->uv;
+	GCupval *uv = gco2uv(gcref(fn->l.uvptr[(ir->op2 >> 8)]));
 #if LJ_GC64
 	int64_t ofs = dispofs(as, &uv->tv);
 	if (checki32(ofs) && checki32(ofs+4)) {
@@ -1347,7 +1347,7 @@ static void asm_uref(ASMState *as, IRIns *ir)
   Reg dest = ra_dest(as, ir, RSET_GPR);
   if (irref_isk(ir->op1)) {
     GCfunc *fn = ir_kfunc(IR(ir->op1));
-    MRef *v = &gcref(fn->l.uvptr[(ir->op2 >> 8)])->uv.v;
+    MRef *v = &gco2uv(gcref(fn->l.uvptr[(ir->op2 >> 8)]))->v;
     emit_rma(as, XO_MOV, dest|REX_GC64, v);
   } else {
     Reg uv = ra_scratch(as, RSET_GPR);

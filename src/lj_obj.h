@@ -799,7 +799,6 @@ LJ_STATIC_ASSERT(offsetof(GCfuncL, ffid) == offsetof(lua_State, dummy_ffid));
 
 typedef union GCobj {
   GChead gch;
-  GCupval uv;
   lua_State th;
   GCproto pt;
   GCfunc fn;
