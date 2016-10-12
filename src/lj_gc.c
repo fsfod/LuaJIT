@@ -857,7 +857,6 @@ static void atomic_mark_misc(global_State *g)
   gc_marknleaf(g, G2J(g)->irbuf + G2J(g)->irbotlim);
   gc_marknleaf(g, G2J(g)->trace);
 #endif
-  gc_marknleaf(g, mref(g->tmpbuf.b, void));
   gc_marknleaf(g, mref(g->gc.thread, void));
   gc_marknleaf(g, mref(g->gc.gcmm, void));
   lj_gc_markleaf(g, (void*)g->strhash);
