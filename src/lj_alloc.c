@@ -259,7 +259,9 @@ static void *lj_alloc_malloc(size_t align, size_t nsize)
   void *p = CALL_MMAP(nsize);
   if (p == MFAIL) return NULL;
   if ((size_t)p & (align - 1)) {
-    void *base = CALL_MMAP(nsize + align);
+    void *base;
+    (void)munmap(p, nsize);
+    base = CALL_MMAP(nsize + align);
     if (base == MFAIL) return NULL;
     p = (void*)(((uintptr_t)base + align - 1) & ~(align - 1));
     if (base != p) (void)munmap(base, (size_t)p - (size_t)base);
