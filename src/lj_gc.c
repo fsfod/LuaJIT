@@ -1525,9 +1525,6 @@ static size_t gc_onestep(lua_State *L) {
 	g->gc.state = GCSfinalize;
       g->gc.sweeppos = g->gc.finalizenum;
       g->gc.finalizenum = 0;
-#if LJ_HASFFI
-      g->gc.fmark = 0;
-#endif
     } else {
       g->gc.state = GCSpause;
       }
@@ -1543,7 +1540,10 @@ static size_t gc_onestep(lua_State *L) {
       }
     }
 #if LJ_HASFFI
-    if (g->gc.fmark) lj_tab_rehash(L, ctype_ctsG(g)->finalizer);
+    if (g->gc.fmark) {
+      g->gc.fmark = 0;
+      lj_tab_rehash(L, ctype_ctsG(g)->finalizer);
+    }
 #endif
     g->gc.state = GCSpause;
     return 0;
