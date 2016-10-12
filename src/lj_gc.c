@@ -1933,7 +1933,7 @@ void *lj_mem_newaligned(lua_State *L, size_t s0, size_t a1, size_t s1, GCPoolID 
     gc_add_bump_to_free_list(g, pool);
     arena = lj_gc_new_arena(L, nsize, p);
     setmref(pool->bumpbase, (uintptr_t)arena + LJ_GC_ARENA_SIZE/64);
-    ptr = (((uintptr_t)arena + LJ_GC_ARENA_SIZE - s1) & ~(a1 - 1)) - s0;
+    ptr = (((uintptr_t)arena + nsize - s1) & ~(a1 - 1)) - s0;
   }
   setmref(pool->bump, ptr & ~(uintptr_t)15);
   lua_assert(checkptrGC(ptr));
