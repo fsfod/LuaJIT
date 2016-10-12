@@ -1576,6 +1576,7 @@ static void gc_abortcycle(lua_State *L)
     } else {
       /* Roll forward to the end of the current cycle. */
       do { gc_onestep(L); } while (g->gc.state != GCSpause);
+      g->gc.ssbsize = 0;  /* Finalizers might have triggered write barrier. */
     }
   }
 }
