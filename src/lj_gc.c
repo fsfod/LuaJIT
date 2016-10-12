@@ -785,8 +785,8 @@ static void atomic_check_still_weak(global_State* g)
 
 static void atomic_propagate_grey(global_State *g)
 {
+  MRef *gq = mref(g->gc.gq, MRef);
   for (;;) {
-    MRef *gq = mref(g->gc.gq, MRef);
     if (mrefu(*gq) & LJ_GC_GSIZE_MASK) {
       GCArena *a = (GCArena*)(mrefu(*gq) & ~(LJ_GC_ARENA_SIZE - 1));
       do {
@@ -799,6 +799,7 @@ static void atomic_propagate_grey(global_State *g)
 	lua_assert(lj_gc_bit(a->mark, &, idx));
 	setmref(a->head.grey, grey + 1);
 	gc_traverse(g, obj2gco(c));
+	gq = mref(g->gc.gq, MRef);
       } while (mrefu(*gq) & LJ_GC_GSIZE_MASK);
     } else if ((mrefu(gq[1]) | mrefu(gq[2])) & LJ_GC_GSIZE_MASK) {
       gq_demote_top(gq, g->gc.gqsize);
@@ -813,6 +814,7 @@ static void atomic_propagate_grey(global_State *g)
 	  gc_traverse(g, o);
 	}
       } while (g->gc.hugegreyidx);
+      gq = mref(g->gc.gq, MRef);
     } else {
       return;
     }
@@ -1891,7 +1893,6 @@ static GCArena *lj_gc_new_arena(lua_State *L, size_t size, uint32_t type)
 
   if (++g->gc.gqsize + 1 == g->gc.gqcapacity) {
     /* Caveat: growing gq might allocate an arena or huge block. */
-    MRef *gq = mref(g->gc.gq, MRef);
     lj_mem_growvec(L, gq, g->gc.gqcapacity, LJ_MAX_MEM32, MRef, GCPOOL_GREY);
     setmref(g->gc.gq, gq);
   }
