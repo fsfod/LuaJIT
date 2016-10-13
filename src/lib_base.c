@@ -116,8 +116,9 @@ LJLIB_NOREGUV LJLIB_ASM(ipairs_aux)	LJLIB_REC(.)
 }
 
 LJLIB_PUSH(lastcl)
-LJLIB_ASM(ipairs)		LJLIB_REC(xpairs 1)
+LJLIB_ASM(ipairs)		LJLIB_REC(xpairs 2)
 {
+  LJ_STATIC_ASSERT(MM_ipairs == MM_pairs + 2);
   return ffh_pairs(L, MM_ipairs);
 }
 
