@@ -24,6 +24,7 @@
 #include "lj_trace.h"
 #include "lj_vm.h"
 #include "lj_strscan.h"
+#include "lj_ctype.h"
 
 /* -- Common helper functions --------------------------------------------- */
 
@@ -369,6 +370,30 @@ LUA_API lua_Integer lua_tointeger(lua_State *L, int idx)
 #else
   return lj_num2int(n);
 #endif
+}
+
+LUA_API long long lua_tointeger64(lua_State *L, int idx)
+{
+  CTState *cts = ctype_cts(L);
+  cTValue *o = index2adr(L, idx);
+  GCcdata *cd = cdataV(o);
+  CType *ct = ctype_raw(cts, cd->ctypeid);
+
+  if (tvisint(o)){
+    return intV(o);
+  } else if (LJ_LIKELY(tvisnum(o))) {
+    return (long long)numV(o);
+  } else if (!tviscdata(o) || !ctype_isnum(ct->info)) {
+    return 0;
+  }
+
+  if (ct->size == 8) {
+    return *(int64_t*)cdataptr(cd);
+  } else if (ct->size == 4) {
+    return *(int32_t*)cdataptr(cd);
+  }
+
+  return 0;
 }
 
 LUALIB_API lua_Integer luaL_checkinteger(lua_State *L, int idx)
