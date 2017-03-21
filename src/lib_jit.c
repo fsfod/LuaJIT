@@ -164,6 +164,109 @@ LJLIB_CF(jit_setfunctionhot){
   return 0;
 }
 
+
+int used_sideexit(lua_State* L, GCtrace *T, int ignore_compiled){
+  int i;
+
+  for(i = 0; i < T->nsnap; i++){
+    if(T->snap[i].count != 0 && (!ignore_compiled || T->snap[i].count != SNAPCOUNT_DONE)){
+      return i;
+    }
+  }
+
+  return -1;
+}
+/*
+ returns the number of the first exit That has an exit count greater than 0
+ arg 1 A Lua function that needs to have a root trace
+ arg 2 An optional bool to enable checking the exits of compiled side traces
+*/
+LJLIB_CF(jit_hasusedsideexit){
+  GCfunc* func = lj_lib_checkfunc(L, 1);
+  GCproto* proto;
+  GCtrace *T;
+  int i, result;
+  int checkSideTraces = (L->top-L->base) > 1 && tvistruecond(L->base+1);
+  
+  if(!isluafunc(func)){
+    lj_err_argtype(L, 1, "Lua Function and not a C function");
+  }
+
+  proto = funcproto(func);
+
+  if(proto->trace == 0){
+    lj_err_callermsg(L, "Lua function has no traces");
+  }
+
+  T = traceref(L2J(L), proto->trace);
+
+  if(T == NULL)lj_err_callermsg(L, "invalid trace");
+  
+  result = used_sideexit(L, T, checkSideTraces);
+    
+  if(checkSideTraces && result == -1){
+    GCtrace *root = T;
+
+    for(i = 0; i < root->nchild; i++){
+      T = traceref(L2J(L), T->nextside);
+
+      result = used_sideexit(L, T, 1);
+      
+      if(result != -1){
+        setintV(L->top++, T->traceno);
+        break;
+      }
+    }
+  }
+  
+  if(result == -1){
+    return 0;
+  }
+  
+  setintV(L->top++, result);
+  //side trace number is returned 
+  return checkSideTraces ? 2 : 1;
+}
+
+//passing false for the second arg(sethot) will reset any exits that still have the same count as J->param[JIT_P_hotexit] to 0
+LJLIB_CF(jit_setexitshot){
+  GCfunc* func = lj_lib_checkfunc(L, 1);
+  int sethot = tvistruecond(lj_lib_checkany(L, 2));
+  GCproto* proto;
+  GCtrace* T;
+  int i, hotcount = L2J(L)->param[JIT_P_hotexit];
+  
+  
+  if(!isluafunc(func)){
+    lj_err_argtype(L, 1, "Lua Function and not a C function");
+  }
+
+  proto = funcproto(func);
+
+  if(proto->trace == 0){
+    lj_err_callermsg(L, "Lua function has no traces");
+  }
+
+  T = traceref(L2J(L), proto->trace);
+
+  if(T == NULL)lj_err_callermsg(L, "Lua function has invalid trace");
+  
+  for (i = 0; i < T->nsnap; i++){
+
+    if(sethot){
+      if(T->snap[i].count != SNAPCOUNT_DONE){
+        T->snap[i].count = hotcount;
+      }
+    }else{
+      if(T->snap[i].count == hotcount){
+        T->snap[i].count = 0;
+      }
+    }
+  }
+  
+  return 0;
+}
+
 LJLIB_PUSH(top-5) LJLIB_SET(os)
 LJLIB_PUSH(top-4) LJLIB_SET(arch)
 LJLIB_PUSH(top-3) LJLIB_SET(version_num)
