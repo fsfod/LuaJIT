@@ -421,6 +421,8 @@
 |.endmacro
 |
 |.macro hotcall, reg
+|  cmp PC_RD, 0
+|  jnz ->vm_hotcall
 |  mov reg, PC
 |  shr reg, 1
 |  and reg, HOTCOUNT_PCMASK

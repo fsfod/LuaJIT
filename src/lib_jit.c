@@ -141,6 +141,29 @@ LJLIB_CF(jit_attach)
   return 0;
 }
 
+LJLIB_CF(jit_setfunctionhot){
+  GCfunc *fn = lj_lib_checkfunc(L, 1);
+  BCOp curop;
+  BCIns* pc;
+
+  if(!isluafunc(fn))lj_err_callermsg(L, "function tobe set hot needs tobe a Lua function");
+
+  pc = mref(fn->l.pc, BCIns);
+
+  curop = bc_op(*pc);
+
+  if(curop == BC_FUNCV)lj_err_callermsg(L, "error byte code header was BC_FUNCV variable argument functions can't be set hot");
+
+  //maybe allow setting it for force interpreter version IFUNCF
+  if(curop != BC_FUNCF){
+    lj_err_callermsg(L, "function header byte code was not BC_FUNCF");
+  }
+
+  *pc = BCINS_AD(curop, bc_a(*pc), 1);
+
+  return 0;
+}
+
 LJLIB_PUSH(top-5) LJLIB_SET(os)
 LJLIB_PUSH(top-4) LJLIB_SET(arch)
 LJLIB_PUSH(top-3) LJLIB_SET(version_num)
