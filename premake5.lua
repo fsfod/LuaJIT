@@ -22,26 +22,13 @@ local flaglist = {
     --"LUAJIT_USE_PERFTOOLS",
 }
 
+
 newoption {
     trigger = "builddir",
     description = "override the build directory"
 }
 
 BuildDir = _OPTIONS["builddir"] or "build"
-
-function BuildDynasmFlags(buildflags)
-    
-    local flags = ""
-    
-    if buildflags["LUAJIT_ENABLE_LUA52COMPAT"] then
-      flags = flags.." -D LJ_52"
-    end
-    
-    
-    if buildflags["LUAJIT_NUMMODE"] == 2 then
-      flags = flags.." -D DUALNUM"
-    end
-end
 
 liblist = {
     "lib_base.c",
@@ -93,40 +80,47 @@ minilua = HOST_LUA or'"obj/minilua/%{cfg.buildcfg}%{cfg.platform}/minilua.exe"'
 
 DEBUG_LUA_PATH = _OPTIONS["DEBUG_LUA_PATH"] or ""
 
--- A solution contains projects, and defines the available configurations
+
 solution "LuaJit"
   configurations { "Debug", "Release" }
   platforms { "x86", "x64" }
   defines {"_CRT_SECURE_NO_DEPRECATE" }
   objdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}"
   targetdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}"
-  startproject"lua"
+  startproject "lua"
+  
    
   filter "platforms:x86"
     architecture "x86"
+    defines { 
+      "LUAJIT_TARGET=LUAJIT_ARCH_X86" 
+    }
 
   filter "platforms:x64"
     architecture "x86_64"
+    defines { 
+      "LUAJIT_TARGET=LUAJIT_ARCH_X64" 
+    }
  
 if not HOST_LUA then  
   project "minilua"
     uuid "74FBF227-E0DA-71C3-E9F2-FC995551D824"
     kind "ConsoleApp"
+    location(BuildDir)
     configurations { "Release" }
     language "C"
-    location(BuildDir)
     vpaths { ["Sources"] = "src/host" }
     files {
       "src/host/minilua.c", 
     }
   
-    configuration "Debug"
+    filter "Debug"
       defines { "NDEBUG" }
-      optimize"Speed"
+      optimize "Speed"
   
-    configuration "Release"
+    filter "Release"
       defines { "NDEBUG" }
-      optimize"Speed" 
+      optimize "Speed" 
 end   
 
   project "buildvm"
@@ -148,7 +142,7 @@ end
       "src"
     }
   
-    filter{'architecture:x32', 'files:src/vm_x86.dasc'}
+    filter {'architecture:x86', 'files:src/vm_x86.dasc'}
       buildmessage 'Compiling %{file.relpath}'
       buildcommands {
         minilua..' %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
@@ -156,36 +150,39 @@ end
       buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
       
     --needed for adding -D P64 for 64 bit builds
-    filter{'architecture:x64', 'files:src/vm_x86.dasc'}
+    filter {'architecture:x64', 'files:src/vm_x86.dasc'}
       buildmessage 'Compiling %{file.relpath}'
       buildcommands {
         minilua..' %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -D P64 -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
       }
       buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
-
-    configuration  {"Debug"}
-      optimize"Speed"
+       --m elfasm -o "%{cfg.objdir}/lj_vm.S"'
+      
+    filter  {"Debug"}
+      optimize "Speed"
  
-    configuration {"Release"}
-      optimize"Speed"
+    filter {"Release"}
+      optimize "Speed"
  
   project "lua"
     uuid "C78D880B-3397-887C-BC12-9F7C281B947C"
     kind "SharedLib"
-    buildoptions "/c"
-    dependson "buildvm"
     targetdir "bin/%{cfg.buildcfg}/%{cfg.platform}"
+    location(BuildDir)
+    buildoptions "/c"
+    symbols "On"
     targetname "lua51"
     vectorextensions "SSE2"
-    defines(flaglist)
     language "C++"
-    location(BuildDir)
+    
+    defines(flaglist)
+    dependson "buildvm"  
     vpaths { ["libs"] = "src/lib_*.h" }
     vpaths { ["libs"] = "src/lib_*.c" }
     vpaths { ["headers"] = "src/lj_*.h" }
     vpaths { [""] = "lua.natvis" }
     
-    includedirs{
+    includedirs {
       "%{cfg.objdir}",
       "src"
     }
@@ -198,14 +195,13 @@ end
       "lua.natvis",
       --'$(IntDir)lj_vm.obj',--obj/lua/%{cfg.buildcfg}/%{cfg.platform}/
       
-      '$(IntDir)/lj_bcdef.h',
-      '$(IntDir)/lj_ffdef.h',
-      '$(IntDir)/lj_libdef.h',
-      '$(IntDir)/lj_recdef.h',
-      '$(IntDir)/lj_folddef.h',
+      '%{cfg.objdir}/lj_bcdef.h',
+      '%{cfg.objdir}/lj_ffdef.h',
+      '%{cfg.objdir}/lj_libdef.h',
+      '%{cfg.objdir}/lj_recdef.h',
+      '%{cfg.objdir}/lj_folddef.h',
     }
-    excludes
-    {
+    excludes {
       "src/*_arm*",
       "src/*_mips*",
       "src/*_ppc*",
@@ -225,24 +221,24 @@ end
     }
     prebuildmessage"Running pre build commands"
     
-    configuration  { "debug"}
+    filter "Debug"
       defines { "DEBUG", "LUA_USE_ASSERT" }
-      flags { "Symbols" }
   
-    configuration { "release" }
+    filter  "Release"
+      optimize "Speed" 
       defines { "NDEBUG"}
-      flags { "Symbols" }
-      optimize "Speed"
+      
   
   project "luajit"
     uuid "4E5D480C-3AFF-72E2-23BA-86360FFBF932"
-    links { "lua"} 
     kind "ConsoleApp"
+    location(BuildDir)
     targetdir "bin/%{cfg.buildcfg}/%{cfg.platform}"
     vectorextensions "SSE2"
-    defines(flaglist)
+    symbols "On"
     language "C++"
-    location(BuildDir)
+    
+    defines(flaglist)
     vpaths { ["libs"] = "src/lib_*.h" }
     vpaths { ["libs"] = "src/lib_*.c" }
     debugenvs {"LUA_PATH=%{sln.location}src/?.lua;%{sln.location}bin/%{cfg.buildcfg}/%{cfg.platform}/?.lua;%{sln.location}tests/?.lua"..DEBUG_LUA_PATH..";%LUA_PATH%"}
@@ -251,16 +247,17 @@ end
     files {
       "src/luajit.c"
     }
+    
+    links { 
+      "lua"
+    } 
         
-    configuration{"Debug"}        
+    filter "Debug"
       defines { "DEBUG", "LUA_USE_ASSERT" }
-      flags { "Symbols" }
  
-    configuration{"Release"}
-      defines { "NDEBUG"}
-      flags { "Symbols" }
+    filter "Release"
       optimize "Speed"
-
+      defines { "NDEBUG"}
 
 local function mkdir_and_gitignore(dir)
   --Create directorys first so writing the .gitignore doesn't fail
