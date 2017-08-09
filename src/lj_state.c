@@ -157,6 +157,8 @@ static TValue *cpluaopen(lua_State *L, lua_CFunction dummy, void *ud)
   return NULL;
 }
 
+#define GGSIZE (sizeof(GG_State) + LUA_EXTRASPACE)
+
 static void close_state(lua_State *L)
 {
   global_State *g = G(L);
@@ -171,13 +173,13 @@ static void close_state(lua_State *L)
   lj_mem_freevec(g, g->strhash, g->strmask+1, GCRef);
   lj_buf_free(g, &g->tmpbuf);
   lj_mem_freevec(g, tvref(L->stack), L->stacksize, TValue);
-  lua_assert(g->gc.total == sizeof(GG_State));
+  lua_assert(g->gc.total == GGSIZE);
 #ifndef LUAJIT_USE_SYSMALLOC
   if (g->allocf == lj_alloc_f)
     lj_alloc_destroy(g->allocd);
   else
 #endif
-    g->allocf(g->allocd, G2GG(g), sizeof(GG_State), 0);
+    g->allocf(g->allocd, ((char*)G2GG(g))-LUA_EXTRASPACE, GGSIZE, 0);
 }
 
 #if LJ_64 && !LJ_GC64 && !(defined(LUAJIT_USE_VALGRIND) && defined(LUAJIT_USE_SYSMALLOC))
@@ -186,11 +188,12 @@ lua_State *lj_state_newstate(lua_Alloc f, void *ud)
 LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
 #endif
 {
-  GG_State *GG = (GG_State *)f(ud, NULL, 0, sizeof(GG_State));
+  char* ggbase = f(ud, NULL, 0, GGSIZE);
+  GG_State *GG = (GG_State *)(ggbase + LUA_EXTRASPACE);
   lua_State *L = &GG->L;
   global_State *g = &GG->g;
-  if (GG == NULL || !checkptrGC(GG)) return NULL;
-  memset(GG, 0, sizeof(GG_State));
+  if (ggbase == NULL || !checkptrGC(ggbase)) return NULL;
+  memset(ggbase, 0, GGSIZE);
   L->gct = ~LJ_TTHREAD;
   L->marked = LJ_GC_WHITE0 | LJ_GC_FIXED | LJ_GC_SFIXED;  /* Prevent free. */
   L->dummy_ffid = FF_C;
@@ -214,7 +217,7 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
   g->gc.state = GCSpause;
   setgcref(g->gc.root, obj2gco(L));
   setmref(g->gc.sweep, &g->gc.root);
-  g->gc.total = sizeof(GG_State);
+  g->gc.total = GGSIZE;
   g->gc.pause = LUAI_GCPAUSE;
   g->gc.stepmul = LUAI_GCMUL;
   lj_dispatch_init((GG_State *)L);
@@ -271,13 +274,15 @@ LUA_API void lua_close(lua_State *L)
 
 lua_State *lj_state_new(lua_State *L)
 {
-  lua_State *L1 = lj_mem_newobj(L, lua_State);
+  char *lmem = lj_mem_newgco(L, sizeof(lua_State) + LUA_EXTRASPACE);
+  lua_State *L1 = tostate(lmem);
   L1->gct = ~LJ_TTHREAD;
   L1->dummy_ffid = FF_C;
   L1->status = LUA_OK;
   L1->stacksize = 0;
   setmref(L1->stack, NULL);
   L1->cframe = NULL;
+  memcpy(lmem, fromstate(L2GG(L)), LUA_EXTRASPACE);
   /* NOBARRIER: The lua_State is new (marked white). */
   setgcrefnull(L1->openupval);
   setmrefr(L1->glref, L->glref);
@@ -295,6 +300,6 @@ void LJ_FASTCALL lj_state_free(global_State *g, lua_State *L)
   lj_func_closeuv(L, tvref(L->stack));
   lua_assert(gcref(L->openupval) == NULL);
   lj_mem_freevec(g, tvref(L->stack), L->stacksize, TValue);
-  lj_mem_freet(g, L);
+  lj_mem_free(g, fromstate(L), sizeof(lua_State) + LUA_EXTRASPACE);
 }
 

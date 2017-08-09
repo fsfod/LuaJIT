@@ -8,6 +8,9 @@
 
 #include "lj_obj.h"
 
+#define fromstate(L) (((char *)(L)) - LUA_EXTRASPACE)
+#define tostate(LX) ((lua_State*)(((char *)(LX)) + LUA_EXTRASPACE))
+
 #define incr_top(L) \
   (++L->top >= tvref(L->maxstack) && (lj_state_growstack1(L), 0))
 

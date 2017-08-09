@@ -123,6 +123,13 @@
 #define LUA_INTFRMLEN		"l"
 #define LUA_INTFRM_T		long
 
+/*
+@@ LUA_EXTRASPACE defines the size of a raw memory area associated with
+** a Lua state with very fast access.
+** CHANGE it if you need a different size.
+*/
+#define LUA_EXTRASPACE          32
+
 /* Linkage of public API functions. */
 #if defined(LUA_BUILD_AS_DLL)
 #if defined(LUA_CORE) || defined(LUA_LIB)
