@@ -89,6 +89,7 @@ typedef struct ASMState {
   MCode *invmcp;	/* Points to invertible loop branch (or NULL). */
   MCode *flagmcp;	/* Pending opportunity to merge flag setting ins. */
   MCode *realign;	/* Realign loop if not NULL. */
+  IRRef fuseirnum;
 
 #ifdef RID_NUM_KREF
   intptr_t krefk[RID_NUM_KREF];
@@ -1935,6 +1936,8 @@ static BCReg asm_baseslot(ASMState *as, SnapShot *snap, int *gotframe)
   return 0;
 }
 
+void lj_asm_irofs(ASMState *as, IRRef ir);
+
 /* Link to another trace. */
 static void asm_tail_link(ASMState *as)
 {
@@ -1981,6 +1984,7 @@ static void asm_tail_link(ASMState *as)
     setgcref(IR(as->J->ktrace)[LJ_GC64].gcr, obj2gco(as->J->curfinal));
     IR(as->J->ktrace)->o = IR_KGC;
   }
+  lj_asm_irofs(as, as->J->cur.nins+1);
 
   /* Sync the interpreter state with the on-trace state. */
   asm_stack_restore(as, snap);
@@ -1988,6 +1992,7 @@ static void asm_tail_link(ASMState *as)
   /* Root traces that add frames need to check the stack at the end. */
   if (!as->parent && gotframe)
     asm_stack_check(as, as->topslot, NULL, as->freeset & RSET_GPR, snapno);
+  lj_asm_irofs(as, as->J->cur.nins);
 }
 
 /* -- Trace setup --------------------------------------------------------- */
@@ -2247,6 +2252,50 @@ static void asm_setup_regsp(ASMState *as)
 
 /* -- Assembler core ------------------------------------------------------ */
 
+void lj_asm_irofs(ASMState *as, IRRef ir)
+{
+  jit_State *J = as->J;
+
+  if (!J->iroffsets) {
+    return;
+  }
+
+  int i = ir >= REF_BIAS ? ((ir-REF_BIAS) + IROFS_START) : ir;
+  lua_assert(i >= 0 &&  ((uint32_t)i) < ((J->cur.nins-REF_BIAS) + IROFS_EXTRA));
+
+  J->iroffsets[i].offset = as->mcp;
+  J->iroffsets[i].fuseirnum = as->fuseirnum;
+  as->fuseirnum = 0;
+}
+
+static void irofs_finalize(ASMState *as, GCtrace *T, int offsetcount)
+{
+  jit_State *J = as->J;
+  MSize i, szofs = IROFS_EXTRA + T->nins-REF_BIAS;
+  IROffsetRecord* list = T->iroffsets;
+  MCode *mcpend = as->mcp;
+  
+  if (!J->iroffsets) {
+    lua_assert(T->iroffset_count == 0 && T->iroffsets == NULL);
+    T->iroffsets = NULL;
+    T->iroffset_count = 0;
+    return;
+  }
+
+  lua_assert(list);
+  lua_assert(T->iroffset_count == szofs);
+
+  for (i = 0; i < szofs; i++) {
+    /* Assumes a trace's machine code is never larger than 64kb */
+    list[i].offset = (uint16_t)(J->iroffsets[i].offset-mcpend);
+    if(i >= IROFS_START) {
+      list[i].fuseirnum = J->iroffsets[i].fuseirnum > REF_BIAS ? J->iroffsets[i].fuseirnum-REF_BIAS : 0;
+    } else {
+      list[i].fuseirnum = J->iroffsets[i].fuseirnum;
+    }
+  }
+}
+
 /* Assemble a trace. */
 void lj_asm_trace(jit_State *J, GCtrace *T)
 {
@@ -2263,6 +2312,16 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
       T->nins = nins;
     }
   }
+
+  int offsetcount = -1;
+
+  //if(J->flags & JIT_F_RECORD_IROFFSETS) {
+    if(J->iroffsets == NULL){
+      J->iroffsets = lj_mem_newvec(J->L, 20, IRCodeOffset);
+      J->iroffsets_capacity = 20;
+    }
+    offsetcount = 0;
+  //}
 
   /* Ensure an initialized instruction beyond the last one for HIOP checks. */
   /* This also allows one RENAME to be added without reallocating curfinal. */
@@ -2331,9 +2390,28 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
     as->gcsteps = 0;
     as->sectref = as->loopref;
     as->fuseref = (as->flags & JIT_F_OPT_FUSE) ? as->loopref : FUSE_DISABLED;
+    as->fuseirnum = 0;
     asm_setup_regsp(as);
-    if (!as->loopref)
+
+    if(offsetcount != -1) {
+      MSize minsize = ((J->cur.nins-REF_BIAS)+IROFS_EXTRA);
+      offsetcount = 0;
+      J->iroffset_mcpstart = as->mcp;
+
+      if (minsize > J->iroffsets_capacity) {       
+        MSize nsz = J->iroffsets_capacity*2;
+        while (nsz < minsize) {
+          nsz = nsz*2;
+        }
+        lj_mem_reallocvec(J->L, J->iroffsets, J->iroffsets_capacity, nsz, IRCodeOffset);
+        J->iroffsets_capacity = nsz;
+      }
+      memset(J->iroffsets, 0, J->iroffsets_capacity*sizeof(IRCodeOffset));
+    }
+
+    if (!as->loopref) {
       asm_tail_link(as);
+    }
 
     /* Assemble a trace in linear backwards order. */
     for (as->curins--; as->curins > as->stopins; as->curins--) {
@@ -2346,6 +2424,12 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
       RA_DBG_REF();
       checkmclim(as);
       asm_ir(as, ir);
+
+      /* Skip sinked values */
+      if(offsetcount != -1 && (ir->o != IR_XSTORE || ir->r != RID_SINK)) {
+        lj_asm_irofs(as, as->curins);
+        offsetcount++;
+      }
     }
 
     if (as->realign && J->curfinal->nins >= T->nins)
@@ -2359,8 +2443,10 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
       asm_snap_prep(as);  /* The GC check is a guard. */
       asm_gc_check(as);
       as->curins = as->stopins;
+      lj_asm_irofs(as, 2);
     }
     ra_evictk(as);
+    lj_asm_irofs(as, 1);
     if (as->parent)
       asm_head_side(as);
     else
@@ -2397,6 +2483,7 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
   asm_mcode_fixup(T->mcode, T->szmcode);
 #endif
   lj_mcode_sync(T->mcode, origtop);
+  irofs_finalize(as, T, offsetcount);
 }
 
 #undef IR

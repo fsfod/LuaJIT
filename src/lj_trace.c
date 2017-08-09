@@ -122,10 +122,16 @@ GCtrace * LJ_FASTCALL lj_trace_alloc(lua_State *L, GCtrace *T)
 {
   size_t sztr = ((sizeof(GCtrace)+7)&~7);
   size_t szins = (T->nins-T->nk)*sizeof(IRIns);
-  size_t sz = sztr + szins +
+  size_t sz = szins +
 	      T->nsnap*sizeof(SnapShot) +
 	      T->nsnapmap*sizeof(SnapEntry);
-  GCtrace *T2 = lj_mem_newt(L, (MSize)sz, GCtrace);
+  size_t szirofs = 0;
+  if (L2J(L)->iroffsets) {
+    T->iroffset_count = (T->nins-REF_BIAS) + IROFS_EXTRA;
+    szirofs = T->iroffset_count * sizeof(IROffsetRecord);
+  }
+
+  GCtrace *T2 = lj_mem_newt(L, (MSize)sztr + sz + szirofs, GCtrace);
   char *p = (char *)T2 + sztr;
   T2->gct = ~LJ_TTRACE;
   T2->marked = 0;
@@ -135,6 +141,10 @@ GCtrace * LJ_FASTCALL lj_trace_alloc(lua_State *L, GCtrace *T)
   T2->nk = T->nk;
   T2->nsnap = T->nsnap;
   T2->nsnapmap = T->nsnapmap;
+  T2->iroffset_count = T->iroffset_count;
+  if(L2J(L)->iroffsets){
+    T->iroffsets = (IROffsetRecord*)(p + sz);
+  }
   memcpy(p, T->ir + T->nk, szins);
   return T2;
 }
@@ -175,7 +185,8 @@ void LJ_FASTCALL lj_trace_free(global_State *g, GCtrace *T)
   }
   lj_mem_free(g, T,
     ((sizeof(GCtrace)+7)&~7) + (T->nins-T->nk)*sizeof(IRIns) +
-    T->nsnap*sizeof(SnapShot) + T->nsnapmap*sizeof(SnapEntry));
+    T->nsnap*sizeof(SnapShot) + T->nsnapmap*sizeof(SnapEntry)
+    + (T->iroffset_count *sizeof(IROffsetRecord)));
 }
 
 /* Re-enable compiling a prototype by unpatching any modified bytecode. */
@@ -361,6 +372,7 @@ void lj_trace_freestate(global_State *g)
   lj_mem_freevec(g, J->snapbuf, J->sizesnap, SnapShot);
   lj_mem_freevec(g, J->irbuf + J->irbotlim, J->irtoplim - J->irbotlim, IRIns);
   lj_mem_freevec(g, J->trace, J->sizetrace, GCRef);
+  lj_mem_freevec(g, J->iroffsets, J->iroffsets_capacity, IRCodeOffset);
 }
 
 /* -- Penalties and blacklisting ------------------------------------------ */
