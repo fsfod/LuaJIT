@@ -551,10 +551,26 @@ struct malloc_state {
   size_t     release_checks;
   mchunkptr  smallbins[(NSMALLBINS+1)*2];
   tbinptr    treebins[NTREEBINS];
+  lua_PageAlloc pagealloc;
+  void*         pagealloc_ud;
   msegment   seg;
 };
 
 typedef struct malloc_state *mstate;
+
+int freepages(mstate m, void *ptr, size_t size)
+{
+  if (m->pagealloc)
+  {
+    m->pagealloc(m->pagealloc_ud, ptr, size);
+    return 0;
+  }
+  else
+  {
+    return CALL_MUNMAP(ptr, size);
+  }
+}
+
 
 #define is_initialized(M)	((M)->top != 0)
 
@@ -834,11 +850,21 @@ static int has_segment_link(mstate m, msegmentptr ss)
 
 /* -----------------------  Direct-mmapping chunks ----------------------- */
 
-static void *direct_alloc(size_t nb)
+static void *direct_alloc(mstate m, size_t nb)
 {
   size_t mmsize = mmap_align(nb + SIX_SIZE_T_SIZES + CHUNK_ALIGN_MASK);
   if (LJ_LIKELY(mmsize > nb)) {     /* Check for wrap around 0 */
-    char *mm = (char *)(DIRECT_MMAP(mmsize));
+    char *mm;
+
+    if (m->pagealloc)
+    {
+      mm = m->pagealloc(m->pagealloc, NULL, mmsize);
+    }
+    else
+    {
+      mm = (char *)(DIRECT_MMAP(mmsize));
+    }
+
     if (mm != CMFAIL) {
       size_t offset = align_offset(chunk2mem(mm));
       size_t psize = mmsize - offset - DIRECT_FOOT_PAD;
@@ -998,7 +1024,7 @@ static void *alloc_sys(mstate m, size_t nb)
 
   /* Directly map large chunks */
   if (LJ_UNLIKELY(nb >= DEFAULT_MMAP_THRESHOLD)) {
-    void *mem = direct_alloc(nb);
+    void *mem = direct_alloc(m, nb);
     if (mem != 0)
       return mem;
   }
@@ -1007,7 +1033,14 @@ static void *alloc_sys(mstate m, size_t nb)
     size_t req = nb + TOP_FOOT_SIZE + SIZE_T_ONE;
     size_t rsize = granularity_align(req);
     if (LJ_LIKELY(rsize > nb)) { /* Fail if wraps around zero */
-      char *mp = (char *)(CALL_MMAP(rsize));
+      char *mp;
+
+      if(m->pagealloc) {
+        mp = m->pagealloc(m->pagealloc, NULL, rsize);
+      } else {
+        mp = (char *)(CALL_MMAP(rsize));
+      }
+
       if (mp != CMFAIL) {
 	tbase = mp;
 	tsize = rsize;
@@ -1076,7 +1109,7 @@ static size_t release_unused_segments(mstate m)
 	} else {
 	  unlink_large_chunk(m, tp);
 	}
-	if (CALL_MUNMAP(base, size) == 0) {
+	if (!m->pagealloc && CALL_MUNMAP(base, size) == 0) {
 	  released += size;
 	  /* unlink obsoleted record */
 	  sp = pred;
@@ -1234,12 +1267,18 @@ static void *tmalloc_small(mstate m, size_t nb)
 
 /* ----------------------------------------------------------------------- */
 
-void *lj_alloc_create(void)
+void *lj_alloc_create(lua_PageAlloc pagealloc, void* pagealloc_ud)
 {
   size_t tsize = DEFAULT_GRANULARITY;
   char *tbase;
   INIT_MMAP();
-  tbase = (char *)(CALL_MMAP(tsize));
+
+  if(pagealloc) {
+    tbase = (char *)pagealloc(pagealloc_ud, NULL, tsize);
+  } else {
+    tbase = (char *)(CALL_MMAP(tsize));
+  }
+
   if (tbase != CMFAIL) {
     size_t msize = pad_request(sizeof(struct malloc_state));
     mchunkptr mn;
@@ -1250,6 +1289,8 @@ void *lj_alloc_create(void)
     m->seg.base = tbase;
     m->seg.size = tsize;
     m->release_checks = MAX_RELEASE_CHECK_RATE;
+    m->pagealloc = pagealloc;
+    m->pagealloc_ud = pagealloc_ud;
     init_bins(m);
     mn = next_chunk(mem2chunk(m));
     init_top(m, mn, (size_t)((tbase + tsize) - (char *)mn) - TOP_FOOT_SIZE);
@@ -1262,11 +1303,22 @@ void lj_alloc_destroy(void *msp)
 {
   mstate ms = (mstate)msp;
   msegmentptr sp = &ms->seg;
+  lua_PageAlloc pagealloc = ms->pagealloc;
+  void* allocud = ms->pagealloc_ud;
+
   while (sp != 0) {
     char *base = sp->base;
     size_t size = sp->size;
     sp = sp->next;
-    CALL_MUNMAP(base, size);
+
+    if (pagealloc)
+    {
+      pagealloc(allocud, base, size);
+    }
+    else
+    {
+      CALL_MUNMAP(base, size);
+    }
   }
 }
 
@@ -1365,7 +1417,7 @@ static LJ_NOINLINE void *lj_alloc_free(void *msp, void *ptr)
       if ((prevsize & IS_DIRECT_BIT) != 0) {
 	prevsize &= ~IS_DIRECT_BIT;
 	psize += prevsize + DIRECT_FOOT_PAD;
-	CALL_MUNMAP((char *)p - prevsize, psize);
+	freepages(fm, (char *)p - prevsize, psize);
 	return NULL;
       } else {
 	mchunkptr prev = chunk_minus_offset(p, prevsize);

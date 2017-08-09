@@ -343,7 +343,7 @@ LUALIB_API lua_State *luaL_newstate(void)
 LUALIB_API lua_State *luaL_newstate(void)
 {
   lua_State *L;
-  void *ud = lj_alloc_create();
+  void *ud = lj_alloc_create(NULL, NULL);
   if (ud == NULL) return NULL;
 #if LJ_64 && !LJ_GC64
   L = lj_state_newstate(lj_alloc_f, ud);
@@ -355,11 +355,14 @@ LUALIB_API lua_State *luaL_newstate(void)
 }
 
 #if LJ_64 && !LJ_GC64
-LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
+LUA_API lua_State *lua_newstate64(lua_PageAlloc f, void *ud)
 {
-  UNUSED(f); UNUSED(ud);
-  fputs("Must use luaL_newstate() for 64 bit target\n", stderr);
-  return NULL;
+  lua_State *L;
+  void *mspace = lj_alloc_create(f, ud);
+  if (mspace == NULL) return NULL;
+  L = lj_state_newstate(lj_alloc_f, mspace);
+  if (L) G(L)->panic = panic;
+  return L;
 }
 #endif
 
