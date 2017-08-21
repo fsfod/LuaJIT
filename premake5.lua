@@ -22,6 +22,11 @@ local flaglist = {
     --"LUAJIT_USE_PERFTOOLS",
 }
 
+premake.api.register {
+  name = "dynasmflags",
+  scope = "config",
+  kind = "list:string",
+ }
 
 newoption {
     trigger = "builddir",
@@ -89,6 +94,7 @@ solution "LuaJit"
   targetdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}"
   startproject "lua"
   
+  dynasmflags { "JIT", "FFI"}
    
   filter "platforms:x86"
     architecture "x86"
@@ -101,6 +107,23 @@ solution "LuaJit"
     defines { 
       "LUAJIT_TARGET=LUAJIT_ARCH_X64" 
     }
+    --tags {"GC64"}
+
+  filter "system:windows"
+    dynasmflags { "WIN" }
+
+  filter {"NOT tags:GC64", "platforms:x64" }
+    dynasmflags { "P64" }
+    
+  filter "tags:LUA52COMPAT"
+    defines { "LUAJIT_ENABLE_LUA52COMPAT" }
+    
+  filter "tags:GC64"
+    defines { "LJ_TARGET_GC64=1" }
+    
+  filter "tags:DUALNUM"
+    defines {"LUAJIT_NUMMODE=2"}
+    dynasmflags { "DUALNUM" }
  
 if not HOST_LUA then  
   project "minilua"
@@ -134,26 +157,29 @@ end
     language "C"
     
     files {
-      "src/vm_x86.dasc",
       "src/host/buildvm*.c",
     }
     includedirs{
       "%{cfg.objdir}",
       "src"
     }
+    
+    filter { "tags:GC64"}
+      files { "src/vm_x64.dasc" }
+    filter { "NOT tags:GC64"}
+      files { "src/vm_x86.dasc" }
   
-    filter {'architecture:x86', 'files:src/vm_x86.dasc'}
+    filter {"NOT tags:GC64", 'files:src/vm_x86.dasc'}
       buildmessage 'Compiling %{file.relpath}'
       buildcommands {
-        minilua..' %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+        minilua..' %{sln.location}dynasm/dynasm.lua -LN %{table.implode(cfg.dynasmflags, "-D ", "", " ")} -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
       }
       buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
-      
-    --needed for adding -D P64 for 64 bit builds
-    filter {'architecture:x64', 'files:src/vm_x86.dasc'}
+
+    filter {"tags:GC64", 'files:src/vm_x64.dasc'}
       buildmessage 'Compiling %{file.relpath}'
       buildcommands {
-        minilua..' %{sln.location}dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -D P64 -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+        minilua..' %{sln.location}dynasm/dynasm.lua -LN %{table.implode(cfg.dynasmflags, "-D ", "", " ")} -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
       }
       buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
        --m elfasm -o "%{cfg.objdir}/lj_vm.S"'
@@ -181,6 +207,7 @@ end
     vpaths { ["libs"] = "src/lib_*.c" }
     vpaths { ["headers"] = "src/lj_*.h" }
     vpaths { [""] = "lua.natvis" }
+    vpaths { [""] = "lua64.natvis" }
     
     includedirs {
       "%{cfg.objdir}",
@@ -192,7 +219,6 @@ end
       "src/lj_*.c",
       "src/lib_*.h",
       "src/lib_*.c",
-      "lua.natvis",
       --'$(IntDir)lj_vm.obj',--obj/lua/%{cfg.buildcfg}/%{cfg.platform}/
       
       '%{cfg.objdir}/lj_bcdef.h',
@@ -206,9 +232,7 @@ end
       "src/*_mips*",
       "src/*_ppc*",
     }
-      
-    linkoptions {'"$(IntDir)lj_vm.obj"'}
-    
+
     prebuildcommands {
       '{MKDIR} %{cfg.targetdir}/jit/',
       '"obj/buildvm/%{cfg.buildcfg}%{cfg.platform}/buildvm.exe" -m peobj -o "$(IntDir)lj_vm.obj"',
@@ -220,6 +244,15 @@ end
       BuildVmCommand("-m vmdef", "vmdef.lua", true, '%{cfg.targetdir}/jit/'),
     }
     prebuildmessage"Running pre build commands"
+
+    filter "NOT tags:GC64"
+      files { "lua.natvis" }
+
+    filter "tags:GC64"
+      files { "lua64.natvis" } 
+
+    filter "system:windows"
+      linkoptions {'"$(IntDir)lj_vm.obj"'}
     
     filter "Debug"
       defines { "DEBUG", "LUA_USE_ASSERT" }
@@ -241,7 +274,10 @@ end
     defines(flaglist)
     vpaths { ["libs"] = "src/lib_*.h" }
     vpaths { ["libs"] = "src/lib_*.c" }
-    debugenvs {"LUA_PATH=%{sln.location}src/?.lua;%{sln.location}bin/%{cfg.buildcfg}/%{cfg.platform}/?.lua;%{sln.location}tests/?.lua"..DEBUG_LUA_PATH..";%LUA_PATH%"}
+    debugenvs {
+      "LUA_PATH=%{sln.location}src/?.lua;%{sln.location}bin/%{cfg.buildcfg}/%{cfg.platform}/?.lua;%{sln.location}tests/?.lua"..DEBUG_LUA_PATH..";%LUA_PATH%",
+    }
+
     debugargs {"../tests/test.lua"}
     
     files {
