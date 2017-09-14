@@ -510,6 +510,7 @@ static void ra_evictset(ASMState *as, RegSet drop)
   work = (drop & ~as->freeset);
   while (work) {
     Reg r = rset_pickbot(work);
+    lua_assert(regcost_ref(as->cost[r]) != 0);
     ra_restore(as, regcost_ref(as->cost[r]));
     rset_clear(work, r);
     checkmclim(as);

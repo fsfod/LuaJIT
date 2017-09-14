@@ -422,6 +422,9 @@ static void emit_loadu64(ASMState *as, Reg r, uint64_t u64)
 static void emit_rma(ASMState *as, x86Op xo, Reg rr, const void *addr)
 {
 #if LJ_GC64
+  /* See if the address is within a 32 bit offset of the GG_State so that 
+   * we can use the fixed RID_DISPATCH register the base address.
+  */
   if (checki32(dispofs(as, addr))) {
     emit_rmro(as, xo, rr, RID_DISPATCH, (int32_t)dispofs(as, addr));
   } else if (checki32(mcpofs(as, addr)) && checki32(mctopofs(as, addr))) {
