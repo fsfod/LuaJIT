@@ -112,6 +112,9 @@ typedef struct AsmHeader {
   ((ctype_get(cts, (intrins)->id)->size >> 16) ? \
     ctype_get(cts, ctype_get(cts, (intrins)->id)->size >> 16)->size : 0)
 
+/* Is the register a blacklisted unallocable one in the JIT */
+#define intrin_isjitbl(r) (LJ_GC64 && LJ_TARGET_X64 && r == RID_DISPATCH)
+
 #define RKDEF_FPR(_) \
   _(FPR64, IRT_NUM,   CTID_DOUBLE) \
   _(FPR32, IRT_FLOAT, CTID_FLOAT) \
