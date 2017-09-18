@@ -157,6 +157,26 @@ static TValue *cpluaopen(lua_State *L, lua_CFunction dummy, void *ud)
   return NULL;
 }
 
+#ifdef LJ_FIXED_GG
+
+#ifndef LJ_GG_ADDRESS
+#define LJ_GG_ADDRESS 0x00900000
+#endif
+
+static void* LJ_ALLOC_GG()
+{
+  void* result = NULL;
+#if LJ_TARGET_WINDOWS
+  result = VirtualAlloc(LJ_GG_ADDRESS, sizeof(GG_State), MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+#else
+   result = mmap((void *)LJ_GG_ADDRESS, sizeof(GG_State), PROT_READ|PROT_WRITE, MMAP_FLAGS_PROBE, -1, 0);
+#endif
+  lua_assert(result != NULL);
+  return result;
+}
+
+#endif
+
 static void close_state(lua_State *L)
 {
   global_State *g = G(L);
@@ -177,7 +197,11 @@ static void close_state(lua_State *L)
     lj_alloc_destroy(g->allocd);
   else
 #endif
+  {
+#ifndef LJ_FIXED_GG
     g->allocf(g->allocd, G2GG(g), sizeof(GG_State), 0);
+#endif
+  }
 }
 
 #if LJ_64 && !LJ_GC64 && !(defined(LUAJIT_USE_VALGRIND) && defined(LUAJIT_USE_SYSMALLOC))
@@ -186,7 +210,11 @@ lua_State *lj_state_newstate(lua_Alloc f, void *ud)
 LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
 #endif
 {
+#ifdef LJ_FIXED_GG
+  GG_State *GG = LJ_ALLOC_GG();
+#else
   GG_State *GG = (GG_State *)f(ud, NULL, 0, sizeof(GG_State));
+#endif
   lua_State *L = &GG->L;
   global_State *g = &GG->g;
   if (GG == NULL || !checkptrGC(GG)) return NULL;

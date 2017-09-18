@@ -2250,8 +2250,12 @@ static void asm_setup_regsp(ASMState *as)
 /* Assemble a trace. */
 void lj_asm_trace(jit_State *J, GCtrace *T)
 {
+#if LJ_FIXED_GG
+  ASMState *as = &J->asm_state;
+#else
   ASMState as_;
   ASMState *as = &as_;
+#endif
   MCode *origtop;
 
   /* Remove nops/renames left over from ASM restart due to LJ_TRERR_MCODELM. */
