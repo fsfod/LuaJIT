@@ -711,7 +711,7 @@ static void asm_asmsetupargs(ASMState *as, IntrinsInfo *ininfo)
     if (ininfo->inregs[n] == 0xff) {
       lua_assert(n < intrins->dyninsz);
       continue;
-    } else if(intrin_isjitbl(r)) {
+    } else if(ra_regbl(r)) {
       /* Defer overwriting the dispatch register until the end */
       continue;
     }
@@ -957,16 +957,16 @@ int asm_intrin_results(ASMState *as, IRIns *ir, CIntrinsic* intrins, IntrinsInfo
 
     ininfo->inset |= RID2RSET(r);
     /* Don't evict if the arg was allocated the correct register */
-    if (!rset_test(as->freeset, r) && arg->r != r && !intrin_isjitbl(r)) {
+    if (!rset_test(as->freeset, r) && arg->r != r && !ra_regbl(r)) {
       evict |= RID2RSET(r);
-    } else if(intrin_isjitbl(r)) {
+    } else if(ra_regbl(r)) {
       ininfo->indisp = i;
     }
   }
 
   for (i = dynout; i < intrins->outsz; i++) {
     Reg r = reg_rid(intrins->out[i]);
-    if(!intrin_isjitbl(r)){
+    if(!ra_regbl(r)){
       outset |= RID2RSET(r);
     } else {
       gc64disp = i;

@@ -510,7 +510,7 @@ static void ra_evictset(ASMState *as, RegSet drop)
   work = (drop & ~as->freeset);
   while (work) {
     Reg r = rset_pickbot(work);
-    lua_assert(!(LJ_GC64 && LJ_TARGET_X64 && r == RID_DISPATCH));
+    lua_assert(!ra_regbl(r));
     lua_assert(regcost_ref(as->cost[r]) != 0);
     ra_restore(as, regcost_ref(as->cost[r]));
     rset_clear(work, r);
@@ -1327,7 +1327,7 @@ static RegSet asm_intrinsichints(ASMState *as, IRIns *ir)
     /* Don't confuse the register allocator with registers that you can't normally 
     ** allocate 
     */
-    if(!intrin_isjitbl(r)){
+    if(!ra_regbl(r)){
       rset_set(mod, r);
     }  
     
@@ -1335,7 +1335,7 @@ static RegSet asm_intrinsichints(ASMState *as, IRIns *ir)
       irval = IR(ira->op2);
       
       /* Back propagate the register to the arguments value if it has no register set */
-      if (irval->prev == REGSP_INIT && !intrin_isjitbl(r)) {
+      if (irval->prev == REGSP_INIT && !ra_regbl(r)) {
         irval->prev = REGSP_HINT(r);
       }
     }
@@ -1348,12 +1348,12 @@ static RegSet asm_intrinsichints(ASMState *as, IRIns *ir)
 
     for (; i < intrins->outsz; i++) {
       Reg r = reg_rid(intrins->out[0]);
-      if (!intrin_isjitbl(r)) {
+      if (!ra_regbl(r)) {
         mod |= 1 << r;
       }
     }
 
-    if (intrin_dynrout(intrins) || intrin_isjitbl(reg_rid(intrins->out[0]))) {
+    if (intrin_dynrout(intrins) || ra_regbl(reg_rid(intrins->out[0]))) {
       ir->prev = REGSP_INIT;
     } else {
       ir->prev = REGSP_HINT(reg_rid(intrins->out[0]));
