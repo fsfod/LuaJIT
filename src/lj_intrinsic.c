@@ -264,7 +264,7 @@ static RegSet process_reglist(lua_State *L, CIntrinsic *intrins, int regsetid,
 
     intrins->flags |= reg & 0xff00;
 
-    if ((reg & REGFLAG_BLACKLIST) || (LJ_GC64 && r == RID_DISPATCH)) {
+    if ((reg & REGFLAG_BLACKLIST)) {
       lj_err_callerv(L, LJ_ERR_FFI_BADREG, "blacklisted", strdata(str), listname);
     }
 
