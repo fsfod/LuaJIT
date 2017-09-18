@@ -760,7 +760,7 @@ static int lj_popcnt(uint32_t i)
 #define align16(n) ((n + 16) & ~(16 - 1))
 
 static int32_t alignsp(int32_t spadj, RegSet savereg) {
-  int32_t gprsave = lj_popcnt(savereg & RSET_GPR) * sizeof(intptr_t);
+  int32_t gprsave = lj_popcnt(savereg & RSET_GPR_DISPATCH) * sizeof(intptr_t);
 
   if (NEEDSFP && rset_test(savereg, RID_EBP)) {
     gprsave -= sizeof(intptr_t);
