@@ -278,8 +278,9 @@ end
       "LUA_PATH=%{sln.location}src/?.lua;%{sln.location}bin/%{cfg.buildcfg}/%{cfg.platform}/?.lua;%{sln.location}tests/?.lua"..DEBUG_LUA_PATH..";%LUA_PATH%",
     }
 
-    debugargs {"../tests/test.lua"}
-    
+    debugdir "tests"
+    debugargs "../tests/runtests.lua"
+
     files {
       "src/luajit.c"
     }
