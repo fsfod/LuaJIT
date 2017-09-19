@@ -101,16 +101,19 @@ solution "LuaJit"
     defines { 
       "LUAJIT_TARGET=LUAJIT_ARCH_X86" 
     }
-
+  
   filter "platforms:x64"
     architecture "x86_64"
     defines { 
       "LUAJIT_TARGET=LUAJIT_ARCH_X64" 
     }
-    --tags {"GC64"}
+    --tags {"GC64"}  
 
   filter "system:windows"
     dynasmflags { "WIN" }
+    
+  filter "Debug"
+    defines { "LJ_FIXED_GG" }
 
   filter {"NOT tags:GC64", "platforms:x64" }
     dynasmflags { "P64" }
@@ -146,7 +149,25 @@ if not HOST_LUA then
       optimize "Speed" 
 end   
 
+  rule "build_dasc"
+    display "My custom compiler"
+    location(BuildDir)
+    fileextension ".dasc"
+    buildmessage 'Compiling %{file.relpath}'
+    buildcommands {
+        minilua..' %{sln.location}dynasm/dynasm.lua -LN [DynasAsmFlags] -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+    }
+    buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
+    
+    propertydefinition {
+      name = "DynasAsmFlags",
+      kind = "string",
+      value = false,
+      switch = "-s"
+    }
+
   project "buildvm"
+    --rules { "build_dasc" }
     uuid "B86F1F94-244F-9E2F-2D67-290699C50491"
     kind "ConsoleApp"
 if not HOST_LUA then
@@ -188,6 +209,10 @@ end
         minilua..' %{sln.location}dynasm/dynasm.lua -LN %{table.implode(cfg.dynasmflags, "-D ", "", " ")} -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
       }
       buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
+
+    filter {}
+      --'%{table.implode(cfg.dynasmflags, "-D ", "", " ")}'
+      
       
     filter  {"Debug"}
       optimize "Speed"
@@ -258,6 +283,9 @@ end
 
     filter "system:windows"
       linkoptions {'"$(IntDir)lj_vm.obj"'}
+
+    filter { "system:windows", "Debug", "tags:FixedAddr" }
+      linkoptions { "/FIXED", "/DEBUG", '/BASE:"0x00440000', "/DYNAMICBASE:NO" }
     
     filter "Debug"
       defines { "DEBUG", "LUA_USE_ASSERT" }
@@ -301,6 +329,9 @@ end
       optimize "Speed"
       defines { "NDEBUG"}
 
+    filter { "system:windows", "Debug", "tags:FixedAddr" }
+      linkoptions { "/FIXED", "/DEBUG", '/BASE:"0x00400000',  "/DYNAMICBASE:NO" }
+
 local function mkdir_and_gitignore(dir)
   --Create directorys first so writing the .gitignore doesn't fail
   os.mkdir(dir)
@@ -313,6 +344,7 @@ local dotvs = os.realpath(path.join(os.realpath(BuildDir), "../.vs"))
 mkdir_and_gitignore(os.realpath(BuildDir))
 mkdir_and_gitignore(bin)
 mkdir_and_gitignore(dotvs)
+mkdir_and_gitignore(os.realpath(path.join(os.realpath(BuildDir), "../obj")))
    
          
       
