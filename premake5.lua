@@ -119,7 +119,7 @@ solution "LuaJit"
     defines { "LUAJIT_ENABLE_LUA52COMPAT" }
     
   filter "tags:GC64"
-    defines { "LJ_TARGET_GC64=1" }
+    defines { "LUAJIT_ENABLE_GC64" }
     
   filter "tags:DUALNUM"
     defines {"LUAJIT_NUMMODE=2"}
@@ -158,31 +158,36 @@ end
     
     files {
       "src/host/buildvm*.c",
+      "src/vm_x64.dasc",
+      "src/vm_x86.dasc",
+      '%{cfg.objdir}/buildvm_arch.h'
     }
     includedirs{
       "%{cfg.objdir}",
       "src"
     }
-    
-    filter { "tags:GC64"}
-      files { "src/vm_x64.dasc" }
-    filter { "NOT tags:GC64"}
-      files { "src/vm_x86.dasc" }
-  
-    filter {"NOT tags:GC64", 'files:src/vm_x86.dasc'}
-      buildmessage 'Compiling %{file.relpath}'
-      buildcommands {
-        minilua..' %{sln.location}dynasm/dynasm.lua -LN %{table.implode(cfg.dynasmflags, "-D ", "", " ")} -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+    filter { "platforms:x64", "tags:GC64" }
+      removefiles {
+        "src/vm_x86.dasc" 
+      }  
+    filter "platforms:x86"
+      removefiles  { 
+        "src/vm_x64.dasc"
       }
-      buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
 
-    filter {"tags:GC64", 'files:src/vm_x64.dasc'}
+    filter {'files:src/vm_x64.dasc'}
       buildmessage 'Compiling %{file.relpath}'
       buildcommands {
         minilua..' %{sln.location}dynasm/dynasm.lua -LN %{table.implode(cfg.dynasmflags, "-D ", "", " ")} -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
       }
       buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
-       --m elfasm -o "%{cfg.objdir}/lj_vm.S"'
+      
+    filter {'files:src/vm_x86.dasc'}
+      buildmessage 'Compiling %{file.relpath}'
+      buildcommands {
+        minilua..' %{sln.location}dynasm/dynasm.lua -LN %{table.implode(cfg.dynasmflags, "-D ", "", " ")} -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+      }
+      buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
       
     filter  {"Debug"}
       optimize "Speed"
