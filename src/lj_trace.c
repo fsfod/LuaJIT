@@ -445,7 +445,7 @@ static void trace_start(jit_State *J)
   setgcref(J->cur.startpt, obj2gco(J->pt));
 
   L = J->L;
-  lj_vmevent_send(L, TRACE,
+  lj_vmevent_send_trace(L, START, &J->cur,
     setstrV(L, L->top++, lj_str_newlit(L, "start"));
     setintV(L->top++, traceno);
     setfuncV(L, L->top++, J->fn);
@@ -525,7 +525,7 @@ static void trace_stop(jit_State *J)
   trace_save(J, T);
 
   L = J->L;
-  lj_vmevent_send(L, TRACE,
+  lj_vmevent_send_trace(L, STOP, T,
     setstrV(L, L->top++, lj_str_newlit(L, "stop"));
     setintV(L->top++, traceno);
     setfuncV(L, L->top++, J->fn);
@@ -586,7 +586,7 @@ static int trace_abort(jit_State *J)
     ptrdiff_t errobj = savestack(L, L->top-1);  /* Stack may be resized. */
     J->cur.link = 0;
     J->cur.linktype = LJ_TRLINK_NONE;
-    lj_vmevent_send(L, TRACE,
+    lj_vmevent_send_trace(L, ABORT, &J->cur,
       TValue *frame;
       const BCIns *pc;
       GCfunc *fn;
