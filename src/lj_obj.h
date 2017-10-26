@@ -599,6 +599,7 @@ typedef struct GCState {
 #else
   uint8_t unused1;
 #endif
+  uint8_t gcexit;
   MSize sweepstr;	/* Sweep position in string table. */
   GCRef root;		/* List of all collectable objects. */
   MRef sweep;		/* Sweep position in root list. */
