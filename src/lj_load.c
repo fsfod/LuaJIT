@@ -22,6 +22,7 @@
 #include "lj_lex.h"
 #include "lj_bcdump.h"
 #include "lj_parse.h"
+#include "lj_vmevent.h"
 
 /* -- Load Lua source code and bytecode ----------------------------------- */
 
@@ -45,6 +46,14 @@ static TValue *cpparser(lua_State *L, lua_CFunction dummy, void *ud)
   return NULL;
 }
 
+static const char *reader_string(lua_State *L, void *ud, size_t *size);
+static const char *reader_file(lua_State *L, void *ud, size_t *size);
+
+typedef struct StringReaderCtx {
+  const char *str;
+  size_t size;
+} StringReaderCtx;
+
 LUA_API int lua_loadx(lua_State *L, lua_Reader reader, void *data,
 		      const char *chunkname, const char *mode)
 {
@@ -54,10 +63,24 @@ LUA_API int lua_loadx(lua_State *L, lua_Reader reader, void *data,
   ls.rdata = data;
   ls.chunkarg = chunkname ? chunkname : "?";
   ls.mode = mode;
+  lj_vmevent_callback_(L, VMEVENT_LOADSCRIPT,
+    VMEventData_LoadScript eventdata = {0};
+    eventdata.name = chunkname;
+    eventdata.mode = mode;
+    eventdata.luareader = (void **)&ls.rfunc;
+    eventdata.luareader_data = &ls.rdata;
+    if (reader == reader_string) {
+      eventdata.codesize = ((StringReaderCtx*)data)->size;
+      eventdata.code = ((StringReaderCtx*)data)->str;
+    } else if (reader == reader_file) {
+      eventdata.isfile = 1;
+    }
+  );
   lj_buf_init(L, &ls.sb);
   status = lj_vm_cpcall(L, NULL, &ls, cpparser);
   lj_lex_cleanup(L, &ls);
   lj_gc_check(L);
+  lj_vmevent_callback(L, VMEVENT_LOADSCRIPT, NULL);
   return status;
 }
 
@@ -88,6 +111,11 @@ LUALIB_API int luaL_loadfilex(lua_State *L, const char *filename,
   int status;
   const char *chunkname;
   if (filename) {
+    lj_vmevent_callback_(L, VMEVENT_LOADFILE,
+      VMEventData_LoadScript eventdata = {0};
+      eventdata.name = filename;
+      eventdata.mode = mode;
+    );
     ctx.fp = fopen(filename, "rb");
     if (ctx.fp == NULL) {
       lua_pushfstring(L, "cannot open %s: %s", filename, strerror(errno));
@@ -118,11 +146,6 @@ LUALIB_API int luaL_loadfile(lua_State *L, const char *filename)
 {
   return luaL_loadfilex(L, filename, NULL);
 }
-
-typedef struct StringReaderCtx {
-  const char *str;
-  size_t size;
-} StringReaderCtx;
 
 static const char *reader_string(lua_State *L, void *ud, size_t *size)
 {

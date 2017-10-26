@@ -11,7 +11,8 @@ typedef void(*luaJIT_vmevent_callback)(void *data, lua_State *L, int eventid, vo
 typedef enum VMEvent2 {
   VMEVENT_DETACH,
   VMEVENT_STATE_CLOSING,
-  VMEVENT_LOADSTRING,
+  VMEVENT_LOADSCRIPT,
+  VMEVENT_LOADFILE,
   VMEVENT_BC,
   VMEVENT_TRACE_START,
   VMEVENT_TRACE_STOP,
@@ -49,5 +50,20 @@ typedef struct VMEventData_ProtoBL {
   struct GCproto *pt;
   unsigned int pc;
 } VMEventData_ProtoBL;
+
+typedef struct VMEventData_LoadScript {
+  const char *name;
+  const char *mode;
+  const char *code;
+  size_t codesize;
+  /* 
+  ** The lua_Reader and its state pointer that is being used to load the script. 
+  ** The pointer can be written to override or capture the source code of the 
+  ** script being loaded.
+  */
+  void **luareader;
+  void **luareader_data;
+  char isfile;
+} VMEventData_LoadScript;
 
 #endif
