@@ -248,7 +248,7 @@ int luaJIT_setmode(lua_State *L, int idx, int mode)
 #if LJ_HASJIT
   case LUAJIT_MODE_ENGINE:
     if ((mode & LUAJIT_MODE_FLUSH)) {
-      lj_trace_flushall(L);
+      lj_trace_flushall(L, FLUSHREASON_USER_REQUESTED);
     } else {
       if (!(mode & LUAJIT_MODE_ON))
 	G2J(g)->flags &= ~(uint32_t)JIT_F_ON;

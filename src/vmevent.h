@@ -24,6 +24,17 @@ typedef enum VMEvent2 {
   VMEVENT__MAX
 } VMEvent2;
 
+typedef enum FlushReason {
+  FLUSHREASON_OTHER,
+  FLUSHREASON_USER_REQUESTED,
+  FLUSHREASON_MAX_MCODE,
+  FLUSHREASON_MAX_TRACE,
+  FLUSHREASON_PROFILETOGGLE,
+  FLUSHREASON_SET_BUILTINMT,
+  FLUSHREASON_SET_IMMUTABLEUV,
+  FLUSHREASON__MAX
+} FlushReason;
+
 typedef struct VMEventData_TExit {
   int gprs_size;
   int fprs_size;

@@ -273,12 +273,13 @@ void lj_trace_flushproto(global_State *g, GCproto *pt)
 }
 
 /* Flush all traces. */
-int lj_trace_flushall(lua_State *L)
+int lj_trace_flushall(lua_State *L, int reason)
 {
   jit_State *J = L2J(L);
   ptrdiff_t i;
   if ((J2G(J)->hookmask & HOOK_GC))
     return 1;
+  lj_vmevent_callback(L, VMEVENT_TRACE_FLUSH, (void *)(uintptr_t)reason);
   for (i = (ptrdiff_t)J->sizetrace-1; i > 0; i--) {
     GCtrace *T = traceref(J, i);
     if (T) {
@@ -426,7 +427,7 @@ static void trace_start(jit_State *J)
   traceno = trace_findfree(J);
   if (LJ_UNLIKELY(traceno == 0)) {  /* No free trace? */
     lua_assert((J2G(J)->hookmask & HOOK_GC) == 0);
-    lj_trace_flushall(J->L);
+    lj_trace_flushall(J->L, FLUSHREASON_MAX_TRACE);
     J->state = LJ_TRACE_IDLE;  /* Silently ignored. */
     return;
   }
@@ -620,7 +621,7 @@ static int trace_abort(jit_State *J)
   if (e == LJ_TRERR_DOWNREC)
     return trace_downrec(J);
   else if (e == LJ_TRERR_MCODEAL)
-    lj_trace_flushall(L);
+    lj_trace_flushall(L, FLUSHREASON_MAX_MCODE);
   return 0;
 }
 
