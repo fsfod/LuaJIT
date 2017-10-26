@@ -12,6 +12,7 @@
 #include "lua.h"
 #include "lj_def.h"
 #include "lj_arch.h"
+#include "vmevent.h"
 
 /* -- Memory references --------------------------------------------------- */
 
@@ -657,6 +658,9 @@ typedef struct global_State {
   MRef ctype_state;	/* Pointer to C type state. */
   PRNGState prng;	/* Global PRNG state. */
   GCRef gcroot[GCROOT_MAX];  /* GC roots. */
+
+  luaJIT_vmevent_callback vmevent_cb; /* User set VM event callback. */
+  void *vmevent_data;                 /* VM event callback data. */
 } global_State;
 
 #define mainthread(g)	(&gcref(g->mainthref)->th)
