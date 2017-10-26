@@ -366,8 +366,13 @@ void lj_trace_freestate(global_State *g)
 /* -- Penalties and blacklisting ------------------------------------------ */
 
 /* Blacklist a bytecode instruction. */
-static void blacklist_pc(GCproto *pt, BCIns *pc)
+static void blacklist_pc(jit_State *J, GCproto *pt, BCIns *pc)
 {
+  lj_vmevent_callback_(J->L, VMEVENT_PROTO_BLACKLISTED, 
+    VMEventData_ProtoBL eventdata;
+    eventdata.pt = pt;
+    eventdata.pc = proto_bcpos(pt, pc);
+  );
   setbc_op(pc, (int)bc_op(*pc)+(int)BC_ILOOP-(int)BC_LOOP);
   pt->flags |= PROTO_ILOOP;
 }
@@ -382,7 +387,7 @@ static void penalty_pc(jit_State *J, GCproto *pt, BCIns *pc, TraceError e)
       val = ((uint32_t)J->penalty[i].val << 1) +
 	    LJ_PRNG_BITS(J, PENALTY_RNDBITS);
       if (val > PENALTY_MAX) {
-	blacklist_pc(pt, pc);  /* Blacklist it, if that didn't help. */
+	blacklist_pc(J, pt, pc);  /* Blacklist it, if that didn't help. */
 	return;
       }
       goto setpenalty;
