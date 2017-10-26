@@ -15,6 +15,7 @@
 #include "lj_dispatch.h"
 #include "lj_vm.h"
 #include "lj_vmevent.h"
+#include "luajit.h"
 
 ptrdiff_t lj_vmevent_prepare(lua_State *L, VMEvent ev)
 {
@@ -54,5 +55,33 @@ void lj_vmevent_call(lua_State *L, ptrdiff_t argbase)
   hook_restore(g, oldh);
   if (g->vmevmask != VMEVENT_NOCACHE)
     g->vmevmask = oldmask;  /* Restore event mask, but not if not modified. */
+}
+
+LUA_API int luaJIT_vmevent_sethook(lua_State *L, luaJIT_vmevent_callback cb, void *data)
+{
+#ifdef LUAJIT_DISABLE_VMEVENT
+  return 0;
+#else
+  if (cb) {
+    G(L)->vmevent_cb = cb;
+    G(L)->vmevent_data = data;
+  } else {
+    lua_assert(data == NULL);
+    G(L)->vmevent_cb = NULL;
+    G(L)->vmevent_data = NULL;
+  }
+  return 1;
+#endif
+}
+
+LUA_API luaJIT_vmevent_callback luaJIT_vmevent_gethook(lua_State *L, void **data)
+{
+#ifdef LUAJIT_DISABLE_VMEVENT
+  *data = NULL;
+  return NULL;
+#else
+  *data = G(L)->vmevent_data;
+  return G(L)->vmevent_cb;
+#endif
 }
 

@@ -7,6 +7,8 @@
 #define _LJ_VMEVENT_H
 
 #include "lj_obj.h"
+#include "lj_dispatch.h"
+#include "vmevent.h"
 
 /* Registry key for VM event handler table. */
 #define LJ_VMEVENTS_REGKEY	"_VMEVENTS"
@@ -33,6 +35,10 @@ typedef enum {
 #ifdef LUAJIT_DISABLE_VMEVENT
 #define lj_vmevent_send(L, ev, args)		UNUSED(L)
 #define lj_vmevent_send_(L, ev, args, post)	UNUSED(L)
+#define lj_vmevent_send_trace(L, ev, args, post)	UNUSED(L)
+#define lj_vmevent_send2(L, ev, callbackarg, args)	UNUSED(L)
+#define lj_vmevent_callback(L, ev, args)	UNUSED(L)
+#define lj_vmevent_callback_(L, ev, build_eventdata)	UNUSED(L)
 #else
 #define lj_vmevent_send(L, ev, args) \
   if (G(L)->vmevmask & VMEVENT_MASK(LJ_VMEVENT_##ev)) { \
@@ -43,6 +49,9 @@ typedef enum {
     } \
   }
 #define lj_vmevent_send_(L, ev, args, post) \
+  if(G(L)->vmevent_cb != NULL){\
+    G(L)->vmevent_cb(G(L)->vmevent_data, L, VMEVENT_##ev, 0);\
+  }\
   if (G(L)->vmevmask & VMEVENT_MASK(LJ_VMEVENT_##ev)) { \
     ptrdiff_t argbase = lj_vmevent_prepare(L, LJ_VMEVENT_##ev); \
     if (argbase) { \
@@ -51,6 +60,33 @@ typedef enum {
       post \
     } \
   }
+
+#define lj_vmevent_callback(L, ev, args) \
+  if(G(L)->vmevent_cb != NULL){\
+    G(L)->vmevent_cb(G(L)->vmevent_data, L, ev, args);\
+  }
+
+/* Special version where the event data struct declared in the macro. Avoids
+** the need for a G(L)->vmevent_cb != NULL check outside the macro and cleanly disables
+** when VM events are compiled out.
+*/
+#define lj_vmevent_callback_(L, ev, build_eventdata) \
+  if(G(L)->vmevent_cb != NULL){\
+    build_eventdata \
+    G(L)->vmevent_cb(G(L)->vmevent_data, L, ev, &eventdata);\
+  }
+
+#define lj_vmevent_send2(L, ev, callbackarg, args) \
+  if(G(L)->vmevent_cb != NULL){\
+    G(L)->vmevent_cb(G(L)->vmevent_data, L, VMEVENT_##ev, callbackarg);\
+  }\
+  lj_vmevent_send(L, ev, args) 
+
+#define lj_vmevent_send_trace(L, subevent, callbackarg, args) \
+  if(G(L)->vmevent_cb != NULL){\
+    G(L)->vmevent_cb(G(L)->vmevent_data, L, VMEVENT_TRACE_##subevent, callbackarg);\
+  }\
+  lj_vmevent_send(L, TRACE, args)
 
 LJ_FUNC ptrdiff_t lj_vmevent_prepare(lua_State *L, VMEvent ev);
 LJ_FUNC void lj_vmevent_call(lua_State *L, ptrdiff_t argbase);
