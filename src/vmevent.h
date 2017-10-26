@@ -34,4 +34,9 @@ typedef struct VMEventData_TExit {
   char gcexit;
 } VMEventData_TExit;
 
+typedef struct VMEventData_ProtoBL {
+  struct GCproto *pt;
+  unsigned int pc;
+} VMEventData_ProtoBL;
+
 #endif
