@@ -22,6 +22,7 @@
 #include "lj_buf.h"
 #include "lj_str.h"
 #include "lj_lib.h"
+#include "lj_vmevent.h"
 
 #if LJ_TARGET_POSIX
 #include <unistd.h>
@@ -116,8 +117,11 @@ LJLIB_CF(os_exit)
     status = boolV(L->base) ? EXIT_SUCCESS : EXIT_FAILURE;
   else
     status = lj_lib_optint(L, 1, EXIT_SUCCESS);
-  if (L->base+1 < L->top && tvistruecond(L->base+1))
+  if (L->base+1 < L->top && tvistruecond(L->base+1)) {
     lua_close(L);
+  } else {
+    lj_vmevent_callback(L, VMEVENT_STATE_CLOSING, L);
+  }
   exit(status);
   return 0;  /* Unreachable. */
 }
