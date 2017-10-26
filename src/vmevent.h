@@ -24,4 +24,14 @@ typedef enum VMEvent2 {
   VMEVENT__MAX
 } VMEvent2;
 
+typedef struct VMEventData_TExit {
+  int gprs_size;
+  int fprs_size;
+  int spill_size;
+  void *gprs;
+  void *fprs;
+  void *spill;
+  char gcexit;
+} VMEventData_TExit;
+
 #endif

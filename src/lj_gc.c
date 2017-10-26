@@ -719,10 +719,14 @@ int LJ_FASTCALL lj_gc_step_jit(global_State *g, MSize steps)
   lua_State *L = gco2th(gcref(g->cur_L));
   L->base = tvref(G(L)->jit_base);
   L->top = curr_topL(L);
-  while (steps-- > 0 && lj_gc_step(L) == 0)
-    ;
-  /* Return 1 to force a trace exit. */
-  return (G(L)->gc.state == GCSatomic || G(L)->gc.state == GCSfinalize);
+  while (steps-- > 0 && lj_gc_step(L) == 0) {}
+  if ((G(L)->gc.state == GCSatomic || G(L)->gc.state == GCSfinalize)) {
+    G(L)->gc.gcexit = 1;
+    /* Return 1 to force a trace exit. */
+    return 1;
+  } else {
+    return 0;
+  }
 }
 #endif
 
