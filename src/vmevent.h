@@ -52,4 +52,19 @@ typedef struct VMEventData_ProtoBL {
   unsigned int pc;
 } VMEventData_ProtoBL;
 
+typedef struct VMEventData_LoadScript {
+  const char *name;
+  const char *mode;
+  const char *code;
+  size_t codesize;
+  /* 
+  ** The lua_Reader and its state pointer that is being used to load the script. 
+  ** The pointer can be written to override or capture the source code of the 
+  ** script being loaded.
+  */
+  void **luareader;
+  void **luareader_data;
+  char isfile;
+} VMEventData_LoadScript;
+
 #endif
