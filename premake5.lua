@@ -33,6 +33,10 @@ newoption {
     description = "override the build directory"
 }
 
+if os.isfile("user.lua") then
+  dofile("user.lua")
+end
+
 BuildDir = _OPTIONS["builddir"] or "build"
 
 liblist = {
@@ -84,7 +88,8 @@ end
 minilua = HOST_LUA or'"obj/minilua/%{cfg.buildcfg}%{cfg.platform}/minilua.exe"'
 
 DEBUG_LUA_PATH = _OPTIONS["DEBUG_LUA_PATH"] or ""
-
+DebugDir = _OPTIONS["debugdir"] or DebugDir or "tests"
+DebugArgs = _OPTIONS["debugargs"] or DebugArgs or "../tests/runtests.lua"
 
 solution "LuaJit"
   configurations { "Debug", "Release" }
@@ -92,16 +97,15 @@ solution "LuaJit"
   defines {"_CRT_SECURE_NO_DEPRECATE" }
   objdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}"
   targetdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}"
-  startproject "lua"
+  startproject "luajit"
+  dynasmflags {"FFI"}
   
-  dynasmflags { "JIT", "FFI"}
-   
   filter "platforms:x86"
     architecture "x86"
     defines { 
       "LUAJIT_TARGET=LUAJIT_ARCH_X86" 
     }
-  
+    
   filter "platforms:x64"
     architecture "x86_64"
     defines { 
@@ -112,8 +116,14 @@ solution "LuaJit"
   filter "system:windows"
     dynasmflags { "WIN" }
     
-  filter "Debug"
-    defines { "LJ_FIXED_GG" }
+  filter { "system:windows", "Release" }
+      linkoptions { "/Zo" }
+ 
+  filter { "tags:NOJIT" }
+    defines {  "LUAJIT_DISABLE_JIT" }
+    
+  filter {"NOT tags:NOJIT" }
+    dynasmflags { "JIT" }
 
   filter {"NOT tags:GC64", "platforms:x64" }
     dynasmflags { "P64" }
@@ -149,25 +159,7 @@ if not HOST_LUA then
       optimize "Speed" 
 end   
 
-  rule "build_dasc"
-    display "My custom compiler"
-    location(BuildDir)
-    fileextension ".dasc"
-    buildmessage 'Compiling %{file.relpath}'
-    buildcommands {
-        minilua..' %{sln.location}dynasm/dynasm.lua -LN [DynasAsmFlags] -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
-    }
-    buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
-    
-    propertydefinition {
-      name = "DynasAsmFlags",
-      kind = "string",
-      value = false,
-      switch = "-s"
-    }
-
   project "buildvm"
-    --rules { "build_dasc" }
     uuid "B86F1F94-244F-9E2F-2D67-290699C50491"
     kind "ConsoleApp"
 if not HOST_LUA then
@@ -311,8 +303,8 @@ end
       "LUA_PATH=%{sln.location}src/?.lua;%{sln.location}bin/%{cfg.buildcfg}/%{cfg.platform}/?.lua;%{sln.location}tests/?.lua"..DEBUG_LUA_PATH..";%LUA_PATH%",
     }
 
-    debugdir "tests"
-    debugargs "../tests/runtests.lua"
+    debugdir(DebugDir)
+    debugargs(DebugArgs)
 
     files {
       "src/luajit.c"
