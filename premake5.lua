@@ -324,12 +324,20 @@ end
     filter { "system:windows", "Debug", "tags:FixedAddr" }
       linkoptions { "/FIXED", "/DEBUG", '/BASE:"0x00400000',  "/DYNAMICBASE:NO" }
 
+  
+local rootignors = {
+  "*.opensdf"
+  "*.sdf",
+  "*.suo",
+  "*.sln",
+}  
+
 local function mkdir_and_gitignore(dir)
   --Create directorys first so writing the .gitignore doesn't fail
   os.mkdir(dir)
   os.writefile_ifnotequal("*.*", path.join(dir, ".gitignore"))
 end
-      
+
 local bin = os.realpath(path.join(os.realpath(BuildDir), "../bin"))
 local dotvs = os.realpath(path.join(os.realpath(BuildDir), "../.vs"))
 --Write .gitignore to directorys that contain just contain generated files
