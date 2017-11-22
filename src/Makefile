@@ -284,6 +284,10 @@ ifneq (,$(findstring LJ_TARGET_PS3 1,$(TARGET_TESTARCH)))
   TARGET_XLIBS+= -lpthread
 endif
 
+ifneq (,$(findstring LJ_GC64 1,$(TARGET_TESTARCH)))
+JITLOG_FLAGS+= --gc64
+endif
+
 TARGET_XCFLAGS+= $(CCOPT_$(TARGET_LJARCH))
 TARGET_ARCH+= $(patsubst %,-DLUAJIT_TARGET=LUAJIT_ARCH_%,$(TARGET_LJARCH))
 
@@ -496,7 +500,7 @@ LJCORE_O= lj_gc.o lj_err.o lj_char.o lj_bc.o lj_obj.o lj_buf.o \
 	  lj_ctype.o lj_cdata.o lj_cconv.o lj_ccall.o lj_ccallback.o \
 	  lj_carith.o lj_clib.o lj_cparse.o \
 	  lj_lib.o lj_alloc.o lib_aux.o \
-	  lj_usrbuf.o $(LJLIB_O) lib_init.o
+	  lj_usrbuf.o lj_jitlog.o $(LJLIB_O) lib_init.o
 
 LJVMCORE_O= $(LJVM_O) $(LJCORE_O)
 LJVMCORE_DYNO= $(LJVMCORE_O:.o=_dyn.o)
@@ -510,8 +514,8 @@ LUAJIT_SO= libluajit.so
 LUAJIT_T= luajit
 
 ALL_T= $(LUAJIT_T) $(LUAJIT_A) $(LUAJIT_SO) $(HOST_T)
-ALL_HDRGEN= lj_bcdef.h lj_ffdef.h lj_libdef.h lj_recdef.h lj_folddef.h \
-	    host/buildvm_arch.h
+ALL_HDRGEN= lj_bcdef.h lj_ffdef.h lj_libdef.h lj_recdef.h lj_folddef.h  \
+	    lj_jitlog_def.h lj_jitlog_decl.h lj_jitlog_writers.h host/buildvm_arch.h
 ALL_GEN= $(LJVM_S) $(ALL_HDRGEN) $(LIB_VMDEFP)
 WIN_RM= *.obj *.lib *.exp *.dll *.exe *.manifest *.pdb *.ilk
 ALL_RM= $(ALL_T) $(ALL_GEN) *.o host/*.o $(WIN_RM)
@@ -640,6 +644,14 @@ host/buildvm_arch.h: $(DASM_DASC) $(DASM_DEP) $(DASM_DIR)/*.lua
 	$(E) "DYNASM    $@"
 	$(Q)$(DASM) $(DASM_FLAGS) -o $@ $(DASM_DASC)
 
+lj_jitlog_writers.h: $(DASM_DEP) jitlog/build.lua jitlog/messages.lua jitlog/generator.lua jitlog/c_generator.lua
+	$(HOST_LUA) jitlog/build.lua $(JITLOG_FLAGS) jitlog/messages.lua writers
+
+lj_jitlog_decl.h: lj_jitlog_def.h
+	
+lj_jitlog_def.h: $(DASM_DEP) jitlog/build.lua jitlog/messages.lua jitlog/generator.lua jitlog/c_generator.lua
+	$(HOST_LUA) jitlog/build.lua $(JITLOG_FLAGS) jitlog/messages.lua defs
+
 host/buildvm.o: $(DASM_DIR)/dasm_*.h
 
 $(BUILDVM_T): $(BUILDVM_O)
@@ -697,6 +709,8 @@ $(HOST_O): %.o: %.c
 	$(Q)$(HOST_CC) $(HOST_ACFLAGS) -c -o $@ $<
 
 include Makefile.dep
+
+lj_jitlog.o: $(ALL_HDRGEN)
 
 ##############################################################################
 # Target file rules.

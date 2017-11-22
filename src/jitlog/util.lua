@@ -94,7 +94,7 @@ function lib.splitlines(s, trimlines)
   return t
 end
 
-function lib.joinlist_format(list, fmt, prefix, suffix, addmax)
+function lib.concatf(list, fmt, prefix, suffix, addmax)
   prefix = prefix or ""
   suffix = suffix or ""
   local t = {}
@@ -145,7 +145,7 @@ function lib.buildtemplate(tmpl, values)
 
     if fmt then
       if type(value) == "table" then
-        value = lib.joinlist_format(value, fmt)
+        value = lib.concatf(value, fmt)
       else
         value = format(fmt, value)
       end

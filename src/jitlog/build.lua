@@ -75,13 +75,21 @@ if arg[1] == "--gc64" then
   --stdout:write("GC64 = true\n")
 end
 
-local msglist = arg[argstart]
+local msglist, gentype, outpath = arg[argstart], arg[argstart + 1], arg[argstart + 2]
 assert(msglist, "No message list lua file specified as first argument")
+assert(gentype, "No generation mode specified as second argument")
 
 local msgdef = dofile(msglist)
+
+outpath = outpath or ""
 
 local apigen = require"jitlog.generator"
 local parser = apigen.create_parser()
 parser:parse_msglist(msgdef.messages)
 
 local data = parser:complete()
+if gentype == "defs" then
+  apigen.write_c(data, {outdir = outpath, mode = "defs"})
+elseif gentype == "writers" then
+  apigen.write_c(data, {outdir = outpath, mode = "writers"})
+end
