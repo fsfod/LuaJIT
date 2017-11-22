@@ -140,6 +140,8 @@ static int jitlog_isrunning(lua_State *L)
 
 /* -- JITLog public API ---------------------------------------------------- */
 
+LUA_API int luaopen_jitlog(lua_State *L);
+
 LUA_API JITLogUserContext* jitlog_start(lua_State *L)
 {
   jitlog_State *context ;
@@ -154,6 +156,7 @@ LUA_API JITLogUserContext* jitlog_start(lua_State *L)
   luaJIT_vmevent_sethook(L, jitlog_callback, context);
   write_header(context);
 
+  lj_lib_prereg(L, "jitlog", luaopen_jitlog, tabref(L->env));
   return &context->user;
 }
 
@@ -246,5 +249,98 @@ LUA_API int jitlog_setsink_mmap(JITLogUserContext *usrcontext, const char *path,
   ubuf_putmem(&ub, ubufB(&context->ub), ubuflen(&context->ub));
   ubuf_free(&context->ub);
   memcpy(&context->ub, &ub, sizeof(ub));
+  return 1;
+}
+
+/* -- Lua module to control the JITLog ------------------------------------ */
+
+static jitlog_State* jlib_getstate(lua_State *L)
+{
+  jitlog_State *context = NULL;
+  luaJIT_vmevent_callback cb = luaJIT_vmevent_gethook(L, (void**)&context);
+  if (cb != jitlog_callback) {
+    luaL_error(L, "The JITLog is not currently running");
+  }
+  return context;
+}
+
+static int jlib_start(lua_State *L)
+{
+  if (jitlog_isrunning(L)) {
+    return 0;
+  }
+  jitlog_start(L);
+  return 0;
+}
+
+static int jlib_shutdown(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  jitlog_shutdown(context);
+  return 0;
+}
+
+static int jlib_reset(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  jitlog_reset(ctx2usr(context));
+  return 0;
+}
+
+static int jlib_setlogsink(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  const char *path = luaL_checkstring(L, 1);
+  int windowsz = luaL_optint(L, 2, 0);
+
+  int result = jitlog_setsink_mmap(ctx2usr(context), path, windowsz);
+  if (result == -1) {
+    luaL_error(L, "Cannot set a log sink for a non memory buffer");
+  } else if (result == -2) {
+    luaL_error(L, "Failed to open mmap for the jitlog buffer");
+  }
+  return 0;
+}
+
+static int jlib_save(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  const char *path = luaL_checkstring(L, 1);
+  int result = jitlog_save(ctx2usr(context), path);
+  if (result != 0) {
+    luaL_error(L, "Failed to save JITLog. last error %d", result);
+  }
+  return 0;
+}
+
+static int jlib_savetostring(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  UserBuf *ub = &context->ub;
+  lua_pushlstring(L, ubufB(ub), ubuflen(ub));
+  return 1;
+}
+
+static int jlib_getsize(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  lua_pushnumber(L, (LUA_NUMBER)ubuf_getoffset(&context->ub));
+  return 1;
+}
+
+static const luaL_Reg jitlog_lib[] = {
+  {"start", jlib_start},
+  {"shutdown", jlib_shutdown},
+  {"reset", jlib_reset},
+  {"save", jlib_save},
+  {"savetostring", jlib_savetostring},
+  {"getsize", jlib_getsize},
+  {"setlogsink", jlib_setlogsink},
+  {NULL, NULL},
+};
+
+LUALIB_API int luaopen_jitlog(lua_State *L)
+{
+  luaL_register(L, "jitlog", jitlog_lib);
   return 1;
 }

@@ -2,6 +2,7 @@ local ffi = require("ffi")
 local format = string.format
 local msgdef = require"jitlog.messages"
 local apigen = require"jitlog.generator"
+local jitlog = require("jitlog")
 
 local parser = apigen.create_parser()
 parser:parse_msglist(msgdef.messages)
@@ -133,7 +134,27 @@ it("field offsets", function()
   end
 end)
 
+function tests.savetofile()
+  jitlog.start()
+  jitlog.save("jitlog.bin")
+end
+
+it("reset jitlog", function()
+  jitlog.start()
+  local headersize = jitlog.getsize()
+  -- Should have grown by at least 10 = 6 chars + 4 byte msg header
+  assert(jitlog.getsize()-headersize >= 10)
+  local log1 = jitlog.savetostring()
+  -- Clear the log and force a new header to be written
+  jitlog.reset()
+  assert(jitlog.getsize() == headersize)
+  local log2 = jitlog.savetostring()
+  assert(#log1 > #log2)
+end
+
 local failed = false
+
+pcall(jitlog.shutdown)
 
 for name, test in pairs(tests) do
   io.stdout:write("Running: "..name.."\n")
@@ -148,6 +169,7 @@ for name, test in pairs(tests) do
     failed = true
     io.stderr:write("  FAILED ".. tostring(err).."\n")
   end
+  pcall(jitlog.shutdown)
 end
 
 if failed then
