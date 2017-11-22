@@ -52,3 +52,4 @@ local parser = apigen.create_parser()
 parser:parse_msglist(msgdef)
 
 local data = parser:complete()
+apigen.write_c(data)
