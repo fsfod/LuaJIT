@@ -189,4 +189,36 @@ function lib.buildtemplate(tmpl, values)
   end))
 end
 
+if pcall(require, "ffi") then
+  local ffi = require("ffi")
+  local ffi_cast = ffi.cast
+  local charptr = ffi.typeof("char*")
+
+  local function get_fbarray(base, offset, adjustment, type)
+    base = ffi_cast(charptr, base)
+
+    if offset == 0 then
+      -- Array is not present when its offset is 0
+      return nil, 0
+    end
+
+    local array = base + adjustment + offset + 4
+    local size = ffi_cast("uint32_t*", array)[-1]
+    if size == 0 then
+      return nil, 0
+    end
+
+    return ffi_cast(type or charptr, array), size
+  end
+  lib.get_fbarray = get_fbarray
+
+  function lib.get_fbstring(base, offset, adjustment)
+    local array, size = get_fbarray(base, offset, adjustment)
+    if not array then
+      return nil
+    end
+    return (ffi.string(array, size))
+  end
+end
+
 return lib

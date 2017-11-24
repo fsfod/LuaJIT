@@ -99,6 +99,7 @@ local data = parser:complete()
 local actions =  {
   defs = function() apigen.write_c(data, {outdir = outpath, mode = "defs"}) end,
   writers = function() apigen.write_c(data, {outdir = outpath, mode = "writers"})  end,
+  lua = function() apigen.writelang("lua", data, {outdir = outpath})  end,
 }
 
 actions.all = function()

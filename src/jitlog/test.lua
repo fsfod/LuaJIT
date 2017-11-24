@@ -2,12 +2,30 @@ local ffi = require("ffi")
 local format = string.format
 local fbsparser = require("jitlog.fbs_parser")
 local apigen = require"jitlog.generator"
+local readerlib = require("jitlog.reader")
 local jitlog = require("jitlog")
 
 local msgschema = fbsparser.parse_fbsfile("jitlog/messages.jlfbs")
-local parser = apigen.create_parser()
-parser:process_schema(msgschema)
-local msginfo_vm = parser:complete()
+local msginfo_vm
+local reader_def
+
+if arg[1] then
+  print("Using custom jitlog reader definition", arg[1])
+  reader_def = dofile(arg[1])
+else
+  reader_def = require("jitlog.reader_def")
+end
+local GC64 = reader_def.GC64 == true
+
+local function mkparser(schema, GC64)
+  local parser = apigen.create_parser(GC64)
+  parser:process_schema(schema)
+  return parser:complete()
+end
+
+msginfo_vm = mkparser(msgschema, reader_def.GC64)
+
+assert(readerlib.makereader({readerdef = reader_def}))
 
 local function buildmsginfo(schema)
   local schema = fbsparser.parse_fbsstring(schema)
@@ -124,6 +142,8 @@ it("field offsets", function()
   for _, def in ipairs(msginfo_vm.msglist) do
     local msgname = def.name
     local msgsize = def.size
+    local ctype = reader_def.messages[msgname]
+    assert(ctype, "Missing cype for message "..msgname)
 
     for _, f in ipairs(def.fields) do
       local name = f.name
@@ -134,6 +154,22 @@ it("field offsets", function()
         if f.offset >= msgsize then
           error(format("Field '%s' in message %s has a offset %d larger than message size of %d", name, msgname, f.offset, msgsize))
         end
+        local name = f.name
+        if f.kind == "array" then
+          local offset = ffi.offsetof(ctype, f.name)
+          -- We only store an offset to the vlen fields
+          if offset then
+            error(format("Special field '%s' in message %s has a offset %d when it should have none", name, msgname, f.offset))
+          end
+          name = name.."_offset"
+        end
+        local offset = ffi.offsetof(ctype, name)
+        if not offset  then
+          error(format("Field '%s' is missing in message %s", name, msgname))
+        end
+        if offset ~= f.offset then
+          error(format("Bad field offset for '%s' in message %s expected %d was %d", name, msgname, offset, f.offset))
+        end
       else
         if f.offset then
           error(format("Special field '%s' in message %s has a offset %d when it should have none", name, msgname, f.offset))
@@ -143,23 +179,51 @@ it("field offsets", function()
   end
 end)
 
-function tests.savetofile()
+local function checkheader(header)
+  assert(header)
+  assert(header.os == jit.os)
+  assert(header.version > 0)
+end
+
+local function parselog(log, verbose)
+  local result
+  if verbose then
+    result = readerlib.makereader({readerdef = reader_def})
+    result.verbose = true
+    assert(result:parse_buffer(log, #log))
+  else
+    result = readerlib.parsebuffer(log)
+  end
+  checkheader(result.header)
+  return result
+end
+
+it("jitlog header", function()
+  jitlog.start()
+  local result = parselog(jitlog.savetostring())
+  checkheader(result.header)
+end)
+
+it("save to file", function()
   jitlog.start()
   jitlog.save("jitlog.bin")
-end
+  local result = readerlib.parsefile("jitlog.bin", {readerdef = reader_def})
+  checkheader(result.header)
+end)
 
 it("reset jitlog", function()
   jitlog.start()
   local headersize = jitlog.getsize()
-  -- Should have grown by at least 10 = 6 chars + 4 byte msg header
-  assert(jitlog.getsize()-headersize >= 10)
   local log1 = jitlog.savetostring()
   -- Clear the log and force a new header to be written
   jitlog.reset()
   assert(jitlog.getsize() == headersize)
   local log2 = jitlog.savetostring()
-  assert(#log1 > #log2)
-end
+
+  local result1 = parselog(log1)
+  local result2 = parselog(log2)
+  assert(result1.starttime < result2.starttime)
+end)
 
 local failed = false
 
