@@ -53,3 +53,4 @@ parser:parse_msglist(msgdef)
 
 local data = parser:complete()
 apigen.write_c(data)
+apigen.writelang("lua", data)
