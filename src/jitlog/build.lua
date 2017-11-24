@@ -92,4 +92,6 @@ if gentype == "defs" then
   apigen.write_c(data, {outdir = outpath, mode = "defs"})
 elseif gentype == "writers" then
   apigen.write_c(data, {outdir = outpath, mode = "writers"})
+elseif gentype == "lua" then
+  apigen.writelang("lua", data, {outdir = outpath})
 end

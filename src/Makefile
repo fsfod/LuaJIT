@@ -508,6 +508,8 @@ LJVMCORE_DYNO= $(LJVMCORE_O:.o=_dyn.o)
 LIB_VMDEF= jit/vmdef.lua
 LIB_VMDEFP= $(LIB_VMDEF)
 
+JITLOG_DEF= jitlog/reader_def.lua
+
 LUAJIT_O= luajit.o
 LUAJIT_A= libluajit.a
 LUAJIT_SO= libluajit.so
@@ -516,7 +518,7 @@ LUAJIT_T= luajit
 ALL_T= $(LUAJIT_T) $(LUAJIT_A) $(LUAJIT_SO) $(HOST_T)
 ALL_HDRGEN= lj_bcdef.h lj_ffdef.h lj_libdef.h lj_recdef.h lj_folddef.h  \
 	    lj_jitlog_def.h lj_jitlog_decl.h lj_jitlog_writers.h host/buildvm_arch.h
-ALL_GEN= $(LJVM_S) $(ALL_HDRGEN) $(LIB_VMDEFP)
+ALL_GEN= $(LJVM_S) $(ALL_HDRGEN) $(LIB_VMDEFP) $(JITLOG_DEF)
 WIN_RM= *.obj *.lib *.exp *.dll *.exe *.manifest *.pdb *.ilk
 ALL_RM= $(ALL_T) $(ALL_GEN) *.o host/*.o $(WIN_RM)
 
@@ -527,7 +529,7 @@ ALL_RM= $(ALL_T) $(ALL_GEN) *.o host/*.o $(WIN_RM)
 # Mixed mode defaults.
 TARGET_O= $(LUAJIT_A)
 TARGET_T= $(LUAJIT_T) $(LUAJIT_SO)
-TARGET_DEP= $(LIB_VMDEF) $(LUAJIT_SO)
+TARGET_DEP= $(LIB_VMDEF) $(LUAJIT_SO) $(JITLOG_DEF)
 
 ifeq (Windows,$(TARGET_SYS))
   TARGET_DYNCC= $(STATIC_CC)
@@ -648,9 +650,12 @@ lj_jitlog_writers.h: $(DASM_DEP) jitlog/build.lua jitlog/messages.lua jitlog/gen
 	$(HOST_LUA) jitlog/build.lua $(JITLOG_FLAGS) jitlog/messages.lua writers
 
 lj_jitlog_decl.h: lj_jitlog_def.h
-	
+
 lj_jitlog_def.h: $(DASM_DEP) jitlog/build.lua jitlog/messages.lua jitlog/generator.lua jitlog/c_generator.lua
 	$(HOST_LUA) jitlog/build.lua $(JITLOG_FLAGS) jitlog/messages.lua defs
+
+jitlog/reader_def.lua: $(DASM_DEP) jitlog/build.lua jitlog/messages.lua jitlog/generator.lua jitlog/c_generator.lua
+	$(HOST_LUA) jitlog/build.lua $(JITLOG_FLAGS) jitlog/messages.lua lua jitlog/
 
 host/buildvm.o: $(DASM_DIR)/dasm_*.h
 
