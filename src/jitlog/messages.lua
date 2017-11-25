@@ -47,6 +47,17 @@ module.messages = {
       timerfreq : u64
     ]]
   },
+
+  {
+    name = "stringmarker",
+    fields = [[
+      time : timestamp
+      jitted : bool
+      flags : 16
+      label : string
+    ]],
+    use_msgsize = "label",
+  },
 }
 
 module.structs = {

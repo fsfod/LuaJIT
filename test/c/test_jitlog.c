@@ -168,3 +168,9 @@ UTEST_F(JITLogFile, create_async_sink) {
 
   lua_close(L1);
 }
+
+UTEST_F(JITLog, marker) {
+  uint64_t start = jitlog_getsize(JL);
+  jitlog_writemarker(JL, "12345", 0);
+  ASSERT_EQ(jitlog_first_msgoffset(JL, MSGTYPE_stringmarker, 0), start);
+}

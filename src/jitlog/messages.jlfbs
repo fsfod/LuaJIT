@@ -38,3 +38,10 @@ message header {
   starttime: timestamp
   timerfreq : uint64
 }
+
+message stringmarker{
+  time : timestamp
+  jitted : bool
+  flags : 16
+  label : string
+}
