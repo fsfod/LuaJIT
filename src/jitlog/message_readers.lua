@@ -8,7 +8,26 @@ local readers = {}
 local api = {}
 local msgobj_mt = {}
 
+function readers:stringmarker(msg)
+  local label = msg.label
+  local flags = msg.flags
+  local time = msg.time
+  local marker = {
+    label = label,
+    time = time,
+    eventid = self.eventid,
+    jitted = msg.jitted,
+    flags = flags,
+    type = "string"
+  }
+  tinsert(self.markers, marker)
+  self:log_msg("stringmarker", "StringMarker: '%s', jitted = %s, time = %s", label, marker.jited, time)
+  return marker
+end
+
 local function init(self)
+  self.markers = {}
+
   return t
 end
 

@@ -284,6 +284,13 @@ LUA_API int jitlog_setsink_mmap(JITLogUserContext *usrcontext, const char *path,
   return 1;
 }
 
+LUA_API void jitlog_writemarker(JITLogUserContext *usrcontext, const char *label, int flags)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+  int jited = context->g->vmstate > 0;
+  log_stringmarker(&context->ub, jited, flags, label);
+}
+
 /* -- Lua module to control the JITLog ------------------------------------ */
 
 static jitlog_State* jlib_getstate(lua_State *L)
@@ -362,6 +369,16 @@ static int jlib_getsize(lua_State *L)
   return 1;
 }
 
+static int jlib_writemarker(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  size_t size = 0;
+  const char *label = luaL_checklstring(L, 1, &size);
+  int flags = luaL_optint(L, 2, 0);
+  jitlog_writemarker(ctx2usr(context), label, flags);
+  return 0;
+}
+
 static const luaL_Reg jitlog_lib[] = {
   {"start", jlib_start},
   {"shutdown", jlib_shutdown},
@@ -370,6 +387,7 @@ static const luaL_Reg jitlog_lib[] = {
   {"savetostring", jlib_savetostring},
   {"getsize", jlib_getsize},
   {"setlogsink", jlib_setlogsink},
+  {"writemarker", jlib_writemarker},
   {NULL, NULL},
 };
 

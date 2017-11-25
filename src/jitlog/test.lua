@@ -180,15 +180,33 @@ end)
 it("reset jitlog", function()
   jitlog.start()
   local headersize = jitlog.getsize()
+  jitlog.writemarker("marker")
+  -- Should have grown by at least 10 = 6 chars + 4 byte msg header
+  assert(jitlog.getsize()-headersize >= 10)
   local log1 = jitlog.savetostring()
   -- Clear the log and force a new header to be written
   jitlog.reset()
   assert(jitlog.getsize() == headersize)
   local log2 = jitlog.savetostring()
+  assert(#log1 > #log2)
 
   local result1 = parselog(log1)
   local result2 = parselog(log2)
   assert(result1.starttime < result2.starttime)
+end)
+
+it("string marker", function()
+  jitlog.start()
+  jitlog.writemarker("marker1")
+  jitlog.writemarker("marker2", 0xbeef)
+  local result = parselog(jitlog.savetostring())
+  assert(#result.markers == 2)
+  assert(result.markers[1].label == "marker1")
+  assert(result.markers[2].label == "marker2")
+  assert(result.markers[1].eventid < result.markers[2].eventid)
+  assert(result.markers[1].time < result.markers[2].time)
+  assert(result.markers[1].flags == 0)
+  assert(result.markers[2].flags == 0xbeef)
 end)
 
 local failed = false
