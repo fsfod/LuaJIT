@@ -25,5 +25,10 @@ LUA_API int jitlog_setsink(JITLogUserContext *usrcontext, UserBuf *ub);
 */
 LUA_API int jitlog_setsink_mmap(JITLogUserContext *usrcontext, const char *path, int mwinsize);
 
+/*
+**  Write a time stamped stringmarker message to the jitlog. The flags parameter optional value
+**  that can be used for arbitrary data otherwise just use 0. 
+*/
+LUA_API void jitlog_writemarker(JITLogUserContext *usrcontext, const char *label, int flags);
 #endif
 

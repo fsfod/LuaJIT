@@ -42,6 +42,14 @@ local msgs = {
     "starttime : timestamp",
     "ggaddress : u64",
   },
+  
+  {
+    name = "stringmarker",
+    "time : timestamp",
+    "flags : 16",
+    "label : string",
+    use_msgsize = "label",
+  },
 }
 
 return msgs

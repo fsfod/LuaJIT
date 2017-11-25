@@ -10,6 +10,22 @@ local msgsizes = logdef.msgsizes
 
 local base_actions = {}
 
+function base_actions:stringmarker(msg)
+  local label = msg:get_label()
+  local flags = msg:get_flags()
+  local time = msg.time
+  local marker = {
+    label = label,
+    time = time,
+    eventid = self.eventid,
+    flags = flags,
+    type = "string"
+  }
+  self.markers[#self.markers + 1] = marker
+  self:log_msg("stringmarker", "StringMarker: %s %s", label, time)
+  return marker
+end
+
 local logreader = {}
 
 function logreader:log(fmt, ...)
@@ -287,9 +303,11 @@ local function makereader(mixins)
   local t = {
     eventid = 0,
     actions = {},
+    markers = {},
     verbose = false,
     logfilter = {
       --header = true,
+      --stringmarker = true,
     }
   }
   if mixins then

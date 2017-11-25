@@ -176,6 +176,7 @@ end
 function tests.reset()
   jitlog.start()
   local headersize = jitlog.getsize()
+  jitlog.addmarker("marker")
   -- Should have grown by at least 10 = 6 chars + 4 byte msg header
   assert(jitlog.getsize()-headersize >= 10)
   local log1 = jitlog.savetostring()
@@ -188,6 +189,20 @@ function tests.reset()
   local result1 = parselog(log1)
   local result2 = parselog(log2)
   assert(result1.starttime < result2.starttime)
+end
+
+function tests.stringmarker()
+  jitlog.start()
+  jitlog.addmarker("marker1")
+  jitlog.addmarker("marker2", 0xbeef)
+  local result = parselog(jitlog.savetostring())
+  assert(#result.markers == 2)
+  assert(result.markers[1].label == "marker1")
+  assert(result.markers[2].label == "marker2")
+  assert(result.markers[1].eventid < result.markers[2].eventid)
+  assert(result.markers[1].time < result.markers[2].time)
+  assert(result.markers[1].flags == 0)
+  assert(result.markers[2].flags == 0xbeef)
 end
 
 local failed = false
