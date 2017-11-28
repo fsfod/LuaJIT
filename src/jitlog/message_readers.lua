@@ -132,6 +132,59 @@ function readers:register_state(msg)
   self:log_msg("register_state", "RegisterState: source = '%s', gpr_count = %d, fpr_count = %d", source, msg.gpr_count, msg.fpr_count)
 end
 
+function readers:trace_flushall(msg)
+  local reason = msg.reason
+  local flush = {
+    reason = self.vmdef.flushreason[reason],
+    eventid = self.eventid,
+    time = msg.time,
+    maxmcode = msg.mcodelimit,
+    maxtrace = msg.tracelimit,
+  }
+  tinsert(self.flushes, flush)
+  self:log_msg("alltraceflush", "TraceFlush: Reason '%s', maxmcode %d, maxtrace %d", flush.reason, msg.mcodelimit, msg.tracelimit)
+  return flush
+end
+
+function fbreaders:VMSettings(msg)
+
+  local paramvalues = self:read_array("int32_t", msg:get_jitparams())
+  local jitparams = {}
+  local names = self.vmdef.jitparams.names
+
+  for i = 0, paramvalues.length-1 do
+    jitparams[names[i+1]] = paramvalues:get(i)
+  end
+
+  local paramdefaults, length = msg:get_jitparams_default()
+  local jitparams_default
+
+  if paramdefaults and length ~= 0 then
+    assert(length == paramvalues.length)
+    jitparams_default = {}
+    local defaults = self:read_array("int32_t", paramdefaults, length)
+    for i = 0, defaults.length-1 do
+      jitparams_default[names[i+1]] = defaults:get(i)
+    end
+  end
+
+  local settings = {
+    jitparams = jitparams,
+    jitparams_default = jitparams_default,
+  }
+
+  self:log_msg("VMSettings", "VMSettings: jitparams = %d", paramvalues.length)
+  return settings
+end
+
+function fbreaders:VMDef(msg)
+  local vmdef = {
+    flushreason = util.make_enum(msg:get_flushreason()),
+    jitparams = util.make_enum(msg:get_jitparams()),
+  }
+  return vmdef
+end
+
 local function init(self)
   self.markers = {}
   -- Record id marker messages in to table 
@@ -140,6 +193,7 @@ local function init(self)
   self.exits = 0
   self.gcexits = 0 -- number of trace exits force triggered by the GC being in the 'atomic' or 'finalize' states
   self.enums = {}
+  self.flushes = {}
 
   return t
 end
@@ -156,6 +210,19 @@ function api:parseheader(header)
 
   for _, enum in ipairs(enumlist) do
     self.enums[enum.__name] = enum
+  end
+
+  local vmdef, limit = header:get_vmdef()
+  if vmdef then
+    local reader = self:create_fbreader("VMDef", vmdef, limit)
+    self.vmdef = self:readfb("VMDef", reader)
+  end
+
+  local vmsettings, limit = header:get_vmsettings()
+
+  if vmsettings then
+    local reader = self:create_fbreader("VMSettings", vmsettings, limit)
+    self.vmsettings = self:readfb("VMSettings", reader)
   end
 end
 

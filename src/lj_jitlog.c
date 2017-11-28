@@ -90,6 +90,12 @@ static void jitlog_exit(jitlog_State *context, VMEventData_TExit *exitState)
   }
 }
 
+static void jitlog_traceflush(jitlog_State *context, FlushReason reason)
+{
+  jit_State *J = G2J(context->g);
+  log_trace_flushall(&context->ub, reason, J->param[JIT_P_maxtrace], J->param[JIT_P_maxmcode] << 10);
+}
+
 #endif
 static void free_context(jitlog_State *context);
 
@@ -108,6 +114,9 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
 #if LJ_HASJIT
     case VMEVENT_TRACE_EXIT:
       jitlog_exit(context, (VMEventData_TExit*)eventdata);
+      break;
+    case VMEVENT_TRACE_FLUSH:
+      jitlog_traceflush(context, (FlushReason)(uintptr_t)eventdata);
       break;
 #endif
     case VMEVENT_DETACH:
@@ -177,18 +186,56 @@ static void write_bnote(UserBuf *ub, const char *label, const void *data, size_t
   log_note(ub, &args);
 }
 
-
-#define enum_entry(enumname, strarray) {.name = enumname, .valuenames = strarray, .valuenames_length = (sizeof(strarray)/sizeof(strarray[0]))}
-
-static enumdef_Args enumlist[] = {
+static const char *const flushreason[] = {
+  "other",
+  "user_requested",
+  "maxmcode",
+  "maxtrace",
+  "profile_toggle",
+  "set_builtinmt",
+  "set_immutableuv",
 };
 
+static const char * jitparams[] = {
+  #define PARAMNAME(len, name, value)	#name,
+  JIT_PARAMDEF(PARAMNAME)
+  #undef PARAMNAME
+};
+
+static const int32_t jit_param_default[JIT_P__MAX + 1] = {
+#define JIT_PARAMINIT(len, name, value)	(value),
+JIT_PARAMDEF(JIT_PARAMINIT)
+#undef JIT_PARAMINIT
+  0
+};
+
+#define enum_entry(enumname, strarray) {.name = enumname, .valuenames = strarray, .valuenames_length = (sizeof(strarray)/sizeof(strarray[0]))}
+#define array_length(arr) (sizeof(arr)/sizeof((arr)[0]))
+
+static enumdef_Args enumlist[] = {
+  enum_entry("flushreason", flushreason),
+};
+
+#define vmdef_array(name, name_array) \
+  .name = name_array, .name##_length = sizeof(name_array)/sizeof((name_array)[0])
+
+VMDef_Args vmdef = {
+  vmdef_array(flushreason, flushreason),
+  vmdef_array(jitparams, jitparams),
+};
 
 static void write_header(jitlog_State *context)
 {
   global_State *g = context->g;
   char cpumodel[64] = {0};
   int model_length = getcpumodel(cpumodel);
+  VMSettings_Args vmsettings = {
+    .jitparams = G2J(g)->param,
+    .jitparams_length = JIT_P__MAX,
+    .jitparams_default = jit_param_default,
+    .jitparams_default_length = JIT_P__MAX,
+  };
+
   header_Args args = {
     .fileheader = 0x474c4a,
     .headersize = sizeof(MSG_header),
@@ -211,6 +258,8 @@ static void write_header(jitlog_State *context)
     .vtable_offsets_length = sizeof(fb_vtoffsets)/sizeof(int),
     .enums = enumlist,
     .enums_length = sizeof(enumlist) / sizeof(enumlist[0]),
+    .vmsettings = &vmsettings,
+    .vmdef = &vmdef,
   };
   log_header(&context->ub, &args);
 

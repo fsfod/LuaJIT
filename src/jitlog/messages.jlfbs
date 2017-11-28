@@ -38,6 +38,8 @@ message header {
   starttime: timestamp
   timerfreq : uint64
   enums : [enumdef]
+  vmsettings : VMSettings
+  vmdef : VMDef
 }
 
 message stringmarker{
@@ -103,4 +105,21 @@ table register_state{
   gprs : [uint8]
   fprs : [uint8]
   vregs : [uint8]
+}
+
+message trace_flushall{
+  time : timestamp
+  reason : uint16 (enum : flushreason)
+  tracelimit : uint16
+  mcodelimit : uint32
+}
+
+table VMSettings{
+  jitparams : [int32]
+  jitparams_default: [int32]  (optional)
+}
+
+table VMDef{
+  flushreason : stringlist
+  jitparams : stringlist
 }
