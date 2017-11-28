@@ -88,6 +88,24 @@ module.messages = {
       id : 16
     ]]
   },
+
+  {
+    name = "traceexit_small",
+    fields = [[
+      isgcexit : bool
+      traceid : 14
+      exit : 9
+    ]]
+  },
+
+  {
+    name = "traceexit",
+    fields = [[
+      isgcexit : bool
+      traceid : u16
+      exit : u16
+    ]]
+  },
 }
 
 return module

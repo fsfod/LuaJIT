@@ -95,11 +95,30 @@ function readers:note(msg)
   return note
 end
 
+function readers:traceexit(msg)
+  local id = msg.traceid
+  local exit = msg.exit
+  local gcexit = msg.isgcexit
+  self.exits = self.exits + 1
+  if gcexit then
+    assert(self.gcstate == "atomic" or self.gcstate == "finalize")
+    self.gcexits = self.gcexits + 1
+    self:log_msg("traceexit", "TraceExit(%d): %d GC Triggered", id, exit)
+  else
+    self:log_msg("traceexit", "TraceExit(%d): %d", id, exit)
+  end
+  return id, exit, gcexit
+end
+-- Reuse handler for compact trace exit messages since they both have the same field names but traceid and exit are smaller
+readers.traceexit_small = readers.traceexit
+
 local function init(self)
   self.markers = {}
   -- Record id marker messages in to table 
   self.track_idmarkers = true
   self.notes = {}
+  self.exits = 0
+  self.gcexits = 0 -- number of trace exits force triggered by the GC being in the 'atomic' or 'finalize' states
 
   return t
 end
