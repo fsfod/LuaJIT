@@ -121,6 +121,12 @@ static void jitlog_exit(jitlog_State *context, VMEventData_TExit *exitState)
   }
 }
 
+static void jitlog_traceflush(jitlog_State *context, FlushReason reason)
+{
+  jit_State *J = G2J(context->g);
+  log_trace_flushall(&context->ub, reason, J->param[JIT_P_maxtrace], J->param[JIT_P_maxmcode] << 10);
+}
+
 #endif
 static void free_context(jitlog_State *context);
 
@@ -139,6 +145,9 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
 #if LJ_HASJIT
     case VMEVENT_TRACE_EXIT:
       jitlog_exit(context, (VMEventData_TExit*)eventdata);
+      break;
+    case VMEVENT_TRACE_FLUSH:
+      jitlog_traceflush(context, (FlushReason)(uintptr_t)eventdata);
       break;
 #endif
     case VMEVENT_DETACH:
@@ -208,6 +217,29 @@ static void write_bnote(UserBuf *ub, const char *label, const void *data, size_t
   log_note(ub, &args);
 }
 
+static const char *const flushreason[] = {
+  "other",
+  "user_requested",
+  "maxmcode",
+  "maxtrace",
+  "profile_toggle",
+  "set_builtinmt",
+  "set_immutableuv",
+};
+
+static const char * jitparams[] = {
+  #define PARAMNAME(len, name, value)	#name,
+  JIT_PARAMDEF(PARAMNAME)
+  #undef PARAMNAME
+};
+
+static const int32_t jit_param_default[JIT_P__MAX + 1] = {
+#define JIT_PARAMINIT(len, name, value)	(value),
+JIT_PARAMDEF(JIT_PARAMINIT)
+#undef JIT_PARAMINIT
+  0
+};
+
 #define write_enum(context, name, strarray) write_enumdef(context, name, strarray, (sizeof(strarray)/sizeof(strarray[0])), 0)
 
 static void write_header(jitlog_State *context)
@@ -235,9 +267,15 @@ static void write_header(jitlog_State *context)
 
   write_note(&context->ub, "msgdefs", msgdefstr);
 
+  write_enum(context, "flushreason", flushreason);
+  write_enum(context, "jitparams", jitparams);
+
   for (int i = 0; enuminfo_list[i].name; i++) {
     write_enumdef(context, enuminfo_list[i].name, enuminfo_list[i].namelist, enuminfo_list[i].count, 0);
   }
+
+  write_bnote(&context->ub, "jitparams_default", jit_param_default, sizeof(jit_param_default));
+  write_bnote(&context->ub, "jitparams", G2J(g)->param, sizeof(G2J(g)->param));
 }
 
 const uint32_t smallidsz = 20;

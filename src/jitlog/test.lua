@@ -299,6 +299,16 @@ it("trace exits", function()
   assert(result.msgcounts.traceexit_small == result.exits)
 end)
 
+it("user trace flush", function()
+  jitlog.start()
+  jit.flush()
+  local result = parselog(jitlog.savetostring())
+  assert(#result.flushes == 1)
+  assert(result.msgcounts.trace_flushall == 1)
+  assert(result.flushes[1].reason == "user_requested")
+  assert(result.flushes[1].time > 0)
+end)
+
 end
 
 local failed = false

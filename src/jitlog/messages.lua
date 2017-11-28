@@ -133,6 +133,16 @@ module.messages = {
       vregs : u8[vregs_length]
     ]]
   },
+
+  {
+    name = "trace_flushall",
+    fields = [[
+      time : timestamp
+      reason : u16 @enum(flushreason)
+      tracelimit : u16
+      mcodelimit : u32
+    ]]
+  },
 }
 
 return module

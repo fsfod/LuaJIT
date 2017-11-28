@@ -126,6 +126,20 @@ function readers:register_state(msg)
   self:log_msg("register_state", "RegisterState: source = '%s', gpr_count = %d, fpr_count = %d", source, msg.gpr_count, msg.fpr_count)
 end
 
+function readers:trace_flushall(msg)
+  local reason = msg.reason
+  local flush = {
+    reason = self.enums.flushreason[reason],
+    eventid = self.eventid,
+    time = msg.time,
+    maxmcode = msg.mcodelimit,
+    maxtrace = msg.tracelimit,
+  }
+  tinsert(self.flushes, flush)
+  self:log_msg("alltraceflush", "TraceFlush: Reason '%s', maxmcode %d, maxtrace %d", flush.reason, msg.mcodelimit, msg.tracelimit)
+  return flush
+end
+
 local function init(self)
   self.markers = {}
   -- Record id marker messages in to table 
@@ -134,6 +148,7 @@ local function init(self)
   self.exits = 0
   self.gcexits = 0 -- number of trace exits force triggered by the GC being in the 'atomic' or 'finalize' states
   self.enums = {}
+  self.flushes = {}
 
   return t
 end
