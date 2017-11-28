@@ -128,6 +128,13 @@ static void jitlog_traceflush(jitlog_State *context, FlushReason reason)
 }
 
 #endif
+
+static void jitlog_gcstate(jitlog_State *context, int newstate)
+{
+  global_State *g = context->g;
+  log_gcstate(&context->ub, newstate, g->gc.state, g->gc.total, g->strnum);
+}
+
 static void free_context(jitlog_State *context);
 
 static void jitlog_loadstage2(lua_State *L, jitlog_State *context);
@@ -150,6 +157,9 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
       jitlog_traceflush(context, (FlushReason)(uintptr_t)eventdata);
       break;
 #endif
+    case VMEVENT_GC_STATECHANGE:
+      jitlog_gcstate(context, (int)(uintptr_t)eventdata);
+      break;
     case VMEVENT_DETACH:
       free_context(context);
       break;
@@ -240,6 +250,15 @@ JIT_PARAMDEF(JIT_PARAMINIT)
   0
 };
 
+static const char *const gcstates[] = {
+  "pause", 
+  "propagate", 
+  "atomic", 
+  "sweepstring", 
+  "sweep", 
+  "finalize",
+};
+
 #define write_enum(context, name, strarray) write_enumdef(context, name, strarray, (sizeof(strarray)/sizeof(strarray[0])), 0)
 
 static void write_header(jitlog_State *context)
@@ -269,6 +288,7 @@ static void write_header(jitlog_State *context)
 
   write_enum(context, "flushreason", flushreason);
   write_enum(context, "jitparams", jitparams);
+  write_enum(context, "gcstate", gcstates);
 
   for (int i = 0; enuminfo_list[i].name; i++) {
     write_enumdef(context, enuminfo_list[i].name, enuminfo_list[i].namelist, enuminfo_list[i].count, 0);

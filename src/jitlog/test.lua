@@ -311,6 +311,34 @@ end)
 
 end
 
+it("GC state", function()
+  --Make sure were not mid way though a GC
+  collectgarbage("collect")
+
+  jitlog.start()
+  collectgarbage("collect")
+  local t = {}
+  for i=1, 6000 do
+    t[i] = {1, 2, true, false, 5, 6, 7, 8, 10, 11, 12}
+    if i == 1000 then
+      collectgarbage("step", 100)
+    end
+  end
+  assert(#t == 6000)
+
+  local result = parselog(jitlog.savetostring())
+  assert(result.gccount > 0)
+  assert(result.gcstatecount > 4)
+  assert(result.gcstatecount == result.msgcounts.gcstate)
+  assert(result.peakmem > 0)
+  assert(result.peakstrnum > 0)
+  if hasjit then
+    assert(result.exits > 0)
+    assert(result.gcexits > 0)
+    assert(result.gcexits <= result.exits)
+  end
+end)
+
 local failed = false
 
 pcall(jitlog.shutdown)

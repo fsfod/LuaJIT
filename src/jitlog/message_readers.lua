@@ -140,6 +140,29 @@ function readers:trace_flushall(msg)
   return flush
 end
 
+function readers:gcstate(msg)
+  local newstate = msg.state
+  local prevstate = msg.prevstate
+  local oldstate = self.gcstateid
+  local totalmem = tonumber(msg.totalmem)
+  self.gcstateid = newstate
+  self.gcstate = self.enums.gcstate[newstate]
+  self.gcstatecount = self.gcstatecount + 1
+  
+  if oldstate ~= newstate then
+    -- A new GC cycle has only started once we're past the 'pause' GC state 
+    if oldstate == nil or newstate == 1 or (oldstate > newstate and newstate > 0)  then
+      self.gccount = self.gccount + 1
+    end
+    self:log_msg("gcstate", "GCState(%s): changed from %s", self.gcstate, self.enums.gcstate[oldstate])
+  end
+  
+  self.peakmem = math.max(self.peakmem or 0, totalmem)
+  self.peakstrnum = math.max(self.peakstrnum or 0, msg.strnum)
+  self:log_msg("gcstate", "GCStateStats: MemTotal = %dMB, StrCount = %d", totalmem/(1024*1024), msg.strnum)
+  return self.gcstate, self.enums.gcstate[prevstate]
+end
+
 local function init(self)
   self.markers = {}
   -- Record id marker messages in to table 
@@ -149,6 +172,8 @@ local function init(self)
   self.gcexits = 0 -- number of trace exits force triggered by the GC being in the 'atomic' or 'finalize' states
   self.enums = {}
   self.flushes = {}
+  self.gccount = 0 -- number GC full cycles that have been seen in the log
+  self.gcstatecount = 0 -- number times the gcstate changed
 
   return t
 end

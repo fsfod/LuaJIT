@@ -143,6 +143,17 @@ module.messages = {
       mcodelimit : u32
     ]]
   },
+
+  {
+    name = "gcstate",
+    fields = [[
+      time : timestamp
+      state : 8 @enum(gcstate)
+      prevstate : 8
+      totalmem : GCSize
+      strnum : u32
+    ]]
+  },
 }
 
 return module
