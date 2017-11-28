@@ -236,6 +236,27 @@ end
 
 end
 
+function tests.gcstate()
+  jitlog.start()
+  collectgarbage("collect")
+  local t = {}
+  for i=1, 10000 do
+    t[i] = {1, 2, true, false}
+  end
+  assert(#t == 10000)
+  local result = parselog(jitlog.savetostring())
+  assert(result.gccount > 0)
+  assert(result.gcstatecount > 4)
+  assert(result.gcstatecount == result.msgcounts.gcstate)
+  assert(result.peakmem > 0)
+  assert(result.peakstrnum > 0)
+  if hasjit then
+    assert(result.exits > 0)
+    assert(result.gcexits > 0)
+    assert(result.gcexits <= result.exits)
+  end
+end
+
 local failed = false
 
 pcall(jitlog.shutdown)

@@ -81,6 +81,15 @@ local msgs = {
     "tracelimit : u16",
     "mcodelimit : u32",
   },
+
+  {
+    name = "gcstate",
+    "time : timestamp",
+    "state : 8",
+    "prevstate : 8",
+    "totalmem : u32",
+    "strnum : u32",
+  },
 }
 
 return msgs

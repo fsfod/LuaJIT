@@ -88,6 +88,28 @@ function base_actions:alltraceflush(msg)
   return flush
 end
 
+function base_actions:gcstate(msg)
+  local newstate = msg:get_state()
+  local prevstate = msg:get_prevstate()
+  local oldstate = self.gcstateid
+  self.gcstateid = newstate
+  self.gcstate = self.enums.gcstate[newstate]
+  self.gcstatecount = self.gcstatecount + 1
+  
+  if oldstate ~= newstate then
+    -- A new GC cycle has only started once we're past the 'pause' GC state 
+    if oldstate == nil or newstate == 1 or (oldstate > newstate and newstate > 0)  then
+      self.gccount = self.gccount + 1
+    end
+    self:log_msg("gcstate", "GCState(%s): changed from %s", self.gcstate, self.enums.gcstate[oldstate])
+  end
+  
+  self.peakmem = math.max(self.peakmem or 0, msg.totalmem)
+  self.peakstrnum = math.max(self.peakstrnum or 0, msg.strnum)
+  self:log_msg("gcstate", "GCStateStats: MemTotal = %dMB, StrCount = %d", msg.totalmem/(1024*1024), msg.strnum)
+  return self.gcstate, self.enums.gcstate[prevstate]
+end
+
 local logreader = {}
 
 function logreader:log(fmt, ...)
@@ -394,6 +416,8 @@ local function makereader(mixins)
     flushes = {},
     exits = 0,
     gcexits = 0, -- number of trace exits force triggered by the GC being in the 'atomic' or 'finalize' states
+    gccount = 0, -- number GC full cycles that have been seen in the log
+    gcstatecount = 0, -- number times the gcstate changed
     enums = {},
     verbose = false,
     logfilter = {
