@@ -33,6 +33,7 @@ typedef struct jitlog_State {
   JITLogUserContext user;
   global_State *g;
   char loadstate;
+  uint32_t traceexit;
 } jitlog_State;
 
 
@@ -42,6 +43,37 @@ LJ_STATIC_ASSERT(offsetof(UserBuf, p) == 0);
 #define usr2ctx(usrcontext)  ((jitlog_State *)(((char *)usrcontext) - offsetof(jitlog_State, user)))
 #define ctx2usr(context)  (&(context)->user)
 
+#if LJ_HASJIT
+
+static const uint32_t large_traceid = 1 << 14;
+static const uint32_t large_exitnum = 1 << 9;
+
+static void jitlog_exit(jitlog_State *context, VMEventData_TExit *exitState)
+{
+  jit_State *J = G2J(context->g);
+  context->traceexit = J->parent | J->exitno;
+
+  if (exitState) {
+    context->traceexit = (J->parent << 16) | J->exitno;
+  } else {
+    context->traceexit = 0;
+  }
+
+  if (!exitState) {
+    return;
+  }
+
+  /* Use a more the compact message if the trace Id is smaller than 16k and the exit smaller than 
+  ** 512 which will fit in the spare 24 bits of a message header.
+  */
+  if (J->parent < large_traceid && J->exitno < large_exitnum) {
+    log_trace_exitsmall(&context->ub, exitState->gcexit, J->parent, J->exitno);
+  } else {
+    log_trace_exit(&context->ub, exitState->gcexit, J->parent, J->exitno);
+  }
+}
+
+#endif
 static void free_context(jitlog_State *context);
 
 static void jitlog_loadstage2(lua_State *L, jitlog_State *context);
@@ -56,6 +88,11 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
   }
 
   switch (event) {
+#if LJ_HASJIT
+    case VMEVENT_TRACE_EXIT:
+      jitlog_exit(context, (VMEventData_TExit*)eventdata);
+      break;
+#endif
     case VMEVENT_DETACH:
       free_context(context);
       break;

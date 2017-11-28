@@ -66,3 +66,15 @@ message note{
   label : string
   data : [uint8] (argtype : const void*)
 }
+
+message trace_exit (no_vtable){
+  isgcexit : bool
+  traceid : uint16
+  exit : uint16
+}
+
+message trace_exitsmall (no_vtable, mapto : trace_exit) {
+  isgcexit : bool
+  traceid : 14
+  exit : 9
+}

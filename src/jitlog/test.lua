@@ -1,4 +1,5 @@
 local ffi = require("ffi")
+local hasjit = pcall(require, "jit.opt")
 local format = string.format
 local fbsparser = require("jitlog.fbs_parser")
 local apigen = require"jitlog.generator"
@@ -33,6 +34,23 @@ local function buildmsginfo(schema)
   local parser = apigen.create_parser(false)
   parser:process_schema(schema)
   return parser:complete()
+end
+
+if hasjit then
+  jit_util = require("jit.util")
+  function jitfunc(f, n, ...)
+    n = n or 300
+    local startbc = bit.band(jit_util.funcbc(f, 0), 0xff)
+    for i = 1, n do
+      f(...)
+    end
+    local stopbc = bit.band(jit_util.funcbc(f, 0), 0xff)
+    -- Make sure the bc op shifts from FUNCF to JFUNCF
+    assert(stopbc == startbc + 2, "failed to prejit method")
+  end
+  jit.off(jitfunc)
+  -- Force delayed bytecode patching from jit.off(jitfunc) to be triggered when its hot counter reaches zero
+  jitfunc(function() end)
 end
 
 local tests = {}
@@ -393,6 +411,24 @@ it("id markers", function()
     currid = currid + 1
   end
 end)
+
+if hasjit then
+
+it("trace exits", function()
+  jitlog.start()
+  local a = 0 
+  for i = 1, 200 do
+    if i <= 100 then
+      a = a + 1
+    end
+  end
+  assert(a == 100)
+  local result = parselog(jitlog.savetostring())
+  assert(result.exits > 4)
+  assert(result.msgcounts.trace_exitsmall == result.exits)
+end)
+
+end
 
 local failed = false
 
