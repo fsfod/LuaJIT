@@ -73,6 +73,14 @@ local msgs = {
     "traceid : u16",
     "exit : u16",
   },
+
+  {
+    name = "alltraceflush",
+    "time : timestamp",
+    "reason : u16",
+    "tracelimit : u16",
+    "mcodelimit : u32",
+  },
 }
 
 return msgs

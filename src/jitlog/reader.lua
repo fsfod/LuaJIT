@@ -74,6 +74,20 @@ end
 -- Reuse handler for compact trace exit messages since they both have the same field names but traceid and exit are smaller
 base_actions.traceexit_small = base_actions.traceexit
 
+function base_actions:alltraceflush(msg)
+  local reason = msg:get_reason()
+  local flush = {
+    reason = self.enums.flushreason[reason],
+    eventid = self.eventid,
+    time = msg.time,
+    maxmcode = msg.mcodelimit,
+    maxtrace = msg.tracelimit,
+  }
+  self.flushes[#self.flushes + 1] = flush
+  self:log_msg("alltraceflush", "TraceFlush: Reason '%s', maxmcode %d, maxtrace %d", flush.reason, msg.mcodelimit, msg.tracelimit)
+  return flush
+end
+
 local logreader = {}
 
 function logreader:log(fmt, ...)
@@ -377,6 +391,7 @@ local function makereader(mixins)
     eventid = 0,
     actions = {},
     markers = {},
+    flushes = {},
     exits = 0,
     gcexits = 0, -- number of trace exits force triggered by the GC being in the 'atomic' or 'finalize' states
     enums = {},

@@ -83,6 +83,12 @@ static void jitlog_exit(jitlog_State *context, VMEventData_TExit *exitState)
   }
 }
 
+static void jitlog_traceflush(jitlog_State *context, FlushReason reason)
+{
+  jit_State *J = G2J(context->g);
+  log_alltraceflush(&context->ub, reason, J->param[JIT_P_maxtrace], J->param[JIT_P_maxmcode] << 10);
+}
+
 #endif
 static void free_context(jitlog_State *context);
 
@@ -101,6 +107,9 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
 #if LJ_HASJIT
     case VMEVENT_TRACE_EXIT:
       jitlog_exit(context, (VMEventData_TExit*)eventdata);
+      break;
+    case VMEVENT_TRACE_FLUSH:
+      jitlog_traceflush(context, (FlushReason)(uintptr_t)eventdata);
       break;
 #endif
     case VMEVENT_DETACH:
@@ -137,6 +146,16 @@ static int getcpumodel(char *model)
 
 #endif
 
+static const char *const flushreason[] = {
+  "other",
+  "user_requested",
+  "maxmcode",
+  "maxtrace",
+  "profile_toggle",
+  "set_builtinmt",
+  "set_immutableuv",
+};
+
 #define write_enum(context, name, strarray) write_enumdef(context, name, strarray, (sizeof(strarray)/sizeof(strarray[0])), 0)
 
 static void write_header(jitlog_State *context)
@@ -147,6 +166,8 @@ static void write_header(jitlog_State *context)
   char *msgnamelist = strlist_concat(jitlog_msgnames, MSGTYPE_MAX, &msgnamessz);
   log_header(&context->ub, 1, 0, sizeof(MSG_header), jitlog_msgsizes, MSGTYPE_MAX, msgnamelist, msgnamessz, cpumodel, model_length, LJ_OS_NAME, (uintptr_t)G2GG(context->g));
   free(msgnamelist);
+
+  write_enum(context, "flushreason", flushreason);
 }
 
 static int jitlog_isrunning(lua_State *L)
