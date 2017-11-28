@@ -50,6 +50,20 @@ local msgs = {
     "label : string",
     use_msgsize = "label",
   },
+
+  {
+    name = "traceexit_small",
+    "isgcexit : bool",
+    "traceid : 14",
+    "exit : 9",
+  },
+
+  {
+    name = "traceexit",
+    "isgcexit : bool",
+    "traceid : u16",
+    "exit : u16",
+  },
 }
 
 return msgs

@@ -26,6 +26,23 @@ function base_actions:stringmarker(msg)
   return marker
 end
 
+function base_actions:traceexit(msg)
+  local id = msg:get_traceid()
+  local exit = msg:get_exit()
+  local gcexit = msg:get_isgcexit()
+  self.exits = self.exits + 1
+  if gcexit then
+    assert(self.gcstate == "atomic" or self.gcstate == "finalize")
+    self.gcexits = self.gcexits + 1
+    self:log_msg("traceexit", "TraceExit(%d): %d GC Triggered", id, exit)
+  else
+    self:log_msg("traceexit", "TraceExit(%d): %d", id, exit)
+  end
+  return id, exit, gcexit
+end
+-- Reuse handler for compact trace exit messages since they both have the same field names but traceid and exit are smaller
+base_actions.traceexit_small = base_actions.traceexit
+
 local logreader = {}
 
 function logreader:log(fmt, ...)
@@ -334,6 +351,8 @@ local function makereader(mixins)
     eventid = 0,
     actions = {},
     markers = {},
+    exits = 0,
+    gcexits = 0, -- number of trace exits force triggered by the GC being in the 'atomic' or 'finalize' states
     verbose = false,
     logfilter = {
       --header = true,

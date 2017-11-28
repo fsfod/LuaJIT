@@ -1,4 +1,5 @@
 local ffi = require("ffi")
+local hasjit = pcall(require, "jit.opt")
 local format = string.format
 local reader_def = require("jitlog.reader_def")
 GC64 = reader_def.GC64
@@ -205,6 +206,24 @@ function tests.stringmarker()
   assert(result.markers[1].time < result.markers[2].time)
   assert(result.markers[1].flags == 0)
   assert(result.markers[2].flags == 0xbeef)
+end
+
+if hasjit then
+
+function tests.tracexits()
+  jitlog.start()
+  local a = 0 
+  for i = 1, 200 do
+    if i <= 100 then
+      a = a + 1
+    end
+  end
+  assert(a == 100)
+  local result = parselog(jitlog.savetostring())
+  assert(result.exits > 4)
+  assert(result.msgcounts.traceexit_small == result.exits)
+end
+
 end
 
 local failed = false
