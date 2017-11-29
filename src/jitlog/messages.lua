@@ -136,6 +136,55 @@ local msgs = {
   },
 
   {
+    name = "trace",
+    "aborted : bool",
+    "stitched : bool",
+    "id : u16",
+    { name = "parentid", type = "u16", argtype = "TraceNo1" },
+    "startpt : GCRef",
+    "stoppt : GCRefPtr",
+    { name = "stoppc", type = "u32", argtype = "BCPos" },
+    "stopfunc : GCRefPtr",
+    "abortcode : u16",
+    "nins : u16",
+    "nk : u16",
+    "root : u16",
+    "nsnap: u16",
+    "nsnapmap: u16",
+    "spadjust : u16",
+    "link : u16",
+    { name = "startpc", type = "u32", argtype = "BCPos" },
+    "mcodesize : u32",
+    "mcodeaddr : ptr",
+    "mcode_length : u32", -- Will be 0 unlike mcodesize when mcode data is filtered
+    "mcode : u8[mcode_length]",
+    "irlen : u32",
+    { name = "ir", length = "irlen", type = "u64", argtype = "IRIns *" },
+    "snapshots : u64[nsnap]",
+    "snapmap : u32[nsnapmap]",
+
+    structcopy = {
+      fields = {
+        id = "traceno",
+        "startpt",
+        "nins",
+        "nk",
+        "root",
+        "nsnap",
+        "nsnapmap",
+        snapshots = "snap",
+        "spadjust",
+        "link",
+        mcodeaddr = "mcode",
+        "mcode",
+        mcodesize = "szmcode",
+        "snapmap",
+      },
+      arg = "trace : GCtrace *",
+    },
+  },
+
+  {
     name = "traceexit_small",
     "isgcexit : bool",
     "traceid : 14",
@@ -147,6 +196,14 @@ local msgs = {
     "isgcexit : bool",
     "traceid : u16",
     "exit : u16",
+  },
+
+  {
+    name = "exitstubs",
+    "startid : u16",
+    "first : ptr",
+    "count : u16",
+    "spacing : u16",
   },
 
   {

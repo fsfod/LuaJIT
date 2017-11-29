@@ -33,6 +33,40 @@ local function make_enum(names)
   return t
 end
 
+ffi.cdef[[
+
+/* Stack snapshot header. */
+typedef struct SnapShot {
+  uint16_t mapofs;	/* Offset into snapshot map. */
+  uint16_t ref;		/* First IR ref for this snapshot. */
+  uint8_t nslots;	/* Number of valid slots. */
+  uint8_t topslot;	/* Maximum frame extent. */
+  uint8_t nent;		/* Number of compressed entries. */
+  uint8_t count;	/* Count of taken exits for this snapshot. */
+} SnapShot;
+
+typedef union IRIns {
+  struct {
+    uint16_t op1;	/* IR operand 1. */
+    uint16_t op2;	/* IR operand 2. */
+    uint16_t ot;		/* IR opcode and type (overlaps t and o). */
+    uint16_t prev;	/* Previous ins in same chain (overlaps r and s). */
+  };
+  struct {
+    int32_t op12;	/* IR operand 1 and 2 (overlaps op1 and op2). */
+    uint8_t t;	/* IR type. */
+    uint8_t o;	/* IR opcode. */
+    uint8_t r;	/* Register allocation (overlaps prev). */
+    uint8_t s;	/* Spill slot allocation (overlaps prev). */
+  };
+  int32_t i;		/* 32 bit signed integer literal (overlaps op12). */
+  GCRef gcr;		/* GCobj constant (overlaps op12 or entire slot). */
+  MRef ptr;		/* Pointer constant (overlaps op12 or entire slot). */
+  double tv;		/* TValue constant (overlaps entire slot). */
+} IRIns;
+
+]]
+
 local function array_index(self, index)
   assert(index >= 0 and index < self.length, index)
   return self.array[index]
@@ -385,6 +419,152 @@ function base_actions:protoloaded(msg)
   end
   self:log_msg("gcproto", "GCproto(%d): created %s", address, created)
   return address, proto
+end
+
+local gctrace = {}
+
+function gctrace:get_startlocation()
+  return (self.startpt:get_bclocation(self.startpc))
+end
+
+function gctrace:get_stoplocation()
+  return (self.stoppt:get_bclocation(self.stoppc))
+end
+
+function gctrace:get_snappc(snapidx)
+  local snap = self.snapshots:get(snapidx)
+  local ofs = snap.mapofs + snap.nent
+  return tonumber(self.snapmap:get(ofs))
+end
+
+local REF_BIAS = 0x8000
+
+function gctrace:dumpIR(start)
+  start = start or 0
+  
+  local irstart = REF_BIAS-self.nk
+  local count = self.nins-REF_BIAS
+  local irname = self.owner.enums.ir
+  local snaplimit = self.snapshots:get(0).ref-REF_BIAS
+  local snapi = 0
+  
+  for i=start, count-2 do
+    local ins = self.ir:get(irstart+i)
+    local op = irname[ins.o]
+    local op1, op2 = ins.op1, ins.op2
+    
+    if i >= snaplimit then
+      local pc = self:get_snappc(snapi)
+      local pt, line = self.owner:pc2proto(pc)
+      print(format(" ------------ Snap(%d): %s: %d ----------------------", snapi, pt and pt.chunk or "?", line or -1))
+      
+      snapi = snapi + 1
+      if snapi == self.nsnap then
+        snaplimit = 0xffff
+      else
+        snaplimit = self.snapshots:get(snapi).ref-REF_BIAS
+      end
+    end
+    
+    if op == "FLOAD" then
+      op2 = self.owner.enums.irfields[op2]
+    elseif op == "HREF" or op == "HREFK" or op == "NEWREF" then
+      op2 = self:get_irconstant(op2)
+    else
+      if op2 > self.nk and op2 < self.nins then
+        op2 = op2-REF_BIAS
+      end
+    end
+    
+    if op1 > self.nk and op1 < self.nins then
+        op1 = op1-REF_BIAS
+    end
+    -- TEMP reduce noise
+    if op == "UREFC" then
+      op2 = ins.op2
+    end
+    
+    print(i..": "..op, op1, op2)
+  end
+end
+
+function gctrace:get_consttab()
+  local count = REF_BIAS-self.nk
+  local irname = self.owner.enums.ir
+  local t = {}
+  
+  for i=0, (count-1) do
+    local ins = self.ir:get(count - i)
+    local op = ins.o
+    local op1, op2 = ins.op1, ins.op2
+
+    if op2 > self.nk and op2 < self.nins then
+      op2 = op2-REF_BIAS
+    end
+
+    if op1 > self.nk and op1 < self.nins then
+        op1 = op1-REF_BIAS
+    end
+    t[i+1] =  {irname[op], op1, op2}
+  end
+  return t
+end
+
+function gctrace:get_irconstant(irref)
+  local index = -(self.nk - irref)
+  local ins = self.ir:get(index)
+  local o = self.owner.enums.ir[ins.o]
+  local types = self.owner.enums.irtypes
+  
+  if o == "KSLOT" or o == "NEWREF" then
+    local gcstr = self.ir:get(-(self.nk - ins.op1)).gcr
+    return self.owner.strings[gcstr]
+  elseif o == "KGC" and ins.t == types.STR then
+    local gcstr = ins.gcr
+    return self.owner.strings[gcstr]
+  end
+end
+
+local trace_mt = {__index = gctrace}
+
+function base_actions:trace(msg)
+  local id = msg:get_id()
+  local aborted = msg:get_aborted()
+  local startpt = self.proto_lookup[addrtonum(msg.startpt)]
+  local stoppt = self.proto_lookup[addrtonum(msg.stoppt)]
+  local trace = {
+    owner = self,
+    eventid = self.eventid,
+    id = id,
+    rootid = msg.root,
+    parentid = msg.parentid,
+    startpt = startpt,
+    startpc = msg.startpc,
+    stoppt = stoppt,
+    stoppc = msg.stoppc,
+    link = msg.link,
+    stopfunc = self.func_lookup[addrtonum(msg.stopfunc)],
+    stitched = msg:get_stitched(),
+    nsnap = msg.nsnap,
+    nins = msg.nins,
+    nk = msg.nk,
+  }
+  trace.snapshots = self:read_array("SnapShot", msg:get_snapshots(), msg.nsnap)
+  trace.snapmap = self:read_array("uint32_t", msg:get_snapmap(), msg.nsnapmap)
+  trace.ir = self:read_array("IRIns", msg:get_ir(), msg.irlen)
+  
+  if aborted then
+    trace.abortcode = msg.abortcode
+    trace.abortreason = self.enums.trace_errors[msg.abortcode]
+    tinsert(self.aborts, trace)
+    self:log_msg("trace", "AbortedTrace(%d): reason %s, parentid = %d, start= %s\n stop= %s", id, trace.abortreason, msg.parentid, 
+                  startpt and startpt:get_location(), stoppt and stoppt:get_location())
+  else
+    tinsert(self.traces, trace)
+    self:log_msg("trace", "Trace(%d): parentid = %d, start= %s\n stop= %s", id, msg.parentid, startpt and startpt:get_location(), stoppt and stoppt:get_location())
+  end
+  setmetatable(trace, trace_mt)
+  return trace
 end
 
 function base_actions:traceexit(msg)
@@ -763,6 +943,8 @@ local function makereader(mixins)
     protos = {},
     proto_lookup = {},
     flushes = {},
+    traces = {},
+    aborts = {},
     exits = 0,
     gcexits = 0, -- number of trace exits force triggered by the GC being in the 'atomic' or 'finalize' states
     gccount = 0, -- number GC full cycles that have been seen in the log
