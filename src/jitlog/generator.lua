@@ -199,6 +199,42 @@ local function split_fieldlist(fields)
   return fielddefs
 end
 
+local function parse_structcopy(msgdef, structcopy, fieldlookup)
+  local arg_name, arg_type = parse_field(structcopy.arg)
+  local struct_arg = {
+    argstr = arg_type..arg_name,
+    type = arg_type, 
+    name = arg_name,
+    store_address = structcopy.store_address,
+    copylist = structcopy.fields,
+  }
+
+  if structcopy.store_address then
+    local struct_addr = fieldlookup[structcopy.store_address]
+    assert(struct_addr, "store_address field '" .. structcopy.store_address .. "' does not exist")
+    struct_addr.noarg = true
+    struct_addr.struct_addr = true
+    struct_addr.value_name = arg_name
+  end
+
+  -- The list of fields to copy is a mixed array and hashtable. Array entries mean we use the same field name for both the
+  -- source struct and destination message field.
+  for name, struct_field in pairs(structcopy.fields) do
+    if type(name) == "number" then
+      name = struct_field
+    end
+    local f = fieldlookup[name]
+    if not f then
+      error(format("No matching field for struct copy field '%s' in message '%s'", name, msgdef.name))
+    end
+    f.noarg = true
+    f.struct_arg = arg_name
+    f.struct_field = struct_field
+  end
+
+  return struct_arg
+end
+
 --[[
 Field List
   noarg: Don't automatically generate an argument for the field in the generated logger function. Set for implict values like timestamp and string length
@@ -206,6 +242,9 @@ Field List
   bitsize: The number of bits this bitfield takes up
   bool: This field was declared as a boolean and we store it as bitfield with a bitsize of 1
   bitstorage: The name of the real field this bitfield is stuffed in most the time this will be some of the space 24 bits of the message id field thats always exists
+  struct_arg: The name of the structure argument this field value will be copied from
+  struct_field: The sub field from a structure arg that this field is assigned from
+  struct_addr: contains the name of the struct argument whoes address is assigned to this field
   value_name: contains a varible name that will be will assigned to this field in the logger function
   buflen: The name of the argument or field that specifies the length of the array
   lengthof: The name of the field this field is providing an array length for
@@ -328,6 +367,11 @@ function parser:parse_msg(def)
     end
   end
 
+  local struct_args
+  if def.structcopy then
+    struct_args = {parse_structcopy(def, def.structcopy, fieldlookup)}
+  end
+
   if #vlen_fields > 0 then
     assert(not def.use_msgsize or #vlen_fields == 1, "Can't use msgsize for field size with more then one variable sized field")
 
@@ -374,7 +418,7 @@ function parser:parse_msg(def)
   msgtype.size = msgsize
   msgtype.vsize = #vlen_fields > 0
   msgtype.vcount = #vlen_fields
-  msgtype.struct_args = struct_args
+  msgtype.struct_args = struct_args or {}
 
   return setmetatable(msgtype, {__index = def})
 end
@@ -581,7 +625,11 @@ end
 
 local function logfunc_getfieldvar(msgdef, argprefix, f)
   local field = f.name
-
+  if f.struct_arg then
+    -- We don't add a prefix to struct arg fields since we create local variable for the struct arg at the top of the log function and fetch its value from the args there
+    return format("%s->%s", f.struct_arg, f.struct_field)
+  end
+  
   if f.value_name then
     field = f.value_name
   end
@@ -701,9 +749,18 @@ function generator:write_logfunc(def)
   --  If we have too many arguments pass them all in as a struct
   if argcount > 4 then
     self.argprefix = "args->"
+    for _, struct_arg in ipairs(def.struct_args) do
+      -- Declare a variable for the struct_arg that we cache its value in
+      table.insert(args, struct_arg.argstr)
+      table.insert(vtotal, 1, format("%s = args->%s;", struct_arg.argstr, struct_arg.name))
+    end
   else
     self.argprefix = ""
     table.insert(args, "UserBuf *ub")
+    for _, struct_arg in ipairs(def.struct_args) do
+      -- Add struct_args as starting parameters of the log function
+      table.insert(args, struct_arg.argstr)
+    end
   end
   
   local added = {}
@@ -727,7 +784,7 @@ function generator:write_logfunc(def)
     -- Don't generate a function arg for fields that have implicit values. Also group arrays fields with
     -- their length field in the parameter list.
     if not noarg and (not f.lengthof or def.fieldlookup[f.lengthof].noarg) then
-      assert(not f.value_name)
+      assert(not f.value_name and not f.struct_field)
 
       table.insert(args, format("%s %s", (argtype or typename), f.name))
       if f.buflen then
@@ -743,7 +800,10 @@ function generator:write_logfunc(def)
     local field_assignment = f.name
     local writer = f.writer or typedef.writer
 
-    if f.value_name then
+    if f.struct_arg then
+      -- Field has it value set from a field inside struct passed in as a function argument
+      field_assignment = format("%s->%s", f.struct_arg, f.struct_field)
+    elseif f.value_name then
       field_assignment = f.value_name
     elseif not noarg or f.bitofs then
       field_assignment = self.argprefix..f.name
