@@ -311,6 +311,46 @@ it("user trace flush", function()
   assert(result.flushes[1].time > 0)
 end)
 
+it("trace", function()
+  jitlog.start()
+  local a = 0 
+  for i = 1, 300 do
+    if i >= 100 then
+      if i <= 200 then
+        a = a + 1
+      else
+        a = a + 2
+      end
+    end
+  end
+  assert(a == 301)
+  
+  local result = parselog(jitlog.savetostring())
+  assert(result.exits > 0)
+  assert(#result.aborts == 0)
+  local traces = result.traces
+  assert(#traces == 3)
+  assert(traces[1].eventid > traces[1].start_eventid)
+  assert(traces[1].eventid < traces[2].eventid)
+  assert(traces[1].time < traces[2].time)
+  assert(traces[1].start_time < traces[1].time)
+  assert(traces[1].start_eventid < traces[2].start_eventid)
+  assert(traces[1].start_time < traces[2].start_time)
+  assert(traces[1].startpt == traces[1].stoppt)
+  assert(traces[2].startpt == traces[2].stoppt)
+  assert(traces[3].startpt == traces[3].stoppt)
+  assert(traces[1].startpt == traces[2].startpt and traces[2].startpt == traces[3].startpt)
+  assert(traces[1].startpt.chunk:find("test.lua"))
+  assert(traces[1].stopfunc == traces[2].stopfunc)
+  assert(traces[1].stopfunc.proto == traces[1].stoppt)
+  assert(traces[1].stopfunc.upvalues.length > 0)
+  -- Root traces should have no parent
+  assert(traces[1].parentid == 0)
+  assert(traces[2].parentid == traces[1].id)
+  assert(traces[3].parentid == traces[2].id)
+  assert(traces[1].id ~= traces[2].id and traces[2].id ~= traces[3].id)
+end)
+
 end
 
 it("GC state", function()

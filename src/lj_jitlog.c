@@ -9,6 +9,7 @@
 #include "lj_buf.h"
 #include "lj_vmevent.h"
 #include "lj_debug.h"
+#include "lj_ircall.h"
 #include "luajit.h"
 #include "lauxlib.h"
 #include "lj_target.h"
@@ -27,6 +28,7 @@ typedef struct jitlog_State {
   char loadstate;
   uint32_t traceexit;
   JITLogMode mode;
+  int max_exitstub;
   lua_Reader luareader;
   void* luareader_data;
   GCtab *strings;
@@ -35,6 +37,10 @@ typedef struct jitlog_State {
   uint32_t protocount;
   GCtab *funcs;
   uint32_t funccount;
+  GCfunc *startfunc;
+  BCPos lastpc;
+  GCfunc *lastlua;
+  GCfunc *lastfunc;
 } jitlog_State;
 
 
@@ -396,6 +402,9 @@ static void jitlog_tracestart(jitlog_State *context, GCtrace *T)
   BCPos startpc = proto_bcpos(startpt, mref(T->startpc, const BCIns));
   memorize_proto(context, startpt);
 
+  context->startfunc = J->fn;
+  context->lastfunc = context->lastlua = J->fn;
+  context->lastpc = proto_bcpos(J->pt, J->pc);
 
   trace_start_Args args = {
     .id = T->traceno,
@@ -406,6 +415,142 @@ static void jitlog_tracestart(jitlog_State *context, GCtrace *T)
     .startpc = startpc,
   };
   log_trace_start(&context->ub, &args);
+}
+
+static GCproto* getcurlualoc(jitlog_State *context, uint32_t *pc)
+{
+  jit_State *J = G2J(context->g);
+  GCproto *pt = NULL;
+
+  *pc = 0;
+  if (J->pt) {
+    pt = J->pt;
+    *pc = proto_bcpos(pt, J->pc);
+  } else if (context->lastlua) {
+    pt = funcproto(context->lastlua);
+    lua_assert(context->lastpc < pt->sizebc);
+    *pc = context->lastpc;
+  }
+
+  return pt;
+}
+
+static void write_exitstubs(jitlog_State *context, GCtrace *T)
+{
+#ifdef EXITSTUBS_PER_GROUP
+  int maxsnap = T->nsnap;
+  if (maxsnap < context->max_exitstub) {
+    return;
+  }
+
+  int groups = maxsnap / EXITSTUBS_PER_GROUP;
+  if (maxsnap % EXITSTUBS_PER_GROUP)
+    groups++;
+
+  for (int i = context->max_exitstub/EXITSTUBS_PER_GROUP; i < groups; i++) {
+    MCode *first = exitstub_addr(G2J(context->g), i * EXITSTUBS_PER_GROUP);
+    log_exitstubs(&context->ub, i * EXITSTUBS_PER_GROUP, first, EXITSTUBS_PER_GROUP, EXITSTUB_SPACING);
+  }
+  context->max_exitstub = groups * EXITSTUBS_PER_GROUP;
+#else
+  MCode *first = exitstub_trace_addr(T, 0);
+  int spacing = exitstub_trace_addr(T, 1) - first;
+
+  log_exitstubs(&context->ub, 0, (intptr_t)(void *)first, T->nsnap, spacing);
+#endif
+}
+
+static void jitlog_writetrace(jitlog_State *context, GCtrace *T, int abort)
+{
+  jit_State *J = G2J(context->g);
+  GCproto *startpt = &gcref(T->startpt)->pt;
+  BCPos startpc = proto_bcpos(startpt, mref(T->startpc, const BCIns));
+  BCPos stoppc;
+  GCproto *stoppt = getcurlualoc(context, &stoppc);
+  memorize_proto(context, startpt);
+  memorize_proto(context, stoppt);
+  memorize_func(context, context->lastfunc);
+
+  if (!abort) {
+    write_exitstubs(context, T);
+  }
+
+  int abortreason = -1, abortinfo = 0;
+
+  if (abort) {
+    abortreason = tvisnumber(J->L->top - 1) ? numberVint(J->L->top - 1) : -1;
+    if (tvisnumber(&J->errinfo)) {
+      abortinfo = numberVint(&J->errinfo);
+    } else if(tvisfunc(&J->errinfo)) {
+      abortinfo = funcV(&J->errinfo)->c.ffid;
+    }
+  }
+
+  MSize mcodesize;
+  if (jitlog_isfiltered(context, LOGFILTER_TRACE_MCODE)) {
+    mcodesize = 0;
+  } else {
+    mcodesize = T->szmcode;
+  }
+  int irsize;
+  if (jitlog_isfiltered(context, LOGFILTER_TRACE_IR)) {
+    irsize = 0;
+  } else {
+    irsize = (T->nins - T->nk) + 1;
+  }
+
+  trace_Args args = {
+    .trace = T,
+    .aborted = abort,
+    .stitched = isstitched(context, T),
+    .parentid = J->parent,
+    .startpc = startpc,
+    .stoppt = stoppt,
+    .stoppc = stoppc,
+    .stopfunc = context->lastfunc,
+    .abortcode = (uint16_t)abortreason,
+    .abortinfo = (uint16_t)abortinfo,
+    .mcode_length = mcodesize,
+    .ir = T->ir + REF_BIAS,
+    .irlen = irsize,
+    .ins_count = T->nins - REF_BIAS,
+    .constants = T->ir + T->nk,
+    .constant_count = REF_BIAS - T->nk, 
+    .snapshots = (uint8_t*)T->snap,
+    .snapshots_length = T->nsnap*sizeof(T->snap[0]),
+  };
+
+  log_trace(&context->ub, &args);
+}
+
+static void jitlog_tracestop(jitlog_State *context, GCtrace *T)
+{
+  if (jitlog_isfiltered(context, LOGFILTER_TRACE_COMPLETED)) {
+    return;
+  }
+  jitlog_writetrace(context, T, 0);
+}
+
+static void jitlog_traceabort(jitlog_State *context, GCtrace *T)
+{
+  if (jitlog_isfiltered(context, LOGFILTER_TRACE_ABORTS)) {
+    return;
+  }
+  jitlog_writetrace(context, T, 1);
+}
+
+static void jitlog_tracebc(jitlog_State *context)
+{
+  jit_State *J = G2J(context->g);
+  if (context->lastfunc != J->fn) {
+    context->lastfunc = J->fn;
+  }
+
+  if (J->pt) {
+    lua_assert(isluafunc(J->fn));
+    context->lastlua = J->fn;
+    context->lastpc = proto_bcpos(J->pt, J->pc);
+  }
 }
 
 static const uint32_t large_traceid = 1 << 14;
@@ -559,6 +704,15 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
     case VMEVENT_TRACE_START:
       jitlog_tracestart(context, (GCtrace*)eventdata);
       break;
+    case VMEVENT_RECORD:
+      jitlog_tracebc(context);
+      break;
+    case VMEVENT_TRACE_STOP:
+      jitlog_tracestop(context, (GCtrace*)eventdata);
+      break;
+    case VMEVENT_TRACE_ABORT:
+      jitlog_traceabort(context, (GCtrace*)eventdata);
+      break;
     case VMEVENT_TRACE_EXIT:
       jitlog_exit(context, (VMEventData_TExit*)eventdata);
       break;
@@ -701,6 +855,53 @@ static const char *const fastfunc_names[] = {
   #undef FFDEF
 };
 
+static const char *const terror[] = {
+  #define TREDEF(name, msg)	#name,
+  #include "lj_traceerr.h"
+  #undef TREDEF
+};
+
+static const char *const trace_errors[] = {
+  #define TREDEF(name, msg)	msg,
+  #include "lj_traceerr.h"
+  #undef TREDEF
+};
+
+static const char *const ir_names[] = {
+  #define IRNAME(name, m, m1, m2)	#name,
+  IRDEF(IRNAME)
+  #undef IRNAME
+};
+
+static const char *const irt_names[] = {
+  #define IRTNAME(name, size)	#name,
+  IRTDEF(IRTNAME)
+  #undef IRTNAME
+};
+
+static const char *const ircall_names[] = {
+  #define IRCALLNAME(cond, name, nargs, kind, type, flags)	#name,
+  IRCALLDEF(IRCALLNAME)
+  #undef IRCALLNAME
+};
+
+static const char* const irfpmath_names[] = {
+  #define IRFPMDEFNAME(name)	#name,
+  IRFPMDEF(IRFPMDEFNAME)
+  #undef IRFPMDEFNAME
+};
+
+static const char * irfield_names[] = {
+  #define FLNAME(name, ofs)	#name,
+  IRFLDEF(FLNAME)
+  #undef FLNAME
+};
+
+static const char *const trlink_names[] = {
+  "none", "root", "loop", "tail-recursion", "up-recursion", "down-recursion",
+  "interpreter", "return", "stitch"
+};
+
 #define write_enum(context, name, strarray) write_enumdef(context, name, strarray, (sizeof(strarray)/sizeof(strarray[0])), 0)
 
 static void write_header(jitlog_State *context)
@@ -728,6 +929,7 @@ static void write_header(jitlog_State *context)
 
   write_note(&context->ub, "msgdefs", msgdefstr);
   write_bnote(&context->ub, "bc_mode", lj_bc_mode, (BC__MAX+GG_NUM_ASMFF) * sizeof(uint16_t));
+  write_bnote(&context->ub, "ir_mode", lj_ir_mode, sizeof(lj_ir_mode));
 
   write_enum(context, "flushreason", flushreason);
   write_enum(context, "jitparams", jitparams);
@@ -735,6 +937,14 @@ static void write_header(jitlog_State *context)
   write_enum(context, "gcatomic_stages", gcatomic_stages);
   write_enum(context, "bc", bc_names);
   write_enum(context, "fastfuncs", fastfunc_names);
+  write_enum(context, "terror", terror);
+  write_enum(context, "trace_errors", trace_errors);
+  write_enum(context, "ir", ir_names);
+  write_enum(context, "irtypes", irt_names);
+  write_enum(context, "ircalls", ircall_names);
+  write_enum(context, "irfpmath", irfpmath_names);
+  write_enum(context, "irfields", irfield_names);
+  write_enum(context, "trace_link", trlink_names);
 
   for (int i = 0; enuminfo_list[i].name; i++) {
     write_enumdef(context, enuminfo_list[i].name, enuminfo_list[i].namelist, enuminfo_list[i].count, 0);

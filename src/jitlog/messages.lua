@@ -219,6 +219,59 @@ module.messages = {
   },
 
   {
+    name = "trace",
+    fields = [[
+      time : timestamp
+      aborted : bool
+      stitched : bool
+      id : u16
+      parentid : u16 @argtype(TraceNo1)
+      linktype : u8 @enum(trace_link)
+      startpt : GCRef
+      stoppt : GCRefPtr
+      stoppc : u32 @argtype(BCPos)
+      stopfunc : GCRefPtr
+      abortcode : u16
+      abortinfo : u16
+      ins_count : u16
+      constant_count : u16
+      root : u16
+      nsnap: u16
+      nsnapmap: u16
+      spadjust : u16
+      link : u16
+      startpc : u32 @argtype(BCPos)
+      mcodesize : u32
+      mcodeaddr : ptr
+      mcode_length : u32 // Will be 0 unlike mcodesize when mcode data is filtered
+      mcode : u8[mcode_length] 
+      constants : u64[constant_count] @argtype(IRIns *)
+      irlen : u32
+      ir : u64[irlen] @argtype(IRIns *)
+      snapshots : u8[snapshots_length]
+      snapshots_length : u32
+      snapmap : u32[nsnapmap]
+    ]],
+    structcopy = {
+      fields = {
+        id = "traceno",
+        "startpt",
+        "linktype",
+        "root",
+        "nsnap",
+        "nsnapmap",
+        "spadjust",
+        "link",
+        mcodeaddr = "mcode",
+        "mcode",
+        mcodesize = "szmcode",
+        "snapmap",
+      },
+      arg = "trace : GCtrace *",
+    },
+  },
+
+  {
     name = "traceexit_small",
     fields = [[
       isgcexit : bool
@@ -249,6 +302,16 @@ module.messages = {
       gprs : u8[gprs_length]
       fprs : u8[fprs_length]
       vregs : u8[vregs_length]
+    ]]
+  },
+
+  {
+    name = "exitstubs",
+    fields = [[
+      startid : u16
+      first : ptr
+      count : u16
+      spacing : u16
     ]]
   },
 

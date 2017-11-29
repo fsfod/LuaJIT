@@ -15,6 +15,55 @@ local function addrtonum(address)
 end
 
 ffi.cdef[[
+typedef union TValue{
+  double num;
+  uint64_t u64;
+  uint64_t i64;
+  struct{
+    union {
+      uint32_t gcr;	/* GCobj reference (if any). */
+      int32_t i;	/* Integer value. */
+    };
+    union {
+      int32_t it;
+      uint32_t frame;
+    };
+  };
+} TValue;
+
+/* Stack snapshot header. */
+typedef struct SnapShotV2 {
+  uint32_t mapofs;	/* Offset into snapshot map. */
+  uint16_t ref;		/* First IR ref for this snapshot. */
+  uint8_t nslots;	/* Number of valid slots. */
+  uint8_t topslot;	/* Maximum frame extent. */
+  uint8_t nent;		/* Number of compressed entries. */
+  uint8_t count;	/* Count of taken exits for this snapshot. */
+} SnapShotV2;
+
+typedef union IRIns {
+  struct {
+    uint16_t op1;	/* IR operand 1. */
+    uint16_t op2;	/* IR operand 2. */
+    uint16_t ot;		/* IR opcode and type (overlaps t and o). */
+    uint16_t prev;	/* Previous ins in same chain (overlaps r and s). */
+  };
+  struct {
+    int32_t op12;	/* IR operand 1 and 2 (overlaps op1 and op2). */
+    uint8_t t;	/* IR type. */
+    uint8_t o;	/* IR opcode. */
+    uint8_t r;	/* Register allocation (overlaps prev). */
+    uint8_t s;	/* Spill slot allocation (overlaps prev). */
+  };
+  int32_t i;		/* 32 bit signed integer literal (overlaps op12). */
+  GCRef gcr;		/* GCobj constant (overlaps op12 or entire slot). */
+  MRef ptr;		/* Pointer constant (overlaps op12 or entire slot). */
+  TValue tv;		/* TValue constant (overlaps entire slot). */
+} IRIns;
+
+]]
+
+ffi.cdef[[
 typedef struct protobc {
   int length;
   int32_t bc[?];
@@ -123,6 +172,8 @@ function readers:note(msg)
       self.msgdefs = data
     elseif label == "bc_mode" then
       self.bcmode = self:read_array("uint16_t", dataptr, size/2)
+    elseif label == "ir_mode" then
+      self.ir_mode = self:read_array("uint8_t", dataptr, size)
     end
   end
 
@@ -469,7 +520,354 @@ function readers:trace_start(msg)
     stitched = msg.stitched,
   }
   self.current_trace = trace
-  self:log_msg("trace_start", "TraceStart(%d): parentid = %d, start = %s", id, msg.parentid, startpt and startpt:get_location())
+  self:log_msg("trace_start", "TraceStart(%d): start = %s, parentid = %d", id, startpt and startpt:get_displayname(),  msg.parentid)
+  return trace
+end
+
+local irmode = util.make_enum{
+  "ref",
+  "lit",
+  "cst",
+  "none",
+}
+
+local function get_irmode(op, modelist)
+  local m = modelist:get(op)
+  local op1 = irmode[band(m, 3)]
+  local op2 = irmode[band(bit.rshift(m, 2), 3)]
+  return op1, op2
+end
+
+function api:get_irmode(op)
+  return (get_irmode(op, self.ir_mode))
+end
+
+local REF_BIAS = 0x8000
+
+function api:decode_irins(ins)
+  local irname = self.enums.ir
+  local m1, m2 = get_irmode(ins.o, self.ir_mode)
+  
+  local op, op1, op2 = self.enums.ir[ins.o], ins.op1, ins.op2
+  
+  if m1 == "ref" then
+    op1 = op1-REF_BIAS
+  end
+  
+  if m2 == "ref" then
+    op2 = op2-REF_BIAS
+  else
+    op2 = self:decode_irlit(op, op2) or op2
+  end
+  local irt = self.enums.irtypes[band(ins.t, 31 )]
+  return op, irt, op1, op2
+end
+
+local gctrace = {}
+
+function gctrace:get_displaystring()
+  local startpt, stoppt = self.startpt, self.stoppt
+  if self.abortcode then
+    return (format("AbortedTrace(%d): start= %s, reason %s, parentid = %d\n stop= %s", self.id,  startpt and startpt:get_displayname(), 
+                   self.abortreason, self.parentid, stoppt and stoppt:get_displayname()))
+  else
+    return (format("Trace(%d): start = %s, parentid = %d, linktype = %s\n stop = %s",  self.id, startpt and startpt:get_displayname(), self.parentid, self.linktype, 
+                   stoppt and stoppt:get_displayname()))
+  end
+end
+
+function gctrace:get_startlocation()
+  return (self.startpt:get_bclocation(self.startpc))
+end
+
+function gctrace:get_stoplocation()
+  return (self.stoppt:get_bclocation(self.stoppc))
+end
+
+function gctrace:get_startbc()
+  return (self.startpt:get_bcop(self.startpc))
+end
+
+function gctrace:get_stopbc()
+  return (self.stoppt and self.stoppt:get_bcop(self.stoppc))
+end
+
+function gctrace:get_snappc(snapidx)
+  local snap = self.snapshots:get(snapidx)
+  local ofs = snap.mapofs + snap.nent
+  return tonumber(self.snapmap:get(ofs))
+end
+
+local sload_literals = setmetatable({}, { 
+  __index = function(t, mode)
+    local s = ""
+    if band(mode, 1) ~= 0 then s = s.."P" end
+    if band(mode, 2) ~= 0 then s = s.."F" end
+    if band(mode, 4) ~= 0 then s = s.."T" end
+    if band(mode, 8) ~= 0 then s = s.."C" end
+    if band(mode, 16) ~= 0 then s = s.."R" end
+    if band(mode, 32) ~= 0 then s = s.."I" end
+    t[mode] = s
+    return s
+  end
+})
+
+local xload_literals = { [0] = "", "R", "V", "RV", "U", "RU", "VU", "RVU", }
+
+function api:gen_irdecoders()
+  local irtype = self.enums.irtypes
+  assert(irtype, "Missing IRType enum")
+
+  local conv_modes = setmetatable({}, { __index = function(t, mode)
+    local s = irtype[band(mode, 31)]
+    s = s.."->"..irtype[band(rshift(mode, 5), 31)]
+    if band(mode, 0x800) ~= 0 then s = s.." sext" end
+    local c = rshift(mode, 14)
+    if c == 2 then s = s.." index" elseif c == 3 then s = s.." check" end
+    t[mode] = s
+    return s
+  end})
+
+  local irfields = self.enums.irfields
+  local ircalls = self.enums.ircalls
+  assert(ircalls, "Missing IRCalls enum")
+  assert(irfields, "Missing IRFields enum")
+  assert(self.enums.irfpmath, "Missing FPMATH enum")
+
+  self.ir_literals = {
+    FLOAD = irfields,
+    FREF = irfields,
+    SLOAD = sload_literals,
+    CALLN = ircalls,
+    CALLA = ircalls,
+    CALLL = ircalls,
+    CALLS = ircalls,
+    CONV = conv_modes,
+    FPMATH = self.enums.irfpmath,
+    BUFHDR = { [0] = "RESET", "APPEND" },
+    TOSTR = { [0] = "INT", "NUM", "CHAR" },
+  }
+end
+
+function api:decode_irlit(op, op2)
+  local ir_literals = self.ir_literals
+  if not ir_literals then
+    self:gen_irdecoders()
+    ir_literals = self.ir_literals
+  end
+  
+  local decoder = ir_literals[op] 
+  if decoder then
+    return decoder[op2]
+  end
+end
+
+function gctrace:get_irins(index)
+  local ins = self.ir:get(index)
+  local enums = self.owner.enums
+  local irname = enums.ir
+  local op = irname[ins.o]
+  local op1, op2 = ins.op1, ins.op2
+  local m1, m2 = get_irmode(ins.o, self.owner.ir_mode)
+  
+  local op1val
+  local op2val = self.owner:decode_irlit(op, op2)
+  
+  if m1 == "ref" then
+    if op1 < REF_BIAS then
+      op1val = self:get_irconstant(op1-REF_BIAS)
+    end
+    op1 = op1-REF_BIAS
+  end
+  
+  if m2 == "ref" then
+    if op2 < REF_BIAS then
+      op2val = self:get_irconstant(op2-REF_BIAS)
+    end
+    op2 = op2-REF_BIAS
+  end
+  
+  return op, enums.irtypes[band(ins.t, 31 )], op1, op2, op1val, op2val
+end
+
+function gctrace:get_irconstant(irref)
+  local index = irref
+  if irref > 0 then
+    index = self.constant_count - (REF_BIAS-irref)
+  else
+    index = self.constant_count + irref
+  end
+  
+  --print("get_irconstant", irref, index, self.nk)
+  local ins = self.constants:get(index)
+  local o = self.owner.enums.ir[ins.o]
+  local types = self.owner.enums.irtypes
+  --print("get_irconstant", o, types[ins.t], irref, index, self.nk)
+  
+  if o == "KSLOT" or o == "NEWREF" then
+    return self:get_irconstant(ins.op1)
+  elseif o == "KGC" then
+    local gcref = addrtonum(ins.gcr)
+    if ins.t == types.STR then
+      return self.owner.strings[gcref] or gcref, "string"
+    elseif ins.t == types.PROTO then
+      return self.owner.proto_lookup[gcref], "proto"
+    elseif ins.t == types.FUNC then
+      return self.owner.func_lookup[gcref] or gcref, "function"
+    end
+  elseif o == "KPTR" or o == "KKPTR" then
+    return addrtonum(ins.gcr), "ptr"
+  elseif o == "KINT" then
+    return ins.i
+  elseif o == "KNUM" then
+    return self.constants:get(index+1).tv.num
+  elseif o == "KINT64" then
+    return self.constants:get(index+1).tv.i64
+  elseif o == "KNULL" then
+    return "null"
+  end
+end
+
+function gctrace:visit_ir(func, start)
+  assert(type(func) == "function")
+  assert(not start or (type(start) == "number" and start >= 0 and start < self.ins_count))
+  start = start or 0
+  
+  local count = self.ins_count
+  
+  for i=start, count-2 do
+    local op, t, op1, op2, op1val, op2val = self:get_irins(i)
+    func(i, op, t, op1, op2, op1val, op2val)
+  end
+end
+
+function gctrace:dump_ir(start)
+  local snaplimit = self.snapshots:get(0).ref-REF_BIAS
+  local snapi = 0
+  
+  local irprinter = function(i, op, t, op1, op2, op1val, op2val)
+    if i >= snaplimit then
+      local pc = self:get_snappc(snapi)
+      local pt, line = self.owner:pc2proto(pc)
+      print(format(" ------------ Snap(%d): %s: %d ----------------------", snapi, pt and pt:get_displayname() or "?", line or -1))
+      
+      snapi = snapi + 1
+      if snapi == self.nsnap then
+        snaplimit = 0xffff
+      else
+        snaplimit = self.snapshots:get(snapi).ref-REF_BIAS
+      end
+    end
+
+    print(format("%d: %-5s %-6s %s, %s ", i, t, op, tostring(op1val or op1), tostring(op2val  or op2)))
+  end
+  
+  self:visit_ir(irprinter, start)
+end
+
+function gctrace:ir_totable(start)
+  local ir = table.new(self.ins_count-2)
+  self:visit_ir(function(i, op, op1, op2, op1val, op2val)
+    ir[i+1] = {op, op1val or op1, op2val or op2}
+  end)
+  return ir
+end
+
+function gctrace:get_consttab()
+  local count = self.constant_count
+  local irname = self.owner.enums.ir
+  local t = {}
+  
+  for i=0, (count-1) do
+    local ins = self.ir:get(count - i)
+    local op = ins.o
+    local op1, op2 = ins.op1, ins.op2
+
+    if op2 > self.nk and op2 < self.nins then
+      op2 = op2-REF_BIAS
+    end
+
+    if op1 > self.nk and op1 < self.nins then
+        op1 = op1-REF_BIAS
+    end
+    t[i+1] =  {irname[op], op1, op2}
+  end
+  return t
+end
+
+msgobj_mt.trace = {
+  __index = gctrace
+}
+
+function readers:trace(msg)
+  local id = msg.id
+  local aborted = msg.aborted
+  local startpt = self.proto_lookup[addrtonum(msg.startpt)]
+  local stoppt = self.proto_lookup[addrtonum(msg.stoppt)]
+  
+  local start = self.current_trace
+  self.current_trace = nil
+  if start then
+    -- Make sure the trace start event data matches the trace finished data
+    assert(start.id == id)
+    assert(start.parentid == msg.parentid)
+  end
+
+  local trace = {
+    owner = self,
+    eventid = self.eventid,
+    time = msg.time,
+    start_eventid = start and start.eventid,
+    start_time = start and start.time,
+    id = id,
+    rootid = msg.root,
+    parentid = msg.parentid,
+    startpt = startpt,
+    startpc = msg.startpc,
+    stoppt = stoppt,
+    stoppc = msg.stoppc,
+    link = msg.link,
+    linktype = self.enums.trace_link[msg.linktype],
+    stopfunc = self.func_lookup[addrtonum(msg.stopfunc)],
+    stitched = msg.stitched,
+    nsnap = msg.nsnap,
+    ins_count = msg.ins_count,
+    constant_count = msg.constant_count,
+    nins = REF_BIAS + msg.ins_count,
+    nk = msg.constant_count - REF_BIAS,
+    mcodesize = msg.mcodesize,
+    mcodeaddr = msg.mcodeaddr,
+  }
+  if true then
+    local snaps, length = msg:get_snapshots()
+    trace.snapshots = self:read_array("SnapShotV2", snaps, msg.nsnap)
+  else
+    trace.snapshots = self:read_array("SnapShotV1", msg:get_snapshots())
+  end
+  trace.snapmap = self:read_array("uint32_t", msg:get_snapmap())
+  trace.ir = self:read_array("IRIns", msg:get_ir())
+  trace.constants = self:read_array("IRIns", msg:get_constants())
+
+  if aborted then
+    trace.abortcode = msg.abortcode
+    trace.abortreason = self.enums.trace_errors[msg.abortcode]
+    trace.abortinfo = msg.abortinfo
+    
+    local abortkind = self.enums.terror[msg.abortcode] 
+    if abortkind == "NYIBC" then
+      trace.abortreason = format("NYI: bytecode %s", self.enums.bc[trace.abortinfo])
+    elseif abortkind == "NYIFFU" then
+      trace.abortreason = format("NYI: cannot assemble IR instruction %d", self.enums.fastfuncs[trace.abortinfo])
+    elseif abortkind == "NYIIR" then
+      trace.abortreason = format("NYI: cannot assemble IR instruction %d", self.enums.ir[trace.abortinfo])
+    end
+    tinsert(self.aborts, trace)
+  else
+    tinsert(self.traces, trace)
+  end
+  setmetatable(trace, self.msgobj_mt.trace)
+  self:log_msg("trace", trace:get_displaystring())
+  
   return trace
 end
 
@@ -574,6 +972,8 @@ local function init(self)
   self.proto_lookup = {}
   self.functions = {}
   self.func_lookup = {}
+  self.traces = {}
+  self.aborts = {}
 
   self.markers = {}
   -- Record id marker messages in to table 
