@@ -237,6 +237,44 @@ function parser:build_recordlayout(def)
   return msgsize
 end
 
+function parser:process_structcopy(msgdef, structcopy, fieldlookup)
+  local arg_name, arg_type = structcopy.arg.name, structcopy.arg.type
+  local struct_arg = {
+    argstr = arg_type..arg_name,
+    type = arg_type, 
+    name = arg_name,
+    store_address = structcopy.store_address,
+    copylist = structcopy.fields,
+  }
+
+  if structcopy.store_address then
+    local struct_addr = fieldlookup[structcopy.store_address]
+    if not struct_addr then
+      self:report_error("store_address field '%s' does not exist for structcopy in message %s", structcopy.store_address, msgdef.name)
+    end
+    struct_addr.noarg = true
+    struct_addr.struct_addr = true
+    struct_addr.value_name = arg_name
+  end
+
+  -- The list of fields to copy is a mixed array and hashtable. Array entries mean we use the same field name for both the
+  -- source struct and destination message field.
+  for name, struct_field in pairs(structcopy.fields) do
+    if type(name) == "number" then
+      name = struct_field
+    end
+    local f = fieldlookup[name]
+    if not f then
+      self:report_error("No matching field for struct copy field '%s' in message '%s", name, msgdef.name)
+    end
+    f.noarg = true
+    f.struct_arg = arg_name
+    f.struct_field = struct_field
+  end
+
+  return struct_arg
+end
+
 function parser:parse_struct(def, t)
   
   assert(def.name, "struct definition has no name")
@@ -281,6 +319,9 @@ Field List
   bitsize: The number of bits this bitfield takes up
   bool: This field was declared as a boolean and we may store it as bitfield with a bitsize of 1
   bitstorage: The name of the real field this bitfield is stuffed in most the time this will be some of the space 24 bits of the message id field thats always exists
+  struct_arg: The name of the structure argument this field value will be copied from
+  struct_field: The sub field from a structure arg that this field is assigned from
+  struct_addr: contains the name of the struct argument whoes address is assigned to this field
   value_name: contains a varible name that will be will assigned to this field in the logger function
   buflen: The name of the argument or field that specifies the length of the array
   lengthof: The name of the field this field is providing an array length for
@@ -437,6 +478,14 @@ function parser:parse_msg(def, m)
 
   end
 
+  local struct_args
+
+  if def.extra.structcopy then
+    struct_args = {self:process_structcopy(def, def.extra.structcopy, fieldlookup)}
+  else
+    struct_args = {}
+  end
+
   for i, f in pairs(m.fields) do
     if f.buflen then
       local buflen = fieldlookup[f.buflen]
@@ -457,6 +506,7 @@ function parser:parse_msg(def, m)
   end
 
   m.vcount = #vlen_fields
+  m.struct_args = struct_args
   self:build_recordlayout(m)
 
   return setmetatable(m, { __index = def})
@@ -829,6 +879,10 @@ end
 
 local function logfunc_getfieldvar(msgdef, argprefix, f)
   local field = f.name
+  if f.struct_arg then
+    -- We don't add a prefix to struct arg fields since we create local variable for the struct arg at the top of the log function and fetch its value from the args there
+    return format("%s->%s", f.struct_arg, f.struct_field)
+  end
 
   if f.value_name then
     field = f.value_name
@@ -1074,8 +1128,17 @@ function generator:write_logfunc(def)
   if simple_args then
     self.argprefix = ""
     table.insert(args, "UserBuf *ub")
+    for _, struct_arg in ipairs(def.struct_args) do
+      -- Add struct_args as starting parameters of the log function
+      table.insert(args, struct_arg.argstr)
+    end
   else
     self.argprefix = "args->"
+    for _, struct_arg in ipairs(def.struct_args) do
+      -- Declare a variable for the struct_arg that we cache its value in
+      table.insert(args, struct_arg.argstr)
+      table.insert(header, 1, format("%s = args->%s;", struct_arg.argstr, struct_arg.name))
+    end
   end
 
   local added = {}
@@ -1128,7 +1191,10 @@ function generator:write_logfunc(def)
     local value = f.name
     local assigned = false
 
-    if f.value_name then
+    if f.struct_arg then
+      -- Field has it value set from a field inside struct passed in as a function argument
+      value = format("%s->%s", f.struct_arg, f.struct_field)
+    elseif f.value_name then
       value = f.value_name
     elseif not noarg or f.bitofs then
       value = self.argprefix..f.name
