@@ -61,6 +61,51 @@ local msgs = {
   },
 
   {
+    name = "gcstring",
+    "address : GCRef",
+    "len : u32",
+    "hash : u32",
+    "data : string[len]",
+    structcopy = {
+      fields = {
+        "len",
+        "hash",
+      },
+      arg = "s : GCstr *",
+      store_address = "address",
+    },
+    use_msgsize = "len",
+  },
+
+  {
+    name = "gcproto",
+    "address : GCRef",
+    "chunkname : GCRef",
+    "firstline : i32",
+    "numline : i32",
+    "bcaddr : MRef",
+    "bclen : u32",
+    "bc : u32[bclen]",
+    "sizekgc : u32",
+    "kgc : GCRef[sizekgc]",
+    "lineinfosize : u32",
+    "lineinfo : u8[lineinfosize]",
+    "varinfo_size : u32",
+    "varinfo : u8[varinfo_size]",
+    structcopy = {
+      fields = {
+        "chunkname",
+        "firstline",
+        "numline",
+        bclen = "sizebc",
+        "sizekgc",
+      },
+      arg = "pt : GCproto *",
+      store_address = "address",
+    },
+  },
+  
+  {
     name = "traceexit_small",
     "isgcexit : bool",
     "traceid : 14",
