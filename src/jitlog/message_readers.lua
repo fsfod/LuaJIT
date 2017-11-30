@@ -3,7 +3,7 @@ local util = require("jitlog.util")
 require("table.new")
 local format = string.format
 local tinsert = table.insert
-local band = bit.band
+local band, rshift = bit.band, bit.rshift
 
 local readers = {}
 local api = {}
@@ -13,6 +13,44 @@ local msgobj_mt = {}
 local function addrtonum(address)
   return (tonumber(bit.band(address, 0x7fffffffffffULL)))
 end
+
+ffi.cdef[[
+typedef struct protobc {
+  int length;
+  int32_t bc[?];
+} protobc;
+]]
+
+local protobc = ffi.metatype("protobc", {
+  __new = function(ct, count, src)
+    local result = ffi.new(ct, count, count)
+    ffi.copy(result.bc, src, count * 4)
+    return result
+  end,
+  __index = {
+    -- Returns just the opcode of the bytecode at the specified index
+    getop = function(self, index)
+      assert(index >= 0 and index < self.length)
+      return band(self.bc[index], 0xff)
+    end,
+    
+    findop = function(self, op)
+      for i = 0, self.length-1 do
+        if band(self.bc[index], 0xff) == op then
+          return i
+        end
+        return -1
+      end
+    end,
+    -- Returns the opcode and the a, b, c, d operand fields of the bytecode at the specified index
+    -- See http://wiki.luajit.org/Bytecode-2.0#introduction
+    getbc = function(self, index)
+      assert(index >= 0 and index < self.length)
+      local bc = self.bc[index]
+      return band(bc, 0xff), band(rshift(bc, 8), 0xff), band(rshift(bc, 24), 0xff), band(rshift(bc, 16), 0xff), band(rshift(bc, 16), 0xffff)
+    end,
+  }
+})
 
 function readers:stringmarker(msg)
   local label = msg.label
@@ -83,6 +121,8 @@ function readers:note(msg)
     if label == "msgdefs" then
       assert(type(data) == "string")
       self.msgdefs = data
+    elseif label == "bc_mode" then
+      self.bcmode = self:read_array("uint16_t", dataptr, size/2)
     end
   end
 
@@ -127,6 +167,11 @@ function readers:obj_label(msg)
   local label = msg.label
   local flags = msg.flags
   local objtype = objtypes[msg.objtype]
+  
+  local obj
+  if objtype == "proto" then
+    obj = self.proto_lookup[address]
+  end
 
   local objlabel = {
     eventid = self.eventid,
@@ -134,11 +179,168 @@ function readers:obj_label(msg)
     label = label,
     flags = flags,
     address = address,
+    object = obj,
   }
+  if obj then
+    obj.label = label
+    obj.label_flags = msg.flags
+  end
   self:log_msg("obj_label", "ObjLabel(%s): type = %s, address = 0x%x, flags = %d", label, objtype, address, flags)
   self.objlabels[address] = objlabel
   self.objlabel_lookup[label] = objlabel
   return objlabel
+end
+
+function readers:obj_string(msg)
+  local string = msg.data
+  local address = addrtonum(msg.address)
+  self.strings[address] = string
+  self:log_msg("obj_string", "String(0x%x): %s", address, string)
+  return string, address
+end
+
+local gcproto = {}
+
+function gcproto:get_name()
+  return self.fullname or self:get_location()
+end
+
+function gcproto:get_displayname()
+  if self.fullname then
+    return (format("%s in %s:%d", self.fullname, self.chunk, self.firstline))
+  end
+  return self.fullname or self:get_location()
+end
+
+function gcproto:get_location()
+  return (format("%s:%d", self.chunk, self.firstline))
+end
+
+function gcproto:get_bclocation(bcidx)
+  return (format("%s:%d", self.chunk, self:get_linenumber(bcidx)))
+end
+
+function gcproto:get_linenumber(bcidx)
+  assert(self.lineinfo, "proto has no lineinfo")
+  -- There is never any line info for the first bytecode so use the firstline
+  if bcidx == 0 or self.firstline == -1 then
+    return self.firstline
+  end
+  return self.firstline + self.lineinfo:get(bcidx-1)
+end
+
+function gcproto:get_pcline(pcaddr)
+  local diff = pcaddr-self.bcaddr
+  if diff < 0 or diff > (self.bclen * 4) then
+    return nil
+  end
+  if diff ~= 0 then
+    diff = diff/4
+  end
+  return self:get_linenumber(diff)
+end
+
+function gcproto:dumpbc()
+  local currline = -1
+  local lineinfo = self.lineinfo
+  local bcnames = self.owner.enums.bc
+  
+  for i = 0, self.bclen-1 do
+    if lineinfo and lineinfo.array[i] ~= currline then
+      currline = lineinfo.array[i]
+      print(format("%s:%d", self.chunk or "?", self.firstline + lineinfo.array[i]))
+    end
+    local op, a, b, c, d = self.bc:getbc(i)
+    op = bcnames[op+1]
+    print(format(" %s, %d, %d, %d, %d", op, a, b, c, d))
+  end
+end
+
+function gcproto:get_bcop(index)
+  return (self.owner.enums.bc[self.bc:getop(index)])
+end
+
+function gcproto:get_rawbc(index)
+  return (self.bc:getbc(index))
+end
+
+msgobj_mt.proto = {
+  __index = gcproto,
+  __tostring = function(self) 
+    return "GCproto: ".. self:get_location() 
+  end,
+}
+
+local nullarray = {0}
+local nobc = ffi.new("protobc", 0, 1, nullarray)
+
+function readers:obj_proto(msg)
+  local address = addrtonum(msg.address)
+  local chunk = msg.chunkname
+  local proto = {
+    owner = self,
+    chunk = chunk, 
+    firstline = msg.firstline, 
+    numline = msg.numline,
+    numparams = msg.numparams,
+    framesize = msg.framesize,
+    flags = msg.flags,
+    uvcount = msg.uvcount,
+    bclen = msg.bclen,
+    bcaddr = addrtonum(msg.bcaddr),
+    address = address,
+    uvnames = msg.uvnames,
+    varnames = msg.varnames,
+    varinfo = self:read_array("VarRecord", msg:get_varinfo()),
+    kgc = self:read_array("GCRef", msg:get_kgc()),
+  }
+  setmetatable(proto, self.msgobj_mt.proto)
+  proto.hotslot = band(rshift(proto.bcaddr, 2), 64-1)
+  self.proto_lookup[address] = proto
+  
+  local bclen = proto.bclen
+  local bcarray
+  if bclen > 0 then
+    local bc, count = msg:get_bc()
+    bcarray = protobc(count, bc)--self:read_array("protobc", msg.bc, bclen)
+  else
+    bcarray = nobc
+  end
+  proto.bc = bcarray
+
+  local lineinfo, lisize, listtype
+  if bclen == 0 or msg.lineinfosize == 0 then
+    -- We won't have any line info for internal functions or if the debug info is stripped
+    lineinfo = false
+  elseif proto.numline < 256 then
+    listtype = "uint8_t"
+    lisize = 1
+  elseif proto.numline < 65536 then
+    lisize = 2
+    listtype = "uint16_t"
+  else
+    lisize = 4
+    listtype = "uint32_t"
+  end
+  if listtype then
+    assert(msg.lineinfosize == bclen * lisize)
+    lineinfo = self:read_array(listtype, msg:get_lineinfo(), bclen)
+  end
+  proto.lineinfo = lineinfo
+
+  tinsert(self.protos, proto)
+  self:log_msg("obj_proto", "Proto(0x%x): %s, hotslot %d", address, proto:get_location(), proto.hotslot)
+  return proto
+end
+
+function api:pc2proto(pc)
+  for i, pt in ipairs(self.protos) do
+    local line = pt:get_pcline(pc)
+    if line then
+      return pt, line
+    end
+  end
+  return nil, nil
 end
 
 function readers:traceexit(msg)
@@ -237,6 +439,10 @@ function readers:statechange(msg)
 end
 
 local function init(self)
+  self.strings = {}
+  self.protos = {}
+  self.proto_lookup = {}
+
   self.markers = {}
   -- Record id marker messages in to table 
   self.track_idmarkers = true

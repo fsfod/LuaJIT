@@ -27,6 +27,10 @@ typedef struct jitlog_State {
   char loadstate;
   uint32_t traceexit;
   JITLogMode mode;
+  GCtab *strings;
+  uint32_t strcount;
+  GCtab *protos;
+  uint32_t protocount;
 } jitlog_State;
 
 
@@ -36,6 +40,44 @@ LJ_STATIC_ASSERT(offsetof(UserBuf, p) == 0);
 #define usr2ctx(usrcontext)  ((jitlog_State *)(((char *)usrcontext) - offsetof(jitlog_State, user)))
 #define ctx2usr(context)  (&(context)->user)
 #define jitlog_isfiltered(context, evt) (((context)->user.logfilter & (evt)) != 0)
+
+static void *growvec(void *p, MSize *szp, MSize lim, MSize esz)
+{
+  MSize sz = (*szp) << 1;
+  if (sz < LJ_MIN_VECSZ)
+    sz = LJ_MIN_VECSZ;
+  if (sz > lim)
+    sz = lim;
+  p = realloc(p, sz*esz);
+  *szp = sz;
+  return p;
+}
+
+#define jl_newvec(ctx, n, t)	((t *)malloc((n)*sizeof(t)))
+#define jl_growvec(ctx, p, n, m, t) \
+  ((p) = (t *)growvec((p), &(n), (m), (MSize)sizeof(t)))
+#define jl_freevec(ctx, p, n, t)	free((p))
+
+static GCtab* create_pinnedtab(lua_State *L)
+{
+  GCtab *t = lj_tab_new(L, 0, 0);
+  TValue key;
+  setlightudV(&key, t);
+  settabV(L, lj_tab_set(L, tabV(registry(L)), &key), t);
+  lj_gc_anybarriert(L, tabV(registry(L)));
+  return t;
+}
+
+static GCtab* free_pinnedtab(lua_State *L, GCtab *t)
+{
+  TValue key;
+  TValue *slot;
+  setlightudV(&key, t);
+  slot = lj_tab_set(L, tabV(&G(L)->registrytv), &key);
+  lua_assert(tabV(slot) == t);
+  setnilV(slot);
+  return t;
+}
 
 static char* strlist_concat(const char *const *list, int limit, MSize *retsize)
 {
@@ -75,6 +117,165 @@ static void write_enumdef(jitlog_State *context, const char *name, const char *c
   };
   log_enumdef(&context->ub, &args);
   free(namesblob);
+}
+
+static int memorize_gcref(lua_State *L, GCtab* t, TValue* key, uint32_t *count) {
+  TValue *slot = lj_tab_set(L, t, key);
+
+  if (tvisnil(slot) || !lj_obj_equal(key, slot + 1)) {
+    int id = (*count)++;
+    setlightudV(slot, (void*)(uintptr_t)id);
+    return 1;
+  }
+  return 0;
+}
+
+static void write_gcstring(UserBuf *ub, GCstr *s)
+{
+  log_obj_string(ub, s, strdata(s));
+}
+
+static int memorize_string(jitlog_State *context, GCstr *s)
+{
+  lua_State *L = mainthread(context->g);
+  TValue key;
+  setstrV(L, &key, s);
+
+  if (s->len > 256) {
+    /*TODO: don't keep around large strings */
+  }
+
+  if (memorize_gcref(L, context->strings, &key, &context->strcount)) {
+    write_gcstring(&context->ub, s);
+    return 1;
+  }
+  return 0;
+}
+
+static MSize uvinfo_size(GCproto* pt) {
+  const uint8_t *p = proto_uvinfo(pt);
+  MSize n = pt->sizeuv;
+  if (!n) {
+    return 0;
+  }
+  while (*p++ || --n);
+  lua_assert(((uintptr_t)p) < (((uintptr_t)pt) + pt->sizept));
+  return (MSize)(p - proto_uvinfo(pt));
+}
+
+#define VARNAMESTR(name, str)	str,
+
+static const char *const builtin_varnames[] = {
+  NULL,
+  VARNAMEDEF(VARNAMESTR)
+};
+
+static void write_gcproto(jitlog_State *context, UserBuf* ub, GCproto* pt)
+{
+  int addvinfo = proto_varinfo(pt) != NULL;
+
+  uint8_t *lineinfo = mref(pt->lineinfo, uint8_t);
+  uint32_t linesize = 0;
+  if (mref(pt->lineinfo, void)) {
+    if (pt->numline < 256) {
+      linesize = pt->sizebc;
+    } else if (pt->numline < 65536) {
+      linesize = pt->sizebc * sizeof(uint16_t);
+    } else {
+      linesize = pt->sizebc * sizeof(uint32_t);
+    }
+  }
+
+  VarRecord *varinfo = NULL;
+  MSize count = 0, capacity = 32;
+  UserBuf varnames;
+  /* Silence warnings about varnames not being initialized in a path guarded by varinfo being initialized */
+  memset(&varnames, 0, sizeof(varnames));
+
+  if (addvinfo) {
+    const char *p = (const char *)proto_varinfo(pt), *limit = ((char *)pt) + pt->sizept;
+    varinfo = jl_newvec(context, 32, VarRecord);
+    ubuf_init_mem(&varnames, pt->sizept - (linesize+ (pt->sizebc*4)));
+
+    BCPos lastpc = 0;
+    for (; p < limit;) {
+      const char *name = p;
+      uint32_t vn = *(const uint8_t *)p;
+      if (vn < VARNAME__MAX) {
+        name = builtin_varnames[vn];
+        if (vn == VARNAME_END) break;  /* End of varinfo. */
+        ubuf_putmem(&varnames, name,  strlen(name)+1);
+      } else {
+        name = p;
+        /* Find the end of variable name. */
+        do {
+          p++;
+        } while (*(const uint8_t *)p);  
+        ubuf_putmem(&varnames, name, (p - name) + 1);
+      }
+      lua_assert(p < limit);
+
+      p++;
+      BCPos startpc = lastpc + lj_buf_ruleb128(&p);
+      varinfo[count].startpc = startpc;
+      varinfo[count].extent = lj_buf_ruleb128(&p);
+      lastpc = startpc;
+      lua_assert(startpc < pt->sizebc);
+      lua_assert((startpc+varinfo[count].extent) <= pt->sizebc);
+      lua_assert(p < limit);
+
+      if (++count == capacity) {
+        jl_growvec(context, varinfo, capacity, LJ_MAX_MEM32, VarRecord);
+      }
+    }
+  }
+
+  obj_proto_Args args = {
+    .pt = pt,
+    .chunkname = proto_chunknamestr(pt),
+    .bc = proto_bc(pt),
+    .bcaddr = proto_bc(pt),
+    .kgc = mref(pt->k, GCRef) - pt->sizekgc,
+    .knum = mref(pt->k, double),
+    .lineinfo = lineinfo,
+    .lineinfosize = linesize,
+    .uvnames = (char *)proto_uvinfo(pt),
+    .uvnames_size = uvinfo_size(pt),
+  };
+  if (varinfo) {
+    args.varinfo = varinfo;
+    args.varinfo_length = count;
+    args.varnames = ubufB(&varnames);
+    args.varnames_size = (uint32_t)ubuflen(&varnames);
+  }
+  log_obj_proto(ub, &args);
+
+  if (varinfo) {
+    jl_freevec(context, varinfo, capacity, VarRecord);
+    ubuf_free(&varnames);
+  }
+}
+
+static void memorize_proto(jitlog_State* context, GCproto* pt)
+{
+  lua_State* L = mainthread(context->g);
+  TValue key;
+  int i;
+  setprotoV(L, &key, pt);
+
+  if (!memorize_gcref(L, context->protos, &key, &context->protocount)) {
+    /* Already written this proto to the jitlog */
+    return;
+  }
+
+  for (i = 0; i != pt->sizekgc; i++) {
+    GCobj* o = proto_kgc(pt, -(i + 1));
+    /* We want the string constants to be able to tell what fields are being accessed by the bytecode */
+    if (o->gch.gct == ~LJ_TSTR) {
+      memorize_string(context, gco2str(o));
+    }
+  }
+  write_gcproto(context, &context->ub, pt);
 }
 
 typedef enum ObjType {
@@ -334,6 +535,12 @@ static const char *const gcatomic_stages[] = {
   "clearweak",
 };
 
+static const char *const bc_names[] = {
+  #define BCNAME(name, ma, mb, mc, mt)       #name,
+  BCDEF(BCNAME)
+  #undef BCNAME
+};
+
 #define write_enum(context, name, strarray) write_enumdef(context, name, strarray, (sizeof(strarray)/sizeof(strarray[0])), 0)
 
 static void write_header(jitlog_State *context)
@@ -360,11 +567,13 @@ static void write_header(jitlog_State *context)
   free(msgnamelist);
 
   write_note(&context->ub, "msgdefs", msgdefstr);
+  write_bnote(&context->ub, "bc_mode", lj_bc_mode, (BC__MAX+GG_NUM_ASMFF) * sizeof(uint16_t));
 
   write_enum(context, "flushreason", flushreason);
   write_enum(context, "jitparams", jitparams);
   write_enum(context, "gcstate", gcstates);
   write_enum(context, "gcatomic_stages", gcatomic_stages);
+  write_enum(context, "bc", bc_names);
 
   for (int i = 0; enuminfo_list[i].name; i++) {
     write_enumdef(context, enuminfo_list[i].name, enuminfo_list[i].namelist, enuminfo_list[i].count, 0);
@@ -434,12 +643,14 @@ static jitlog_State *jitlog_start_safe(lua_State *L)
 
 static void jitlog_loadstage2(lua_State *L, jitlog_State *context)
 {
-  lua_assert(context->loadstate == 1);
+  lua_assert(context->loadstate == 1 && !context->strings && !context->protos);
   /* Flag that were inside stage 2 init since registering our Lua lib may  
   *  trigger a VM event from the GC that would cause us to run this function
   *  more than once.
   */
   context->loadstate = 2;
+  context->strings = create_pinnedtab(L);
+  context->protos = create_pinnedtab(L);
   lj_lib_prereg(L, "jitlog", luaopen_jitlog, tabref(L->env));
   context->loadstate = 3;
 }
@@ -474,6 +685,8 @@ static void jitlog_shutdown(jitlog_State *context)
     luaJIT_vmevent_sethook(L, NULL, NULL);
   }
 
+  free_pinnedtab(L, context->strings);
+  free_pinnedtab(L, context->protos);
   free_context(context);
 }
 
@@ -486,6 +699,10 @@ LUA_API void jitlog_close(JITLogUserContext *usrcontext)
 LUA_API void jitlog_reset(JITLogUserContext *usrcontext)
 {
   jitlog_State *context = usr2ctx(usrcontext);
+  context->strcount = 0;
+  context->protocount = 0;
+  lj_tab_clear(context->strings);
+  lj_tab_clear(context->protos);
   ubuf_reset(&context->ub);
   write_header(context);
 }
@@ -751,6 +968,7 @@ static int jlib_labelproto(lua_State *L)
   if (!tvisfunc(obj) || !isluafunc(funcV(obj))) {
     luaL_error(L, "Expected a Lua function for the first the parameter to label in the log");
   }
+  memorize_proto(context, funcproto(funcV(obj)));
   jitlog_labelobj(context, obj2gco(funcproto(funcV(obj))), label, flags);
   return 0;
 }

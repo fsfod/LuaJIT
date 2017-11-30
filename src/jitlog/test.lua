@@ -388,6 +388,60 @@ it("object label", function()
   assert(result.objlabels[labels.f1.address] == labels.f1)
 end)
 
+it("object function proto", function()
+  local function f1() return end
+  jitlog.start()
+  jitlog.labelproto(loadstring("return 1"), "f1")
+  jitlog.labelproto(loadstring("\nreturn 1, 2"), "f2")
+  jitlog.labelproto(loadstring([[
+  local upval1, upval2 = 1, 2
+  return function(a, b) return upval1 + upval2 + b + 42 end
+]])() , "f3")
+  local result = parselog(jitlog.savetostring())
+  checkheader(result.header)
+  assert(#result.protos == 4)
+  
+  local pt1, pt2 = result.protos[1], result.protos[2]  
+  assert(pt1.firstline == 0)
+  assert(pt1.numline == 1)
+  assert(pt1.chunk == "return 1")
+  assert(pt2.numparams == 0)
+  assert(pt1.uvcount == 0)
+  assert(#pt1.uvnames == 0)
+  assert(pt1.bclen == 3)
+  assert(pt1:get_bcop(0) == "FUNCV") -- Top level chunks are vararg
+  assert(pt1:get_bcop(pt1.bclen-1) == "RET1")
+  for i = 1, pt1.bclen-1 do
+    assert(pt1:get_linenumber(i) == 1)
+  end
+  
+  -- Check line numbers are correcta
+  assert(pt2.firstline == 0)
+  assert(pt2.numline == 2)
+  assert(pt2.chunk == "\nreturn 1, 2")
+  assert(pt2.bclen == 4)
+  assert(pt2:get_bcop(0) == "FUNCV")
+  assert(pt2:get_bcop(pt2.bclen-1) == "RET")
+  for i = 1, pt2.bclen-1 do
+    assert(pt2:get_linenumber(i) == 2)
+  end
+
+  local pt3 = result.protos[3]
+  assert(pt3.numparams == 2)
+  assert(pt3.uvcount == 2)
+  assert(#pt3.uvnames == 2)
+  assert(pt3.uvnames[1] == "upval1")
+  assert(pt3.uvnames[2] == "upval2")
+  -- Parameters will be the first variables
+  assert(pt3.varnames[1] == "a")
+  assert(pt3.varnames[2] == "b")
+  -- There lifetime starts from the function header bytecode
+  assert(pt3.varinfo:get(0).startpc == 0)
+  assert(pt3.varinfo:get(0).extent == pt3.bclen)
+  assert(pt3.varinfo:get(1).startpc == 0)
+  assert(pt3.varinfo:get(1).extent == pt3.bclen)
+end)
+
 local failed = false
 
 pcall(jitlog.shutdown)
