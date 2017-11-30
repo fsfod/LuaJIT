@@ -287,6 +287,17 @@ function tests.proto()
   end
 end
 
+function tests.protoloaded()
+  jitlog.start()
+  loadstring("return 1")
+  loadstring("\nreturn 2")
+  local result = parselog(jitlog.savetostring())
+  assert(#result.protos == 2)
+  assert(result.protos[1].created)
+  assert(result.protos[2].created > result.protos[1].created)
+  assert(result.protos[2].createdid > result.protos[1].createdid)
+end
+
 local failed = false
 
 pcall(jitlog.shutdown)

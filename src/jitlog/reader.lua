@@ -290,6 +290,18 @@ function base_actions:gcproto(msg)
   return proto
 end
 
+function base_actions:protoloaded(msg)
+  local address = addrtonum(msg.address)
+  local created = msg.time
+  local proto = self.proto_lookup[address]
+  if proto then
+    proto.created = created
+    proto.createdid = self.eventid
+  end
+  self:log_msg("gcproto", "GCproto(%d): created %s", address, created)
+  return address, proto
+end
+
 function base_actions:traceexit(msg)
   local id = msg:get_traceid()
   local exit = msg:get_exit()

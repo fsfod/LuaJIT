@@ -104,7 +104,13 @@ local msgs = {
       store_address = "address",
     },
   },
-  
+
+  {
+    name = "protoloaded",
+    "time : timestamp",
+    "address : GCRefPtr",
+  },
+
   {
     name = "traceexit_small",
     "isgcexit : bool",
