@@ -361,6 +361,15 @@ static void jitlog_traceflush(jitlog_State *context, FlushReason reason)
 
 #endif
 
+static void jitlog_protoloaded(jitlog_State *context, GCproto *pt)
+{
+  if (jitlog_isfiltered(context, LOGFILTER_PROTO_LOADED)) {
+    return;
+  }
+  memorize_proto(context, pt);
+  log_protoloaded(&context->ub, pt);
+}
+
 static gc_info_Args build_gcinfo(jitlog_State* context) {
   global_State* g = context->g;
   gc_info_Args args = {
@@ -498,6 +507,9 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
       jitlog_traceflush(context, (FlushReason)(uintptr_t)eventdata);
       break;
 #endif
+    case VMEVENT_BC:
+      jitlog_protoloaded(context, (GCproto*)eventdata);
+      break;
     case VMEVENT_DETACH:
       free_context(context);
       break;

@@ -226,3 +226,8 @@ struct VarRecord{
   startpc : uint32
   extent: uint32
 }
+
+message protoloaded{
+  time : timestamp
+  address : GCRefPtr
+}
