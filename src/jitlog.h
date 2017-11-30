@@ -7,6 +7,7 @@
 typedef enum JITLogFilter {
   LOGFILTER_TRACE_EXITS = 0x1,
   LOGFILTER_GC_STATE    = 0x2,
+  LOGFILTER_PROTO_LOADED = 0x4,
 } JITLogFilter;
 
 typedef struct JITLogUserContext {

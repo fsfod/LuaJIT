@@ -343,6 +343,18 @@ function api:pc2proto(pc)
   return nil, nil
 end
 
+function readers:protoloaded(msg)
+  local address = addrtonum(msg.address)
+  local created = msg.time
+  local proto = self.proto_lookup[address]
+  if proto then
+    proto.created = created
+    proto.createdid = self.eventid
+  end
+  self:log_msg("gcproto", "GCproto(%d): created %s", address, created)
+  return address, proto
+end
+
 function readers:traceexit(msg)
   local id = msg.traceid
   local exit = msg.exit

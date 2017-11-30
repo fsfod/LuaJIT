@@ -167,6 +167,14 @@ module.messages = {
   },
 
   {
+    name = "protoloaded",
+    fields = [[
+      time : timestamp
+      address : GCRefPtr
+    ]]
+  },
+
+  {
     name = "traceexit_small",
     fields = [[
       isgcexit : bool

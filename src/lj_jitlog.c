@@ -398,6 +398,15 @@ static void jitlog_gcatomic_stage(jitlog_State *context, int atomicstage)
   log_statechange(&context->ub, STATEKIND_GC_ATOMIC, atomicstage, 0);
 }
 
+static void jitlog_protoloaded(jitlog_State *context, GCproto *pt)
+{
+  if (jitlog_isfiltered(context, LOGFILTER_PROTO_LOADED)) {
+    return;
+  }
+  memorize_proto(context, pt);
+  log_protoloaded(&context->ub, pt);
+}
+
 static void free_context(jitlog_State *context);
 
 static void jitlog_loadstage2(lua_State *L, jitlog_State *context);
@@ -420,6 +429,9 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
       jitlog_traceflush(context, (FlushReason)(uintptr_t)eventdata);
       break;
 #endif
+    case VMEVENT_BC:
+      jitlog_protoloaded(context, (GCproto*)eventdata);
+      break;
     case VMEVENT_GC_STATECHANGE:
       jitlog_gcstate(context, (int)(uintptr_t)eventdata);
       break;
