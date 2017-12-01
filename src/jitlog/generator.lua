@@ -307,6 +307,7 @@ end
 
 parser.builtin_msgorder = {
   header = 0,
+  enumdef = 1,
 }
 
 local function sortmsglist(msglist, msgorder)

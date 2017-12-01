@@ -57,6 +57,14 @@ static char* strlist_concat(const char *const *list, int limit, MSize *retsize)
   return buff;
 }
 
+static void write_enumdef(jitlog_State *context, const char *name, const char *const *names, uint32_t namecount, int isbitflags)
+{
+  MSize size = 0;
+  char *namesblob = strlist_concat(names, namecount, &size);
+  log_enumdef(&context->ub, isbitflags, name, namecount, namesblob, size);
+  free(namesblob);
+}
+
 #if LJ_HASJIT
 
 static const uint32_t large_traceid = 1 << 14;
@@ -129,6 +137,7 @@ static int getcpumodel(char *model)
 
 #endif
 
+#define write_enum(context, name, strarray) write_enumdef(context, name, strarray, (sizeof(strarray)/sizeof(strarray[0])), 0)
 
 static void write_header(jitlog_State *context)
 {

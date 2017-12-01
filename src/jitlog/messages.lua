@@ -42,7 +42,16 @@ local msgs = {
     "starttime : timestamp",
     "ggaddress : u64",
   },
-  
+
+  {
+    name = "enumdef",
+    "isbitflags : bool",
+    "name : string",
+    "namecount : u32",
+    "valuenames_length : u32",
+    "valuenames : stringlist[valuenames_length]",
+  },
+
   {
     name = "stringmarker",
     "time : timestamp",
