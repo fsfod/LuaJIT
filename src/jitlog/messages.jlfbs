@@ -37,6 +37,7 @@ message header {
   tabletype_count : uint16
   starttime: timestamp
   timerfreq : uint64
+  enums : [enumdef]
 }
 
 message stringmarker{
@@ -65,6 +66,13 @@ message note{
   isinternal : bool
   label : string
   data : [uint8] (argtype : const void*)
+}
+
+table enumdef{
+  isbitflags : bool
+  name : string
+  namecount : uint32
+  valuenames : stringlist
 }
 
 message trace_exit (no_vtable){

@@ -1,4 +1,5 @@
 local ffi = require"ffi"
+local util = require("jitlog.util")
 require("table.new")
 local format = string.format
 local tinsert = table.insert
@@ -97,6 +98,15 @@ function readers:note(msg)
   return note
 end
 
+function fbreaders:enumdef(msg)
+  local name = msg.name
+  local names = msg.valuenames
+  local enum = util.make_enum(names)
+  enum.__name = name
+  self:log_msg("enumdef", "Enum(%s): %s", name, table.concat(names,","))
+  return enum, name, names
+end
+
 function readers:trace_exit(msg)
   local id = msg.traceid
   local exit = msg.exit
@@ -129,11 +139,24 @@ local function init(self)
   self.notes = {}
   self.exits = 0
   self.gcexits = 0 -- number of trace exits force triggered by the GC being in the 'atomic' or 'finalize' states
+  self.enums = {}
 
   return t
 end
 
 function api:parseheader(header)
+
+  local emunptr, count, limit = header:get_enums()
+
+  if emunptr == nil then
+    error("Emum list missing from header")
+  end
+
+  local enumlist = self:read_fbarray("enumdef", emunptr, count, limit)
+
+  for _, enum in ipairs(enumlist) do
+    self.enums[enum.__name] = enum
+  end
 end
 
 local lib = {

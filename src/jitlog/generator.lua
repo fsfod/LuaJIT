@@ -595,6 +595,41 @@ function parser:build_vtable(def)
   def.vtable = offsets
 end
 
+local enum_mt = {
+  __index = {
+    add_entry = function(self, name, value)
+      if self.lookup[name] then
+        error(format("enum label '%s' already exists in enum %s", name, self.name))
+      end
+
+      if not value then
+        self.lookup[name] = true
+        self.seq_values = true
+      else
+        self.lookup[name] = true
+        self.custom_values = true
+      end
+      table.insert(self.entries, name)
+    end
+  }
+}
+
+function parser:add_enum(name)
+  local enum = self.enums[name] 
+  if enum then
+    return enum
+  end
+  enum = {
+    name = name,
+    prefix = "",
+    lookup = {},
+    entries = {},
+  }
+  setmetatable(enum, enum_mt)
+  self.enums[name] = enum
+  return enum
+end
+
 parser.builtin_msgorder = {
   header = 0,
   idmarker4b = 1,
@@ -623,6 +658,7 @@ end
 local copyfields = {
   "msglist",
   "schema",
+  "enums",
   "msglookup",
   "sorted_msgnames",
   "sorted_typenames",
@@ -1244,6 +1280,20 @@ function generator:build_boundscheck(msgdef)
   return buildtemplate(self.templates.boundscheck_func, {name = msgdef.name, msgsize = msgdef.size, checks = checks})
 end
 
+function generator:write_enums()
+  for name, def in pairs(self.enums) do
+    self:write_enum(name, def.entries, def.prefix)
+  end
+end
+
+function generator:write_namelists()
+  for name, def in pairs(self.enums) do
+    if not def.no_namelist then
+      self:write_namelist(name.."_names", def.entries)
+    end
+  end
+end
+
 function generator:write_enum(name, names, prefix)
   prefix = prefix and (prefix .. "_") or name
 
@@ -1377,11 +1427,13 @@ local c_generator = require("jitlog.c_generator")
 local api = {
   create_parser = function(GC64)
     local t = {
+      GC64 = GC64,
       msglist = {},
       msglookup = {},
       types = setmetatable({}, {__index = builtin_types}),
       structs = {},
       tables = {},
+      enums = {},
     }
     t.data = t
     return setmetatable(t, {__index = parser})

@@ -177,6 +177,13 @@ static void write_bnote(UserBuf *ub, const char *label, const void *data, size_t
   log_note(ub, &args);
 }
 
+
+#define enum_entry(enumname, strarray) {.name = enumname, .valuenames = strarray, .valuenames_length = (sizeof(strarray)/sizeof(strarray[0]))}
+
+static enumdef_Args enumlist[] = {
+};
+
+
 static void write_header(jitlog_State *context)
 {
   global_State *g = context->g;
@@ -202,6 +209,8 @@ static void write_header(jitlog_State *context)
     .vtables = fb_vtables,
     .vtable_offsets = (unsigned int *)fb_vtoffsets,
     .vtable_offsets_length = sizeof(fb_vtoffsets)/sizeof(int),
+    .enums = enumlist,
+    .enums_length = sizeof(enumlist) / sizeof(enumlist[0]),
   };
   log_header(&context->ub, &args);
 
@@ -212,6 +221,7 @@ static void write_header(jitlog_State *context)
   header->vtable = (int32_t)-(header->vtables_offset + diff + 4);
 
   write_note(&context->ub, "msgdefs", msgdefstr);
+
 }
 
 const uint32_t smallidsz = 20;
