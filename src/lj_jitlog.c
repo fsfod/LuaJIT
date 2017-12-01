@@ -61,6 +61,21 @@ static char* strlist_concat(const char *const *list, int limit, MSize *retsize)
   return buff;
 }
 
+static void write_enumdef(jitlog_State *context, const char *name, const char *const *names, uint32_t namecount, int isbitflags)
+{
+  MSize size = 0;
+  char *namesblob = strlist_concat(names, namecount, &size);
+  enumdef_Args args = {
+    .isbitflags = isbitflags,
+    .name = name,
+    .namecount = namecount,
+    .valuenames = namesblob,
+    .valuenames_length = size,
+  };
+  log_enumdef(&context->ub, &args);
+  free(namesblob);
+}
+
 #if LJ_HASJIT
 
 static const uint32_t large_traceid = 1 << 14;
@@ -193,6 +208,8 @@ static void write_bnote(UserBuf *ub, const char *label, const void *data, size_t
   log_note(ub, &args);
 }
 
+#define write_enum(context, name, strarray) write_enumdef(context, name, strarray, (sizeof(strarray)/sizeof(strarray[0])), 0)
+
 static void write_header(jitlog_State *context)
 {
   global_State *g = context->g;
@@ -217,6 +234,10 @@ static void write_header(jitlog_State *context)
   free(msgnamelist);
 
   write_note(&context->ub, "msgdefs", msgdefstr);
+
+  for (int i = 0; enuminfo_list[i].name; i++) {
+    write_enumdef(context, enuminfo_list[i].name, enuminfo_list[i].namelist, enuminfo_list[i].count, 0);
+  }
 }
 
 const uint32_t smallidsz = 20;

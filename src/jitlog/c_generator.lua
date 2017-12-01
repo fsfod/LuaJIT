@@ -154,6 +154,28 @@ function generator:write_msginfo()
   self:write("\n};\n")
 end
 
+-- Put all the info for dynamic generated enums in an array that can exported
+function generator:write_enuminfo()
+  self:write([[
+typedef struct EnumInfo {
+  const char* name;
+  const char *const *namelist;
+  int count;
+} EnumInfo;
+
+EnumInfo enuminfo_list[] = {
+]])
+  
+  for name, def in pairs(self.enums) do
+    if not def.no_namelist then
+      self:writef('  {"%s", %s_names, %d},\n', name, name, #def.entries)
+    end
+  end
+  -- Add a null entry at the end
+  self:writef('  {NULL, NULL, 0},\n')
+  self:write("};\n\n")
+end
+
 function generator:write_headers_def(options)
   options = options or {}
   local outdir = options.outdir or ""
@@ -175,6 +197,9 @@ LUA_API const int32_t jitlog_msgsizes[];
   self:write_namelist("jitlog_msgnames", self.sorted_msgnames)
   self:write_msgsizes()
   self:write_msgsizes(true)
+  self:write_namelists()
+  self:write_enuminfo()
+
   self:write_msginfo()
 
   self:write("#endif\n")
@@ -194,6 +219,7 @@ function generator:writefile(options)
 ]])
 
   self:write_enum("MSGTYPES", self.sorted_msgnames, "MSGTYPE")
+  self:write_enums()
   self:write_msgdefs()
   
   self:write([[

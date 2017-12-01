@@ -389,8 +389,44 @@ function parser:parse_msglist(msgs)
   end
 end
 
+local enum_mt = {
+  __index = {
+    add_entry = function(self, name, value)
+      if self.lookup[name] then
+        error(format("enum label '%s' already exists in enum %s", name, self.name))
+      end
+
+      if not value then
+        self.lookup[name] = true
+        self.seq_values = true
+      else
+        self.lookup[name] = true
+        self.custom_values = true
+      end
+      table.insert(self.entries, name)
+    end
+  }
+}
+
+function parser:add_enum(name)
+  local enum = self.enums[name] 
+  if enum then
+    return enum
+  end
+  enum = {
+    name = name,
+    prefix = "",
+    lookup = {},
+    entries = {},
+  }
+  setmetatable(enum, enum_mt)
+  self.enums[name] = enum
+  return enum
+end
+
 parser.builtin_msgorder = {
   header = 0,
+  enumdef = 1,
   idmarker4b = 2,
   idmarker = 3,
 }
@@ -416,6 +452,7 @@ end
 
 local copyfields = {
   "msglist",
+  "enums",
   "msglookup",
   "sorted_msgnames",
   "types",
@@ -823,7 +860,21 @@ function generator:write_msgsizes(dispatch_table)
   self:writetemplate(template, {list = sizes, count = #self.sorted_msgnames})
 end
 
-function generator:write_msgdefs()
+function generator:write_enums()
+  for name, def in pairs(self.enums) do
+    self:write_enum(name, def.entries, def.prefix)
+  end
+end
+
+function generator:write_namelists()
+  for name, def in pairs(self.enums) do
+    if not def.no_namelist then
+      self:write_namelist(name.."_names", def.entries)
+    end
+  end
+end
+
+function generator:write_msgdefs(mode)
   for _, def in ipairs(self.msglist) do
     self:write_struct(def.name, def)
   end
@@ -865,6 +916,7 @@ local api = {
     local t = {
       msglist = {},
       msglookup = {},
+      enums = {},
       types = setmetatable({}, {__index = builtin_types})
     }
     t.data = t

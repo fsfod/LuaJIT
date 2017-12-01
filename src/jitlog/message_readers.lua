@@ -1,4 +1,5 @@
 local ffi = require"ffi"
+local util = require("jitlog.util")
 require("table.new")
 local format = string.format
 local tinsert = table.insert
@@ -95,6 +96,14 @@ function readers:note(msg)
   return note
 end
 
+function readers:enumdef(msg)
+  local name = msg.name
+  local names = msg.valuenames
+  self.enums[name] = util.make_enum(names)
+  self:log_msg("enumdef", "Enum(%s): %s", name, table.concat(names,","))
+  return name, names
+end
+
 function readers:traceexit(msg)
   local id = msg.traceid
   local exit = msg.exit
@@ -124,6 +133,7 @@ local function init(self)
   self.notes = {}
   self.exits = 0
   self.gcexits = 0 -- number of trace exits force triggered by the GC being in the 'atomic' or 'finalize' states
+  self.enums = {}
 
   return t
 end

@@ -60,6 +60,17 @@ module.messages = {
   },
 
   {
+    name = "enumdef",
+    fields = [[
+      isbitflags : bool
+      name : string
+      namecount : u32
+      valuenames_length : u32
+      valuenames : stringlist[valuenames_length]
+    ]]
+  },
+
+  {
     name = "stringmarker",
     fields = [[
       time : timestamp
