@@ -198,6 +198,10 @@ ffi.cdef[[
 
   for _, def in ipairs(self.msglist) do
     self:writef("assert(ffi.sizeof('MSG_%s') == %d)\n", def.name, def.size)
+     if def.enumlist then
+      local names = self.namescans[def.enumlist]
+      self:write_enum(names.enumname, names.matches)
+    end
   end
 
   for _, def in ipairs(self.msglist) do

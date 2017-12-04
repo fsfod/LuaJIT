@@ -117,7 +117,7 @@ function generator:writefile(options)
 ]])
 
   self:write_enum("MSGTYPES", self.sorted_msgnames, "MSGTYPE")
-  self:write_msgdefs()
+  self:write_msgdefs("structdef")
   
   self:write([[
 #ifdef _MSC_VER
