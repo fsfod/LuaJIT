@@ -121,6 +121,13 @@ local msgs = {
   },
 
   {
+    name = "protobl",
+    "time : timestamp",
+    { name = "proto", type = "GCRefPtr", argtype = "GCproto *" },
+    "bcindex : 24",
+  },
+
+  {
     name = "loadscript",
     "time : timestamp",
     "isloadstart : bool",

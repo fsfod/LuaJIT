@@ -269,6 +269,48 @@ function tests.trace()
   assert(traces[1].id ~= traces[2].id and traces[2].id ~= traces[3].id)
 end
 
+local function nojit_loop(f, n)
+  local ret
+  n = n or 200
+  for i=1, n do
+    ret = f()
+  end
+  return ret
+end
+
+jit.off(nojit_loop)
+
+function tests.protobl()
+  jitlog.start()
+  local ret1 = function() return 1 end
+  jit.off(ret1)
+  local func = function() return ret1() end
+  nojit_loop(func, 100000)
+  -- Check we also handle loop blacklisting
+  local function loopbl()
+    local ret
+    for i=1, 50000 do
+      ret = ret1()
+    end
+    return ret
+  end
+  loopbl()
+
+  local result = parselog(jitlog.savetostring())
+  assert(#result.aborts >= 2)
+  local blacklist = result.proto_blacklist 
+  assert(#blacklist == 2)
+  assert(blacklist[1].eventid < blacklist[2].eventid)
+  assert(blacklist[1].time < blacklist[2].time)
+  -- Function header blacklisted
+  assert(blacklist[1].bcindex == 0)
+  -- Loop header blacklisted
+  assert(blacklist[2].bcindex > 0)
+  assert(blacklist[1].proto ~= blacklist[2].proto)
+  assert(blacklist[1].proto.chunk:find("test.lua"))
+  assert(blacklist[2].proto.chunk:find("test.lua"))
+end
+
 end
 
 function tests.gcstate()

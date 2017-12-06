@@ -584,6 +584,24 @@ end
 -- Reuse handler for compact trace exit messages since they both have the same field names but traceid and exit are smaller
 base_actions.traceexit_small = base_actions.traceexit
 
+function base_actions:protobl(msg)
+  local address = addrtonum(msg.proto)
+  local proto = self.proto_lookup[address]
+  local blacklist = {
+    eventid = self.eventid,
+    proto = proto,
+    bcindex = msg:get_bcindex(),
+    time = msg.time,
+  }
+  -- Record the first blacklist event the proto gets in the proto
+  if not proto.blacklisted then
+    proto.blacklisted = blacklist
+  end
+  tinsert(self.proto_blacklist, blacklist)
+  self:log_msg("protobl", "ProtoBlacklisted(%d): %s", address, proto:get_location())
+  return blacklist
+end
+
 function base_actions:alltraceflush(msg)
   local reason = msg:get_reason()
   local flush = {
@@ -942,6 +960,7 @@ local function makereader(mixins)
     func_lookup = {},
     protos = {},
     proto_lookup = {},
+    proto_blacklist = {},
     flushes = {},
     traces = {},
     aborts = {},
