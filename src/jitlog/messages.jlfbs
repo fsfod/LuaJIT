@@ -337,3 +337,9 @@ message exitstubs{
   count : uint16
   spacing : uint16
 }
+
+message protobl{
+  time : timestamp
+  proto : GCRefPtr (argtype : GCproto *)
+  bcindex : uint32
+}
