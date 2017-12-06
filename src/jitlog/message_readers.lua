@@ -893,6 +893,24 @@ function readers:register_state(msg)
   self:log_msg("register_state", "RegisterState: source = '%s', gpr_count = %d, fpr_count = %d", source, msg.gpr_count, msg.fpr_count)
 end
 
+function readers:protobl(msg)
+  local address = addrtonum(msg.proto)
+  local proto = self.proto_lookup[address]
+  local blacklist = {
+    eventid = self.eventid,
+    proto = proto,
+    bcindex = msg.bcindex,
+    time = msg.time,
+  }
+  -- Record the first blacklist event the proto gets in the proto
+  if not proto.blacklisted then
+    proto.blacklisted = blacklist
+  end
+  tinsert(self.proto_blacklist, blacklist)
+  self:log_msg("protobl", "ProtoBlacklisted(%d): %s", address, proto:get_location())
+  return blacklist
+end
+
 function readers:trace_flushall(msg)
   local reason = msg.reason
   local flush = {
@@ -989,6 +1007,7 @@ local function init(self)
   self.objlabels = {}
   self.objlabel_lookup = {}
   self.loaded_scripts = {}
+  self.proto_blacklist = {}
 
   return t
 end

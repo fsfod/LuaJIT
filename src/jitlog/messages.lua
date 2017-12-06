@@ -186,6 +186,15 @@ module.messages = {
   },
 
   {
+    name = "protobl",
+    fields = [[
+      time : timestamp
+      proto : GCRefPtr @argtype(GCproto *)
+      bcindex : 24
+    ]]
+  },
+
+  {
     name = "loadscript",
     fields = [[
       time : timestamp

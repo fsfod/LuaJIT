@@ -596,6 +596,12 @@ static void jitlog_exit(jitlog_State *context, VMEventData_TExit *exitState)
   }
 }
 
+static void jitlog_protobl(jitlog_State *context, VMEventData_ProtoBL *data)
+{
+  memorize_proto(context, data->pt);
+  log_protobl(&context->ub, data->pt, data->pc);
+}
+
 static void jitlog_traceflush(jitlog_State *context, FlushReason reason)
 {
   jit_State *J = G2J(context->g);
@@ -715,6 +721,9 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
       break;
     case VMEVENT_TRACE_EXIT:
       jitlog_exit(context, (VMEventData_TExit*)eventdata);
+      break;
+    case VMEVENT_PROTO_BLACKLISTED:
+      jitlog_protobl(context, (VMEventData_ProtoBL*)eventdata);
       break;
     case VMEVENT_TRACE_FLUSH:
       jitlog_traceflush(context, (FlushReason)(uintptr_t)eventdata);
