@@ -151,15 +151,16 @@ local function checkheader(header)
   assert(header.version > 0)
 end
 
+local testmixins = {
+  readerlib.mixins.msgstats,
+}
+
 local function parselog(log, verbose)
-  local result
+  local result = readerlib.makereader(testmixins)
   if verbose then
-    result = readerlib.makereader()
     result.verbose = true
-    assert(result:parse_buffer(log, #log))
-  else
-    result = readerlib.parsebuffer(log)
   end
+  assert(result:parse_buffer(log, #log))
   checkheader(result.header)
   return result
 end
@@ -200,6 +201,7 @@ it("string marker", function()
   jitlog.writemarker("marker1")
   jitlog.writemarker("marker2", 0xbeef)
   local result = parselog(jitlog.savetostring())
+  assert(result.msgcounts.stringmarker == 2)
   assert(#result.markers == 2)
   assert(result.markers[1].label == "marker1")
   assert(result.markers[2].label == "marker2")

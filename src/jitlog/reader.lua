@@ -397,7 +397,64 @@ local function applymixin(self, mixin)
   end
 end
 
+local msgstats = {
+  api = {}
+}
+  
+function msgstats:init()  
+  local msgcounts = table.new(255, 0)
+  self.msgcounts = msgcounts
+  for i = 0, 255 do
+    msgcounts[i] = 0
+  end
+
+  -- Map message names to an index
+  setmetatable(msgcounts, {__index = function(counts, key)
+    local index = self.msgtype[key]
+    return index and counts[index] 
+  end})
+  
+  local msgtotalsize = table.new(255, 0)
+  self.msgtotalsize = msgtotalsize
+  for i = 0, 255 do
+    msgtotalsize[i] = 0
+  end    
+end
+
+function msgstats:aftermsg(msgtype, size, pos)
+  self.msgtotalsize[msgtype] = self.msgtotalsize[msgtype] + size
+  self.msgcounts[msgtype] = self.msgcounts[msgtype] + 1
+end
+
+function msgstats.api:print_msgstats()
+  print("Name            Total Size   Count")
+  for i = 0, #self.msgnames-1 do
+    if self.msgtotalsize[i] ~= 0 then
+      print(format(" %-12s %10d   %5d", self.msgnames[i+1], self.msgtotalsize[i], self.msgcounts[i]))
+    end
+  end
+end
+
+function msgstats.api:get_msgstats()
+  local counts = {}
+  local totalsize = {}
+  for i = 0, self.msgtype_count-1 do
+    local name = self.msgnames[i+1]
+    counts[name] = self.msgcounts[i]
+    totalsize[name] = self.msgtotalsize[i]
+  end
+  return {totalsize = totalsize, counts = counts}
+end
+
+function msgstats.api:reset_msgstats()
+  for i = 0, self.msgtype_count-1 do
+    self.msgtotalsize[i] = 0
+    self.msgcounts[i] = 0
+  end
+end
+
 local builtin_mixins = {
+  msgstats = msgstats,
 }
 
 local lib = {
