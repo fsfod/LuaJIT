@@ -300,7 +300,33 @@ local function applymixin(self, mixin)
   end
 end
 
+local msgstats_mixin = {
+  init = function(self)
+    local datatotals = table.new(255, 0)
+    for i = 0, 255 do
+      datatotals[i] = 0
+    end
+    self.datatotals = datatotals
+  
+    local msgcounts = table.new(255, 0)
+    for i = 0, 255 do
+      msgcounts[i] = 0
+    end
+    -- Map message names to an index
+    setmetatable(msgcounts, {__index = function(counts, key)
+      local index = self.msgtype[key]
+      return index and counts[index] 
+    end})
+    self.msgcounts = msgcounts
+  end,
+  aftermsg = function(self, msgtype, size, pos)
+    self.datatotals[msgtype] = self.datatotals[msgtype] + size
+    self.msgcounts[msgtype] = self.msgcounts[msgtype] + 1
+  end,
+}
+
 local builtin_mixins = {
+  msgstats = msgstats_mixin,
 }
 
 local function makereader(mixins)
