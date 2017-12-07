@@ -297,14 +297,19 @@ local function checkheader(header)
   assert(header.version > 0)
 end
 
+local testmixins = {
+  readerlib.mixins.msgstats,
+}
+
 local function parselog(log, verbose)
-  local result
+  local result = readerlib.makereader({readerdef = reader_def, mixins = testmixins})
   if verbose then
-    result = readerlib.makereader({readerdef = reader_def})
     result.verbose = true
-    assert(result:parse_buffer(log, #log))
-  else
-    result = readerlib.parsebuffer(log)
+  end
+  local sucess, offset, msg = result:parse_buffer(log, #log)
+  if not sucess then
+    print(msg, offset)
+    error("failed to parse")
   end
   checkheader(result.header)
   return result
@@ -346,6 +351,7 @@ it("string marker", function()
   jitlog.writemarker("marker1")
   jitlog.writemarker("marker2", 0xbeef)
   local result = parselog(jitlog.savetostring())
+  assert(result.msgcounts.stringmarker == 2)
   assert(#result.markers == 2)
   assert(result.markers[1].label == "marker1")
   assert(result.markers[2].label == "marker2")
