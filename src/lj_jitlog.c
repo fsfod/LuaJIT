@@ -10,6 +10,7 @@
 #include "lj_vmevent.h"
 #include "lj_debug.h"
 #include "lj_ircall.h"
+#include "lj_ff.h"
 #include "luajit.h"
 #include "lauxlib.h"
 
@@ -354,6 +355,20 @@ static void jitlog_protoloaded(JITLogState *context, GCproto *pt)
   log_protoloaded(context->g, pt);
 }
 
+static void jitlog_ffunc_callback(JITLogState *context, int ffid)
+{
+  global_State *g = context->g;
+  //l->base[1]
+
+  if (ffid == FF_coroutine_resume) {
+    /* log_currentthread(g, l->base[1])*/
+  } else if (ffid == FF_coroutine_create) {
+
+  } else if (ffid == FF_coroutine_wrap) {
+
+  }
+}
+
 static void free_context(JITLogState *context);
 
 static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *eventdata)
@@ -390,6 +405,9 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
       break;
     case VMEVENT_GC_STATECHANGE:
       jitlog_gcstate(context, (int)(uintptr_t)eventdata);
+      break;
+    case VMEVENT_FASTFUNC_CALLED:
+      jitlog_ffunc_callback(context, (int)(uintptr_t)eventdata);
       break;
     case VMEVENT_DETACH:
       free_context(context);
