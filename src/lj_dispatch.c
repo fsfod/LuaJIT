@@ -31,6 +31,7 @@
 #include "lj_profile.h"
 #endif
 #include "lj_vm.h"
+#include "lj_vmevent.h"
 #include "luajit.h"
 
 /* Bump GG_NUM_ASMFF in lj_dispatch.h as needed. Ugly. */
@@ -474,6 +475,9 @@ ASMFunction LJ_FASTCALL lj_dispatch_call(lua_State *L, const BCIns *pc)
   jit_State *J = G2J(g);
 #endif
   int missing = call_init(L, fn);
+  if (isffunc(fn)) {
+    lj_vmevent_callback(L, VMEVENT_FASTFUNC_CALLED, (void*)(intptr_t)fn->c.ffid);
+  }
 #if LJ_HASJIT
   J->L = L;
   if ((uintptr_t)pc & 1) {  /* Marker for hot call. */
