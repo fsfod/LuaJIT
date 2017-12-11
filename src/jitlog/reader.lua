@@ -731,6 +731,19 @@ local msgstats_mixin = {
   end,
 }
 
+local marker_recordstats_mixin = {
+  init = function(self)
+    self.marker_traces = 0
+    self.marker_aborts = 0
+    self.marker_aborts = 0
+  end,
+  actions = {
+    stringmarker = function(self, msg, marker)
+      marker.
+    end
+  }
+}
+
 local builtin_mixins = {
   msgstats = msgstats_mixin,
 }
