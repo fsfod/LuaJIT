@@ -394,7 +394,12 @@ static void penalty_pc(jit_State *J, GCproto *pt, BCIns *pc, TraceError e)
 setpenalty:
   J->penalty[i].val = (uint16_t)val;
   J->penalty[i].reason = e;
-  hotcount_set(J2GG(J), pc+1, val);
+  /* If the pc is the function header set the hot count in the proto */
+  if (proto_bcpos(pt, pc) == 0) {
+    pt->hotcount = val;
+  } else {
+    hotcount_set(J2GG(J), pc+1, val);
+  }
 }
 
 /* -- Trace compiler state machine ---------------------------------------- */
@@ -571,10 +576,18 @@ static int trace_abort(jit_State *J)
   if (J->parent == 0 && !bc_isret(bc_op(J->cur.startins))) {
     if (J->exitno == 0) {
       BCIns *startpc = mref(J->cur.startpc, BCIns);
-      if (e == LJ_TRERR_RETRY)
-	hotcount_set(J2GG(J), startpc+1, 1);  /* Immediate retry. */
-      else
-	penalty_pc(J, &gcref(J->cur.startpt)->pt, startpc, e);
+      GCproto *startpt = &gcref(J->cur.startpt)->pt;
+      if (e == LJ_TRERR_RETRY) {
+        /* Immediate retry. */
+        if (proto_bcpos(startpt, startpc) == 0) {
+          startpt->hotcount = 1;
+        } else {
+          lua_assert(bc_op(startpc[0]) > BC_FORI || bc_op(startpc[0]) <= BC_JLOOP);
+          hotcount_set(J2GG(J), startpc+1, 1);
+        }
+      } else {
+        penalty_pc(J, startpt, startpc, e);
+      }
     } else {
       traceref(J, J->exitno)->link = J->exitno;  /* Self-link is blacklisted. */
     }
@@ -730,7 +743,14 @@ void LJ_FASTCALL lj_trace_hot(jit_State *J, const BCIns *pc)
   /* Note: pc is the interpreter bytecode PC here. It's offset by 1. */
   ERRNO_SAVE
   /* Reset hotcount. */
-  hotcount_set(J2GG(J), pc, J->param[JIT_P_hotloop]*HOTCOUNT_LOOP);
+  if (bc_op(pc[-1]) >= BC_FUNCF && bc_op(pc[-1]) <= BC_JFUNCV) {
+    GCproto *pt = (GCproto *)(((char *)(pc-1)) - sizeof(GCproto));
+    lua_assert(pt->hotcount == 0xffff);
+    pt->hotcount = J->param[JIT_P_hotfunc] - 1;
+  } else {
+    hotcount_set(J2GG(J), pc, J->param[JIT_P_hotloop]*HOTCOUNT_LOOP);
+  }
+  
   /* Only start a new trace if not recording or inside __gc call or vmevent. */
   if (J->state == LJ_TRACE_IDLE &&
       !(J2G(J)->hookmask & (HOOK_GC|HOOK_VMEVENT))) {

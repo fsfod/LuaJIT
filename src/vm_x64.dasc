@@ -330,10 +330,7 @@
 |.endmacro
 |
 |.macro hotcall, reg
-|  mov reg, PCd
-|  shr reg, 1
-|  and reg, HOTCOUNT_PCMASK
-|  sub word [DISPATCH+reg+GG_DISP2HOT], HOTCOUNT_CALL
+|  sub word [PCd-4+PC2PROTO(hotcount)], 1
 |  jb ->vm_hotcall
 |.endmacro
 |

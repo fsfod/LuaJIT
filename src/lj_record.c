@@ -1667,9 +1667,11 @@ static void check_call_unroll(jit_State *J, TraceNo lnk)
   } else {
     if (count > J->param[JIT_P_callunroll]) {
       if (lnk) {  /* Possible tail- or up-recursion. */
+        GCproto *pt = (GCproto *)(((char *)J->pc)- sizeof(GCproto));
+        lua_assert(bc_op(*J->pc) == BC_JFUNCF);
 	lj_trace_flush(J, lnk);  /* Flush trace that only returns. */
 	/* Set a small, pseudo-random hotcount for a quick retry of JFUNC*. */
-	hotcount_set(J2GG(J), J->pc+1, LJ_PRNG_BITS(J, 4));
+        pt->hotcount = LJ_PRNG_BITS(J, 4);
       }
       lj_trace_err(J, LJ_TRERR_CUNROLL);
     }

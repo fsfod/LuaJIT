@@ -13,6 +13,8 @@
 #include "lj_str.h"
 #include "lj_tab.h"
 #include "lj_bc.h"
+#include "lj_jit.h"
+#include "lj_dispatch.h"
 #if LJ_HASFFI
 #include "lj_ctype.h"
 #include "lj_cdata.h"
@@ -381,6 +383,9 @@ GCproto *lj_bcread_proto(LexState *ls)
     setmref(pt->uvinfo, NULL);
     setmref(pt->varinfo, NULL);
   }
+#if LJ_HASJIT
+  pt->hotcount = L2J(ls->L)->param[JIT_P_hotfunc] - 1;
+#endif
   return pt;
 }
 

@@ -98,6 +98,51 @@ static void flagbits_to_strings(lua_State *L, uint32_t flags, uint32_t base,
 }
 #endif
 
+static GCproto *check_Lproto(lua_State *L, int nolua);
+
+LJLIB_CF(jit_sethot)
+{
+  GCproto *pt = check_Lproto(L, 0);
+  int32_t count = lj_lib_checkint(L, 2);
+  int32_t loopid = lj_lib_optint(L, 3, -1);
+  /*
+  ** Loops decrement the count by two instead of one like functions when using
+  ** shared hot counters.
+  */
+  if (loopid != -1) {
+    count = count * 2;
+  }
+
+  if (count < 0 || count > 0xffff) {
+    luaL_error(L, "bad hot count value");
+  }
+
+  if (loopid == -1) {
+    int old =  pt->hotcount;
+    pt->hotcount = count;
+    setintV(L->top-1, old);
+    return 1;
+  } else if (loopid > 0) {
+    BCIns *bc = proto_bc(pt);
+    MSize hci = 0, i = 0;
+    for (i = 0; i != pt->sizebc; i++) {
+      int iscountbc = bc_op(bc[i]) == BC_FORL || bc_op(bc[i]) == BC_ITERL ||
+                      bc_op(bc[i]) == BC_LOOP;
+      if (iscountbc) {
+        if (++hci == loopid) {
+          BCIns *hcbc = bc + i;
+          int old = hotcount_get(L2GG(L), hcbc);
+          hotcount_set(L2GG(L), hcbc, count);
+          setintV(L->top-1, old);
+          return 1;
+        }
+      }
+    }
+  }
+  lj_err_callerv(L, LJ_ERR_IDXRNG);
+  return 0;
+}
+
 LJLIB_CF(jit_status)
 {
 #if LJ_HASJIT
