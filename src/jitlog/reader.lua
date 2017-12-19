@@ -739,13 +739,31 @@ local marker_recordstats_mixin = {
   end,
   actions = {
     stringmarker = function(self, msg, marker)
-      marker.
+      -- Record the start intervals for all the lists in the marker
+      marker.owner = self
+      marker.id = #self.markers
+      marker.traces = #self.traces
+      marker.aborts = #self.aborts
+      marker.flushes = #self.flushes
+      marker.protos = self.protos
+      marker.ptbl = #self.proto_blacklist
+      marker.exits = self.exits
+      marker.gcstate = self.gcstate
+      marker.gccount = self.gccount
+      marker.gcstatecount = self.gcstatecount
+      
+      local prev = self.markers[#self.markers - 1]
+      if prev then
+        marker.prev = prev
+        prev.next = marker
+      end
     end
   }
 }
 
 local builtin_mixins = {
   msgstats = msgstats_mixin,
+  markerstats = marker_recordstats_mixin,
 }
 
 local function makereader(mixins)
