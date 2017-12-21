@@ -367,7 +367,7 @@ function base_actions:traceexit(msg)
   local gcexit = msg:get_isgcexit()
   self.exits = self.exits + 1
   if gcexit then
-    assert(self.gcstate == "atomic" or self.gcstate == "finalize")
+    --assert(self.gcstate == "atomic" or self.gcstate == "finalize")
     self.gcexits = self.gcexits + 1
     self:log_msg("traceexit", "TraceExit(%d): %d GC Triggered", id, exit)
   else
@@ -740,7 +740,7 @@ local marker_recordstats_mixin = {
   actions = {
     stringmarker = function(self, msg, marker)
       -- Record the start intervals for all the lists in the marker
-      marker.owner = self
+      --marker.owner = self
       marker.id = #self.markers
       marker.traces = #self.traces
       marker.aborts = #self.aborts
@@ -792,7 +792,7 @@ local function makereader(mixins)
     }
   }
   if mixins then
-    for _, mixin in ipairs(mixins) do
+    for _, mixin in pairs(mixins) do
       applymixin(t, mixin)
     end
   end
