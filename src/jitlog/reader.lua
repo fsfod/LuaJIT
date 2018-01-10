@@ -328,6 +328,53 @@ function base_actions:scriptsrc(msg)
   script.source = (script.source or "") .. msg:get_sourcechunk()
 end
 
+local gcfunc = {}
+
+function gcfunc:tostring()
+  if self.ffid == 0 then
+    return (string.format("GCFunc(%x): Lua %s", self.address, self.proto and self.proto:get_location() or "?"))
+  else
+    if self.fastfunc then
+      return (string.format("GCFunc(%x): fastfunc %s, func 0x%s", self.address, self.fastfunc, self.cfunc))
+    else
+      return (string.format("GCFunc(%x): C func 0x%s", self.address, self.cfunc))
+    end
+  end
+end
+
+local gcfunc_mt = {__index = gcfunc}
+
+function base_actions:gcfunc(msg)
+  local address = addrtonum(msg.address)  
+  local upvalues = self:read_array("uint64_t", msg:get_upvalues(), msg:get_nupvalues())
+  local target = addrtonum(msg.proto_or_cfunc)
+  local func = {
+      owner = self,
+      ffid = msg:get_ffid(),
+      address = address,
+      proto = false,
+      cfunc = false,
+      upvalues = upvalues,
+  }
+  if msg:get_ffid() == 0 then
+    local proto = self.proto_lookup[target]
+    if not proto then
+      print(format("Failed to find proto %s for func %s", target, address))
+    end
+    func.proto = proto
+    self:log_msg("gcfunc", "GCFunc(%x): Lua %s, nupvalues %d", address, proto and proto:get_location(), 0)
+  else
+    func.cfunc = target
+    if msg:get_ffid() ~= 255 then
+      func.fastfunc = self.enums.fastfuncs[msg:get_ffid()]
+    end
+    self:log_msg("gcfunc", "GCFunc(%x): %s Func 0x%d nupvalues %d", address, func.fastfunc, target, 0)
+  end
+  self.func_lookup[address] = func
+  tinsert(self.functions, func)
+  return func
+end
+
 function base_actions:protoloaded(msg)
   local address = addrtonum(msg.address)
   local created = msg.time
@@ -711,6 +758,8 @@ local function makereader(mixins)
     actions = {},
     markers = {},
     strings = {},
+    functions = {},
+    func_lookup = {},
     protos = {},
     proto_lookup = {},
     flushes = {},

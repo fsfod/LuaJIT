@@ -701,7 +701,7 @@ $(HOST_O): %.o: %.c
 
 include Makefile.dep
 
-lj_jitlog.o: lj_jitlog_def.h lj_jitlog_writers.h lj_jitlog_decl.h lj_bcdef.h
+lj_jitlog.o: lj_jitlog_def.h lj_jitlog_writers.h lj_jitlog_decl.h lj_bcdef.h lj_ffdef.h
 
 ##############################################################################
 # Target file rules.

@@ -78,6 +78,15 @@ local msgs = {
   },
 
   {
+    name = "gcfunc",
+    "address : GCRefPtr",
+    "proto_or_cfunc : ptr",
+    "nupvalues : u8",
+    "ffid : u8",
+    { name = "upvalues", length = "nupvalues", type = "u64", argtype = "TValue *" },
+  },
+
+  {
     name = "gcproto",
     "address : GCRef",
     "chunkname : GCRef",
