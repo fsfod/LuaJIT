@@ -245,3 +245,10 @@ message loadscript{
 message scriptsrc{
   sourcechunk : string (explicit_length)
 }
+
+message obj_func{
+  address : GCRefPtr
+  proto_or_cfunc : ptr
+  ffid : uint8
+  upvalues : [uint64] (argtype : TValue *)
+}
