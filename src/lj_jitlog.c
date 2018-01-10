@@ -33,6 +33,8 @@ typedef struct jitlog_State {
   uint32_t strcount;
   GCtab *protos;
   uint32_t protocount;
+  GCtab *funcs;
+  uint32_t funccount;
 } jitlog_State;
 
 
@@ -280,6 +282,53 @@ static void memorize_proto(jitlog_State* context, GCproto* pt)
   write_gcproto(context, &context->ub, pt);
 }
 
+static void write_gcfunc(UserBuf* ub, GCfunc* fn)
+{
+  if (isluafunc(fn)) {
+    int i;
+    TValue* upvalues = malloc(fn->l.nupvalues * sizeof(TValue));
+    /* Remove the upvalue pointer indirection baking in there current values */
+    for (i = 0; i != fn->l.nupvalues; i++) {
+      upvalues[i] = *uvval(&gcref(fn->l.uvptr[i])->uv);
+    }
+    obj_func_Args args = {
+      .address = fn,
+      .proto_or_cfunc = funcproto(fn),
+      .ffid = fn->l.ffid,
+      .upvalues = upvalues,
+      .nupvalues = fn->l.nupvalues,
+    };
+    log_obj_func(ub, &args);
+    free(upvalues);
+  }
+  else {
+    obj_func_Args args = {
+      .address = fn,
+      .proto_or_cfunc = (void *)fn->c.f,
+      .ffid = fn->l.ffid,
+      .upvalues = fn->c.upvalue,
+      .nupvalues = fn->c.nupvalues,
+    };
+    log_obj_func(ub, &args);
+  }
+}
+
+static void memorize_func(jitlog_State* context, GCfunc* fn)
+{
+  lua_State* L = mainthread(context->g);
+  TValue key;
+  setfuncV(L, &key, fn);
+
+  if (!memorize_gcref(L, context->funcs, &key, &context->funccount)) {
+    return;
+  }
+
+  if (isluafunc(fn)) {
+    memorize_proto(context, funcproto(fn));
+  }
+  write_gcfunc(&context->ub, fn);
+}
+
 typedef enum ObjType {
   OBJTYPE_STRING,
   OBJTYPE_UPVALUE,
@@ -321,6 +370,9 @@ static ObjType obj_type(GCobj *o) {
 
 void jitlog_labelobj(jitlog_State *context, GCobj *o, const char *label, int flags)
 {
+  if (o->gch.gct == ~LJ_TFUNC) {
+    memorize_func(context, gco2func(o));
+  }
   log_obj_label(&context->ub, obj_type(o), o, label, flags);
 }
 
@@ -727,6 +779,7 @@ static void jitlog_loadstage2(lua_State *L, jitlog_State *context)
   context->loadstate = 2;
   context->strings = create_pinnedtab(L);
   context->protos = create_pinnedtab(L);
+  context->funcs = create_pinnedtab(L);
   lj_lib_prereg(L, "jitlog", luaopen_jitlog, tabref(L->env));
   context->loadstate = 3;
 }
@@ -763,6 +816,7 @@ static void jitlog_shutdown(jitlog_State *context)
 
   free_pinnedtab(L, context->strings);
   free_pinnedtab(L, context->protos);
+  free_pinnedtab(L, context->funcs);
   free_context(context);
 }
 
@@ -777,8 +831,10 @@ LUA_API void jitlog_reset(JITLogUserContext *usrcontext)
   jitlog_State *context = usr2ctx(usrcontext);
   context->strcount = 0;
   context->protocount = 0;
+  context->funccount = 0;
   lj_tab_clear(context->strings);
   lj_tab_clear(context->protos);
+  lj_tab_clear(context->funcs);
   ubuf_reset(&context->ub);
   write_header(context);
 }

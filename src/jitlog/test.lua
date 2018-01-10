@@ -376,6 +376,8 @@ it("object label", function()
   assert(f1() == 1)
 
   local result = parselog(jitlog.savetostring())
+  assert(#result.protos == 1)
+  assert(#result.functions == 1)
   local labels = result.objlabel_lookup
   assert(labels.t1)
   assert(labels.t1.objtype == "table")
@@ -386,6 +388,8 @@ it("object label", function()
   assert(labels.f1.objtype == "func_lua")
   assert(labels.f1.label == "f1")
   assert(result.objlabels[labels.f1.address] == labels.f1)
+  assert(result.functions[1].label == "f1")
+  assert(result.functions[1].address == labels.f1.address)
 end)
 
 it("object function proto", function()

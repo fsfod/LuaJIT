@@ -171,6 +171,8 @@ function readers:obj_label(msg)
   local obj
   if objtype == "proto" then
     obj = self.proto_lookup[address]
+  elseif objtype == "func_lua" or objtype == "func_c" then
+    obj = self.func_lookup[address]
   end
 
   local objlabel = {
@@ -389,6 +391,57 @@ function readers:scriptsrc(msg)
   script.source = (script.source or "") .. msg.sourcechunk
 end
 
+local gcfunc = {}
+
+function gcfunc:tostring()
+  if self.ffid == 0 then
+    return (string.format("GCFunc(0x%x): Lua %s", self.address, self.proto and self.proto:get_location() or "?"))
+  else
+    if self.fastfunc then
+      return (string.format("GCFunc(%s): address = 0x%x, func 0x%x", self.fastfunc, self.address, self.cfunc))
+    else
+      return (string.format("GCFunc(0x%x): C func 0x%x", self.address, self.cfunc))
+    end
+  end
+end
+
+msgobj_mt.func = {
+  __index = gcfunc,
+  __tostring = gcfunc.tostring
+}
+
+function readers:obj_func(msg)
+  local address = addrtonum(msg.address)  
+  local upvalues = self:read_array("uint64_t", msg:get_upvalues())
+  local target = addrtonum(msg.proto_or_cfunc)
+  local func = {
+      owner = self,
+      ffid = msg.ffid,
+      address = address,
+      proto = false,
+      cfunc = false,
+      upvalues = upvalues,
+  }
+  if msg.ffid == 0 then
+    local proto = self.proto_lookup[target]
+    if not proto then
+      print(format("Failed to find proto %s for func %s", target, address))
+    end
+    func.proto = proto
+    self:log_msg("obj_func", "GCFunc(0x%x): Lua %s, nupvalues %d", address, proto and proto:get_location(), 0)
+  else
+    func.cfunc = target
+    if msg.ffid ~= 255 then
+      func.fastfunc = self.enums.fastfuncs[msg.ffid]
+    end
+    self:log_msg("obj_func", "GCFunc(0x%x): %s Func 0x%d nupvalues %d", address, func.fastfunc, target, 0)
+  end
+  setmetatable(func, self.msgobj_mt.func)
+  self.func_lookup[address] = func
+  tinsert(self.functions, func)
+  return func
+end
+
 function readers:protoloaded(msg)
   local address = addrtonum(msg.address)
   local created = msg.time
@@ -500,6 +553,8 @@ local function init(self)
   self.strings = {}
   self.protos = {}
   self.proto_lookup = {}
+  self.functions = {}
+  self.func_lookup = {}
 
   self.markers = {}
   -- Record id marker messages in to table 

@@ -120,6 +120,17 @@ module.messages = {
   },
 
   {
+    name = "obj_func",
+    fields = [[
+      address : GCRefPtr
+      proto_or_cfunc : ptr
+      nupvalues : u8
+      ffid : u8
+      upvalues: u64[nupvalues] @argtype(TValue *)
+    ]]
+  },
+
+  {
     name = "obj_proto",
     fields = [[
       address : GCRef
