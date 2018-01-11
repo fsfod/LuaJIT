@@ -47,6 +47,7 @@ LJ_STATIC_ASSERT(offsetof(UserBuf, p) == 0);
 
 #define usr2ctx(usrcontext)  ((jitlog_State *)(((char *)usrcontext) - offsetof(jitlog_State, user)))
 #define ctx2usr(context)  (&(context)->user)
+#define jitlog_isfiltered(context, evt) (((context)->user.logfilter & (evt)) != 0)
 
 #if LJ_HASJIT
 
@@ -64,7 +65,7 @@ static void jitlog_exit(jitlog_State *context, VMEventData_TExit *exitState)
     context->traceexit = 0;
   }
 
-  if (!exitState) {
+  if (!exitState || jitlog_isfiltered(context, LOGFILTER_TRACE_EXITS)) {
     return;
   }
 
@@ -116,6 +117,10 @@ static gc_info_Args build_gcinfo(jitlog_State* context) {
 
 static void jitlog_gcstate(jitlog_State* context, int newstate)
 {
+  if (jitlog_isfiltered(context, LOGFILTER_GC_STATE)) {
+    return;
+  }
+
   global_State* g = context->g;
   gc_info_Args gcinfo = build_gcinfo(context);
   uint64_t steptime = stop_getticks() - context->gcstart;
@@ -146,6 +151,9 @@ enum StateKind{
 
 static void jitlog_gcatomic_stage(jitlog_State *context, int atomicstage)
 {
+  if (jitlog_isfiltered(context, LOGFILTER_GC_STATE)) {
+    return;
+  }
   log_statechange(&context->ub, STATEKIND_GC_ATOMIC, atomicstage, 0);
 }
 
@@ -453,6 +461,35 @@ LUA_API JITLogUserContext* jitlog_getjlctx(lua_State *L) {
 
 LUA_API int luaopen_jitlog(lua_State *L);
 
+static void update_gcevents(jitlog_State *context, int force_on)
+{
+  lua_State *L = &G2GG(context->g)->L;
+  JITLogUserContext* usr = ctx2usr(context);
+
+  /* Don't enable the gcevent if all the GC log filters have been set */
+  if (force_on || (usr->logfilter & LOGFILTER_GC) != LOGFILTER_GC) {
+    void *gceventud = NULL;
+    void* gcevent = luaJIT_gcevent_gethook(L, &gceventud);
+
+    /* Don't update the GC event hook if are already set for it */
+    if (gcevent == &jitlog_gcevent) {
+      lj_assertL(gceventud == context, "Unexpected GC event callback user value, expected JITLog state");
+      return;
+    }
+
+    /* If theres an existing gcevent hook save it away so we can forward events to it */
+    if (gcevent) {
+      usr->gcevent = gcevent;
+      usr->gcevent_ud = gceventud;
+    }
+    /* Only register for GC events after we've created our tables */
+    luaJIT_gcevent_sethook(L, jitlog_gcevent, context);
+  } else {
+    /* The Forward gc callback function pointer will be null most the time so this will disable GC events */
+    luaJIT_gcevent_sethook(L, usr->gcevent, usr->gcevent_ud);
+  }
+}
+
 /* This Function may be called from another thread while the Lua state is still
 ** running, so it must not try interact with the Lua state in anyway except for
 ** setting the VM event hook. The second stage of loading is done when we get 
@@ -484,6 +521,7 @@ static jitlog_State *jitlog_start_safe(lua_State *L, UserBuf *ub)
   write_header(context);
 
   luaJIT_vmevent_sethook(L, jitlog_callback, context);
+  update_gcevents(context, 0);
   return context;
 }
 
@@ -497,22 +535,8 @@ static void jitlog_loadstage2(lua_State *L, jitlog_State *context)
   context->loadstate = 2;
   lj_lib_prereg(L, "jitlog", luaopen_jitlog, tabref(L->env));
   
-  void *gceventud = NULL;
-  void* gcevent = luaJIT_gcevent_gethook(L, &gceventud);
-
-    JITLogUserContext* usr = ctx2usr(context);
-    /* If theres an existing gcevent hook save it away so we can forward events to it */
-    if (gcevent) {
-      usr->gcevent = gcevent;
-      usr->gcevent_ud = gceventud;
-    }
-    /* Only register for GC events after we've created our tables */
-    luaJIT_gcevent_sethook(L, jitlog_gcevent, context);
+  update_gcevents(context, 0);
   
-
-  /* Only register for GC events after we've created our tables */
-  luaJIT_gcevent_sethook(L, jitlog_gcevent, context);
-
   context->loadstate = LoadState_Running;
 }
 

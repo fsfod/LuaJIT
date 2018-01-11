@@ -5,6 +5,13 @@
 #include "luajit.h"
 #include "lj_usrbuf.h"
 
+typedef enum JITLogFilter {
+  LOGFILTER_TRACE_EXITS = 0x1,
+  LOGFILTER_GC_STATE    = 0x2,
+
+  LOGFILTER_GC = LOGFILTER_GC_STATE,
+} JITLogFilter;
+
 typedef struct JITLogUserContext {
   void *userdata;
   /* Next vmevent handler to call in our VM Event handler */
@@ -13,6 +20,7 @@ typedef struct JITLogUserContext {
   /* Next GC event handler to call in our GC Event handler */
   luaJIT_vmevent_callback gcevent;
   void *gcevent_ud;
+  JITLogFilter logfilter;
 } JITLogUserContext;
 
 typedef enum JITLogMode {
