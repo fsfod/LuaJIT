@@ -31,6 +31,7 @@ LJ_STATIC_ASSERT(offsetof(UserBuf, p) == 0);
 
 #define usr2ctx(usrcontext)  ((jitlog_State *)(((char *)usrcontext) - offsetof(jitlog_State, user)))
 #define ctx2usr(context)  (&(context)->user)
+#define jitlog_isfiltered(context, evt) (((context)->user.logfilter & (evt)) != 0)
 
 static char* strlist_concat(const char *const *list, int limit, MSize *retsize)
 {
@@ -73,6 +74,9 @@ static const uint32_t large_exitnum = 1 << 9;
 static void jitlog_exit(jitlog_State *context, VMEventData_TExit *exitState)
 {
   jit_State *J = G2J(context->g);
+  if (jitlog_isfiltered(context, LOGFILTER_TRACE_EXITS)) {
+    return;
+  }
   /* Use a more the compact message if the trace Id is smaller than 16k and the exit smaller than 
   ** 512 which will fit in the spare 24 bits of a message header.
   */
@@ -94,6 +98,9 @@ static void jitlog_traceflush(jitlog_State *context, FlushReason reason)
 static void jitlog_gcstate(jitlog_State *context, int newstate)
 {
   global_State *g = context->g;
+  if (jitlog_isfiltered(context, LOGFILTER_GC_STATE)) {
+    return;
+  }
   log_gcstate(&context->ub, newstate, g->gc.state, g->gc.total, g->strnum);
 }
 
