@@ -35,6 +35,7 @@ LJ_STATIC_ASSERT(offsetof(UserBuf, p) == 0);
 
 #define usr2ctx(usrcontext)  ((jitlog_State *)(((char *)usrcontext) - offsetof(jitlog_State, user)))
 #define ctx2usr(context)  (&(context)->user)
+#define jitlog_isfiltered(context, evt) (((context)->user.logfilter & (evt)) != 0)
 
 static char* strlist_concat(const char *const *list, int limit, MSize *retsize)
 {
@@ -92,7 +93,7 @@ static void jitlog_exit(jitlog_State *context, VMEventData_TExit *exitState)
     context->traceexit = 0;
   }
 
-  if (!exitState) {
+  if (!exitState || jitlog_isfiltered(context, LOGFILTER_TRACE_EXITS)) {
     return;
   }
 
@@ -132,6 +133,9 @@ static void jitlog_traceflush(jitlog_State *context, FlushReason reason)
 static void jitlog_gcstate(jitlog_State *context, int newstate)
 {
   global_State *g = context->g;
+  if (jitlog_isfiltered(context, LOGFILTER_GC_STATE)) {
+    return;
+  }
   log_gcstate(&context->ub, newstate, g->gc.state, g->gc.total, g->strnum);
 }
 
@@ -143,6 +147,9 @@ enum StateKind{
 
 static void jitlog_gcatomic_stage(jitlog_State *context, int atomicstage)
 {
+  if (jitlog_isfiltered(context, LOGFILTER_GC_STATE)) {
+    return;
+  }
   log_statechange(&context->ub, STATEKIND_GC_ATOMIC, atomicstage, 0);
 }
 

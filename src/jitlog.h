@@ -4,8 +4,14 @@
 #include "lua.h"
 #include "lj_usrbuf.h"
 
+typedef enum JITLogFilter {
+  LOGFILTER_TRACE_EXITS = 0x1,
+  LOGFILTER_GC_STATE    = 0x2,
+} JITLogFilter;
+
 typedef struct JITLogUserContext {
   void *userdata;
+  JITLogFilter logfilter;
 } JITLogUserContext;
 
 typedef enum JITLogMode {
