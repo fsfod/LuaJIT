@@ -183,6 +183,7 @@
   _(LOOP,	rbase,	___,	jump,	___) \
   _(ILOOP,	rbase,	___,	jump,	___) \
   _(JLOOP,	rbase,	___,	lit,	___) \
+  _(LOOPHC,	___,	___,	lit,	___) \
   \
   _(JMP,	rbase,	___,	jump,	___) \
   \

@@ -5249,6 +5249,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     | // Fall through. Assumes BC_ILOOP follows and ins_A is a no-op.
     break;
 
+  case BC_LOOPHC:
   case BC_ILOOP:
     |  ins_A	// RA = base, RD = target (loop extent)
     |  ins_next

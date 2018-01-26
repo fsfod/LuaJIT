@@ -2351,14 +2351,25 @@ static void parse_break(LexState *ls)
   gola_new(ls, NAME_BREAK, VSTACK_GOTO, bcemit_jmp(ls->fs));
 }
 
+static void emit_loophotcount(FuncState *fs)
+{
+#if LJ_HASJIT
+  bcemit_AD(fs, BC_LOOPHC, 0, L2J(fs->L)->param[JIT_P_hotloop] - 1);
+#else
+  bcemit_AD(fs, BC_LOOPHC, 0, 0);
+#endif
+}
+
 /* Parse 'goto' statement. */
 static void parse_goto(LexState *ls)
 {
   FuncState *fs = ls->fs;
   GCstr *name = lex_str(ls);
   VarInfo *vl = gola_findlabel(ls, name);
-  if (vl)  /* Treat backwards goto within same scope like a loop. */
+  if (vl) { /* Treat backwards goto within same scope like a loop. */
     bcemit_AJ(fs, BC_LOOP, vl->slot, -1);  /* No BC range check. */
+    emit_loophotcount(fs);
+  }
   fs->bl->flags |= FSCOPE_GOLA;
   gola_new(ls, name, VSTACK_GOTO, bcemit_jmp(fs));
 }
@@ -2419,6 +2430,7 @@ static void parse_while(LexState *ls, BCLine line)
   fscope_begin(fs, &bl, FSCOPE_LOOP);
   lex_check(ls, TK_do);
   loop = bcemit_AD(fs, BC_LOOP, fs->nactvar, 0);
+  emit_loophotcount(fs);
   parse_block(ls);
   jmp_patch(fs, bcemit_jmp(fs), start);
   lex_match(ls, TK_end, TK_while, line);
@@ -2438,6 +2450,7 @@ static void parse_repeat(LexState *ls, BCLine line)
   fscope_begin(fs, &bl2, 0);  /* Inner scope. */
   lj_lex_next(ls);  /* Skip 'repeat'. */
   bcemit_AD(fs, BC_LOOP, fs->nactvar, 0);
+  emit_loophotcount(fs);
   parse_chunk(ls);
   lex_match(ls, TK_until, TK_repeat, line);
   condexit = expr_cond(ls);  /* Parse condition (still inside inner scope). */
@@ -2487,9 +2500,10 @@ static void parse_for_num(LexState *ls, GCstr *varname, BCLine line)
   fscope_end(fs);
   /* Perform loop inversion. Loop control instructions are at the end. */
   loopend = bcemit_AJ(fs, BC_FORL, base, NO_JMP);
+  emit_loophotcount(fs);
   fs->bcbase[loopend].line = line;  /* Fix line for control ins. */
   jmp_patchins(fs, loopend, loop+1);
-  jmp_patchins(fs, loop, fs->pc);
+  jmp_patchins(fs, loop, fs->pc-1);
 }
 
 /* Try to predict whether the iterator is next() and specialize the bytecode.
@@ -2561,6 +2575,8 @@ static void parse_for_iter(LexState *ls, GCstr *indexname)
   jmp_patchins(fs, loop, fs->pc);
   bcemit_ABC(fs, isnext ? BC_ITERN : BC_ITERC, base, nvars-3+1, 2+1);
   loopend = bcemit_AJ(fs, BC_ITERL, base, NO_JMP);
+  emit_loophotcount(fs);
+
   fs->bcbase[loopend-1].line = line;  /* Fix line for control ins. */
   fs->bcbase[loopend].line = line;
   jmp_patchins(fs, loopend, loop+1);

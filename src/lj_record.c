@@ -2415,6 +2415,9 @@ void lj_record_ins(jit_State *J)
     lj_trace_err(J, LJ_TRERR_BLACKL);
     break;
 
+  case BC_LOOPHC:
+    break;
+
   case BC_JMP:
     if (ra < J->maxslot)
       J->maxslot = ra;  /* Shrink used slots. */
