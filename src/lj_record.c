@@ -1640,6 +1640,28 @@ noconstify:
   }
 }
 
+/* Record function Creation. */
+static TRef rec_fnew(jit_State *J, BCReg protovar, BCReg dest)
+{
+  TRef protoref = J->base[protovar];
+  GCproto *pt = protoV(J->L->base + protovar);
+  MSize i, nuv = pt->sizeuv;
+  int immuvs = 1;
+  lua_assert(tref_type(protoref) == IRT_PROTO);
+  
+  for (i = 0; i < nuv; i++) {
+    int32_t v = proto_uv(pt)[i];
+    if (!((v / PROTO_UV_IMMUTABLE) & 1)) {
+      immuvs = 0;
+      break;
+    }
+  }
+  if (immuvs) {
+  }
+ // lj_func_newL_jit()
+  return emitir(IRT(IR_FNEW, IRT_FUNC), protoref, TREF_NIL);
+}
+
 /* -- Record calls to Lua functions --------------------------------------- */
 
 /* Check unroll limits for calls. */
@@ -2285,6 +2307,10 @@ void lj_record_ins(jit_State *J)
   case BC_USETV: case BC_USETS: case BC_USETN: case BC_USETP:
     rec_upvalue(J, ra, rc);
     break;
+  case BC_FNEW:
+    ra = rec_fnew(J, rc, ra);
+    break;
+    
 
   /* -- Table ops --------------------------------------------------------- */
 
@@ -2449,7 +2475,6 @@ void lj_record_ins(jit_State *J)
   case BC_ITERN:
   case BC_ISNEXT:
   case BC_UCLO:
-  case BC_FNEW:
     setintV(&J->errinfo, (int32_t)op);
     lj_trace_err_info(J, LJ_TRERR_NYIBC);
     break;

@@ -1066,6 +1066,17 @@ static void asm_tdup(ASMState *as, IRIns *ir)
   asm_gencall(as, ci, args);
 }
 
+static void asm_fnew(ASMState *as, IRIns *ir)
+{
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_func_newL_jit];
+  IRRef args[2];
+  args[0] = ASMREF_L;     /* lua_State *L    */
+  args[1] = ir->op1;  /* const GCProto *pt */
+  as->gcsteps++;
+  asm_setupresult(as, ir, ci);  /* GCfunc * */
+  asm_gencall(as, ci, args);
+}
+
 static void asm_gc_check(ASMState *as);
 
 /* Explicit GC step. */
@@ -1705,6 +1716,7 @@ static void asm_ir(ASMState *as, IRIns *ir)
   case IR_TNEW: asm_tnew(as, ir); break;
   case IR_TDUP: asm_tdup(as, ir); break;
   case IR_CNEW: case IR_CNEWI: asm_cnew(as, ir); break;
+  case IR_FNEW: asm_fnew(as, ir); break;
 
   /* Buffer operations. */
   case IR_BUFHDR: asm_bufhdr(as, ir); break;

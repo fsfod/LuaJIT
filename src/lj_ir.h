@@ -119,6 +119,7 @@
   _(XSNEW,	A , ref, ref) \
   _(TNEW,	AW, lit, lit) \
   _(TDUP,	AW, ref, ___) \
+  _(FNEW,	AW, ref, ref) \
   _(CNEW,	AW, ref, ref) \
   _(CNEWI,	NW, ref, ref)  /* CSE is ok, not marked as A. */ \
   \
