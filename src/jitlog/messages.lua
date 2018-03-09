@@ -252,6 +252,16 @@ local msgs = {
     "slotcount :  u32",
     "slots : u64[slotcount]",
   },
+
+  {
+    name = "gcsnapshot",
+    "time : timestamp",
+    "label: string",
+    "objcount :  u32",
+    "objs : u64[objcount]",
+    "objmemsz :  u64",
+    "objmem : u8[objmemsz]",
+  },
 }
 
 local structs = {

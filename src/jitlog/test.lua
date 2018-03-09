@@ -609,6 +609,56 @@ function tests.stacksnapshot()
 
 end
 
+local function sumtab(t)
+  local total = 0
+  for _, v in pairs(t) do
+    total = total + v
+  end
+  return total
+end
+
+local function getobjaddress(obj)
+  if type(obj) == "table" then
+    return tonumber(string.sub(tostring(obj), #"table: " + 1))
+  end
+end
+
+function tests.gcsnapshot()
+  jitlog.start()
+  jitlog.write_gcsnapshot("start", true)
+  local t = table.new(8192, 0)
+  jitlog.write_gcsnapshot("table allocated", true)
+  local result = parselog(jitlog.savetostring())
+  assert(#result.gcsnapshots == 2)
+  local snap1 = result.gcsnapshots[1]
+  local snap2 = result.gcsnapshots[2]
+  assert(snap1.label == "start")
+  assert(snap2.label == "table allocated")
+  assert(snap1.time < snap2.time)
+  assert(snap2.objcount-snap1.objcount == 1)
+  assert(snap2.objcount-snap1.objcount == 1)
+  assert(snap2.objmemsz > snap1.objmemsz)
+  
+  -- Check we find objects by address
+  local taddress = getobjaddress(t)
+  assert(snap1:findobj(taddress) == nil)
+  assert(snap2:findobj(taddress) >= 0)
+  local tests_addr = getobjaddress(tests)
+  assert(snap1:findobj(tests_addr) > 0)
+  assert(snap2:findobj(tests_addr) > 0)
+  
+  local stats1 = snap1:getstats()
+  local stats2 = snap2:getstats()
+  assert(stats2.counts["table"] == stats1.counts["table"]+1)
+  assert(snap1.objcount < snap2.objcount)
+  assert(sumtab(stats1.counts) == snap1.objcount)
+  assert(sumtab(stats2.counts) == snap2.objcount)
+  -- Also includes the GG state at the end
+  assert(snap1.objmemsz < snap2.objmemsz)
+  assert(sumtab(stats1.memtotals) < snap1.objmemsz)
+  assert(sumtab(stats2.memtotals) < snap2.objmemsz)
+end
+
 local failed = false
 
 pcall(jitlog.shutdown)
