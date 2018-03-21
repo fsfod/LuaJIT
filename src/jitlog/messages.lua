@@ -56,8 +56,24 @@ local msgs = {
     name = "stringmarker",
     "time : timestamp",
     "flags : 16",
+    "jited : bool",
     "label : string",
     use_msgsize = "label",
+  },
+  
+  {
+    name = "marker",
+    "time : timestamp",
+    "jited : bool",
+    "flags : 7",
+    "id : 16",
+  },
+
+  {
+    name = "smallmarker",
+    "jited : bool",
+    "flags : 7",
+    "id : 16",
   },
 
   {

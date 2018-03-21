@@ -240,6 +240,27 @@ function base_actions:stringmarker(msg)
   return marker
 end
 
+function base_actions:smallmarker(msg)
+  local id = msg:get_id()
+  local flags = msg:get_flags()
+  local marker = {
+    eventid = self.eventid,
+    id = id,
+    flags = flags,
+    type = "small"
+  }
+  tinsert(self.markers, marker)
+  self:log_msg("smallmarker", "SmallMarker: %s %s", id, flags)
+  return marker
+end
+
+function base_actions:marker(msg)
+  local id = msg:get_id()
+  local flags = msg:get_flags()
+  self:log_msg("marker", "Marker: id: %d, flags: %d", id, flags)
+  return id, msg.time, flags
+end
+
 function base_actions:enumdef(msg)
   local name = msg:get_name()
   local names = msg:get_valuenames()

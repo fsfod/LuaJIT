@@ -210,6 +210,27 @@ function tests.stringmarker()
   assert(result.markers[2].flags == 0xbeef)
 end
 
+function tests.smallmarker()
+  jitlog.start()
+  writemarker(0xff00)
+  for i=1, 200 do
+    writemarker(i, 1)
+    writemarker(0xbeef, 7)
+  end
+  
+  local result = parselog(jitlog.savetostring())
+  assert(#result.markers >= 201, #result.markers)
+  assert(result.msgcounts.smallmarker == 401, result.msgcounts.smallmarker)
+  assert(not result.markers[1].label)
+  assert(not result.markers[2].label)
+  assert(result.markers[1].eventid < result.markers[2].eventid)
+  assert(result.markers[1].id == 0xff00, result.markers[1].id)
+  for i=1, 200 do
+    print(result.markers[i+1].id,  i)
+    assert(result.markers[i+1].id == i)
+  end
+end
+
 if hasjit then
 
 function tests.tracexits()
@@ -624,6 +645,7 @@ for name, test in pairs(tests) do
 end
 
 if failed then
+  io.stdin:read()
   -- Signal that we failed to travis
   os.exit(1)
 end

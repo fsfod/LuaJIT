@@ -859,6 +859,29 @@ static void write_header(jitlog_State *context)
   write_enum(context, "irfields", irfield_names);
 }
 
+const uint32_t smallidsz = 20;
+
+static void writemarker(jitlog_State *context, uint32_t id, uint32_t flags)
+{
+  int jited = context->g->vmstate > 0;
+  /* TODO: something in the upper flags to set this */
+  if (1) {
+    lua_assert(id < (uint32_t)((1 << smallidsz)-1) && flags < 16);
+    log_smallmarker(&context->ub, jited, flags, id);
+  } else {
+    log_marker(&context->ub, jited, flags, id);
+  }
+}
+
+void lj_writemarker(lua_State *L, uint32_t id, uint32_t flags)
+{
+  jitlog_State *context = (jitlog_State *)(G(L)->vmevent_data);
+  if (context == NULL) {
+    return;
+  }
+  writemarker(context, id, flags);
+}
+
 static int jitlog_isrunning(lua_State *L)
 {
   void* current_context = NULL;
@@ -1049,7 +1072,8 @@ LUA_API int jitlog_setsink_mmap(JITLogUserContext *usrcontext, const char *path,
 LUA_API void jitlog_writemarker(JITLogUserContext *usrcontext, const char *label, int flags)
 {
   jitlog_State *context = usr2ctx(usrcontext);
-  log_stringmarker(&context->ub, flags, label);
+  int jited = context->g->vmstate > 0;
+  log_stringmarker(&context->ub, flags, jited, label);
   context->events_written |= JITLOGEVENT_MARKER;
 }
 
@@ -1239,6 +1263,12 @@ static int jlib_getmode(lua_State *L)
 
   setboolV(L->top-1, context->mode & mode);
   return 1;
+}
+
+void lj_write_stringmarker(jitlog_State *context, GCstr *label, int flags)
+{
+  lua_assert(label != NULL);
+  jitlog_writemarker(ctx2usr(context), strdata(label), flags);
 }
 
 static int jlib_addmarker(lua_State *L)

@@ -460,6 +460,16 @@ LJLIB_CF(collectgarbage)
   return 1;
 }
 
+void lj_writemarker(lua_State *L, uint32_t id, uint32_t flags);
+
+LJLIB_CF(writemarker)
+{
+  int32_t id = lj_lib_checkint(L, 1);
+  int32_t flags = lj_lib_optint(L, 2, 0);
+  lj_writemarker(L, id, flags);
+  return 0;
+}
+
 /* -- Base library: miscellaneous functions ------------------------------- */
 
 LJLIB_PUSH(top-2)  /* Upvalue holds weak table. */
