@@ -1192,6 +1192,16 @@ static void LJ_FASTCALL recff_debug_getmetatable(jit_State *J, RecordFFData *rd)
   J->base[0] = mt ? mtref : TREF_NIL;
 }
 
+static void LJ_FASTCALL recff_writemarker(jit_State *J, RecordFFData *rd)
+{
+  TRef tr = J->base[0];
+  TRef flags = J->base[1];
+  if (!tref_isinteger(tr) || (!tref_isnil(flags) && (!tref_isinteger(flags) || !tref_isk(flags)))) {
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
+  }
+  emitir(IRT(IR_JLMARK, IRT_NIL), tr, !tref_isnil(flags) ? (numberVint(&rd->argv[1]) & 15) : 0);
+  J->needsnap = 1;
+}
 /* -- Record calls to fast functions -------------------------------------- */
 
 #include "lj_recdef.h"

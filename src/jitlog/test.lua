@@ -225,9 +225,17 @@ function tests.smallmarker()
   assert(not result.markers[2].label)
   assert(result.markers[1].eventid < result.markers[2].eventid)
   assert(result.markers[1].id == 0xff00, result.markers[1].id)
-  for i=1, 200 do
-    print(result.markers[i+1].id,  i)
-    assert(result.markers[i+1].id == i)
+
+  -- Check the markers are still writen correctlyt in JIT'ed code
+  local currid = 1
+  local markers = result.markers 
+  for i=1, 400,2 do
+    print(markers[i+1].id, markers[i+1].flags )
+    assert(markers[i+1].id == currid, markers[i+1].id )
+    assert(markers[i+1].flags == 1, markers[i+1].flags)
+    assert(markers[i+2].id == 0xbeef, markers[i+2].id)
+    assert(markers[i+2].flags == 7, markers[i+2].flags)
+    currid = currid + 1
   end
 end
 

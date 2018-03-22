@@ -462,7 +462,7 @@ LJLIB_CF(collectgarbage)
 
 void lj_writemarker(lua_State *L, uint32_t id, uint32_t flags);
 
-LJLIB_CF(writemarker)
+LJLIB_CF(writemarker)		LJLIB_REC(.)
 {
   int32_t id = lj_lib_checkint(L, 1);
   int32_t flags = lj_lib_optint(L, 2, 0);
