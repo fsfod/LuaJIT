@@ -2674,6 +2674,146 @@ static void asm_prof(ASMState *as, IRIns *ir)
   emit_rma(as, XO_GROUP3b, XOg_TEST, &J2G(as->J)->hookmask);
 }
 
+const int minbuffspace = 127;
+
+static void emit_jlog_buffcheck(ASMState *as, Reg rbuff, Reg rend, int mode)
+{
+  char* eventbuff = (char *)J2G(as->J)->vmevent_data;
+
+  /* Check that theres still enough space left in the buffer */
+  if (mode == 0) {
+    asm_guardcc(as, CC_LE);
+  } else if (mode == 1) {
+    emit_jcc(as, CC_LE, exitstub_addr(as->J, as->T->nsnap-1));
+  }else {
+    emit_call(as, lj_jitlog_checkbuffer);
+  }
+
+  emit_gmrmi(as, XG_ARITHi(XOg_CMP), rend, minbuffspace);
+  emit_rr(as, XO_ARITH(XOg_SUB), rend, rbuff);
+
+  /*  Load the buffer end */
+  emit_rma(as, XO_MOV, rend, eventbuff + offsetof(SBuf, e));
+}
+
+const int idbitpos = 16;
+
+#define MSGFLAG_TIMESTAMP (1 << 29)
+#define MSGFLAG_DYNID (1 << 30)
+#define MSGFLAG_TRACETAIL (1 << 28)
+
+
+static void emit_marker(ASMState *as, RegSet allow, uint32_t id, int flags)
+{
+  char* eventbuff = (char *)J2G(as->J)->vmevent_data;
+  Reg rbuff, rend;
+  int32_t header = (flags & 15) << 8;
+  int msgtype = 0, needts = 0, msgsize;
+
+  if (MSGFLAG_TIMESTAMP & flags) {
+    needts = 1;
+    msgtype = MSGTYPE_marker;
+    msgsize = sizeof(MSG_marker);
+  } else {
+    msgtype = MSGTYPE_smallmarker;
+    msgsize = 4;
+  }
+  header |= msgtype;
+
+  if (allow != RSET_EMPTY) {
+    if (needts) {
+      ra_evict(as, RID2RSET(RID_ECX)|RID2RSET(RID_EDX));
+      rbuff = ra_scratch(as, allow & ~(RID2RSET(RID_EAX)|RID2RSET(RID_EDX)));
+    } else {
+      rbuff = ra_scratch(as, allow);
+    }
+    rset_clear(allow, rbuff);
+    rend = ra_scratch(as, rset_exclude(allow, RID_EBP));
+  } else {
+      emit_spsub(as, -((int)sizeof(intptr_t) * 4));
+      /* Restore spilled registers */
+      emit_rmro(as, XO_MOV, RID_EDX|REX_64, RID_ESP, 0);
+      emit_rmro(as, XO_MOV, RID_ECX|REX_64, RID_ESP, sizeof(intptr_t));
+      if (needts) {
+        emit_rmro(as, XO_MOV, RID_EAX|REX_64, RID_ESP, sizeof(intptr_t) * 2);
+      }
+      rbuff = RID_ECX;
+      rend = RID_EDX;
+  }
+
+  /* Check that theres still enough space left in the buffer */
+  emit_jlog_buffcheck(as, rbuff, rend, (flags & MSGFLAG_TRACETAIL) ? 1 : 0);
+
+  checkmclim(as);
+
+  /*  Store the new buffer position pointer */
+  emit_rma(as, XO_MOVto, rbuff, eventbuff);
+  emit_addptr(as, rbuff, msgsize);
+
+  if (MSGFLAG_DYNID & flags) {
+    emit_rmro(as, XO_MOVto, rend, rbuff, 0);
+    /* Create combined message header and id */
+    emit_gri(as, XG_ARITHi(XOg_OR), rend, header);
+    emit_shifti(as, XOg_SHL, rend, idbitpos);
+    emit_rr(as, XO_MOV, rend, (Reg)id);
+  } else {
+    /*  Store the msg header to buffer */
+    emit_movmroi(as, rbuff, 0, header | (id << idbitpos));
+  }
+
+  checkmclim(as);
+
+  if (needts) {
+    emit_rmro(as, XO_MOVto, RID_EDX, rbuff, 8);
+    emit_rmro(as, XO_MOVto, RID_EAX, rbuff, 4);
+    /*  Load buffer position pointer */
+    emit_rma(as, XO_MOV, rbuff, eventbuff);
+    /* Write a time stamp first so we can reuse the registers it used */
+    ((uint16_t*)(as->mcp))[-1] = XI_RDTSC;
+    as->mcp -= 2;
+  } else {
+    /*  Load buffer position pointer */
+    emit_rma(as, XO_MOV, rbuff, eventbuff);
+  }
+
+  if (allow == RSET_EMPTY) {
+      /* Spill the registers we need since none are free */
+      emit_rmro(as, XO_MOVto, RID_EDX|REX_64, RID_ESP, 0);
+      emit_rmro(as, XO_MOVto, RID_ECX|REX_64, RID_ESP, sizeof(intptr_t));
+      if (needts) {
+        emit_rmro(as, XO_MOVto, RID_EAX|REX_64, RID_ESP, sizeof(intptr_t) * 2);
+      }
+    emit_spsub(as, (int)sizeof(intptr_t) * 4);
+  }
+  checkmclim(as);
+}
+
+static void asm_jlog_marker(ASMState *as, IRIns *ir)
+{
+  char* eventbuff = (char *)J2G(as->J)->vmevent_data;
+  IRIns* ref = IR(ir->op1);
+  int32_t flags = (ir->op2 & 15) << 8;
+  uint32_t id;
+
+  if (ir->op1 == REF_NIL) {
+    /* The id embedded in the instruction as the literal */
+    id = ir->op2;
+    flags = 0;
+  } else if (irt_isinteger(ref->t)) {
+    if (irref_isk(ir->op1)) {
+      id = (ref->i << idbitpos);
+    } else {
+      id = ra_alloc1(as, ir->op1, RSET_GPR);
+      flags |= MSGFLAG_DYNID;
+    }
+  } else {
+    lua_assert(0);
+    lj_trace_err(as->J, LJ_TRERR_NYIIR);
+  }
+
+  emit_marker(as, RSET_GPR, id, flags);
+}
+
 /* -- Stack handling ------------------------------------------------------ */
 
 /* Check Lua stack size for overflow. Use exit handler as fallback. */

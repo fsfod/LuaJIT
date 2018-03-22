@@ -240,6 +240,7 @@ typedef enum {
   XI_FPATAN =	0xf3d9,
   XI_FSCALE =	0xfdd9,
   XI_FYL2X =	0xf1d9,
+  XI_RDTSC =	0x310f,
 
   /* VEX-encoded instructions. XV_* prefix. */
   XV_RORX =	XV_f20f3a(f0),

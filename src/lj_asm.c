@@ -29,6 +29,7 @@
 #include "lj_dispatch.h"
 #include "lj_vm.h"
 #include "lj_target.h"
+#include "lj_jitlog_def.h"
 
 #ifdef LUA_USE_ASSERT
 #include <stdio.h>
@@ -1620,6 +1621,7 @@ static void asm_ir(ASMState *as, IRIns *ir)
   case IR_HIOP: asm_hiop(as, ir); break;
   case IR_GCSTEP: asm_gcstep(as, ir); break;
   case IR_PROF: asm_prof(as, ir); break;
+  case IR_JLMARK: asm_jlog_marker(as, ir); break;
 
   /* Guarded assertions. */
   case IR_LT: case IR_GE: case IR_LE: case IR_GT:

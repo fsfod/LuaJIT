@@ -145,6 +145,7 @@
   _(CALLS,	S , ref, lit) \
   _(CALLXS,	S , ref, ref) \
   _(CARG,	N , ref, ref) \
+  _(JLMARK,	S , ref, lit) \
   \
   /* End of list. */
 
