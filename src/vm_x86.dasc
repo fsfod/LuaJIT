@@ -345,11 +345,24 @@
 |  jmp aword [DISPATCH+OP*4]
 |.endif
 |.endmacro
+|.macro ins_NEXT2
+|  mov RC, [PC+4]
+|  movzx RA, RCH
+|  movzx OP, RCL
+|  add PC, 8
+|  shr RC, 16
+|.if X64
+|  jmp aword [DISPATCH+OP*8]
+|.else
+|  jmp aword [DISPATCH+OP*4]
+|.endif
+|.endmacro
 |
 |// Instruction footer.
 |.if 1
 |  // Replicated dispatch. Less unpredictable branches, but higher I-Cache use.
 |  .define ins_next, ins_NEXT
+|  .define ins_next2, ins_NEXT2
 |  .define ins_next_, ins_NEXT
 |.else
 |  // Common dispatch. Lower I-Cache use, only one (very) unpredictable branch.
@@ -357,6 +370,9 @@
 |  // Around 10%-30% slower on Core2, a lot more slower on P4.
 |  .macro ins_next
 |    jmp ->ins_next
+|  .endmacro
+|  .macro ins_next2
+|    jmp ->ins_next2
 |  .endmacro
 |  .macro ins_next_
 |  ->ins_next:
@@ -5223,20 +5239,25 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_AJ	// RA = base, RD = target
     |  lea RA, [BASE+RA*8]
     |  mov RB, [RA+4]
-    |  cmp RB, LJ_TNIL; je >1		// Stop if iterator returned nil.
+    |  cmp RB, LJ_TNIL; je >2		// Stop if iterator returned nil.
     if (op == BC_JITERL) {
       |  mov [RA-4], RB
       |  mov RB, [RA]
       |  mov [RA-8], RB
       |  jmp =>BC_JLOOP
+      |2:
+      |  ins_next2 // Skips over BC_LOOPHC
     } else {
       |  branchPC RD			// Otherwise save control var + branch.
       |  mov RD, [RA]
       |  mov [RA-4], RB
       |  mov [RA-8], RD
+      |1:
+      |  ins_next
+      |2:
+      |  add PC, 4  // Skip over BC_LOOPHC
+      |  jmp <1
     }
-    |1:
-    |  ins_next
     break;
 
   case BC_LOOP:
@@ -5248,10 +5269,11 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |.endif
     | // Fall through. Assumes BC_ILOOP follows and ins_A is a no-op.
     break;
-
-  case BC_LOOPHC:
   case BC_ILOOP:
     |  ins_A	// RA = base, RD = target (loop extent)
+    |  ins_next2
+    break;
+  case BC_LOOPHC:
     |  ins_next
     break;
 
