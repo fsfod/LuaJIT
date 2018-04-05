@@ -296,4 +296,16 @@ void lj_cdata_set(CTState *cts, CType *d, uint8_t *dp, TValue *o, CTInfo qual)
   lj_cconv_ct_tv(cts, d, dp, o, 0);
 }
 
+const void *lj_cdata_arg_topointer(lua_State *L, int narg)
+{
+  CTState *cts = ctype_cts(L);
+  TValue *o = L->base + narg-1;
+  void *p;
+  if (o >= L->top)
+    lj_err_arg(L, narg, LJ_ERR_NOVAL);
+
+  lj_cconv_ct_tv(cts, ctype_get(cts, CTID_P_CVOID), (uint8_t *)&p, o, CCF_ARG(narg));
+  return p;
+}
+
 #endif

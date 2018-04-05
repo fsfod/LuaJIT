@@ -918,6 +918,23 @@ LJLIB_CF(stringbuf_writesub)  LJLIB_REC(stringbuf_writerange)
   return 0;
 }
 
+const void *lj_cdata_arg_topointer(lua_State *L, int narg);
+
+LJLIB_CF(stringbuf_writemem)
+{
+  SBuf *sb = check_bufarg(L);
+  const void *mem = lj_cdata_arg_topointer(L, 2);
+  lua_Number len = lj_lib_checknum(L, 3);
+
+  if (len < 0 || len > LJ_MAX_MEM) {
+    luaL_argerror(L, 3, "bad memory length value");
+  }
+
+  lj_buf_putmem(sb, mem, len);
+  return 0;
+}
+
+
 LJLIB_CF(stringbuf_rep)  LJLIB_REC(string_rep 1)
 {
   return string_rep(L, 1);

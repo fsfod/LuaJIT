@@ -1,5 +1,6 @@
 package.path = package.path .. ";../src/?.lua"
 
+local ffi = require("ffi")
 local jit = require("jit")
 local jutil = require("jit.util")
 local vmdef = require("jit.vmdef")
@@ -864,6 +865,16 @@ function tests.fold_tmpbufstr()
   testjit("foo1234_5678", tmpstrtosbuf_fold, "foo", "1234", "5678")
   testjit("foo123_456", tmpstrtosbuf_nofold, "foo", "123", "456")
   asserteq(temp3,  "456_123")
+end
+
+function tests.writemem()
+  
+  local array = ffi.new("char[8]")
+  ffi.copy(array, "12345678", 8)
+  
+  buf:reset()
+  buf:writemem(array, 8)
+  asserteq(buf:tostring(),  "12345678")
 end
 
 tracker.start()
