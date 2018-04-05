@@ -868,13 +868,34 @@ function tests.fold_tmpbufstr()
 end
 
 function tests.writemem()
-  
   local array = ffi.new("char[8]")
   ffi.copy(array, "12345678", 8)
   
   buf:reset()
   buf:writemem(array, 8)
   asserteq(buf:tostring(),  "12345678")
+end
+
+local function test_ffiinter(cdata)
+  buf2:reset()
+  buf2:reserve(16)
+  buf2:setlength(8)
+  ffi.copy(buf2, "1234", 4)
+  ffi.copy(ffi.cast("char*", buf2)+4, cdata, 4)
+  
+  return (buf2:tostring())
+end
+
+function tests.fficast()
+  local array = ffi.new("char[8]")
+  buf2:reset()
+  buf2:reserve(16)
+  buf2:setlength(8)
+  ffi.copy(buf2, "12345678", 8)
+
+  local array = ffi.new("char[8]")
+  ffi.copy(array, "5678", 4)
+  testjit("12345678", test_ffiinter, array)
 end
 
 tracker.start()

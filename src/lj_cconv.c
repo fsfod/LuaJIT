@@ -13,6 +13,7 @@
 #include "lj_cdata.h"
 #include "lj_cconv.h"
 #include "lj_ccallback.h"
+#include "lj_buf.h"
 
 /* -- Conversion errors --------------------------------------------------- */
 
@@ -608,8 +609,12 @@ void lj_cconv_ct_tv(CTState *cts, CType *d,
   } else if (tvisudata(o)) {
     GCudata *ud = udataV(o);
     tmpptr = uddata(ud);
-    if (ud->udtype == UDTYPE_IO_FILE)
+    if (ud->udtype == UDTYPE_IO_FILE) {
       tmpptr = *(void **)tmpptr;
+    } else if (ud->udtype == UDTYPE_STRING_BUF) {
+      SBuf *sb = (SBuf *)tmpptr;
+      tmpptr = sbufB(sb);
+    }
   } else if (tvislightud(o)) {
     tmpptr = lightudV(o);
   } else if (tvisfunc(o)) {

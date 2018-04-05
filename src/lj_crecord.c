@@ -618,6 +618,13 @@ static TRef crec_ct_tv(jit_State *J, CType *d, TRef dp, TRef sp, cTValue *sval)
       TRef tr = emitir(IRT(IR_FLOAD, IRT_U8), sp, IRFL_UDATA_UDTYPE);
       emitir(IRTGI(IR_EQ), tr, lj_ir_kint(J, UDTYPE_IO_FILE));
       sp = emitir(IRT(IR_FLOAD, IRT_PTR), sp, IRFL_UDATA_FILE);
+    } else if (ud->udtype == UDTYPE_STRING_BUF) {
+      TRef buff, tr = emitir(IRT(IR_FLOAD, IRT_U8), sp, IRFL_UDATA_UDTYPE);
+      emitir(IRTGI(IR_EQ), tr, lj_ir_kint(J, UDTYPE_STRING_BUF));
+      /* Use the Base pointer of the buffer */
+      buff = emitir(IRT(IR_ADD, IRT_PTR), sp, lj_ir_kint(J, sizeof(GCudata)));
+      buff = emitir(IRT(IR_BUFHDR, IRT_PGC), buff, IRBUFHDR_STRBUF | IRBUFHDR_MODIFY);
+      sp = emitir(IRT(IR_FLOAD, IRT_PGC), buff, IRFL_SBUF_B);
     } else {
       sp = emitir(IRT(IR_ADD, IRT_PTR), sp, lj_ir_kintp(J, sizeof(GCudata)));
     }
