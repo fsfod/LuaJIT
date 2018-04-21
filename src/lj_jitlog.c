@@ -58,6 +58,12 @@ LJ_STATIC_ASSERT(offsetof(UserBuf, p) == 0);
 #define ctx2usr(context)  (&(context)->user)
 #define jitlog_isfiltered(context, evt) (((context)->user.logfilter & (evt)) != 0)
 
+void LJ_FASTCALL lj_jitlog_checkbuffer(lua_State *L)
+{
+  jitlog_State *context = (jitlog_State *)(G(L)->vmevent_data);
+  ubuf_more(&context->ub, 256);
+}
+
 static GCtab* create_pinnedtab(lua_State *L)
 {
   GCtab *t = lj_tab_new(L, 0, 0);

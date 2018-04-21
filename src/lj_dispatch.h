@@ -136,6 +136,8 @@ LJ_FUNCA void LJ_FASTCALL lj_dispatch_stitch(jit_State *J, const BCIns *pc);
 LJ_FUNCA void LJ_FASTCALL lj_dispatch_profile(lua_State *L, const BCIns *pc);
 #endif
 
+LJ_FUNCA void LJ_FASTCALL lj_jitlog_checkbuffer(lua_State *L);
+
 #if LJ_HASFFI && !defined(_BUILDVM_H)
 /* Save/restore errno and GetLastError() around hooks, exits and recording. */
 #include <errno.h>
