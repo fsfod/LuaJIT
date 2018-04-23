@@ -1744,6 +1744,9 @@ static void asm_head_root(ASMState *as)
 {
   int32_t spadj;
   asm_head_root_base(as);
+  if (J2G(as->J)->vmevent_data) {
+    emit_marker(as, RSET_EMPTY, as->J->cur.traceno, 1|MSGFLAG_TIMESTAMP);
+  }
   emit_setvmstate(as, (int32_t)as->T->traceno);
   spadj = asm_stack_adjust(as);
   as->T->spadjust = (uint16_t)spadj;
@@ -1909,6 +1912,10 @@ static void asm_head_side(ASMState *as)
     /* Continue with coalescing to fix up the broken cycle(s). */
   }
 
+  if (J2G(as->J)->vmevent_data) {
+    emit_marker(as, RSET_EMPTY, as->J->cur.traceno, 1|MSGFLAG_TIMESTAMP);
+  }
+
   /* Inherit top stack slot already checked by parent trace. */
   as->T->topslot = as->parent->topslot;
   if (as->topslot > as->T->topslot) {  /* Need to check for higher slot? */
@@ -1990,6 +1997,10 @@ static void asm_tail_link(ASMState *as)
 
   /* Sync the interpreter state with the on-trace state. */
   asm_stack_restore(as, snap);
+
+  if (J2G(as->J)->vmevent_data) {
+    emit_marker(as, RSET_EMPTY, as->J->cur.traceno, 2|MSGFLAG_TIMESTAMP|MSGFLAG_TRACETAIL);
+  }
 
   /* Root traces that add frames need to check the stack at the end. */
   if (!as->parent && gotframe)
