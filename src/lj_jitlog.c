@@ -21,6 +21,21 @@
 #include "jitlog.h"
 
 
+typedef struct jl_timer {
+  uint64_t start;
+  uint64_t time;
+  uint32_t count;
+} jl_timer;
+
+struct TimerArena;
+
+
+typedef struct TimerArena {
+  struct TimerArena *next;	/* Next area. */
+  size_t size;		/* Size of current area. */
+  jl_timer timers[10000];
+} TimerArena;
+
 typedef struct jitlog_State {
   UserBuf ub; /* Must be first so loggers can reference it just by casting the G(L)->vmevent_data pointer */
   JITLogUserContext user;
@@ -48,6 +63,9 @@ typedef struct jitlog_State {
   uint32_t traced_bc_capacity;
   uint64_t resetpoint;
   JITLogEventTypes events_written;
+  GCtab *perflabels;
+  TimerArena* timers;
+  TimerArena _timers;
 } jitlog_State;
 
 
