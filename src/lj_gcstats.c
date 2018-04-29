@@ -480,3 +480,74 @@ size_t gcobj_size(GCobj *o)
       return 0;
   }
 }
+
+static void gcstats_tracker_callback(GCAllocationStats *state, GCobj *o, uint32_t info, size_t size)
+{
+  int free = (info & 0x80) != 0;
+  int tid = info & 0x7f;
+
+  /* Check for the special type id used for table resizes */
+  if (tid == (1 + ~LJ_TUDATA)) {
+    GCtab *t = (GCtab *)o;
+    GCSize oldasize = (info >> 16);
+    int32_t hinfo = (int8_t)((info >> 8) & 0xff);
+    uint32_t oldhsize = hinfo != -1 ? 1 << hinfo : 0;
+    uint32_t hsize = t->hmask + 1;
+
+    if (hsize != oldhsize) {
+      if (hsize > oldhsize) {
+        state->stats[9].acount++;
+        state->stats[9].atotal += hsize - oldhsize;
+      } else {
+        state->stats[9].fcount++;
+        state->stats[9].ftotal += oldhsize - hsize;
+      }
+    }
+
+    if (t->asize != oldasize) {
+      if (t->asize > oldasize) {
+        state->stats[10].acount++;
+        state->stats[10].atotal += t->asize - oldasize;
+      } else {
+        state->stats[10].fcount++;
+        state->stats[10].ftotal += oldasize - t->asize;
+      }
+    }
+    return;
+  } else {
+    tid = typeconverter[tid];
+  }
+
+  if (!free) {
+    state->stats[tid].acount++;
+    state->stats[tid].atotal += (GCSize)size;
+  } else {
+    state->stats[tid].fcount++;
+    state->stats[tid].ftotal += (GCSize)size;
+  }
+}
+
+LUA_API GCAllocationStats *start_gcstats_tracker(lua_State *L)
+{
+  global_State *g = G(L);
+  GCAllocationStats *state = malloc(sizeof(GCAllocationStats));
+  memset(state, 0, sizeof(GCAllocationStats));
+  state->L = L;
+  g->objallocd = state;
+  g->objalloc_cb = (lua_ObjAlloc_cb)gcstats_tracker_callback;
+  return state;
+}
+
+LUA_API void stop_gcstats_tracker(GCAllocationStats *tracker)
+{
+  global_State *g;
+  if (tracker->L) {
+    g = G(tracker->L);
+    lua_assert(g->objalloc_cb == (lua_ObjAlloc_cb)gcstats_tracker_callback);
+    g->objalloc_cb = NULL;
+    g->objallocd = NULL;
+  }
+  free(tracker);
+}
+
+
