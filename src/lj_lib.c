@@ -105,6 +105,7 @@ void lj_lib_register(lua_State *L, const char *libname,
 	fn->c.f = ofn->c.f;  /* Copy handler from previous function. */
       else
 	fn->c.f = *cf++;  /* Get cf or handler from C function table. */
+      lj_mem_createcb(L, fn, sizeCfunc(nuv));
       if (len) {
 	/* NOBARRIER: See above for common barrier. */
 	setfuncV(L, lj_tab_setstr(L, tab, lj_str_new(L, name, len)), fn);

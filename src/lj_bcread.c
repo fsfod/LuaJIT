@@ -381,6 +381,7 @@ GCproto *lj_bcread_proto(LexState *ls)
     setmref(pt->uvinfo, NULL);
     setmref(pt->varinfo, NULL);
   }
+  lj_mem_createcb(ls->L, pt, sizept);
   return pt;
 }
 

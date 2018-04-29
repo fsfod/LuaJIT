@@ -46,6 +46,7 @@ GCcdata *lj_cdata_newv(lua_State *L, CTypeID id, CTSize sz, CTSize align)
   cd->marked |= 0x80;
   cd->gct = ~LJ_TCDATA;
   cd->ctypeid = id;
+  lj_mem_createcb(L, cd, extra + sz);
   return cd;
 }
 
@@ -78,8 +79,9 @@ void LJ_FASTCALL lj_cdata_free(global_State *g, GCcdata *cd)
     CTSize sz = ctype_hassize(ct->info) ? ct->size : CTSIZE_PTR;
     lua_assert(ctype_hassize(ct->info) || ctype_isfunc(ct->info) ||
 	       ctype_isextern(ct->info));
-    lj_mem_free(g, cd, sizeof(GCcdata) + sz);
+    lj_mem_freegco(g, cd, sizeof(GCcdata) + sz);
   } else {
+    lj_mem_freecb(g, cd, sizecdatav(cd));
     lj_mem_free(g, memcdatav(cd), sizecdatav(cd));
   }
 }
