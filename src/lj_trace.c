@@ -136,6 +136,7 @@ GCtrace * LJ_FASTCALL lj_trace_alloc(lua_State *L, GCtrace *T)
   T2->nsnap = T->nsnap;
   T2->nsnapmap = T->nsnapmap;
   memcpy(p, T->ir + T->nk, szins);
+  lj_mem_createcb(L, T2, sz);
   return T2;
 }
 
@@ -173,7 +174,7 @@ void LJ_FASTCALL lj_trace_free(global_State *g, GCtrace *T)
       J->freetrace = T->traceno;
     setgcrefnull(J->trace[T->traceno]);
   }
-  lj_mem_free(g, T,
+  lj_mem_freegco(g, T,
     ((sizeof(GCtrace)+7)&~7) + (T->nins-T->nk)*sizeof(IRIns) +
     T->nsnap*sizeof(SnapShot) + T->nsnapmap*sizeof(SnapEntry));
 }

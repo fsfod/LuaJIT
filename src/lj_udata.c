@@ -24,11 +24,12 @@ GCudata *lj_udata_new(lua_State *L, MSize sz, GCtab *env)
   /* Chain to userdata list (after main thread). */
   setgcrefr(ud->nextgc, mainthread(g)->nextgc);
   setgcref(mainthread(g)->nextgc, obj2gco(ud));
+  lj_mem_createcb(L, ud, sizeof(GCudata) + sz);
   return ud;
 }
 
 void LJ_FASTCALL lj_udata_free(global_State *g, GCudata *ud)
 {
-  lj_mem_free(g, ud, sizeudata(ud));
+  lj_mem_freegco(g, ud, sizeudata(ud));
 }
 
