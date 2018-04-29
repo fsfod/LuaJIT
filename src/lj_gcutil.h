@@ -11,12 +11,18 @@
 
 size_t gcobj_size(GCobj *o);
 void gcobj_tablestats(GCtab* t, GCStatsTable* result);
+int validatedump(int count, SnapshotObj* objects, char* objectmem, size_t mem_size);
 
 typedef struct LJList {
   MSize count;
   MSize capacity;
   void* list;
 } LJList;
+
+typedef struct ChunkHeader{
+    char id[4];
+    uint32_t length;
+} ChunkHeader;
 
 #define lj_list_init(L, l, c, t) \
     (l)->capacity = (c); \
