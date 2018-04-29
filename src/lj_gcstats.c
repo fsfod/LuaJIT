@@ -24,6 +24,7 @@
 
 #include "lj_gcutil.h"
 #include "lj_gcstats.h"
+#include <stdio.h>
 
 
 static void gcstats_walklist(global_State *g, GCobj *liststart, GCObjStat* stats_result);
@@ -229,7 +230,7 @@ LUA_API size_t gcsnapshot_getgcstats(GCSnapshot* snap, GCStats* gcstats)
 
   for (MSize i = 0; i < snap->count; i++) {
     size_t size = objects[i].typeandsize >> 4;
-    gcobj_type type = (gcobj_type)(objects[i].typeandsize & 15);
+    GCObjType type = (GCObjType)(objects[i].typeandsize & 15);
 
     stats[type].count++;
     stats[type].totalsize += size;
@@ -329,6 +330,73 @@ static uint32_t dump_strings(lua_State *L, LJList* list, UserBuf* buf)
   }
 
   return count;
+}
+
+LUA_API int gcsnapshot_validate(GCSnapshot* snapshot)
+{
+  return validatedump(snapshot->count, snapshot->objects, snapshot->gcmem, snapshot->gcmem_size);
+}
+
+int validatedump(int count, SnapshotObj* objects, char* objectmem, size_t mem_size) 
+{
+  char* position = objectmem;
+  size_t size;
+  GCobj* o;
+  GCObjType type;
+
+  for (int i = 0; i < count; i++) {
+    o = (GCobj*)position;
+    size = objects[i].typeandsize >> 4;
+    type = (GCObjType)(objects[i].typeandsize & 15);
+
+    //Check the type we have in the pointer array matchs the ones in the header of object we think our current position is meant tobe pointing at
+    if (o->gch.gct != ((~LJ_TSTR)+ type)) {
+      return -i;
+    }
+
+    position += size;
+    if ((size_t)(position - objectmem) > mem_size) {
+      return -i;
+    }
+  }
+
+  return 0;
+}
+
+size_t writeheader(FILE* f, const char* name, uint32_t size)
+{
+  ChunkHeader header = { 0 };
+  memcpy(&header.id, name, 4);
+  header.length = size;
+
+  return fwrite(&header, sizeof(header), 1, f);
+}
+
+size_t writeint(FILE* f, int32_t i)
+{
+  return fwrite(&i, 4, 1, f);
+}
+
+LUA_API void gcsnapshot_save(GCSnapshot* snapshot, FILE* f)
+{
+
+  //Save object array
+  writeheader(f, "GCOB", (snapshot->count*sizeof(SnapshotObj))+4);
+  writeint(f, snapshot->count);
+  fwrite(snapshot->objects, sizeof(SnapshotObj)*snapshot->count, 1, f);
+
+  //Save objects memory
+  writeheader(f, "OMEM", (uint32_t)snapshot->gcmem_size);
+  if (snapshot->gcmem_size != 0) {
+    fwrite(snapshot->gcmem, snapshot->gcmem_size, 1, f);
+  }
+}
+
+LUA_API void gcsnapshot_savetofile(GCSnapshot* snapshot, const char* path)
+{
+  FILE* f = fopen(path, "wb");
+  gcsnapshot_save(snapshot, f);
+  fclose(f);
 }
 
 void tablestats(GCtab* t, GCStatsTable* result)
