@@ -622,6 +622,8 @@ typedef struct global_State {
   MRef jit_base;	/* Current JIT code L->base or NULL. */
   MRef ctype_state;	/* Pointer to C type state. */
   GCRef gcroot[GCROOT_MAX];  /* GC roots. */
+  lua_ObjAlloc_cb objalloc_cb; /* Callback for allocation of GC object*/
+  void* objallocd;             /* GC object callback data */
 
   luaJIT_vmevent_callback vmevent_cb; /* User set VM event callback. */
   void *vmevent_data;                 /* VM event callback data. */
