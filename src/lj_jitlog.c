@@ -676,6 +676,72 @@ static void jitlog_protoloaded(jitlog_State *context, GCproto *pt)
   context->events_written |= JITLOGEVENT_PROTO_LOADED;
 }
 
+static void gcalloc_cb(jitlog_State *context, GCobj *o, uint32_t info, size_t size)
+{
+  int free = (info & 0x80) != 0;
+  int tid = info & 0x7f;
+  uint32_t type = 0;
+  uint32_t extra = 0;
+
+  if (tid == (1 + ~LJ_TUDATA)) {
+    GCtab *t = (GCtab *)o;
+    uint32_t ahsize = t->asize << 8;
+    ahsize |= t->hmask > 0 ? lj_fls(t->hmask+1) : 0;
+    log_gctab_resize(&context->ub, (info >> 8) & 0xff, info >> 16, o, ahsize);
+    return;
+  }
+
+  if (!free && 0) {
+    if (tid == ~LJ_TSTR) {
+      memorize_string(context, (GCstr *)o);
+      return;
+    } else if(tid == ~LJ_TFUNC) {
+      memorize_func(context, (GCfunc *)o);
+      return;
+    }
+  }
+  
+  switch (tid) {
+    case ~LJ_TSTR:
+      type = 0;
+      break;
+    case ~LJ_TUPVAL:
+      type = 1;
+      break;
+    case ~LJ_TTHREAD:
+      type = 2;
+      break;
+    case ~LJ_TPROTO:
+      type = 3;
+      break;
+    case ~LJ_TFUNC:
+      type = isluafunc(&o->fn) ? 4 : 5;
+      break;
+    case ~LJ_TTRACE:
+      type = 6;
+      break;
+    case ~LJ_TCDATA:
+      type = 7;
+      extra = ((GCcdata *)o)->ctypeid;
+      break;
+    case ~LJ_TTAB:
+      type = 8;
+      break;
+    case ~LJ_TUDATA:
+      type = 9;
+      break;
+    default:
+      lua_assert(0);
+      break;
+  }
+
+  if (size < (1 << 19) && extra == 0) {
+    log_gcobj(&context->ub, free, type, (uint32_t)size, o);
+  } else {
+    log_gcobj_large(&context->ub, free, type, extra, o, (uint32_t)size);
+  }
+}
+
 static void free_context(jitlog_State *context);
 
 static void jitlog_loadstage2(lua_State *L, jitlog_State *context);
@@ -877,8 +943,31 @@ static int jitlog_set_gcstats_enabled(jitlog_State *context, int enable)
     }
     context->gcstats = start_gcstats_tracker(L);
   } else { 
+    if (context->g->objalloc_cb == (lua_ObjAlloc_cb)&gcalloc_cb) {
+      /* we shouldn't have both callbacks enabled at the same time */
+      lua_assert(!context->gcstats);
+      return 0;
+    }
     stop_gcstats_tracker(context->gcstats);
     context->gcstats = NULL;
+  }
+  return 1;
+}
+
+static int jitlog_setobjalloclog(jitlog_State *context, int enable)
+{
+  if (enable) {
+    if (context->g->objalloc_cb != NULL) {
+      return context->g->objalloc_cb == (lua_ObjAlloc_cb)&gcalloc_cb;
+    }
+    context->g->objalloc_cb = (lua_ObjAlloc_cb)&gcalloc_cb;
+    context->g->objallocd = context;
+  } else {
+    if (context->g->objalloc_cb != (lua_ObjAlloc_cb)&gcalloc_cb) {
+      return 1;
+    }
+    context->g->objalloc_cb = NULL;
+    context->g->objallocd = NULL;
   }
   return 1;
 }
@@ -949,6 +1038,11 @@ LUA_API JITLogUserContext* jitlog_start(lua_State *L)
 static void clear_objalloc_callback(jitlog_State *context)
 {
   global_State *g = context->g;
+  if (g->objalloc_cb == (lua_ObjAlloc_cb)&gcalloc_cb) {
+    lua_assert(!context->gcstats);
+    g->objalloc_cb = NULL;
+    g->objallocd = NULL;
+  }
   if (context->gcstats) {
     stop_gcstats_tracker(context->gcstats);
     context->gcstats = NULL;
@@ -1388,6 +1482,15 @@ static int jlib_reset_gcstats(lua_State *L)
   return 0;
 }
 
+static int jlib_setobjalloclog(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  int enable = tvistruecond(lj_lib_checkany(L, 1));
+  int ret = jitlog_setobjalloclog(context, enable);
+  setboolV(L->base+1, ret);
+  return 1;
+}
+
 static const luaL_Reg jitlog_lib[] = {
   {"start", jlib_start},
   {"shutdown", jlib_shutdown},
@@ -1409,6 +1512,7 @@ static const luaL_Reg jitlog_lib[] = {
   {"setgcstats_enabled", jlib_setgcstats_enabled},
   {"write_gcstats", jlib_write_gcstats},
   {"reset_gcstats", jlib_reset_gcstats},
+  {"set_objalloc_logging", jlib_setobjalloclog},
   {NULL, NULL},
 };
 
