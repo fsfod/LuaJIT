@@ -19,6 +19,17 @@
      <ExpandedItem Condition="gcptr32 != 0">(GCobj*)gcptr32</ExpandedItem>
   </Expand>
 </Type>
+  
+<Type Name="SBuf">
+  <DisplayString>size: {((char*)p.ptr32) - (char*)b.ptr32} buff: {(char*)b.ptr32}</DisplayString>
+  <Expand>
+    <Item Name="size">((char*)p.ptr32) - (char*)b.ptr32</Item>
+    <Item Name="capacity">((char*)e.ptr32) - (char*)b.ptr32</Item>
+    <Item Name="buff">(char*)b.ptr32,s</Item>
+    <Item Name="pos">(char*)p.ptr32</Item>
+    <Item Name="end">(char*)e.ptr32</Item>
+  </Expand>
+</Type>
 
 <Type Name="GCobj">
   <DisplayString Condition="gch.gct == 4">{str}</DisplayString>
@@ -276,6 +287,16 @@
         <IndexListItems>
           <Size>nsnapmap</Size>
           <ValueNode>(int)(snapmap[$i] &gt;&gt; 24)</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
+    
+    <Synthetic Name="Snapshot Map raw">
+      <DisplayString>[size] = {nsnapmap,i}</DisplayString>
+      <Expand>
+        <IndexListItems>
+          <Size>nsnapmap</Size>
+          <ValueNode>snapmap[$i]</ValueNode>
         </IndexListItems>
       </Expand>
     </Synthetic>

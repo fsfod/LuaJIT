@@ -11,6 +11,17 @@
        <Item Name="raw">(char*)(this+1),s</Item>
     </Expand>
 </Type>
+
+<Type Name="SBuf">
+  <DisplayString>size: {((char*)p.ptr64) - (char*)b.ptr64} buff: {(char*)b.ptr64}</DisplayString>
+  <Expand>
+    <Item Name="size">((char*)p.ptr64) - (char*)b.ptr64</Item>
+    <Item Name="capacity">((char*)e.ptr64) - (char*)b.ptr64</Item>
+    <Item Name="buff">(char*)b.ptr64,s</Item>
+    <Item Name="pos">(char*)p.ptr64</Item>
+    <Item Name="end">(char*)e.ptr64</Item>
+  </Expand>
+</Type>
   
   <Type Name="GCRef">
   <DisplayString Condition="gcptr64 != 0">{(GCobj*)(gcptr64 &amp; 0x7FFFFFFFFFFF)}</DisplayString>
