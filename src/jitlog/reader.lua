@@ -976,6 +976,44 @@ function base_actions:stacksnapshot(msg)
   return stack
 end
 
+function base_actions:perf_counters(msg)
+  local counterdef = self.enums.counters
+  local counts_length = msg:get_counts_length()
+  local ids = msg.ids_length ~= 0 and msg:get_ids()
+  assert(counts_length <= #counterdef.names)
+  assert(msg.ids_length == 0 or msg.ids_length == counts_length)
+  
+  local counts = msg:get_counts()
+  for i=0, counts_length-1 do
+    local key
+    if ids then
+      key = counterdef[ids[i]]
+    else
+      key = counterdef[i]
+    end
+    self.counters[key] = (self.counters[key] or 0) + counts[i]
+  end
+end
+
+function base_actions:perf_timers(msg)
+  local timerdef = self.enums.timers
+  local times_length = msg:get_times_length()
+  local ids = msg.ids_length ~= 0 and msg:get_ids()
+  assert(times_length <= #timerdef.names)
+  assert(msg.ids_length == 0 or idcount == times_length)
+  
+  local times = msg:get_times()
+  for i=0, times_length-1 do
+    local key
+    if ids then
+      key = timerdef[ids[i]]
+    else
+      key = timerdef[i]
+    end
+    self.timers[key] = (self.timers[key] or 0) + times[i]
+  end
+end
+
 local logreader = {}
 
 function logreader:log(fmt, ...)
@@ -1314,6 +1352,8 @@ local function makereader(mixins)
     section_starts = {},
     section_counts = {},
     section_time = {},
+    counters = {},
+    timers = {},
     verbose = false,
     logfilter = {
       --header = true,
