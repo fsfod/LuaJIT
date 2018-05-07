@@ -747,6 +747,26 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
   }
 }
 
+void write_section(lua_State *L, int id, int isstart)
+{
+  SBuf *sb;
+  MSG_section *msg;
+  int jited = G(L)->vmstate > 0;
+  if (!G(L)->vmevent_data) {
+    return;
+  }
+
+  sb = (SBuf *)G(L)->vmevent_data;
+  msg = (MSG_section *)sbufP(sb);
+  msg->header = MSGTYPE_section;
+  msg->header |= (id << 8);
+  msg->header |= (jited << 30);
+  msg->header |= (isstart << 31);
+  msg->time = __rdtsc();
+  setsbufP(sb, sbufP(sb) + 12);
+  lj_buf_more(sb, 128);
+}
+
 #if LJ_TARGET_X86ORX64
 
 static int getcpumodel(char *model)
@@ -857,6 +877,7 @@ static void write_header(jitlog_State *context)
   write_enum(context, "irtypes", irt_names);
   write_enum(context, "ircalls", ircall_names);
   write_enum(context, "irfields", irfield_names);
+  write_enum(context, "sections", section_names);
 }
 
 static int jitlog_isrunning(lua_State *L)

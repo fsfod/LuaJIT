@@ -64,6 +64,12 @@ parser.namescans = {
     enumname = "CounterId",
     enumprefix = "Counter",
   },
+
+  section = {
+    patten = "SECTION_START%(([^%,)]+)",
+    enumname = "SectionId",
+    enumprefix = "Section",
+  },
 }
 
 parser.files_to_scan = {

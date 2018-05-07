@@ -64,6 +64,11 @@ extern uint32_t perf_counters[Counter_MAX+1];
 void perf_printcounters(lua_State *L);
 void perf_printtimers(lua_State *L);
 
+LJ_NOAPI void write_section(lua_State *L, int id, int isstart);
+
+#define SECTION_START(name) write_section(L, Section_##name, 1)
+#define SECTION_END(name) write_section(L, Section_##name, 0)
+
 #else
 
 #define TicksStart()
@@ -72,6 +77,9 @@ void perf_printtimers(lua_State *L);
 #define TIMER_START(name)
 #define TIMER_END(name)
 #define PERF_COUNTER(name)
+
+#define SECTION_START(name) 
+#define SECTION_END(name)
 
 #endif
 

@@ -53,6 +53,15 @@ local msgs = {
   },
 
   {
+    name = "section",
+    "time : timestamp",
+    "id : 22",
+    "isjited : bool",
+    "isstart : bool",
+    enumlist = "section",
+  },
+
+  {
     name = "stringmarker",
     "time : timestamp",
     "flags : 16",
