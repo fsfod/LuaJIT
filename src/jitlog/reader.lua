@@ -1069,6 +1069,50 @@ function base_actions:gcsnapshot(msg)
   return snap
 end
 
+ffi.cdef[[
+typedef struct AllocationStat {
+  uint32_t acount;
+  uint32_t fcount;
+  uint32_t atotal;
+  uint32_t ftotal;
+} AllocationStat;
+]]
+
+local objtype_stats = {
+"string",
+"upvalue",
+"thread",
+"proto",
+"function",
+"trace",
+"cdata",
+"table",
+"udata",
+"table_hash",
+"table_array",
+}
+
+function base_actions:gcstats(msg)
+  local allocation_stats = ffi.cast("AllocationStat*", msg:get_statsbuff())
+  local stats = {
+    time = msg.time,
+    eventid = self.eventid,
+  }
+  
+  for i, name in ipairs(objtype_stats) do
+    local n = i-1
+    local ostat = {
+      acount = allocation_stats[n].acount, 
+      fcount = allocation_stats[n].fcount,
+      atotal = allocation_stats[n].atotal, 
+      ftotal = allocation_stats[n].ftotal,
+    }
+    stats[name] = ostat
+  end
+  tinsert(self.gcstats, stats)
+  return stats
+end
+
 local logreader = {}
 
 function logreader:log(fmt, ...)
@@ -1402,6 +1446,7 @@ local function makereader(mixins)
     gccount = 0, -- number GC full cycles that have been seen in the log
     gcstatecount = 0, -- number times the gcstate changed
     gcsnapshots = {},
+    gcstats = {},
     enums = {},
     loaded_scripts = {},
     objlabels = {},
