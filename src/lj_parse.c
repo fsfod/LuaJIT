@@ -136,7 +136,7 @@ typedef struct FuncState {
   BCInsLine *bcbase;		/* Base of bytecode stack. */
   BCPos bclim;			/* Limit of bytecode stack. */
   MSize vbase;			/* Base of variable stack for this function. */
-  uint8_t flags;		/* Prototype flags. */
+  uint32_t flags;		/* Prototype flags. */
   uint8_t numparams;		/* Number of parameters. */
   uint8_t framesize;		/* Fixed frame size. */
   uint8_t nuv;			/* Number of upvalues */
@@ -1612,7 +1612,7 @@ static void fs_init(LexState *ls, FuncState *fs)
   fs->nactvar = 0;
   fs->nuv = 0;
   fs->bl = NULL;
-  fs->flags = 0;
+  fs->flags = PROTO_NO_TAILCALL;
   fs->framesize = 1;  /* Minimum frame size. */
   fs->kt = lj_tab_new(L, 0, 0);
   /* Anchor table of constants in stack to avoid being collected. */
@@ -2318,7 +2318,7 @@ static void parse_return(LexState *ls)
       if (e.k == VCALL) {  /* Check for tail call. */
 	BCIns *ip = bcptr(fs, &e);
 	/* It doesn't pay off to add BC_VARGT just for 'return ...'. */
-	if (bc_op(*ip) == BC_VARG) goto notailcall;
+	if ((fs->flags & PROTO_NO_TAILCALL) || bc_op(*ip) == BC_VARG) goto notailcall;
 	fs->pc--;
 	ins = BCINS_AD(bc_op(*ip)-BC_CALL+BC_CALLT, bc_a(*ip), bc_c(*ip));
       } else {  /* Can return the result from any register. */
@@ -2327,6 +2327,7 @@ static void parse_return(LexState *ls)
     } else {
       if (e.k == VCALL) {  /* Append all results from a call. */
       notailcall:
+        lua_assert(e.k == VCALL);
 	setbc_b(bcptr(fs, &e), 0);
 	ins = BCINS_AD(BC_RETM, fs->nactvar, e.u.s.aux - fs->nactvar);
       } else {

@@ -388,6 +388,7 @@ typedef struct GCproto {
 /* Only used during parsing. */
 #define PROTO_HAS_RETURN	0x20	/* Already emitted a return. */
 #define PROTO_FIXUP_RETURN	0x40	/* Need to fixup emitted returns. */
+#define PROTO_NO_TAILCALL   0x100
 /* Top bits used for counting created closures. */
 #define PROTO_CLCOUNT		0x20	/* Base of saturating 3 bit counter. */
 #define PROTO_CLC_BITS		3
