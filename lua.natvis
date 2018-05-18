@@ -357,7 +357,7 @@
       <Expand>
         <ArrayItems>
           <Size>sizetrace</Size>
-          <ValuePointer>(GCtrace**)trace</ValuePointer>
+          <ValuePointer>*(GCRef*)trace</ValuePointer>
         </ArrayItems>
       </Expand>
     </Synthetic>
