@@ -221,6 +221,27 @@ static int norm_gcstateid(int gcs)
   }
 }
 
+const char *getgcsname(int gcs)
+{
+  switch (gcs) {
+    case GCSpause:
+    return "GCSpause";
+    case GCSpropagate:
+    return "GCSpropagate";
+    case GCSatomic:
+    return "GCSatomic";
+    case GCSsweepstring:
+    return "GCSsweepstring";
+    case GCSsweep:
+    return "GCSsweep";
+    case GCSfinalize:
+    return "GCSfinalize";
+    default:
+    return NULL;
+    break;
+  }
+}
+
 void TraceGC(global_State *g, int newstate)
 {
   lua_State *L = mainthread(g);
