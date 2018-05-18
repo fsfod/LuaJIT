@@ -74,7 +74,7 @@ void TraceGC(global_State *g, int newstate);
 #define gc_markgct(g, o, gct) \
   { if (gc_ishugeblock(o) || arenaobj_iswhite(obj2gco(o))) gc_mark(g, obj2gco(o), gct); }
 
-#define gc_markthread(g, o, gct)  gc_markgct(g, o, ~LJ_TTHREAD)
+#define gc_markthread(g, o)  gc_markgct(g, o, ~LJ_TTHREAD)
 
 #define gc_mark_tab(g, o) \
   { if (arenaobj_iswhite(obj2gco(o))) gc_mark(g, obj2gco(o), ~LJ_TTAB); }
