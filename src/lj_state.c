@@ -277,7 +277,7 @@ lua_State *lj_state_new(lua_State *L)
   setgcrefnull(L1->openupval);
   setmrefr(L1->glref, L->glref);
   setgcrefr(L1->env, L->env);
-  arena_adddefermark(L, ptr2arena(L1), L1);
+  arena_adddefermark(L, ptr2arena(L1), (GCobj *)L1);
   stack_init(L1, L);  /* init stack */
   return L1;
 }
