@@ -186,6 +186,10 @@ static void *DIRECT_MMAP_NEAR(void* address, size_t size, size_t alignment)
   ULONG flags = MEM_RESERVE|MEM_COMMIT;
   LONG st = 0;
 
+  if(probe == 0){
+    probe = alignment;
+  }
+
 #if LJ_64
   limit = (uint32_t)0x7fffffff;
 #else
