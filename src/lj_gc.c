@@ -35,11 +35,17 @@
 #define GCSWEEPCOST	10
 #define GCFINALIZECOST	100
 
+#if DEBUG
+void TraceGC(global_State *g, int newstate);
+#else
+#define TraceGC(g, newstate)
+#endif
+
 static void gc_setstate(global_State *g, int newstate)
 {
+  TraceGC(g, newstate);
   g->gc.state = newstate;
 }
-#define TraceGC TraceGC
 
 #if DEBUG
 #define GCDEBUG(fmt, ...)  printf(fmt, __VA_ARGS__)
@@ -49,12 +55,6 @@ extern void VERIFYGC(global_State *g);
 #define VERIFYGC(g)
 #endif
 
-#ifdef TraceGC
-void TraceGC(global_State *g, int newstate);
-#define SetGCState(g, newstate) TraceGC(g, newstate); g->gc.state = newstate
-#else
-#define SetGCState(g, newstate) g->gc.state = newstate
-#endif
 
 /* Macros to set GCobj colors and flags. */
 #define gray2black(x)		((x)->gch.marked |= LJ_GC_BLACK)
