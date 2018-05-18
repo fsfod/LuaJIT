@@ -100,9 +100,10 @@ int livechecker(GCobj *o, void *user) {
 
     for (ref = T->nk; ref < REF_TRUE; ref++) {
       IRIns *ir = &T->ir[ref];
-      if (ir->o == IR_KGC) {
+      if (ir->o == IR_KGC)
         checklive(ir_kgc(ir));
-      }
+      if (irt_is64(ir->t) && ir->o != IR_KNULL)
+        ref++;
     }
 
     checklivecon(T->link, traceref(G2J(g), T->link));
@@ -248,7 +249,7 @@ void TraceGC(global_State *g, int newstate)
 
   if (newstate == GCSpropagate) {
     //perflog_print();
-    //printf("---------------GC Start %d----------Total %dKb------Threshold %dKb---------\n", GCCount, g->gc.total/1024, g->gc.threshold/1024);
+    printf("---------------GC Start %d----------Total %dKb------Threshold %dKb---------\n", GCCount, g->gc.total/1024, g->gc.threshold/1024);
     GCCount++;
   }
 
@@ -274,7 +275,7 @@ void TraceGC(global_State *g, int newstate)
 #if defined(DEBUG) || defined(GCDEBUG)
   check_arenamemused(g);
 
-  if (g->gc.state == GCSsweep || g->gc.isminor) {
+  if (1 || g->gc.state == GCSsweep || g->gc.isminor) {
     checkarenas(g);
   }
 #endif

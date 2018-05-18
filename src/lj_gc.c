@@ -311,7 +311,9 @@ static void gc_marktrace(global_State *g, TraceNo traceno)
 static void gc_traverse_trace(global_State *g, GCtrace *T)
 {
   IRRef ref;
-  if (T->traceno == 0) return;
+  if (T->traceno == 0) {
+    return;
+  }
   PERF_COUNTER(gc_traverse_trace);
   for (ref = T->nk; ref < REF_TRUE; ref++) {
     IRIns *ir = &T->ir[ref];
@@ -1165,7 +1167,12 @@ static void sweep_traces(global_State *g)
 
   for (int i = J->sizetrace-1; i > 0; i--) {
     GCtrace *t = (GCtrace *)gcref(J->trace[i]);
-    if (t && iswhite(g, t)) {
+    lua_assert(!t || t->traceno == i);
+    if (t && iswhite(g, t) && 0) {
+      for (int j = 1; j < J->sizetrace-1; j--) {
+        GCtrace *t2 = (GCtrace *)gcref(J->trace[i]);
+        lua_assert(!t2 || t->nextside == i || t->nextroot == i);
+      }
       lj_trace_free(g, t);
     }
   }
