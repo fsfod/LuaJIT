@@ -147,7 +147,11 @@
     <Item Name="Param Count">numparams,i</Item>
     <Item Name="Trace">trace,i</Item>
     <Item Name="Total Size">sizept,i</Item>
-    
+    <Item Name="Hot Count" Optional="true">hotcount,i</Item>
+    <Item Name="CallCount" Optional="true">callcount,i</Item>
+    <Item Name="Loop Count" Optional="true">loopcount,i</Item>
+    <Item Name="PC Addr">(uint64_t)(this+1),p</Item>
+
     <Synthetic Name="Byte Code">
       <DisplayString>Header {(BCOp)(((BCIns*)(this+1))[0]&amp;0xff)}</DisplayString>
       <Expand>
