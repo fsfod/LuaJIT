@@ -213,10 +213,33 @@ enum gctid {
 
 #define lj_mem_freetgco(g, p)	lj_mem_freegco(g, (p), sizeof(*(p)))
 
+typedef struct GCVecHeader {
+  GCHeader;
+} GCVecHeader;
+
+#define lj_gcvec_hdr(p) ((GCVecHeader *)(((char *)(p)) - sizeof(GCVecHeader)))
+
+#if 1
+
+#define LJ_TGCVEC 13
+
+void *lj_gcvec_realloc(lua_State *L, GCobj *owner, void *p, GCSize oldsz, GCSize newsz);
+void lj_gcvec_free(global_State *g, void *p, GCSize osize);
+
+#define lj_mem_newgcvec(L, owner, n, t)	((t *)lj_gcvec_realloc(L, obj2gco(owner), NULL, 0, (GCSize)((n)*sizeof(t))))
+#define lj_mem_freegcvec(g, p, n, t) lj_gcvec_free(g, (p), (n)*sizeof(t))
+
+#define lj_mem_reallocgcvec(L, owner, p, on, n, t) \
+  ((p) = (t *)lj_gcvec_realloc(L, obj2gco(owner), p, (on)*sizeof(t), (GCSize)((n)*sizeof(t))))
+
+#else
+
 #define lj_mem_newgcvec(L, owner, n, t)	((t *)lj_mem_reallocgc(L, obj2gco(owner), NULL, 0, (GCSize)((n)*sizeof(t))))
 #define lj_mem_freegcvec(g, p, n, t)	lj_mem_freegco(g, (p), (n)*sizeof(t))
 
 #define lj_mem_reallocgcvec(L, owner, p, on, n, t) \
   ((p) = (t *)lj_mem_reallocgc(L, obj2gco(owner), p, (on)*sizeof(t), (GCSize)((n)*sizeof(t))))
+
+#endif
 
 #endif

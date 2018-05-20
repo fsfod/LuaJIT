@@ -83,6 +83,8 @@ extern void VERIFYGC(global_State *g);
 #define gc_mark_str(g, s)	\
   { if (gc_ishugeblock(s) || arenaobj_iswhite(obj2gco(s))) gc_mark(g, obj2gco(s), ~LJ_TSTR); }
 
+void gc_mark_gcvec(global_State *g, void *v, MSize size);
+
 /* Mark a white GCobj. */
 void gc_mark(global_State *g, GCobj *o, int gct)
 {
@@ -238,7 +240,7 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
     }
   }
   if (t->asize && !hascolo_array(t))
-    arena_markgcvec(g, arrayslot(t, 0), t->asize * sizeof(TValue));
+    gc_mark_gcvec(g, arrayslot(t, 0), t->asize * sizeof(TValue));
   if (weak == LJ_GC_WEAK)  /* Nothing to mark if both keys/values are weak. */
     return 1;
   if (!(weak & LJ_GC_WEAKVAL)) {  /* Mark array part. */
@@ -266,7 +268,7 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
     Node *node = noderef(t->node);
     MSize i, hmask = t->hmask;
     if (!hascolo_hash(t))
-      arena_markgcvec(g, node, hmask * sizeof(Node));
+      gc_mark_gcvec(g, node, hmask * sizeof(Node));
     for (i = 0; i <= hmask; i++) {
       Node *n = &node[i];
       if (!tvisnil(&n->val)) {  /* Mark non-empty slot. */
@@ -1789,4 +1791,54 @@ void lj_mem_shrinkobj(lua_State *L, GCobj *o, MSize osize, MSize newsz)
   slack = arena_shrinkobj(o, newsz);
   g->gc.total -= slack;
   VERIFYGC(g);
+}
+
+#ifdef LJ_TGCVEC
+
+void *lj_gcvec_realloc(lua_State *L, GCobj *owner, void *p, GCSize oldsz, GCSize newsz)
+{
+  if (oldsz != 0) {
+    oldsz += sizeof(GCVecHeader);
+    p = ((char *)p) - sizeof(GCVecHeader);
+    GCDEBUG("Free_Vec(%d_%d) size: %d\n", ptr2arena(p)->extra.id, ptr2cell(p), oldsz);
+  }
+
+  if (newsz != 0) {
+    newsz += sizeof(GCVecHeader);
+  }
+
+  p = lj_mem_reallocgc(L, owner, p, oldsz, newsz);
+
+  if (newsz) {
+    GCDEBUG("Alloc_Vec(%d_%d) size: %d\n", ptr2arena(p)->extra.id, ptr2cell(p), newsz);
+  }
+
+  if (newsz != 0) {
+    GCVecHeader *hdr = (GCVecHeader *)p;
+    hdr->gct = LJ_TGCVEC;
+    setgcrefp(hdr->nextgc, owner);
+    p = hdr + 1;
+  }
+  
+  return p;
+}
+
+void lj_gcvec_free(global_State *g, void *p, GCSize osize)
+{
+  GCVecHeader *hdr = (GCVecHeader *)(((char *)p) - sizeof(GCVecHeader));
+  lua_assert(hdr->gct == LJ_TGCVEC);
+  lj_mem_freegco(g, hdr, osize +  sizeof(GCVecHeader));
+}
+
+#endif
+
+void gc_mark_gcvec(global_State *g, void *v, MSize size)
+{
+#ifdef LJ_TGCVEC
+  GCVecHeader *hdr = (GCVecHeader *)(((char *)v) - sizeof(GCVecHeader));
+  lua_assert(hdr->gct == LJ_TGCVEC);
+  arena_markgcvec(g, hdr, size);
+#else
+  arena_markgcvec(g, v, size);
+#endif
 }

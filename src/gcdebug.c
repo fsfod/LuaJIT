@@ -57,6 +57,7 @@ int getcellextent(global_State *g, int i, int cell)
 #define tvisdead(g, tv) (tvisgcv(tv) && isdead(g, gcV(tv)))
 
 #define checklive(o) gc_assert(!isdead(g, obj2gco(o)))
+#define checklive_gcvec(o) gc_assert(!isdead(g, obj2gco(lj_gcvec_hdr(o))))
 #define checklivetv(tv) gc_assert(!tvisgcv(tv) || !isdead(g, gcV(tv)))
 #define checklivecon(cond, o) gc_assert(!(cond) || !isdead(g, obj2gco(o)))
 
@@ -70,7 +71,7 @@ int livechecker(GCobj *o, void *user) {
     checklivecon(gcref(t->metatable), gcref(t->metatable));
 
     if (t->asize && !hascolo_array(t)) {
-      checklive(tvref(t->array));
+      checklive_gcvec(tvref(t->array));
     }
 
     for (i = 0; i < t->asize; i++) {
@@ -82,7 +83,7 @@ int livechecker(GCobj *o, void *user) {
       Node *node = noderef(t->node);
       MSize hmask = t->hmask;
       if (!hascolo_hash(t)) {
-        checklive(node);
+        checklive_gcvec(node);
       }
       for (i = 0; i <= hmask; i++) {
         Node *n = &node[i];
