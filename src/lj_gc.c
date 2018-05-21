@@ -141,6 +141,7 @@ static void gc_mark_start(global_State *g)
     arenaobj_towhite(obj2gco(mainthread(g)));
   }
 
+  arena_markcell(ptr2arena(G2GG(g)), MinCellId);
   gc_markthread(g, &G2GG(g)->L);
   gc_mark_str(g, &g->strempty);
   gc_markthread(g, mainthread(g));
