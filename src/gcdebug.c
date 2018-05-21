@@ -161,7 +161,7 @@ int livechecker(GCobj *o, void *user) {
     for (tv = tvref(th->stack)+1+LJ_FR2; tv < top; tv++) {
       checklivetv(tv);
     }
-  }
+  } 
 
   return 0;
 }
@@ -172,7 +172,7 @@ void checkarenas(global_State *g) {
     GCArena *arena = lj_gc_arenaref(g, i);
     ArenaFlags flags = lj_gc_arenaflags(g, i);
 
-    if ((flags & (ArenaFlag_TravObjs|ArenaFlag_Empty)) == ArenaFlag_TravObjs) {
+    if (!(flags & ArenaFlag_Empty)) {
 
       //if (arena != g->arena) {
         arena_visitobjects(arena, livechecker, g, 0);
@@ -279,7 +279,9 @@ void check_arenamemused(global_State *g)
     ArenaFlags flags = lj_gc_arenaflags(g, i);
 
     if (!(flags & ArenaFlag_Empty)) {
-      atotal += arena_totalobjmem(arena);
+      GCSize arenamem = arena_totalobjmem(arena);
+      lua_assert(arenamem < (1024*1024));
+      atotal += arenamem;
     }
   }
 
@@ -367,6 +369,15 @@ void TraceGC(global_State *g, int newstate)
   if (1 || g->gc.state == GCSsweep || g->gc.isminor) {
     checkarenas(g);
   }
+
+  if (g->gc.state == GCSatomic) {
+    lua_assert(arenaobj_isblack(&g->strempty));
+    lua_assert(arenaobj_isblack(tabref(mainthread(g)->env)));
+
+    lua_assert(arenaobj_isblack(&G2GG(g)->L));
+    lua_assert(arenaobj_isblack(mainthread(g)));
+    
+  }
 #endif
 #ifdef DEBUG
   if (IsDebuggerPresent()) {
@@ -420,6 +431,7 @@ void VERIFYGC(global_State *g)
 {
 
   check_arenamemused(g);
+  //checkarenas(g);
 /*
   int celllen = getcellextent(g, 1, 18991);
   if (celllen != prevcelllen) {

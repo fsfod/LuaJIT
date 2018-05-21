@@ -158,6 +158,8 @@ static void gc_mark_start(global_State *g)
       lua_assert(!mref(arena_extrainfo(arena)->fixedcells, GCCellID1));
     }
   }
+  lua_assert(arenaobj_isblack(&g->strempty));
+//  print_deadobjs(g);
 }
 
 /* Mark open upvalues. */
@@ -1172,10 +1174,10 @@ static void sweep_traces(global_State *g)
   for (int i = J->sizetrace-1; i > 0; i--) {
     GCtrace *t = (GCtrace *)gcref(J->trace[i]);
     lua_assert(!t || t->traceno == i);
-    if (t && iswhite(g, t) && 0) {
+    if (t && iswhite(g, t)) {
       for (int j = 1; j < J->sizetrace-1; j--) {
         GCtrace *t2 = (GCtrace *)gcref(J->trace[i]);
-        lua_assert(!t2 || t->nextside == i || t->nextroot == i);
+        //lua_assert(!t2 || t->nextside == i || t->nextroot == i);
       }
       lj_trace_free(g, t);
     }
@@ -1274,12 +1276,12 @@ static size_t gc_onestep(lua_State *L)
     if (tvref(g->jit_base))  /* Don't run atomic phase on trace. */
       return LJ_MAX_MEM;
     atomic(g, L);
-    gc_sweepstart(g);
     gc_setstate(g, GCSsweepstring);/* Start of sweep phase. */
+    gc_sweepstart(g);
     return 0;
   case GCSsweepstring: {
     GCSize old = g->gc.total;
-    //while (gc_sweepstring(g));
+   // while (gc_sweepstring(g));
     gc_sweepstring(g);  /* Sweep one chain. */
     if (g->gc.sweepstr > g->strmask) {
       /* All string hash chains sweeped. */
@@ -1555,7 +1557,7 @@ void LJ_FASTCALL lj_gc_emptygrayssb(global_State *g)
     list = (GCRef *)(((intptr_t)list) & ~GRAYSSB_MASK);
     limit = (MSize)(mask/sizeof(GCRef));
   }
-  GCDEBUG("lj_gc_emptygrayssb\n");
+  GCDEBUG("lj_gc_emptygrayssb: size %d\n", limit);
   if (!g->gc.isminor && g->gc.state != GCSpropagate && g->gc.state != GCSatomic) {
     lj_gc_resetgrayssb(g);
     return;
