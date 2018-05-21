@@ -15,6 +15,7 @@
 #include "lj_dispatch.h"
 #include "lj_alloc.h"
 #include "lj_vmperf.h"
+#include "gcdebug.h"
 
 #include <stdio.h>
 
@@ -174,9 +175,96 @@ void checkarenas(global_State *g) {
     if ((flags & (ArenaFlag_TravObjs|ArenaFlag_Empty)) == ArenaFlag_TravObjs) {
 
       //if (arena != g->arena) {
-        arena_visitobjects(arena, livechecker, g);
+        arena_visitobjects(arena, livechecker, g, 0);
      // }
     } else if(flags & ArenaFlag_Empty) {
+      gc_assert(arena_topcellid(arena) == MinCellId && arena_greysize(arena) == 0);
+    }
+  }
+}
+
+
+typedef struct ArenaPrinterState {
+  global_State *g;
+  int arenaid;
+  TypeFilter filter;
+} ArenaPrinterState;
+
+static int printobj(GCobj *o, void *user)
+{
+  ArenaPrinterState *s = (ArenaPrinterState *)user;
+  int gct = o->gch.gct;
+  
+  if(arenaobj_isblack(o)){
+    return 0;
+  }
+
+  if ((1 << gct) & s->filter) {
+    return 0;
+  }
+
+  if (gct == ~LJ_TSTR) {
+    GCstr *str = gco2str(o);
+    printf("DEAD(%d_%d) string '%s'\n", s->arenaid, ptr2cell(o), strdata(str));
+  } else if (gct == ~LJ_TTAB) {
+    GCtab *t = gco2tab(o);
+    MSize i;
+    printf("DEAD(%d_%d) table a = %d, h = %d\n", s->arenaid, ptr2cell(o), t->asize, t->hmask ? (t->hmask + 1) : 0);
+  } else if (gct == 13) {
+    printf("DEAD(%d_%d) gcvector\n", s->arenaid, ptr2cell(o));
+  } else if (o->gch.gct == ~LJ_TTRACE) {
+    GCtrace *T = gco2trace(o);
+    printf("DEAD(%d_%d) trace %d\n", s->arenaid, ptr2cell(o), T->traceno);
+  } else if (o->gch.gct == ~LJ_TPROTO) {
+    GCproto *pt = gco2pt(o);
+    printf("DEAD(%d_%d) proto %s:%d\n", s->arenaid, ptr2cell(o), proto_chunknamestr(pt), pt->firstline);
+
+    #if LJ_HASJIT
+    if (!pt->trace) {
+      gc_assert(bc_op(proto_bc(pt)[0]) != BC_JFUNCF);
+    }
+    #endif
+  } else if (gct == ~LJ_TFUNC) {
+    GCfunc *fn = gco2func(o);
+    if (isluafunc(fn)) {
+      GCproto *pt = funcproto(fn);
+      printf("DEAD(%d_%d) func %s:%d\n", s->arenaid, ptr2cell(o), proto_chunknamestr(pt), pt->firstline);
+    } else {
+      printf("DEAD(%d_%d) Cfunc\n", s->arenaid, ptr2cell(o));
+    }
+  } else if (gct == ~LJ_TUPVAL) {
+    GCupval *uv = gco2uv(o);
+    printf("DEAD(%d_%d) upvalue, closed %d\n", s->arenaid, ptr2cell(o), uv->closed);
+  } else if (gct == ~LJ_TUDATA) {
+    GCudata *ud = gco2ud(o);
+    printf("DEAD(%d_%d) userdata\n", s->arenaid, ptr2cell(o));
+  } else if (gct == ~LJ_TTHREAD) {
+    lua_State *th = gco2th(o);
+    printf("DEAD(%d_%d) thread\n", s->arenaid, ptr2cell(o));
+  }
+
+  return 0;
+}
+
+void arena_print_deadobjs(global_State *g, GCArena *arena, TypeFilter filter)
+{
+  ArenaPrinterState state = {0};
+  state.g = g;
+  state.filter = filter;
+  state.arenaid = arena_extrainfo(arena)->id;
+  arena_visitobjects(arena, printobj, &state, CellState_White);
+}
+
+void print_deadobjs(global_State *g, TypeFilter filter)
+{
+
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+    ArenaFlags flags = lj_gc_arenaflags(g, i);
+
+    if (!(flags & ArenaFlag_Empty)) {
+      arena_print_deadobjs(g, arena, filter);
+    } else if (flags & ArenaFlag_Empty) {
       gc_assert(arena_topcellid(arena) == MinCellId && arena_greysize(arena) == 0);
     }
   }
@@ -401,3 +489,19 @@ void setarenas_black(global_State *g, int mode)
   }
 }
 
+static int zero_objmem(GCobj *o, void *user)
+{
+  int filter = (int)(uintptr_t)user;
+  MSize size = arenaobj_cellcount(o);
+
+  if ((1 << o->gch.gct) & filter) {
+    return 0;
+  }
+  memset(o, 0, size * 16);
+  return 0;
+}
+
+void arena_clear_objmem(GCArena *arena, int cellstate, TypeFilter filter)
+{
+  arena_visitobjects(arena, zero_objmem, (void*)(uintptr_t)filter, cellstate);
+}

@@ -247,7 +247,7 @@ void arena_setrangewhite(GCArena *arena, GCCellID startid, GCCellID endid);
 void arena_setrangeblack(GCArena *arena, GCCellID startid, GCCellID endid);
 void arena_dumpwhitecells(global_State *g, GCArena *arena);
 typedef int(*arenavisitor)(GCobj *o, void *user);
-void arena_visitobjects(GCArena *arena, arenavisitor cb, void *user);
+void arena_visitobjects(GCArena *arena, arenavisitor cb, void *user, int mode);
 
 void *arena_allocalign(GCArena *arena, MSize size, MSize align);
 void* arena_allocslow(GCArena *arena, MSize size);

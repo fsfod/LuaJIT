@@ -1143,13 +1143,23 @@ void arena_dumpwhitecells(global_State *g, GCArena *arena)
   }
 }
 
-void arena_visitobjects(GCArena *arena, arenavisitor cb, void *user)
+void arena_visitobjects(GCArena *arena, arenavisitor cb, void *user, int mode)
 {
   MSize i, size = arena_blocktop(arena);
   MSize arenaid = arena_extrainfo(arena)->id;
 
   for (i = MinBlockWord; i < size; i++) {
-    GCBlockword block = arena->block[i];
+    GCBlockword block;
+
+    if (mode == CellState_White) {
+      block = arena->block[i] & ~arena->mark[i];
+    } else if (mode == CellState_Black) {
+      block = arena->block[i] & arena->mark[i];
+    } else if (mode == CellState_Free) {
+      block = (~arena->block[i]) & arena->mark[i];
+    } else {
+      block = arena->block[i];
+    }
 
     if (block) {
       uint32_t bit = lj_ffs(block);
