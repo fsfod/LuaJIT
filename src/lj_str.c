@@ -179,6 +179,12 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
   }
   /* Nope, create a new string. */
   s = lj_mem_newgcoUL(L, sizeof(GCstr)+len+1, GCstr);
+  /* Any strings still white during GCSsweepstring will be cleared from the string 
+  ** hash table so make all newly created ones black this GC phase.
+  */
+  if (g->gc.state == GCSsweepstring) {
+    toblack(g, s);
+  }
   s->gct = ~LJ_TSTR;
   s->len = len;
   s->hash = h;
