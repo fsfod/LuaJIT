@@ -396,7 +396,13 @@ void sweepcallback(global_State *g, GCArena *arena, MSize i, int count)
 #if defined(DEBUG) || defined(GCDEBUG)
   VERIFYGC(g);
   if (count == -1) {
-   // arena_dumpwhitecells(g, arena);
+    ArenaPrinterState state = {0};
+    state.g = g;
+    state.arenaid = arena_extrainfo(arena)->id;
+    state.filter = TFILTER_TAB;
+    //arena_visitobjects(arena, printobj, &state, CellState_White);
+
+    arena_clear_objmem(arena, CellState_White, 0);
   } else {
     if (count & 0x10000) {
       printf("Swept arena %d\n", i);
