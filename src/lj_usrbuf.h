@@ -26,7 +26,6 @@ typedef struct UserBuf {
   char *b;
   void *state;
   UBufHandler bufhandler;
-  lua_State *L;
   int userflags;
 } UserBuf;
 
@@ -151,6 +150,7 @@ static LJ_INLINE int ubuf_free(UserBuf *ub)
 
 int membuf_doaction(UserBuf *ub, UBufAction action, void *arg);
 int filebuf_doaction(UserBuf *ub, UBufAction action, void *arg);
+int mmapbuf_doaction(UserBuf *ub, UBufAction action, void *arg);
 
 static LJ_INLINE int ubuf_init_mem(UserBuf *ub, int minbufspace)
 {
@@ -166,6 +166,16 @@ static LJ_INLINE int ubuf_init_file(UserBuf *ub, const char* path)
   ub->bufhandler = filebuf_doaction;
   args.path = path;
   return filebuf_doaction(ub, UBUF_INIT, &args);
+}
+
+static LJ_INLINE int ubuf_init_mmap(UserBuf *ub, const char* path, int windowsize)
+{
+  UBufInitArgs args = {0};
+  lua_assert(path);
+  ub->bufhandler = mmapbuf_doaction;
+  args.minbufspace = windowsize;
+  args.path = path;
+  return mmapbuf_doaction(ub, UBUF_INIT, &args);
 }
 
 #endif
