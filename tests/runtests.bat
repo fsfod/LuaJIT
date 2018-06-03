@@ -28,13 +28,44 @@ if not defined INCLUDE (
 
 echo --------- Building LuaJIT --------------------
 
-call :build_luajit "normal"
-call :build_luajit "gc64" "gc64"
+if "%1" == "-allbuilds" (
+  set buildkind="all"
+  goto skip_arg
+) else (
+  if "%1" == "-gc64"  (
+    set buildkind="gc64"
+    goto skip_arg
+  ) else (
+    set buildkind="default"
+  )
+)
 
-cd %TESTDIR%
+:start
+if [%1] == [] goto done
+echo %1
+set args=%args% %1
+:skip_arg
+shift
+goto start
+:done
 
-call :test_build "gc64"
-call :test_build "normal"
+if %buildkind% == "all"  (
+@rem call :build_luajit "default"
+@rem  call :build_luajit "gc64" "gc64"
+  echo running tests under GC64\default
+  call :test_build "default"
+  call :test_build "gc64"
+) ELSE (
+  if %buildkind% == "gc64"  (
+@rem    call :build_luajit "gc64" "gc64"
+    echo running tests under GC64
+    call :test_build "gc64"
+  ) ELSE (
+  echo running tests under \default
+@rem    call :build_luajit "default"
+    call :test_build "default"
+  )
+)
 
 EXIT /B 0
 
@@ -56,7 +87,7 @@ EXIT /B 0
 :test_build
   pushd .
   cd "%TESTDIR%\LuaJIT-test-cleanup\test"
-  "%TESTDIR%\builds\%~1\luajit.exe" test.lua
+  "%TESTDIR%\builds\%~1\luajit.exe" test.lua %args%
   if %ERRORLEVEL% NEQ 0 (
     EXIT /B 1
   )
