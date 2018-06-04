@@ -53,7 +53,11 @@ int getcellextent(global_State *g, int i, int cell)
   return arena_cellextent(arena, cell);
 }
 
+#if LJ_TARGET_WINDOWS
 #define gc_assert(cond) do { if (!(cond)) __debugbreak(); } while(0)
+#else
+#define gc_assert(cond) lua_assert(cond)
+#endif
 
 #define tvisdead(g, tv) (tvisgcv(tv) && isdead(g, gcV(tv)))
 
