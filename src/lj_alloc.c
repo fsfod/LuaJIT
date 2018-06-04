@@ -467,6 +467,7 @@ static void *CALL_MREMAP_(void *ptr, size_t osz, size_t nsz, int flags)
 #define CALL_MREMAP(addr, osz, nsz, mv) ((void)osz, MFAIL)
 #endif
 
+#if LJ_TARGET_WINDOWS
 uint32_t enablelargepages()
 {
   HANDLE hToken;
@@ -487,6 +488,7 @@ uint32_t enablelargepages()
   CloseHandle(hToken);
   return error;
 }
+#endif
 
 int priv = -1;
 
@@ -495,16 +497,31 @@ typedef struct PageHeader{
   size_t size;
 } PageHeader;
 
+#include "stdio.h"
+
 void *lj_allocpages(void* hint, size_t alignment, size_t size, void** handle)
 {
   size_t allocsize = size;
   uintptr_t mem = 0;
   void* base = NULL;
+
+#if LJ_TARGET_WINDOWS
   if (priv == -1) {
     priv = enablelargepages();
   }
+#endif
 
-#if 0
+#if LJ_TARGET_WINDOWS
+  base = DIRECT_MMAP_NEAR(hint, size, alignment);
+  mem = (uintptr_t)base;
+  lua_assert((mem & ArenaCellMask) == 0);
+
+  if (base == MFAIL) {
+    return NULL;
+  }
+  *handle = (void *)(mem | 1);
+#else
+
   if (alignment < size) {
     allocsize = size+alignment+sizeof(PageHeader);
   } else {
@@ -515,21 +532,13 @@ void *lj_allocpages(void* hint, size_t alignment, size_t size, void** handle)
   base = DIRECT_MMAP(allocsize);
   *handle = base;
 
-  uintptr_t mem = lj_round(((uintptr_t)base)+sizeof(PageHeader), alignment);
+  mem = lj_round(((uintptr_t)base)+sizeof(PageHeader), alignment);
   ((PageHeader*)mem)[-1].base = base;
   ((PageHeader*)mem)[-1].size = allocsize;
-#else
-  base = DIRECT_MMAP_NEAR(hint, size, alignment);
-  mem = (uintptr_t)base;
-  lua_assert((mem & ArenaCellMask) == 0);
-
-  if (base == MFAIL) {
-    return NULL;
-  }
-
-  *handle = (void*)(mem | 1);
+  
+  //mem = (uintptr_t)aligned_alloc(alignment, size);
+  //printf("aligned_alloc(%zd, %zd) %px\n", alignment, size, mem);
 #endif
-
 
   return (void *)mem;
 }
@@ -538,7 +547,11 @@ void lj_freepages(void *handle, void* p, size_t size)
 {
 
   if (((uintptr_t)handle) & 1) {
+#if LJ_TARGET_WINDOWS
     CALL_MUNMAP(p, size);
+#else
+    free(p);
+#endif
   } else if (((uintptr_t)handle) & 2) {
 
   } else {
