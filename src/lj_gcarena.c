@@ -270,7 +270,7 @@ void *arena_allocslow(GCArena *arena, MSize size)
   if (1) {
     return NULL;
   } else {
-    MSize bin = min(numcells, MaxBinSize-1)-1;
+    MSize bin = (numcells < (MaxBinSize-1) ? numcells : (MaxBinSize-1))-1;
 
     if (numcells < MaxBinSize) {
       uint32_t firstbin = lj_ffs(freelist->binmask & (0xffffffff << bin));
@@ -377,7 +377,7 @@ static FreeChunk *setfreechunk(GCArena *arena, void *cell, MSize numcells)
   FreeChunk *chunklist = (FreeChunk *)cell;
   setmref(arena->freelist, cell);
   memset(cell, 0, CellSize);
-  chunklist->len = min(numcells, 255);
+  chunklist->len = numcells < 255 ? numcells : 255;
   return chunklist;
 }
 
@@ -394,7 +394,7 @@ void arena_free(global_State *g, GCArena *arena, void* mem, MSize size)
   arena_setfreecell(arena, cell);
 
   if (freelist && 0) {
-    MSize bin = min(numcells, MaxBinSize)-1;
+    MSize bin = (numcells < MaxBinSize ?  numcells : MaxBinSize)-1;
     uint32_t sizebit = 1 << bin;
 
     if (numcells < MaxBinSize) {
@@ -435,7 +435,7 @@ void arena_free(global_State *g, GCArena *arena, void* mem, MSize size)
     }
   }
 
-  arena->firstfree = min(arena->firstfree, cell);
+  arena->firstfree =  cell < arena->firstfree ? cell : arena->firstfree;
   freelist->freecells += numcells;
 }
 
@@ -622,7 +622,10 @@ void arena_growgreystack(global_State *g, GCArena *arena)
   GCCellID1 *old = mref(arena->greybase, GCCellID1)-2, *newlist;
   /*4 bytes at the start for the size and a sentinel 0 cell id at the top */
   MSize size = (*(MSize *)old)+3;
-  MSize newsize = min(size*2, ArenaUsableCells);
+  MSize newsize = size*2;
+  if (newsize > ArenaUsableCells) {
+    newsize = ArenaUsableCells;
+  }
 
   newlist = newgreystack(L, arena, newsize);
   memcpy(newlist-2 + size, old, size*sizeof(GCCellID1));
@@ -667,8 +670,11 @@ void arena_setblacks(GCArena *arena, GCCellID1 *cells, MSize count)
 void arena_setrangeblack(GCArena *arena, GCCellID startid, GCCellID endid)
 {
   MSize i, start = arena_blockidx(startid);
-  MSize end = min(arena_blockidx(endid)+1, MaxBlockWord);
+  MSize end = arena_blockidx(endid)+1;
   lua_assert(startid < endid && startid >= MinCellId && endid <= MaxCellId);
+  if (end > MaxBlockWord) {
+    end = MaxBlockWord;
+  }
 
   if (arena_blockbitidx(startid) != 0) {
     GCBlockword mask = (~(GCBlockword)0) << arena_blockbitidx(startid);
@@ -690,8 +696,11 @@ void arena_setrangeblack(GCArena *arena, GCCellID startid, GCCellID endid)
 void arena_setrangewhite(GCArena *arena, GCCellID startid, GCCellID endid)
 {
   MSize i, start = arena_blockidx(startid);
-  MSize end = min(arena_blockidx(endid)+1, MaxBlockWord);
+  MSize end = arena_blockidx(endid)+1;
   lua_assert(startid < endid && startid >= MinCellId && endid <= MaxCellId);
+  if (end >  MaxBlockWord) {
+    end = MaxBlockWord;
+  }
 
   if (arena_blockbitidx(startid) != 0) {
     GCBlockword mask = (~(GCBlockword)0) << arena_blockbitidx(startid);
@@ -933,7 +942,10 @@ MSize arena_majorsweep(GCArena *arena, GCCellID cellend)
   MSize count = 0, limit;
   if (!cellend)
     cellend = arena_topcellid(arena);
-  limit = min(arena_blockidx(cellend)+1, MaxBlockWord);
+    limit = arena_blockidx(cellend)+1;
+    if(limit > MaxBlockWord) {
+      limit = MaxBlockWord;
+    }
 
   lua_assert(arena_greysize(arena) == 0);
 #if 0
@@ -968,7 +980,10 @@ MSize arena_minorsweep(GCArena *arena, MSize limit)
 {
   MSize count = 0;
   if (limit == 0) {
-    limit = min(arena_blockidx(arena_topcellid(arena))+1, MaxBlockWord);
+    limit = arena_blockidx(arena_topcellid(arena))+1;
+    if (limit > MaxBlockWord) {
+      limit = MaxBlockWord;
+    }
   } else {
 
   }
