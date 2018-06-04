@@ -994,7 +994,7 @@ void lj_gc_freearena(global_State *g, GCArena *arena)
   }
 }
 
-void sweep_arena(global_State *g, MSize i, MSize celltop);
+static void sweep_arena(global_State *g, MSize i, MSize celltop);
 
 GCArena *lj_gc_setactive_arena(lua_State *L, GCArena *arena, int travobjs)
 {
