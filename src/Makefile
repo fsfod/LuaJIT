@@ -48,7 +48,7 @@ CCOPT= -O2 -fomit-frame-pointer
 # the binaries to a different machine you could also use: -march=native
 #
 CCOPT_x86= -march=i686 -msse -msse2 -mfpmath=sse
-CCOPT_x64=
+CCOPT_x64= -msse4
 CCOPT_arm=
 CCOPT_arm64=
 CCOPT_ppc=
