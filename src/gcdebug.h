@@ -22,6 +22,7 @@ void arena_print_deadobjs(global_State *g, GCArena *arena, TypeFilter filter);
 
 void setarenas_black(global_State *g, int mode);
 void strings_toblack(global_State *g);
+void traces_toblack(global_State *g);
 void arena_clear_objmem(GCArena *arena, int cellstate, TypeFilter filter);
 void TraceGC(global_State *g, int newstate);
 

@@ -305,7 +305,7 @@ static void gc_traverse_func(global_State *g, GCfunc *fn)
 
 #if LJ_HASJIT
 /* Mark a trace. */
-static void gc_marktrace(global_State *g, TraceNo traceno)
+void gc_marktrace(global_State *g, TraceNo traceno)
 {
   GCobj *o = obj2gco(traceref(G2J(g), traceno));
   lua_assert(traceno != G2J(g)->cur.traceno);

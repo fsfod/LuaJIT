@@ -523,3 +523,18 @@ void arena_clear_objmem(GCArena *arena, int cellstate, TypeFilter filter)
 {
   arena_visitobjects(arena, zero_objmem, (void*)(uintptr_t)filter, cellstate);
 }
+
+void gc_marktrace(global_State *g, TraceNo traceno);
+
+void traces_toblack(global_State *g)
+{
+  jit_State *J = G2J(g);
+
+  for (int i = J->sizetrace-1; i > 0; i--) {
+    GCtrace *t = (GCtrace *)gcref(J->trace[i]);
+    lua_assert(!t || t->traceno == i);
+    if (t) {
+      gc_marktrace(g, i);
+    }
+  }
+}
