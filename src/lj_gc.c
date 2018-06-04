@@ -1109,8 +1109,13 @@ static void atomic(global_State *g, lua_State *L)
   SECTION_END(gc_atomic);
 }
 
+#if DEBUG
 #define PreSweepArena(g, arena, i)  sweepcallback(g, arena, i, -1)
 #define PostSweepArena(g, arena, i, count) sweepcallback(g, arena, i, count)
+#else
+#define PreSweepArena(g, arena, i)  
+#define PostSweepArena(g, arena, i, count)
+#endif
 
 void sweepcallback(global_State *g, GCArena *arena, MSize i, int count);
 
