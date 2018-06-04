@@ -305,7 +305,7 @@ LUA_API GCBlockword *arenaobj_getblockword(void *o);
 LUA_API GCBlockword *arenaobj_getmarkword(void *o);
 LUA_API const char* arena_dumpwordstate(GCArena *arena, int blockidx);
 
-static CellState arena_cellstate(GCArena *arena, GCCellID cell)
+inline CellState arena_cellstate(GCArena *arena, GCCellID cell)
 {
   GCBlockword blockbit = arena_blockbit(cell);
   int32_t shift = arena_blockbitidx(cell);
@@ -449,7 +449,7 @@ static LJ_AINLINE void arenaobj_markcdstr(void* o)
 {
   GCArena *arena = ptr2arena(o);
   GCCellID cell = ptr2cell(o);
-  MSize blockofs = ((((uintptr_t)o) >> 7) & 0x1FFC);
+  //MSize blockofs = ((((uintptr_t)o) >> 7) & 0x1FFC);
   lua_assert(arena_cellisallocated(arena, cell));
   lua_assert(((GCCell*)o)->gct == ~LJ_TSTR || ((GCCell*)o)->gct == ~LJ_TCDATA ||
              ((GCCell*)o)->gct == ~LJ_TUDATA);
