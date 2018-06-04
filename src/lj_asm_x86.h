@@ -1847,7 +1847,7 @@ static void asm_cnew(ASMState *as, IRIns *ir)
   CTInfo info = lj_ctype_info(cts, id, &sz);
   const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_mem_newgco];
   IRRef args[4];
-  int usebump = ir->o == IR_CNEWI || sz < ArenaOversized;
+  int usebump = 0;//ir->o == IR_CNEWI || sz < ArenaOversized;
   Reg rcd;
   RegSet allow = RSET_GPR;
   lua_assert(sz != CTSIZE_INVALID || (ir->o == IR_CNEW && ir->op2 != REF_NIL));
