@@ -19,6 +19,13 @@
 
 #include <stdio.h>
 
+#if !LJ_TARGET_WINDOWS
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wunused-function"
+#endif
+
 GCArena *getarena(lua_State *L, int i)
 {
   return lj_gc_arenaref(G(L), i);
@@ -543,3 +550,7 @@ void traces_toblack(global_State *g)
     }
   }
 }
+
+#if !LJ_TARGET_WINDOWS
+#pragma GCC diagnostic pop
+#endif
