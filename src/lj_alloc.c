@@ -848,7 +848,7 @@ static int has_segment_link(mstate m, msegmentptr ss)
 /* Check properties of any chunk, whether free, inuse, mmapped etc  */
 static void do_check_any_chunk(mstate m, mchunkptr p)
 {
-  assert((is_aligned(chunk2mem(p))) || (p->head == FENCEPOST_HEAD));
+  lua_assert((is_aligned(chunk2mem(p))) || (p->head == FENCEPOST_HEAD));
 }
 
 /* Check properties of top chunk */
@@ -856,13 +856,13 @@ static void do_check_top_chunk(mstate m, mchunkptr p)
 {
   msegmentptr sp = segment_holding(m, (char*)p);
   size_t  sz = p->head & ~INUSE_BITS; /* third-lowest bit can be set! */
-  assert(sp != 0);
-  assert((is_aligned(chunk2mem(p))) || (p->head == FENCEPOST_HEAD));
-  assert(sz == m->topsize);
-  assert(sz > 0);
-  assert(sz == ((sp->base + sp->size) - (char*)p) - TOP_FOOT_SIZE);
-  assert(pinuse(p));
-  assert(!pinuse(chunk_plus_offset(p, sz)));
+  lua_assert(sp != 0);
+  lua_assert((is_aligned(chunk2mem(p))) || (p->head == FENCEPOST_HEAD));
+  lua_assert(sz == m->topsize);
+  lua_assert(sz > 0);
+  lua_assert(sz == ((sp->base + sp->size) - (char*)p) - TOP_FOOT_SIZE);
+  lua_assert(pinuse(p));
+  lua_assert(!pinuse(chunk_plus_offset(p, sz)));
 }
 
 /* Check properties of (inuse) mmapped chunks */
@@ -870,21 +870,21 @@ static void do_check_mmapped_chunk(mstate m, mchunkptr p)
 {
   size_t  sz = chunksize(p);
   size_t len = (sz + (p->prev_foot));
-  assert(is_direct(p));
-  assert((is_aligned(chunk2mem(p))) || (p->head == FENCEPOST_HEAD));
-  assert(!is_small(sz));
-  assert(chunk_plus_offset(p, sz)->head == FENCEPOST_HEAD);
-  assert(chunk_plus_offset(p, sz+SIZE_T_SIZE)->head == 0);
+  lua_assert(is_direct(p));
+  lua_assert((is_aligned(chunk2mem(p))) || (p->head == FENCEPOST_HEAD));
+  lua_assert(!is_small(sz));
+  lua_assert(chunk_plus_offset(p, sz)->head == FENCEPOST_HEAD);
+  lua_assert(chunk_plus_offset(p, sz+SIZE_T_SIZE)->head == 0);
 }
 
 /* Check properties of inuse chunks */
 static void do_check_inuse_chunk(mstate m, mchunkptr p)
 {
   do_check_any_chunk(m, p);
-  assert(is_inuse(p));
-  assert(next_pinuse(p));
+  lua_assert(is_inuse(p));
+  lua_assert(next_pinuse(p));
   /* If not pinuse and not mmapped, previous chunk has OK offset */
-  assert(is_direct(p) || pinuse(p) || next_chunk(prev_chunk(p)) == p);
+  lua_assert(is_direct(p) || pinuse(p) || next_chunk(prev_chunk(p)) == p);
   if (is_direct(p))
     do_check_mmapped_chunk(m, p);
 }
@@ -895,20 +895,20 @@ static void do_check_free_chunk(mstate m, mchunkptr p)
   size_t sz = chunksize(p);
   mchunkptr next = chunk_plus_offset(p, sz);
   do_check_any_chunk(m, p);
-  assert(!is_inuse(p));
-  assert(!next_pinuse(p));
-  assert(!is_direct(p));
+  lua_assert(!is_inuse(p));
+  lua_assert(!next_pinuse(p));
+  lua_assert(!is_direct(p));
   if (p != m->dv && p != m->top) {
     if (sz >= MIN_CHUNK_SIZE) {
-      assert((sz & CHUNK_ALIGN_MASK) == 0);
-      assert(is_aligned(chunk2mem(p)));
-      assert(next->prev_foot == sz);
-      assert(pinuse(p));
-      assert(next == m->top || is_inuse(next));
-      assert(p->fd->bk == p);
-      assert(p->bk->fd == p);
+      lua_assert((sz & CHUNK_ALIGN_MASK) == 0);
+      lua_assert(is_aligned(chunk2mem(p)));
+      lua_assert(next->prev_foot == sz);
+      lua_assert(pinuse(p));
+      lua_assert(next == m->top || is_inuse(next));
+      lua_assert(p->fd->bk == p);
+      lua_assert(p->bk->fd == p);
     } else  /* markers are always of size SIZE_T_SIZE */
-      assert(sz == SIZE_T_SIZE);
+      lua_assert(sz == SIZE_T_SIZE);
   }
 }
 
@@ -919,11 +919,11 @@ static void do_check_malloced_chunk(mstate m, void* mem, size_t s)
     mchunkptr p = mem2chunk(mem);
     size_t sz = p->head & ~INUSE_BITS;
     do_check_inuse_chunk(m, p);
-    assert((sz & CHUNK_ALIGN_MASK) == 0);
-    assert(sz >= MIN_CHUNK_SIZE);
-    assert(sz >= s);
+    lua_assert((sz & CHUNK_ALIGN_MASK) == 0);
+    lua_assert(sz >= MIN_CHUNK_SIZE);
+    lua_assert(sz >= s);
     /* unless mmapped, size is less than MIN_CHUNK_SIZE more than request */
-    assert(is_direct(p) || sz < (s + MIN_CHUNK_SIZE));
+    lua_assert(is_direct(p) || sz < (s + MIN_CHUNK_SIZE));
   }
 }
 
@@ -936,46 +936,46 @@ static void do_check_tree(mstate m, tchunkptr t)
   size_t tsize = chunksize(t);
   bindex_t idx;
   compute_tree_index(tsize, idx);
-  assert(tindex == idx);
-  assert(tsize >= MIN_LARGE_SIZE);
-  assert(tsize >= minsize_for_tree_index(idx));
-  assert((idx == NTREEBINS-1) || (tsize < minsize_for_tree_index((idx+1))));
+  lua_assert(tindex == idx);
+  lua_assert(tsize >= MIN_LARGE_SIZE);
+  lua_assert(tsize >= minsize_for_tree_index(idx));
+  lua_assert((idx == NTREEBINS-1) || (tsize < minsize_for_tree_index((idx+1))));
 
   do { /* traverse through chain of same-sized nodes */
     do_check_any_chunk(m, ((mchunkptr)u));
-    assert(u->index == tindex);
-    assert(chunksize(u) == tsize);
-    assert(!is_inuse(u));
-    assert(!next_pinuse(u));
-    assert(u->fd->bk == u);
-    assert(u->bk->fd == u);
+    lua_assert(u->index == tindex);
+    lua_assert(chunksize(u) == tsize);
+    lua_assert(!is_inuse(u));
+    lua_assert(!next_pinuse(u));
+    lua_assert(u->fd->bk == u);
+    lua_assert(u->bk->fd == u);
     if (u->parent == 0) {
-      assert(u->child[0] == 0);
-      assert(u->child[1] == 0);
+      lua_assert(u->child[0] == 0);
+      lua_assert(u->child[1] == 0);
     } else {
-      assert(head == 0); /* only one node on chain has parent */
+      lua_assert(head == 0); /* only one node on chain has parent */
       head = u;
-      assert(u->parent != u);
-      assert(u->parent->child[0] == u ||
+      lua_assert(u->parent != u);
+      lua_assert(u->parent->child[0] == u ||
         u->parent->child[1] == u ||
         *((tbinptr*)(u->parent)) == u);
       if (u->child[0] != 0) {
-        assert(u->child[0]->parent == u);
-        assert(u->child[0] != u);
+        lua_assert(u->child[0]->parent == u);
+        lua_assert(u->child[0] != u);
         do_check_tree(m, u->child[0]);
       }
       if (u->child[1] != 0) {
-        assert(u->child[1]->parent == u);
-        assert(u->child[1] != u);
+        lua_assert(u->child[1]->parent == u);
+        lua_assert(u->child[1] != u);
         do_check_tree(m, u->child[1]);
       }
       if (u->child[0] != 0 && u->child[1] != 0) {
-        assert(chunksize(u->child[0]) < chunksize(u->child[1]));
+        lua_assert(chunksize(u->child[0]) < chunksize(u->child[1]));
       }
     }
     u = u->fd;
   } while (u != t);
-  assert(head != 0);
+  lua_assert(head != 0);
 }
 
 /*  Check all the chunks in a treebin.  */
@@ -985,7 +985,7 @@ static void do_check_treebin(mstate m, bindex_t i)
   tchunkptr t = *tb;
   int empty = (m->treemap & (1U << i)) == 0;
   if (t == 0)
-    assert(empty);
+    lua_assert(empty);
   if (!empty)
     do_check_tree(m, t);
 }
@@ -997,7 +997,7 @@ static void do_check_smallbin(mstate m, bindex_t i)
   mchunkptr p = b->bk;
   unsigned int empty = (m->smallmap & (1U << i)) == 0;
   if (p == b)
-    assert(empty);
+    lua_assert(empty);
   if (!empty) {
     for (; p != b; p = p->bk) {
       size_t size = chunksize(p);
@@ -1005,8 +1005,8 @@ static void do_check_smallbin(mstate m, bindex_t i)
       /* each chunk claims to be free */
       do_check_free_chunk(m, p);
       /* chunk belongs in bin */
-      assert(small_index(size) == i);
-      assert(p->bk == b || chunksize(p->bk) == chunksize(p));
+      lua_assert(small_index(size) == i);
+      lua_assert(p->bk == b || chunksize(p->bk) == chunksize(p));
       /* chunk is followed by an inuse chunk */
       q = next_chunk(p);
       if (q->head != FENCEPOST_HEAD)
@@ -1061,16 +1061,16 @@ static size_t traverse_and_check(mstate m)
     while (s != 0) {
       mchunkptr q = align_as_chunk(s->base);
       mchunkptr lastq = 0;
-      assert(pinuse(q));
+      lua_assert(pinuse(q));
       while (segment_holds(s, q) &&
         q != m->top && q->head != FENCEPOST_HEAD) {
         sum += chunksize(q);
         if (is_inuse(q)) {
-          assert(!bin_find(m, q));
+          lua_assert(!bin_find(m, q));
           do_check_inuse_chunk(m, q);
         } else {
-          assert(q == m->dv || bin_find(m, q));
-          assert(lastq == 0 || is_inuse(lastq)); /* Not 2 consecutive free */
+          lua_assert(q == m->dv || bin_find(m, q));
+          lua_assert(lastq == 0 || is_inuse(lastq)); /* Not 2 consecutive free */
           do_check_free_chunk(m, q);
         }
         lastq = q;
@@ -1096,16 +1096,16 @@ static void do_check_malloc_state(mstate m)
 
   if (m->dvsize != 0) { /* check dv chunk */
     do_check_any_chunk(m, m->dv);
-    assert(m->dvsize == chunksize(m->dv));
-    assert(m->dvsize >= MIN_CHUNK_SIZE);
-    assert(bin_find(m, m->dv) == 0);
+    lua_assert(m->dvsize == chunksize(m->dv));
+    lua_assert(m->dvsize >= MIN_CHUNK_SIZE);
+    lua_assert(bin_find(m, m->dv) == 0);
   }
 
   if (m->top != 0) {   /* check top chunk */
     do_check_top_chunk(m, m->top);
-    /*assert(m->topsize == chunksize(m->top)); redundant */
-    assert(m->topsize > 0);
-    assert(bin_find(m, m->top) == 0);
+    /*lua_assert(m->topsize == chunksize(m->top)); redundant */
+    lua_assert(m->topsize > 0);
+    lua_assert(bin_find(m, m->top) == 0);
   }
 
   total = traverse_and_check(m);
@@ -2063,8 +2063,8 @@ void* lj_alloc_memalign(void* msp, size_t alignment, size_t bytes)
 
     mem = chunk2mem(p);
 #if DEBUG
-    assert(chunksize(p) >= nb);
-    assert(((uintptr_t)mem & (alignment - 1)) == 0);
+    lua_assert(chunksize(p) >= nb);
+    lua_assert(((uintptr_t)mem & (alignment - 1)) == 0);
     //check_inuse_chunk(m, p);
     //POSTACTION(m);
 #endif
