@@ -1689,7 +1689,6 @@ GCobj *lj_mem_newgco_t(lua_State *L, GCSize osize, uint32_t gct)
     if (LJ_UNLIKELY(o == NULL)) {
       o = findarenaspace(L, osize, istrav(gct));
     }
-
     //GCDEBUG("Alloc(%d, %d) %s\n", ptr2arena(o)->extra.id, ptr2cell(o), lj_obj_itypename[gct]);
     g->gc.total += realsz;
   } else {
@@ -1751,15 +1750,15 @@ void *lj_mem_reallocgc(lua_State *L, GCobj *owner, void *p, GCSize oldsz, GCSize
     } else {
       mem = hugeblock_alloc(L, newsz, 0);
     }
+    if (oldsz) {
+      memcpy(mem, p, oldsz);
+    }
+  } else {
+    mem = NULL;
   }
 
   //lua_assert(!p || oldsz > 0);
   if (oldsz) {
-    if (newsz) {
-      memcpy(mem, p, oldsz);
-    } else {
-      mem = NULL;
-    }
     lj_mem_freegco(G(L), p, oldsz);
   }
   VERIFYGC(g);
