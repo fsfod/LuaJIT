@@ -384,12 +384,13 @@ void TraceGC(global_State *g, int newstate)
   }
 #endif
 #ifdef DEBUG
+#if LJ_TARGET_WINDOWS
   if (IsDebuggerPresent()) {
     char buf[100];
     sprintf(buf, "GC State = %s\n", getgcsname(newstate));
     OutputDebugStringA(buf);
   }
-
+#endif
   printf("GC State = %s\n", getgcsname(newstate));
 #endif
 
