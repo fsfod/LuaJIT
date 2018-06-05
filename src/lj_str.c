@@ -157,7 +157,7 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
 	lua_assert(!isdead(g, o) && (g->gc.state != GCSsweep || isblack(g, o)));
 	/* Resurrect if dead. */
 	if (g->gc.state == GCSsweepstring && iswhitefast(o)) {
-	  toblack(g, o);
+	  toblack(g, (GCobj *)o);
 	}
 	return sx;  /* Return existing string. */
       }
@@ -170,7 +170,7 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
 	lua_assert(!isdead(g, o) && (g->gc.state != GCSsweep || isblack(g, o)));
 	/* Resurrect if dead. */
 	if (g->gc.state == GCSsweepstring && iswhitefast(o)) {
-	  toblack(g, o);
+	  toblack(g, (GCobj *)o);
 	}
 	return sx;  /* Return existing string. */
       }
@@ -183,7 +183,7 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
   ** hash table so make all newly created ones black this GC phase.
   */
   if (g->gc.state == GCSsweepstring) {
-    toblack(g, s);
+    toblack(g, (GCobj *)s);
   }
   s->gct = ~LJ_TSTR;
   s->len = len;
