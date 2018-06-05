@@ -942,10 +942,10 @@ MSize arena_majorsweep(GCArena *arena, GCCellID cellend)
   MSize count = 0, limit;
   if (!cellend)
     cellend = arena_topcellid(arena);
-    limit = arena_blockidx(cellend)+1;
-    if(limit > MaxBlockWord) {
-      limit = MaxBlockWord;
-    }
+  limit = arena_blockidx(cellend)+1;
+  if (limit > MaxBlockWord) {
+    limit = MaxBlockWord;
+  }
 
   lua_assert(arena_greysize(arena) == 0);
 #if 0
