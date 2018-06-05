@@ -1814,7 +1814,11 @@ void *lj_gcvec_realloc(lua_State *L, GCobj *owner, void *p, GCSize oldsz, GCSize
   if (oldsz != 0) {
     oldsz += sizeof(GCVecHeader);
     p = ((char *)p) - sizeof(GCVecHeader);
-    GCDEBUG("Free_Vec(%d_%d) size: %d\n", ptr2arena(p)->extra.id, ptr2cell(p), oldsz);
+    if (oldsz < ArenaOversized) {
+      GCDEBUG("Free_Vec(%d_%d) size: %d\n", ptr2arena(p)->extra.id, ptr2cell(p), oldsz);
+    } else {
+      GCDEBUG("Free_Vec(HUGE) size: %d\n", oldsz);
+    }
   }
 
   if (newsz != 0) {
@@ -1824,7 +1828,12 @@ void *lj_gcvec_realloc(lua_State *L, GCobj *owner, void *p, GCSize oldsz, GCSize
   p = lj_mem_reallocgc(L, owner, p, oldsz, newsz);
 
   if (newsz) {
-    GCDEBUG("Alloc_Vec(%d_%d) size: %d\n", ptr2arena(p)->extra.id, ptr2cell(p), newsz);
+    if (newsz < ArenaOversized) {
+      GCDEBUG("Alloc_Vec(%d_%d) size: %d\n", ptr2arena(p)->extra.id, ptr2cell(p), newsz);
+    } else {
+      GCDEBUG("Alloc_Vec(HUGE) size: %d\n", newsz);
+    } 
+    
   }
 
   if (newsz != 0) {
