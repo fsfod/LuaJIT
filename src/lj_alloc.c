@@ -1084,10 +1084,9 @@ static size_t traverse_and_check(mstate m)
 
 
 /* Check all properties of malloc_state. */
-static void do_check_malloc_state(mstate m)
+static size_t do_check_malloc_state(mstate m)
 {
   bindex_t i;
-  size_t total;
   /* check bins */
   for (i = 0; i < NSMALLBINS; ++i)
     do_check_smallbin(m, i);
@@ -1108,7 +1107,7 @@ static void do_check_malloc_state(mstate m)
     lua_assert(bin_find(m, m->top) == 0);
   }
 
-  total = traverse_and_check(m);
+  return traverse_and_check(m);
 }
 #endif
 
