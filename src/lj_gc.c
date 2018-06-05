@@ -1656,6 +1656,26 @@ void * LJ_FASTCALL lj_mem_newcd(lua_State *L, GCSize size)
   return o;
 }
 
+int lj_mem_tryreclaim(lua_State *L)
+{
+  global_State *g = G(L);
+  MSize fallback = g->gc.arenastop, id = g->gc.arenastop;
+  GCArena *arena = NULL;
+  uint32_t wantedflags;
+  lua_assert(0 && "TODO: emergency GC to reclaim some memory for allocation");
+/*
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+    ArenaFlags arenaflags = lj_gc_arenaflags(g, i);
+
+    if ((arenaflags & (ArenaFlag_Explicit|ArenaFlag_ScanFreeSpace)) ==
+        ArenaFlag_ScanFreeSpace) {
+    }
+  }
+  */
+  return 0;
+}
+
 GCobj *findarenaspace(lua_State *L, GCSize osize, int travobj)
 {
   global_State *g = G(L);
@@ -1670,6 +1690,14 @@ GCobj *findarenaspace(lua_State *L, GCSize osize, int travobj)
   }
 
   arena = lj_gc_findnewarena(L, travobj);
+
+  if (arena == NULL) {
+    if (lj_mem_tryreclaim(L)) {
+      arena = lj_gc_findnewarena(L, travobj);
+    } else {
+      lj_err_mem(L);
+    }
+  }
   return (GCobj*)arena_alloc(arena, osize);
 }
 
