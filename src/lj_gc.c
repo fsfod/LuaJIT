@@ -431,7 +431,7 @@ GCSize gc_traverse(global_State *g, GCobj *o)
   }
 }
 
-void pqueue_init(lua_State *L, PQueue* q)
+static void pqueue_init(lua_State *L, PQueue* q)
 {
   q->size = 16;
   q->count = 0;
@@ -442,7 +442,7 @@ void pqueue_init(lua_State *L, PQueue* q)
 #define child_right(idx) (idx * 2 + 2)
 #define parentidx(idx) ((idx - 1) / 2)
 
-void pqueue_pushup(PQueue* q, MSize idx)
+static void pqueue_pushup(PQueue* q, MSize idx)
 {
   GCArena *arena = q->array[idx];
   MSize greylen = arena_greysize(arena);
@@ -462,7 +462,7 @@ void pqueue_pushup(PQueue* q, MSize idx)
   }
 }
 
-void pqueue_insert(lua_State *L, PQueue* q, GCArena *arena)
+static void pqueue_insert(lua_State *L, PQueue* q, GCArena *arena)
 {
   /* TODO: cache queue size in the lower bits of the pointer with some refresh mechanism */
   if ((q->count+1) >= q->size) {
