@@ -233,6 +233,7 @@ void hugeblock_mark(global_State *g, void *o);
 void hugeblock_makewhite(global_State *g, GCobj *o);
 void hugeblock_toblack(global_State *g, GCobj *o);
 void hugeblock_setfixed(global_State *g, GCobj *o);
+void hugeblock_setfinalizable(global_State *g, GCobj *o);
 GCSize hugeblock_sweep(global_State *g);
 MSize hugeblock_checkfinalizers(global_State *g);
 MSize hugeblock_runfinalizers(global_State *g);
@@ -305,7 +306,7 @@ LUA_API GCBlockword *arenaobj_getblockword(void *o);
 LUA_API GCBlockword *arenaobj_getmarkword(void *o);
 LUA_API const char* arena_dumpwordstate(GCArena *arena, int blockidx);
 
-inline CellState arena_cellstate(GCArena *arena, GCCellID cell)
+static inline CellState arena_cellstate(GCArena *arena, GCCellID cell)
 {
   GCBlockword blockbit = arena_blockbit(cell);
   int32_t shift = arena_blockbitidx(cell);
