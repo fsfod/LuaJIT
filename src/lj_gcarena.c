@@ -1103,8 +1103,13 @@ CellIdChunk *arena_separatefinalizers(global_State *g, GCArena *arena, CellIdChu
         /* If theres no __gc meta skip saving the cell */
         if (!idlist_getmark(chunk, i) ||
             lj_meta_fastg(g, tabref(o->gch.metatable), MM_gc)) {
-          /* Temporally mark black before the sweep */
-          arena_markcell(arena, cell);
+          /* We have to make sure the env\meta tables of the userdata are kept
+          ** alive past the sweep phase, in case there needed in the finalizer  
+          ** phase that happends after the sweep.
+          ** TODO: Can we be smarter about this and only keep them alive until 
+          ** the end of finalize phase.
+          */
+          gc_mark(g, o, ~LJ_TUDATA);
           list = idlist_add(L, list, cell, idlist_getmark(chunk, i));
         }
       }
