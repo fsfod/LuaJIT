@@ -428,7 +428,7 @@ void sweepcallback(global_State *g, GCArena *arena, MSize i, int count)
     arena_clear_objmem(arena, CellState_White, 0);
   } else {
     if (count & 0x10000) {
-      printf("Swept arena %d\n", i);
+      printf("Swept arena(%d) dead %d\n", i, count & ~0x10000);
     } else {
       printf("Arena %d is now empty\n", i);
     }
