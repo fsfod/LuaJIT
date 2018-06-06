@@ -443,6 +443,7 @@ void VERIFYGC(global_State *g)
 {
 
   check_arenamemused(g);
+  do_cellwatch(g);
   //checkarenas(g);
 /*
   int celllen = getcellextent(g, 1, 18991);
@@ -549,6 +550,65 @@ void traces_toblack(global_State *g)
       gc_marktrace(g, i);
     }
   }
+}
+
+typedef struct IdEntry{
+  uint16_t arenaid;
+  GCCellID1 id;
+  int type;
+  char state;
+  uint16_t flags;
+} IdEntry;
+
+static IdEntry cell_watches[] = {
+  {0, 0, LJ_TUPVAL, 0},
+};
+
+static const char* statenames[] = {
+  "Extent",
+  "Free",
+  "White",
+  "Black",
+};
+
+void do_cellwatch(global_State *g)
+{
+  MSize i = 0;
+
+  for (; i < sizeof(cell_watches)/sizeof(IdEntry); i++) {
+    int arenaid = cell_watches[i].arenaid;
+    int cellid = cell_watches[i].id;
+    /* Can't have a zero sized array check for dummy value that marks it empty */
+    if (cellid == 0) {
+      break;
+    }
+    if (arenaid >= g->gc.arenastop || cell_watches[i].state == -1) {
+      continue;
+    }
+
+    GCArena *arena = lj_gc_arenaref(g, arenaid);
+    if (cellid >= arena_topcellid(arena)) {
+      if (cellid == arena_topcellid(arena) &&  !(cell_watches[i].flags & 1)) {
+        printf("CELLWATCH(%d, %d) CellTopEQ\n", arenaid, cellid);
+        cell_watches[i].flags |= 1;
+      }
+      continue;
+    }
+
+    CellState state = arena_cellstate(arena, cellid);
+    if (state != cell_watches[i].state) {
+      GCobj *o = (GCobj *)arena_cell(arena, cellid);
+      if (cell_watches[i].state == 0) {
+        printf("CELLWATCH(%d, %d) Allocated, as %s, gct %d\n", arenaid, cellid, 
+              statenames[state], o->gch.gct);
+      } else {
+          printf("CELLWATCH(%d, %d) %s, gct %d \n", arenaid, cellid, 
+                 statenames[state], o->gch.gct);
+      }
+      cell_watches[i].state = state;
+    }
+  }
+
 }
 
 #if !LJ_TARGET_WINDOWS

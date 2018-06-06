@@ -17,6 +17,7 @@ typedef enum TypeFilter {
 } TypeFilter;
 
 void checkarenas(global_State *g);
+void do_cellwatch(global_State *g);
 void print_deadobjs(global_State *g, TypeFilter filter);
 void arena_print_deadobjs(global_State *g, GCArena *arena, TypeFilter filter);
 
