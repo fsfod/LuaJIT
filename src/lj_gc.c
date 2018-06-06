@@ -95,6 +95,7 @@ void gc_mark(global_State *g, GCobj *o, int gct)
 {
   lua_assert(!isdead(g, o));
   lua_assert(gc_ishugeblock(o) || iswhite(g, o));
+  lua_assert(gct == o->gch.gct);
   PERF_COUNTER(gc_mark);
 
   /* Huge objects are always unconditionally sent to us to make white checks simple */
@@ -328,7 +329,7 @@ static void gc_traverse_trace(global_State *g, GCtrace *T)
   for (ref = T->nk; ref < REF_TRUE; ref++) {
     IRIns *ir = &T->ir[ref];
     if (ir->o == IR_KGC)
-      gc_markgct(g, ir_kgc(ir), irt_toitype(ir->t));
+      gc_markgct(g, ir_kgc(ir), ~irt_toitype(ir->t));
     if (irt_is64(ir->t) && ir->o != IR_KNULL)
       ref++;
   }
