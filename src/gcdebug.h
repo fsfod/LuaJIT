@@ -20,6 +20,7 @@ void checkarenas(global_State *g);
 void do_cellwatch(global_State *g);
 void print_deadobjs(global_State *g, TypeFilter filter);
 void arena_print_deadobjs(global_State *g, GCArena *arena, TypeFilter filter);
+void check_greyqueues_empty(global_State *g);
 
 void setarenas_black(global_State *g, int mode);
 void strings_toblack(global_State *g);
@@ -31,5 +32,11 @@ GCArena *getarena(lua_State *L, int i);
 GCobj *getarenacell(lua_State *L, int i, int cell);
 GCobj *getarenacellG(global_State *g, int i, int cell);
 int getcellextent(global_State *g, int i, int cell);
+
+#if DEBUG
+  #define assert_greyempty check_greyqueues_empty 
+#else
+  #define assert_greyempty(g)
+#endif
 
 #endif

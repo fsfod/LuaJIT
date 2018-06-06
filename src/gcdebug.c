@@ -299,6 +299,18 @@ void check_arenamemused(global_State *g)
   gc_assert(atotal < (g->gc.total - g->gc.hugemem));
 }
 
+void check_greyqueues_empty(global_State *g)
+{
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+    MSize greysize = arena_greysize(arena);
+    if (greysize != 0) {
+      printf("ERROR: grey queue of arena %d was not empty(was %d) when it was expected to be", i, greysize);
+      lua_assert(greysize != 0);
+    }
+  }
+}
+
 MSize GCCount = 0;
 const char *getgcsname(int gcs);
 int prevcelllen = 0;

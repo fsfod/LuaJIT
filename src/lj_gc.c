@@ -639,6 +639,7 @@ static GCSize gc_propagate_gray(global_State *g)
 
     // printf("propagated %d objects in arena(%d), with a size of %d\n", count, arena_extrainfo(maxarena)->id, omem);
   }
+  assert_greyempty(g);
   SECTION_END(propagate_gray);
 
   return total;
@@ -1197,6 +1198,7 @@ static void atomic(global_State *g, lua_State *L)
   gc_sweep_uv(g);
   /* Prepare for sweep phase. */
   g->gc.estimate = g->gc.total - (GCSize)udsize;  /* Initial estimate. */
+  assert_greyempty(g);
   SECTION_END(gc_atomic);
 }
 
