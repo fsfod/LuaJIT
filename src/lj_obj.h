@@ -338,19 +338,12 @@ typedef struct GCcdata {
   uint16_t ctypeid;	/* C type ID. */
 } GCcdata;
 
-/* Prepended to variable-sized or realigned C data objects. */
-typedef struct GCcdataVar {
-  uint16_t offset;	/* Offset to allocated memory (relative to GCcdata). */
-  uint16_t extra;	/* Extra space allocated (incl. GCcdata + GCcdatav). */
-  MSize len;		/* Size of payload. */
-} GCcdataVar;
 
 #define cdataptr(cd)	((void *)((cd)+1))
 #define cdataisv(cd)	((cd)->marked & 0x80)
-#define cdatav(cd)	((GCcdataVar *)((char *)(cd) - sizeof(GCcdataVar)))
-#define cdatavlen(cd)	check_exp(cdataisv(cd), cdatav(cd)->len)
-#define sizecdatav(cd)	(cdatavlen(cd) + cdatav(cd)->extra)
-#define memcdatav(cd)	((void *)((char *)(cd) - cdatav(cd)->offset))
+
+#define cdatavlen(cd)	check_exp(cdataisv(cd), gcrefu(cd->nextgc))
+#define sizecdatav(cd)	(cdatavlen(cd))
 
 /* -- Prototype object ---------------------------------------------------- */
 

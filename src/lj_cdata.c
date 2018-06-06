@@ -25,25 +25,6 @@ GCcdata *lj_cdata_newref(CTState *cts, const void *p, CTypeID id)
   return cd;
 }
 
-/* Allocate variable-sized or specially aligned C data object. */
-GCcdata *lj_cdata_newv(lua_State *L, CTypeID id, CTSize sz, CTSize align)
-{
-  MSize extra = sizeof(GCcdataVar) + sizeof(GCcdata) +
-		(align > CT_MEMALIGN ? (1u<<align) - (1u<<CT_MEMALIGN) : 0);
-  char *p = (char*)lj_mem_newcd(L, extra + sz);
-  uintptr_t adata = (uintptr_t)p + sizeof(GCcdataVar) + sizeof(GCcdata);
-  uintptr_t almask = (1u << align) - 1u;
-  GCcdata *cd = (GCcdata *)(((adata + almask) & ~almask) - sizeof(GCcdata));
-  lua_assert((char *)cd - p < 65536);
-  cdatav(cd)->offset = (uint16_t)((char *)cd - p);
-  cdatav(cd)->extra = extra;
-  cdatav(cd)->len = sz;
-  cd->marked |= 0x80;
-  cd->gct = ~LJ_TCDATA;
-  cd->ctypeid = id;
-  return cd;
-}
-
 GCcdata *lj_cdata_newalign(CTState *cts, CTypeID id, CTSize sz, CTSize align)
 {
   GCcdata *cd;
@@ -59,7 +40,26 @@ GCcdata *lj_cdata_newalign(CTState *cts, CTypeID id, CTSize sz, CTSize align)
   cd = (GCcdata *)lj_mem_newagco(cts->L, sizeof(GCcdata) + sz, align);
   cd->gct = ~LJ_TCDATA;
   cd->ctypeid = ctype_check(cts, id);
+  cd->marked |= 0x80;
+  /* FIXME: add a proper field */
+  gcrefu(cd->nextgc) = sz;
   return cd;
+}
+
+/* Allocate variable-sized or specially aligned C data object. */
+GCcdata *lj_cdata_newv(lua_State *L, CTypeID id, CTSize sz, CTSize align)
+{
+  CTState* cts = ctype_ctsG(G(L));
+  if (align <= CT_MEMALIGN) {
+    GCcdata *cd = (GCcdata *)lj_mem_newcd(cts->L, sizeof(GCcdata) + sz);
+    cd->gct = ~LJ_TCDATA;
+    cd->ctypeid = ctype_check(cts, id);
+    cd->marked |= 0x80;
+    gcrefu(cd->nextgc) = sz;
+    return cd;
+  } else {
+    return lj_cdata_newalign(cts, id, sz, align);
+  }
 }
 
 /* Allocate arbitrary C data object. */
@@ -67,36 +67,8 @@ GCcdata *lj_cdata_newx(CTState *cts, CTypeID id, CTSize sz, CTInfo info)
 {
   if (!(info & CTF_VLA) && ctype_align(info) <= CT_MEMALIGN) {
     return lj_cdata_new(cts, id, sz);
-  } else if (!(info & CTF_VLA)) {
-    return lj_cdata_newalign(cts, id, sz, ctype_align(info));
   } else {
     return lj_cdata_newv(cts->L, id, sz, ctype_align(info));
-  }
-}
-
-/* Free a C data object. */
-void LJ_FASTCALL lj_cdata_free(global_State *g, GCcdata *cd)
-{
-  if (LJ_UNLIKELY(cd->marked & LJ_GC_CDATA_FIN)) {
-    GCobj *root;
-    makewhite(g, obj2gco(cd));
-    markfinalized(obj2gco(cd));
-    if ((root = gcref(g->gc.mmudata)) != NULL) {
-      setgcrefr(cd->nextgc, root->gch.nextgc);
-      setgcref(root->gch.nextgc, obj2gco(cd));
-      setgcref(g->gc.mmudata, obj2gco(cd));
-    } else {
-      setgcref(cd->nextgc, obj2gco(cd));
-      setgcref(g->gc.mmudata, obj2gco(cd));
-    }
-  } else if (LJ_LIKELY(!cdataisv(cd))) {
-    CType *ct = ctype_raw(ctype_ctsG(g), cd->ctypeid);
-    CTSize sz = ctype_hassize(ct->info) ? ct->size : CTSIZE_PTR;
-    lua_assert(ctype_hassize(ct->info) || ctype_isfunc(ct->info) ||
-	       ctype_isextern(ct->info));
-    lj_mem_freegco(g, cd, sizeof(GCcdata) + sz);
-  } else {
-    lj_mem_freegco(g, memcdatav(cd), sizecdatav(cd));
   }
 }
 
