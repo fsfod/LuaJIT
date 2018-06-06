@@ -1286,6 +1286,35 @@ static int gc_sweepend(lua_State *L)
   }
 }
 
+#define ATOMIC_SWEEP 1
+#define ATOMIC_PROPAGATE 1
+
+/* Perform both sweepstring and sweep in single atomic call instead of 
+** incrementally to help track down GC phase bugs. 
+*/
+static void gc_atomicsweep(lua_State *L)
+{
+  global_State *g = G(L);
+  GCSize old = g->gc.total;
+
+  if (g->gc.state == GCSatomic) {
+    gc_setstate(g, GCSsweepstring);
+    gc_sweepstart(g);   
+  }
+
+  if (g->gc.state == GCSsweepstring) {
+    while (gc_sweepstring(g));
+  }
+
+  gc_setstate(g, GCSsweep);
+  arenasweep_start(g);
+  while (arenasweep_step(g));
+
+  lua_assert(old >= g->gc.total);
+  g->gc.estimate -= old - g->gc.total;
+  gc_sweepend(L);
+}
+
 /* GC state machine. Returns a cost estimate for each step performed. */
 static size_t gc_onestep(lua_State *L)
 {
@@ -1295,7 +1324,12 @@ static size_t gc_onestep(lua_State *L)
     gc_mark_start(g);  /* Start a new GC cycle by marking all GC roots. */
     return 0;
   case GCSpropagate: {
-    GCSize total = gc_propagate_gray(g); /* Propagate one gray object. */
+#if ATOMIC_PROPAGATE
+    GCSize total = 0;
+    while(gc_propagate_gray(g));
+#else
+   GCSize total = gc_propagate_gray(g); /* Propagate one gray object. */
+#endif
     if (total != 0) {
       return total;
     } else {
@@ -1307,8 +1341,12 @@ static size_t gc_onestep(lua_State *L)
     if (tvref(g->jit_base))  /* Don't run atomic phase on trace. */
       return LJ_MAX_MEM;
     atomic(g, L);
+#if ATOMIC_SWEEP
+    gc_atomicsweep(L);
+#else
     gc_setstate(g, GCSsweepstring);/* Start of sweep phase. */
     gc_sweepstart(g);
+#endif
     return 0;
   case GCSsweepstring: {
     GCSize old = g->gc.total;
