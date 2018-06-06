@@ -1051,18 +1051,21 @@ MSize arena_comparemeta(GCArena *arena, GCArena *meta)
   return 0;
 }
 
-void arena_adddefermark(lua_State *L, GCArena *arena, GCobj *o)
+int arena_adddefermark(lua_State *L, GCArena *arena, GCobj *o)
 {
   ArenaFreeList *freelist = arena_freelist(arena);
   CellIdChunk *chunk = freelist->defermark;
+  int setflag = 0;
   lua_assert(arena_containsobj(arena, o));
   assert_allocated(arena, ptr2cell(o));
 
   if (LJ_UNLIKELY(!chunk)) {
     chunk = idlist_new(L);
+    setflag = 1;
   }
 
   freelist->defermark = idlist_add(L, chunk, ptr2cell(o), o->gch.gct == ~LJ_TTAB);
+  return setflag;
 }
 
 void arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o)

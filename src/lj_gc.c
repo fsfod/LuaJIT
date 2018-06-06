@@ -1078,6 +1078,85 @@ static size_t gc_mark_threads(global_State *g)
   return m;
 }
 
+void lj_gc_setdeferredmark(lua_State *L, GCobj *o)
+{
+  global_State *g = G(L);
+  if (!gc_ishugeblock(o)) {
+    GCArena *arena = ptr2arena(o);
+    if (arena_adddefermark(L, arena, o)) {
+      lj_gc_setarenaflag(g, arena_extrainfo(arena)->id, ArenaFlag_DeferMarks);
+    }
+  } else {
+    lua_assert(0);
+  }
+}
+
+static void gc_deferred_marking(global_State *g)
+{
+  MSize i = 0;
+  for (; i < g->gc.arenastop; i++) {
+    if (!(lj_gc_arenaflags(g, i) & ArenaFlag_DeferMarks)) {
+      continue;
+    }
+
+    GCArena *arena = lj_gc_arenaref(g, i);
+    MSize j = 0;
+    CellIdChunk *list = arena_freelist(arena)->defermark;
+    MSize listmarks = list->count >> 5;
+
+    for (; j < list->count; j++) {
+      GCCellID1 id = list->cells[j];
+      GCobj *o = (GCobj *)arena_cell(arena, id);
+      if (arena_cellismarked(arena, id)) {
+        if (o->gch.gct == ~LJ_TTHREAD) {
+          gc_traverse_thread(g, (lua_State *)o);
+        }
+      } else {
+        idlist_remove(list, j);
+        j--;
+      }
+    }
+  }
+}
+
+static GCRef* sweeplist()
+{
+
+}
+
+void gc_deferred_sweep(global_State *g)
+{
+  MSize i = 0;
+  for (; i < g->gc.arenastop; i++) {
+    if (!(lj_gc_arenaflags(g, i) & ArenaFlag_DeferMarks)) {
+      continue;
+    }
+
+    GCArena *arena = lj_gc_arenaref(g, i);
+    MSize j = 0;
+    CellIdChunk *list = arena_freelist(arena)->defermark;
+    for (; j < idlist_count(list); j++) {
+      GCCellID1 id = list->cells[j];
+      GCobj *o = (GCobj *)arena_cell(arena, id);
+      lua_assert(arena_cellismarked(arena, id));
+
+      if (o->gch.gct == ~LJ_TTHREAD) {
+        GCupval *uv = gcrefp(((lua_State *)o)->openupval, GCupval);
+        GCRef *prev = &((lua_State *)o)->openupval;
+
+        for (; uv; uv = gcrefp(uv->nextgc, GCupval)) {
+          if (arenaobj_iswhite(obj2gco(uv))) {
+            GCDEBUG("sweep_thread_uv(%d, %d)\n", ptr2arena(obj2gco(uv))->extra.id, ptr2cell(obj2gco(uv)));
+            setgcrefr(*prev, uv->nextgc);
+          } else {
+            prev = &uv->nextgc;
+          }
+        }
+      }
+    }
+  }
+}
+
 /* Atomic part of the GC cycle, transitioning from mark to sweep phase. */
 static void atomic(global_State *g, lua_State *L)
 {
@@ -1096,6 +1175,8 @@ static void atomic(global_State *g, lua_State *L)
   gc_mark_gcroot(g);  /* Mark GC roots (again). */
   gc_propagate_gray(g);  /* Propagate all of the above. */
 
+  gc_deferred_marking(g);
+
   /* Empty the 2nd chance list. */
   gc_mark_threads(g);
   gc_propagate_gray(g);
@@ -1106,6 +1187,7 @@ static void atomic(global_State *g, lua_State *L)
 
   /* All marking done, clear weak tables. */
   gc_clearweak(g, gcref(g->gc.weak));
+  gc_deferred_sweep(g);
 
   lj_buf_shrink(L, &g->tmpbuf);  /* Shrink temp buffer. */
 

@@ -99,6 +99,7 @@ typedef enum ArenaFlags {
   ArenaFlag_FixedList = 0x100, /* Has a List of Fixed object cell ids */
   ArenaFlag_GGArena   = 0x200,
   ArenaFlag_SplitPage = 0x400,/* Pages allocated for the arena were part of a larger allocation */
+  ArenaFlag_DeferMarks = 0x800,/* Arena has deferred mark object list */
 } ArenaFlags;
 
 typedef struct ArenaExtra {
@@ -222,7 +223,7 @@ void arena_destroyGG(global_State *g, GCArena* arena);
 void arena_creategreystack(lua_State *L, GCArena *arena);
 void arena_growgreystack(global_State *L, GCArena *arena);
 void arean_setfixed(lua_State *L, GCArena *arena, GCobj *o);
-void arena_adddefermark(lua_State *L, GCArena *arena, GCobj *o);
+int arena_adddefermark(lua_State *L, GCArena *arena, GCobj *o);
 
 void *hugeblock_alloc(lua_State *L, GCSize size, MSize gct);
 void hugeblock_free(global_State *g, void *o, GCSize size);
@@ -550,6 +551,16 @@ static LJ_AINLINE CellIdChunk *idlist_add(lua_State *L, CellIdChunk *chunk, GCCe
     chunk = newchunk;
   }
   return chunk;
+}
+
+/* FIXME: does not fixup the list mark for either slot */
+static inline int idlist_remove(CellIdChunk *chunk, MSize idx)
+{
+  MSize count = idlist_count(chunk);
+  lua_assert(idx < count && count > 0);
+  /* Swap the value at the end of the list in to the index of the removed value */
+  chunk->cells[idx] = chunk->cells[count-1];
+  return --chunk->count == 0;
 }
 
 #define idlist_freechunk(g, chunk) lj_mem_free(g, chunk, sizeof(CellIdChunk))

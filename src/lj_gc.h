@@ -58,6 +58,7 @@ static LJ_AINLINE void makewhite(global_State *g, GCobj *o)
 
 void lj_gc_setfixed(lua_State *L, GCobj *o);
 void lj_gc_setfinalizable(lua_State *L, GCobj *o, GCtab *mt);
+void lj_gc_setdeferredmark(lua_State *L, GCobj *o);
 
 /* Collector. */
 LJ_FUNC size_t lj_gc_separateudata(global_State *g, int all);
