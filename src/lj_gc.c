@@ -615,8 +615,9 @@ static GCSize gc_propagate_gray(global_State *g)
     ArenaFlags flags = lj_gc_arenaflags(g, i);
     /* Skip empty and non traversable arenas */
     if ((flags & (ArenaFlag_Empty|ArenaFlag_TravObjs)) != ArenaFlag_TravObjs) {
-      lua_assert(!(ArenaFlag_TravObjs & flags) || (arena_greysize(arena) == 0 &&
-                  arena_totalobjmem(arena) == 0));
+      lua_assert(arena_greysize(arena) == 0);
+      lua_assert(((flags & ArenaFlag_Empty) && arena_totalobjmem(arena) == 0) ||
+                 (!(flags & ArenaFlag_Empty) && arena_totalobjmem(arena) != 0));
       continue;
     }
     pqueue_insert(L, greyqueu, arena);
@@ -1029,8 +1030,10 @@ GCArena *lj_gc_setactive_arena(lua_State *L, GCArena *arena, int travobjs)
   GCDEBUG("setactive_arena: %d\n", id);
 
   if (travobjs) {
+    lj_gc_setarenaflag(g, id, ArenaFlag_TravObjs);
     g->travarena = arena;
   } else {
+    lj_gc_cleararenaflags(g, id, ArenaFlag_TravObjs);
     g->arena = arena;
   }
   return old;
