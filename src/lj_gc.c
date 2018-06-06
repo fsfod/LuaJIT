@@ -1268,6 +1268,24 @@ static void gc_sweepstart(global_State *g)
   g->gc.curarena = arena_topcellid(g->arena);
 }
 
+static int gc_sweepend(lua_State *L)
+{
+  global_State *g = G(L);
+  if (g->strnum <= (g->strmask >> 2) && g->strmask > LJ_MIN_STRTAB*2-1)
+    lj_str_resize(L, g->strmask >> 1);  /* Shrink string table. */
+  if (gcref(g->gc.mmudata)) {  /* Need any finalizations? */
+    gc_setstate(g, GCSfinalize);
+#if LJ_HASFFI
+    g->gc.nocdatafin = 1;
+#endif
+    return 1;
+  } else {  /* Otherwise skip this phase to help the JIT. */
+    gc_setstate(g, GCSpause);  /* End of GC cycle. */
+    g->gc.debt = 0;
+    return 0;
+  }
+}
+
 /* GC state machine. Returns a cost estimate for each step performed. */
 static size_t gc_onestep(lua_State *L)
 {
@@ -1314,18 +1332,7 @@ static size_t gc_onestep(lua_State *L)
     if (sweepcost != 0) {
       return sweepcost;
     }
-
-    if (g->strnum <= (g->strmask >> 2) && g->strmask > LJ_MIN_STRTAB*2-1)
-      lj_str_resize(L, g->strmask >> 1);  /* Shrink string table. */
-    if (gcref(g->gc.mmudata)) {  /* Need any finalizations? */
-      gc_setstate(g, GCSfinalize);
-#if LJ_HASFFI
-      g->gc.nocdatafin = 1;
-#endif
-    } else {  /* Otherwise skip this phase to help the JIT. */
-      gc_setstate(g, GCSpause);  /* End of GC cycle. */
-      g->gc.debt = 0;
-    }
+    gc_sweepend(L);
     return GCSWEEPMAX*GCSWEEPCOST;
   }
   case GCSfinalize:
