@@ -18,4 +18,10 @@ LJ_FUNC void *lj_allocpages(void *probestart, size_t alignment, size_t size, voi
 LJ_FUNC void lj_freepages(void* handle, void* p, size_t size);
 #endif
 
+#if DEBUG
+LJ_FUNC void lj_check_allocstate(void *m);
+#else
+#define lj_check_allocstate(m)
+#endif
+
 #endif

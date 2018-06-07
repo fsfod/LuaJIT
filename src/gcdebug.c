@@ -456,6 +456,7 @@ void VERIFYGC(global_State *g)
 
   check_arenamemused(g);
   do_cellwatch(g);
+  lj_check_allocstate(g->allocd);
   //checkarenas(g);
 /*
   int celllen = getcellextent(g, 1, 18991);

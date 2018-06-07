@@ -1109,6 +1109,12 @@ static size_t do_check_malloc_state(mstate m)
 
   return traverse_and_check(m);
 }
+
+void lj_check_allocstate(void *m)
+{
+  do_check_malloc_state((mstate)m);
+}
+
 #endif
 
 /* ----------------------- Operations on smallbins ----------------------- */
