@@ -290,6 +290,5 @@ void LJ_FASTCALL lj_state_free(global_State *g, lua_State *L)
   lj_func_closeuv(L, tvref(L->stack));
   lua_assert(gcref(L->openupval) == NULL);
   lj_mem_freevec(g, tvref(L->stack), L->stacksize, TValue);
-  lj_mem_freegco(g, L, sizeof(lua_State));
 }
 

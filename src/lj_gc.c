@@ -1121,16 +1121,25 @@ static void gc_deferred_marking(global_State *g)
           gc_traverse_thread(g, (lua_State *)o);
         }
       } else {
-        idlist_remove(list, j);
-        j--;
+
       }
     }
   }
 }
 
-static GCRef* sweeplist()
+static void sweep_threaduv(lua_State *th)
 {
+  GCupval *uv = gcrefp(th->openupval, GCupval);
+  GCRef *prev = &th->openupval;
 
+  for (; uv; uv = gcrefp(uv->nextgc, GCupval)) {
+    if (arenaobj_iswhite(obj2gco(uv))) {
+      GCDEBUG("sweep_thread_uv(%d, %d)\n", ptr2arena(obj2gco(uv))->extra.id, ptr2cell(obj2gco(uv)));
+      setgcrefr(*prev, uv->nextgc);
+    } else {
+      prev = &uv->nextgc;
+    }
+  }
 }
 
 void gc_deferred_sweep(global_State *g)
@@ -1144,23 +1153,24 @@ void gc_deferred_sweep(global_State *g)
     GCArena *arena = lj_gc_arenaref(g, i);
     MSize j = 0;
     CellIdChunk *list = arena_freelist(arena)->defermark;
-    for (; j < idlist_count(list); j++) {
+    for (; j < idlist_count(list); ) {
       GCCellID1 id = list->cells[j];
       GCobj *o = (GCobj *)arena_cell(arena, id);
-      lua_assert(arena_cellismarked(arena, id));
 
-      if (o->gch.gct == ~LJ_TTHREAD) {
-        GCupval *uv = gcrefp(((lua_State *)o)->openupval, GCupval);
-        GCRef *prev = &((lua_State *)o)->openupval;
-
-        for (; uv; uv = gcrefp(uv->nextgc, GCupval)) {
-          if (arenaobj_iswhite(obj2gco(uv))) {
-            GCDEBUG("sweep_thread_uv(%d, %d)\n", ptr2arena(obj2gco(uv))->extra.id, ptr2cell(obj2gco(uv)));
-            setgcrefr(*prev, uv->nextgc);
-          } else {
-            prev = &uv->nextgc;
-          }
+      if (arena_cellismarked(arena, id)) {
+        if (o->gch.gct == ~LJ_TTHREAD) {
+          sweep_threaduv((lua_State *)o);
         }
+        j++;
+      } else {
+        if (o->gch.gct == ~LJ_TTHREAD) {
+          lj_state_free(g, (lua_State *)o);
+        } else {
+
+        }
+        /* TODO: handle mark bits if we use them */
+        lua_assert((list->count >> 15) == 0);
+        idlist_remove(list, j);
       }
     }
   }
@@ -1193,14 +1203,14 @@ static void atomic(global_State *g, lua_State *L)
   udsize = lj_gc_separateudata(g, 0);  /* Separate userdata to be finalized. */
  // gc_mark_mmudata(g);  /* Mark them. */
   udsize += gc_propagate_gray(g);  /* And propagate the marks. */
+  
+  lj_buf_shrink(L, &g->tmpbuf);  /* Shrink temp buffer. */
 
   /* All marking done, clear weak tables. */
   gc_clearweak(g, gcref(g->gc.weak));
+  gc_sweep_uv(g);
   gc_deferred_sweep(g);
 
-  lj_buf_shrink(L, &g->tmpbuf);  /* Shrink temp buffer. */
-
-  gc_sweep_uv(g);
   /* Prepare for sweep phase. */
   g->gc.estimate = g->gc.total - (GCSize)udsize;  /* Initial estimate. */
   assert_greyempty(g);
