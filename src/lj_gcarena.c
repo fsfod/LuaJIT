@@ -1068,21 +1068,23 @@ int arena_adddefermark(lua_State *L, GCArena *arena, GCobj *o)
   return setflag;
 }
 
-void arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o)
+int arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o)
 {
   CellIdChunk *chunk = arena_finalizers(arena);
+  int setflag = 0;
   lua_assert(arena_containsobj(arena, o));
   assert_allocated(arena, ptr2cell(o));
 
   if (LJ_UNLIKELY(!chunk)) {
     chunk = idlist_new(L);
-    /* TODO: Set has finalizer arena flag */
     setmref(arena_extrainfo(arena)->finalizers, chunk);
+    setflag = 1;
   }
   /* Flag item as needing a meta lookup so we don't need to touch the memory
   ** of cdata that needs finalizing
   */
   idlist_add(L, chunk, ptr2cell(o), o->gch.gct == ~LJ_TTAB || o->gch.gct == ~LJ_TUDATA);
+  return setflag;
 }
 
 CellIdChunk *arena_separatefinalizers(global_State *g, GCArena *arena, CellIdChunk *list)

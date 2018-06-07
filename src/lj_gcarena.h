@@ -100,6 +100,7 @@ typedef enum ArenaFlags {
   ArenaFlag_GGArena   = 0x200,
   ArenaFlag_SplitPage = 0x400,/* Pages allocated for the arena were part of a larger allocation */
   ArenaFlag_DeferMarks = 0x800,/* Arena has deferred mark object list */
+  ArenaFlag_Finalizers = 0x1000,/* Arena has a finalizer list with objects in it */
 } ArenaFlags;
 
 typedef struct ArenaExtra {
@@ -200,7 +201,7 @@ typedef struct HugeBlockTable {
 
 #define arena_extrainfo(arena) (&(arena)->extra)
 #define arena_finalizers(arena) mref(arena_extrainfo(arena)->finalizers, CellIdChunk)
-void arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o);
+int arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o);
 CellIdChunk *arena_separatefinalizers(global_State *g, GCArena *arena, CellIdChunk *out);
 
 #define arena_blockidx(cell) (((cell) & ~BlocksetMask) >> 5)

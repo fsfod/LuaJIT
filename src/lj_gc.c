@@ -718,7 +718,10 @@ void lj_gc_setfinalizable(lua_State *L, GCobj *o, GCtab *mt)
 {
   lua_assert(o->gch.gct == ~LJ_TCDATA || o->gch.gct == ~LJ_TUDATA);
   if (!gc_ishugeblock(o)) {
-    arena_addfinalizer(L, ptr2arena(o), o);
+    GCArena *arena = ptr2arena(o);
+    if(arena_addfinalizer(L, arena, o)){
+      lj_gc_setarenaflag(G(L), arena_extrainfo(arena)->id, ArenaFlag_Finalizers);
+    }
   } else {
     hugeblock_setfinalizable(G(L), o);
   }
