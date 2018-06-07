@@ -1604,9 +1604,14 @@ static void build_subroutines(BuildCtx *ctx)
   |.endif
   |  // Possible write barrier. Table is black, but skip iswhite(mt) check.
   |  barrierback TAB:RB, RC
+  |  and RC, GRAYSSB_MASK // Check SSB buffer overflow
+  |  jz >8
   |1:
   |  jmp ->fff_res1
-  |
+  |8: // Mark and empty the full SSB buffer
+  |  call ->emptygrayssb
+  |  movzx RA, PC_RA
+  |  jmp <1
   |.ffunc_2 rawget
   |  cmp dword [BASE+4], LJ_TTAB;  jne ->fff_fallback
   |.if X64WIN
@@ -4699,7 +4704,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |
     |7:  // Possible table write barrier for the value. Skip valiswhite check.
     |  barrierback TAB:RB, RA
+    |  and RA, GRAYSSB_MASK // Check SSB buffer overflow
+    |  jz >8
     |  movzx RA, PC_RA			// Restore RA.
+    |  jmp <2
+    |8: // Mark and empty the full SSB buffer
+    |  call ->emptygrayssb
+    |  movzx RA, PC_RA
     |  jmp <2
     break;
 
@@ -4768,6 +4779,11 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |
     |7:  // Possible table write barrier for any value. Skip valiswhite check.
     |  barrierback TAB:RB, RD
+    |  and RD, GRAYSSB_MASK // Check SSB buffer overflow
+    |  jz >8
+    |  jmp <2
+    |8: // Mark and empty the full SSB buffer
+    |  call ->emptygrayssb
     |  jmp <2
     break;
 
