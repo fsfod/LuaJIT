@@ -1227,8 +1227,16 @@ static void sweep_arena(global_State *g, MSize i, MSize celltop)
   TicksStart();
 
   if (celltop) {
-    /* Make sure any objects allocated after marking has finished are not swept away */
-    arena_setrangeblack(arena, celltop, celltop+256);
+    lua_assert(celltop <= currtop);
+    /* FIXME: The sweep functions mark in SIMD vector sized chunks which may
+    ** go past the celltop sweep limit so set a simd sized chunk of cell mark
+    ** bits past the sweep limit to black as well.
+    */
+    GCCellID endid = celltop+256;
+    if (endid > MaxCellId) {
+      endid = MaxCellId;
+    }
+    arena_setrangeblack(arena, celltop, endid);
   }
   if (g->gc.isminor) {
     count = arena_minorsweep(arena, celltop);
