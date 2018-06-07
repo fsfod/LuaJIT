@@ -82,7 +82,7 @@ typedef union FreeCellRange {
 /* Should be 64 bytes the same size as a cache line */
 typedef struct CellIdChunk {
   GCCellID1 cells[26];
-  uint32_t count;
+  uint32_t count; /* Upper bits are flag for each cell entry */
   struct CellIdChunk *next;
 } CellIdChunk;
 
@@ -529,6 +529,7 @@ static LJ_AINLINE void *arena_alloc(GCArena *arena, MSize size)
 #define idlist_count(list) ((list)->count & 31)
 #define idlist_getmark(list, cellidx) ((list)->count & (1 << ((cellidx)+5)))
 #define idlist_markcell(list, cellidx) ((list)->count |= (1 << ((cellidx)+5)))
+#define idlist_maxcells 26
 
 void *lj_mem_realloc(lua_State *L, void *p, GCSize osz, GCSize nsz);
 
@@ -540,13 +541,14 @@ static LJ_AINLINE CellIdChunk *idlist_new(lua_State *L)
   return list;
 }
 
-static LJ_AINLINE CellIdChunk *idlist_add(lua_State *L, CellIdChunk *chunk, GCCellID cell, int mark)
+static LJ_INLINE CellIdChunk *idlist_add(lua_State *L, CellIdChunk *chunk, GCCellID cell, int mark)
 {
   MSize count = idlist_count(chunk);
+  lua_assert(count < idlist_maxcells);
   chunk->cells[count] = cell;
-  chunk->count |= mark ? (1 << (count+5)) : 0;
-  chunk->count = ++count;
-  if (LJ_UNLIKELY(count >= 26)) {
+  chunk->count |= (mark ? (1 << (count+5)) : 0);
+  chunk->count++;
+  if (count >= (idlist_maxcells-1)) {
     CellIdChunk *newchunk = idlist_new(L);
     newchunk->next = chunk;
     chunk = newchunk;

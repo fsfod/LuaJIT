@@ -1094,32 +1094,49 @@ CellIdChunk *arena_separatefinalizers(global_State *g, GCArena *arena, CellIdChu
 
   for (; chunk != NULL;) {
     MSize count = idlist_count(chunk);
+    uint32_t listmarks = chunk->count >> 5;
+    uint32_t markmask = (1 << chunk->count) -1;
+    lua_assert(count <= (sizeof(chunk->cells)/2));
+
     for (size_t i = 0; i < count; i++) {
       GCCellID cell = chunk->cells[i];
       assert_allocated(arena, cell);
 
-      if (!((arena_getmark(arena, cell) >> arena_blockbitidx(cell)) & 1)) {
+      if (!arena_cellismarked(arena, cell)) {
         GCobj *o = arena_cellobj(arena, cell);
+        /* If theres no __gc meta skip saving the cell */
+        if ((listmarks >> i) & 1) {
+          lua_assert(o->gch.gct == ~LJ_TUDATA);
+          if (lj_meta_fastg(g, tabref(o->gch.metatable), MM_gc)) {
+            /* We have to make sure the env\meta tables of the userdata are kept
+            ** alive past the sweep phase, in case there needed in the finalizer
+            ** phase that happends after the sweep.
+            ** TODO: Can we be smarter about this and only keep them alive until
+            ** the end of finalize phase.
+            */
+            gc_mark(g, o, ~LJ_TUDATA);
+            list = idlist_add(L, list, cell, 1);
+          }
+        } else {
+          lua_assert(o->gch.gct == ~LJ_TCDATA);
+          arena_markcell(arena, cell);
+          list = idlist_add(L, list, cell, 0);
+        }
+
+        markmask = markmask >> 1;
+        uint32_t cellmask = lj_rol(0xfffffffe, i);
+        listmarks = ((markmask & cellmask) & listmarks) | ((listmarks & ~markmask) ? ~cellmask : 0);
+
         /* Swap the cellid at the end of the list into place of the one we removed */
         /* FIXME: should really do 'stream compaction' and or sorting so theres better chance of the
         ** next item is more likely tobe in cache
         */
         chunk->cells[i] = chunk->cells[--count];
-        /* If theres no __gc meta skip saving the cell */
-        if (!idlist_getmark(chunk, i) ||
-            lj_meta_fastg(g, tabref(o->gch.metatable), MM_gc)) {
-          /* We have to make sure the env\meta tables of the userdata are kept
-          ** alive past the sweep phase, in case there needed in the finalizer  
-          ** phase that happends after the sweep.
-          ** TODO: Can we be smarter about this and only keep them alive until 
-          ** the end of finalize phase.
-          */
-          gc_mark(g, o, ~LJ_TUDATA);
-          list = idlist_add(L, list, cell, idlist_getmark(chunk, i));
-        }
+        i--;
       }
     }
-    chunk->count = count;
+    chunk->count = count | (listmarks << 5);
+    lua_assert(idlist_count(chunk) < idlist_maxcells);
     chunk = chunk->next;
   }
 
