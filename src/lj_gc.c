@@ -1760,7 +1760,7 @@ void lj_gc_setfixed(lua_State *L, GCobj *o)
 
   if (!gc_ishugeblock(o)) {
     GCArena *arena = ptr2arena(o);
-    arean_setfixed(L, ptr2arena(o), o);
+    arena_setfixed(L, ptr2arena(o), o);
     /* Fixed objects should always be black */
     arena_markcell(arena, ptr2cell(o));
   } else {

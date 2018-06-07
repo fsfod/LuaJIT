@@ -223,7 +223,7 @@ void* arena_createGG(GCArena** arena);
 void arena_destroyGG(global_State *g, GCArena* arena);
 void arena_creategreystack(lua_State *L, GCArena *arena);
 void arena_growgreystack(global_State *L, GCArena *arena);
-void arean_setfixed(lua_State *L, GCArena *arena, GCobj *o);
+void arena_setfixed(lua_State *L, GCArena *arena, GCobj *o);
 int arena_adddefermark(lua_State *L, GCArena *arena, GCobj *o);
 
 void *hugeblock_alloc(lua_State *L, GCSize size, MSize gct);

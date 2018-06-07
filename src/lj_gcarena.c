@@ -633,7 +633,7 @@ void arena_growgreystack(global_State *g, GCArena *arena)
   lj_mem_freevec(g, old, size, GCCellID1);
 }
 
-void arean_setfixed(lua_State *L, GCArena *arena, GCobj *o)
+void arena_setfixed(lua_State *L, GCArena *arena, GCobj *o)
 {
   ArenaExtra *info = arena_extrainfo(arena);
   GCCellID1 *list = mref(info->fixedcells, GCCellID1);
@@ -644,7 +644,8 @@ void arean_setfixed(lua_State *L, GCArena *arena, GCobj *o)
 
   if (info->fixedtop == info->fixedsized) {
     MSize size = info->fixedsized;
-    list = lj_mem_growvec(L, list, size, ArenaUsableCells, GCCellID1);
+    GCCellID1 *newlist = lj_mem_growvec(L, list, size, ArenaUsableCells, GCCellID1);
+    list = newlist;
     setmref(info->fixedcells, list);
     info->fixedsized = size;
   }
