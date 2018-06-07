@@ -944,7 +944,6 @@ GCArena *lj_gc_findnewarena(lua_State *L, int travobj)
   uint32_t wantedflags = travobj ? ArenaFlag_TravObjs : 0;
 
   for (MSize i = 0; i < g->gc.arenastop; i++) {
-    GCArena *arena = lj_gc_arenaref(g, i);
     ArenaFlags arenaflags = lj_gc_arenaflags(g, i);
 
     if ((arenaflags & (ArenaFlag_NoBump|ArenaFlag_Explicit|ArenaFlag_Empty)) ==
@@ -964,6 +963,9 @@ GCArena *lj_gc_findnewarena(lua_State *L, int travobj)
     fallback = 0;
   }else if (fallback != g->gc.arenastop) {
     arena = lj_gc_arenaref(g, fallback);
+    id = fallback;
+  } else {
+    arena = NULL;
   }
 
   if (!arena) {
