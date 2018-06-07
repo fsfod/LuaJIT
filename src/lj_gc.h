@@ -83,12 +83,16 @@ LJ_FUNC void lj_gc_freearena(global_State *g, union GCArena *arena);
 LJ_FUNC GCArena *lj_gc_findnewarena(lua_State *L, int travobj);
 LJ_FUNC int lj_gc_getarenaid(global_State *g, void* arena);
 LJ_FUNC union GCArena *lj_gc_setactive_arena(lua_State *L, union GCArena *arena, int travobjs);
-#define lj_gc_arenaref(g, i) ((GCArena *)(((uintptr_t)(g)->gc.arenas[(i)]) & ~(ArenaCellMask)))
-#define lj_gc_arenaflags(g, i) ((uint32_t)(((uintptr_t)(g)->gc.arenas[(i)]) & ArenaCellMask))
+
+#define lj_gc_arenaref(g, i) \
+  check_exp((i) < (g)->gc.arenastop, ((GCArena *)(((uintptr_t)(g)->gc.arenas[(i)]) & ~(ArenaCellMask))))
 #define lj_gc_curarena(g) lj_gc_arenaref(g, (g)->gc.curarena)
+#define lj_gc_arenaflags(g, i) \
+  check_exp((i) < (g)->gc.arenastop, ((uint32_t)(((uintptr_t)(g)->gc.arenas[(i)]) & ArenaCellMask)))
 
 static LJ_AINLINE void lj_gc_setarenaflag(global_State *g, MSize i, uint32_t flags)
 {
+  lua_assert(i < g->gc.arenastop);
   lua_assert((flags & ~ArenaCellMask) == 0);
   //GCArena *arena = lj_gc_arenaref(g, i);
   //arena->
@@ -97,6 +101,7 @@ static LJ_AINLINE void lj_gc_setarenaflag(global_State *g, MSize i, uint32_t fla
 
 static LJ_AINLINE void lj_gc_cleararenaflags(global_State *g, MSize i, uint32_t flags)
 {
+  lua_assert(i < g->gc.arenastop);
   lua_assert((flags & ~ArenaCellMask) == 0);
   g->gc.arenas[i] = (GCArena *)(((uintptr_t)g->gc.arenas[i]) & ~flags);
 }
