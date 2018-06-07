@@ -186,7 +186,7 @@ void checkarenas(global_State *g) {
     if (!(flags & ArenaFlag_Empty)) {
 
       //if (arena != g->arena) {
-        arena_visitobjects(arena, livechecker, g, 0);
+        arena_visitobjects(arena, livechecker, g, g->gc.state >= GCSsweepstring ? CellState_Black : 0);
      // }
     } else if(flags & ArenaFlag_Empty) {
       gc_assert(arena_topcellid(arena) == MinCellId && arena_greysize(arena) == 0);
