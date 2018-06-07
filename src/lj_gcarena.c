@@ -1080,10 +1080,12 @@ int arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o)
     setmref(arena_extrainfo(arena)->finalizers, chunk);
     setflag = 1;
   }
-  /* Flag item as needing a meta lookup so we don't need to touch the memory
-  ** of cdata that needs finalizing
+  /* Flag the cell entry as needing a meta lookup so we can skip touching the memory of cdata 
+  ** touch extra memory checking the object type for cdata that needs finalizing.
   */
-  idlist_add(L, chunk, ptr2cell(o), o->gch.gct == ~LJ_TTAB || o->gch.gct == ~LJ_TUDATA);
+  CellIdChunk *head = idlist_add(L, chunk, ptr2cell(o), o->gch.gct == ~LJ_TTAB || o->gch.gct == ~LJ_TUDATA);
+  chunk = head;
+  setmref(arena_extrainfo(arena)->finalizers, head);
   return setflag;
 }
 
