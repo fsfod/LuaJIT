@@ -1910,30 +1910,80 @@ static LJ_NOINLINE void *lj_alloc_realloc(void *msp, void *ptr, size_t nsize)
   }
 }
 
+#define DEBUG_ALLOC 0
+
+#if DEBUG_ALLOC
 #include <stdio.h>
+
+static uint64_t acount = 0;
+static uint64_t fcount = 0;
+static uint64_t rcount = 0;
+static uint64_t count = 0;
+
+mchunkptr badchunk = NULL;
 
 void *lj_alloc_f(void *msp, void *ptr, size_t osize, size_t nsize)
 {
   (void)osize;
   void *ret;
+
+  count++;
+  if (count == 1) {
+    __asm__ volatile("int $0x03");
+  }
+
 #if DEBUG
   do_check_malloc_state(msp);
 #endif
   if (nsize == 0) {
     ret = lj_alloc_free(msp, ptr);
-    //printf("Free %x size %u\n", ptr, osize);
+    fcount++;
+    printf("Free %x size %u\n", mem2chunk(ptr), osize);
   } else if (ptr == NULL) {
     ret = lj_alloc_malloc(msp, nsize);
-   // printf("Alloc %x size %u\n", ret, nsize);
+    acount++;
+    printf("Alloc %x size %u\n", mem2chunk(ret), nsize);
   } else {
     ret = lj_alloc_realloc(msp, ptr, nsize);
-   // printf("Realloc %x to %x size %u\n", ptr, ret, nsize);
+    rcount++;
+    printf("Realloc %x to %x size %u\n", mem2chunk(ptr), mem2chunk(ret), nsize);
   }
 #if DEBUG
   do_check_malloc_state(msp);
-#endif
+#endif 
+
+  if (count == 1) {
+    badchunk = mem2chunk(ret);
+    //   __asm__ volatile("int $0x03");
+  }
   return ret;
 }
+
+#else
+
+void *lj_alloc_f(void *msp, void *ptr, size_t osize, size_t nsize)
+{
+  (void)osize;
+  void *ret;
+
+#if DEBUG
+  do_check_malloc_state(msp);
+#endif
+  if (nsize == 0) {
+    ret = lj_alloc_free(msp, ptr);
+  } else if (ptr == NULL) {
+    ret = lj_alloc_malloc(msp, nsize);
+  } else {
+    ret = lj_alloc_realloc(msp, ptr, nsize);
+  }
+#if DEBUG
+  do_check_malloc_state(msp);
+#endif 
+
+  return ret;
+}
+
+#endif
 
 /* Consolidate and bin a chunk. Differs from exported versions
    of free mainly in that the chunk need not be marked as inuse.
