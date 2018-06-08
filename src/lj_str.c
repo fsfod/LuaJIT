@@ -148,7 +148,7 @@ void lj_str_resize(lua_State *L, MSize newmask)
   MSize i;
   if (g->gc.state == GCSsweepstring || newmask >= LJ_MAX_STRTAB-1)
     return;  /* No resizing during GC traversal or if already too big. */
-  newhash = lj_mem_newvec(L, newmask+1, GCRef);
+  newhash = lj_mem_newvec(L, newmask+1, GCRef, GCPOOL_GREY);
   memset(newhash, 0, (newmask+1)*sizeof(GCRef));
   freelist = NULL;
   for (i = g->strmask; i != ~(MSize)0; i--) {  /* Rehash old table. */

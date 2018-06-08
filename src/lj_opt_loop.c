@@ -277,7 +277,7 @@ static void loop_unroll(LoopState *lps)
   */
   invar = J->cur.nins;
   lps->sizesubst = invar - REF_BIAS;
-  lps->subst = lj_mem_newvec(J->L, lps->sizesubst, IRRef1);
+  lps->subst = lj_mem_newvec(J->L, lps->sizesubst, IRRef1, GCPOOL_LEAF);
   subst = lps->subst - REF_BIAS;
   subst[REF_BASE] = REF_BASE;
 
@@ -419,7 +419,6 @@ int lj_opt_loop(jit_State *J)
   lps.subst = NULL;
   lps.sizesubst = 0;
   errcode = lj_vm_cpcall(J->L, NULL, &lps, cploop_opt);
-  lj_mem_freevec(J2G(J), lps.subst, lps.sizesubst, IRRef1);
   if (LJ_UNLIKELY(errcode)) {
     lua_State *L = J->L;
     if (errcode == LUA_ERRRUN && tvisnumber(L->top-1)) {  /* Trace error? */

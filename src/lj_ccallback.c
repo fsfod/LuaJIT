@@ -728,7 +728,8 @@ static MSize callback_slot_new(CTState *cts, CType *ct)
     lj_err_caller(cts->L, LJ_ERR_FFI_CBACKOV);
   if (!cts->cb.mcode)
     callback_mcode_new(cts);
-  lj_mem_growvec(cts->L, cbid, cts->cb.sizeid, CALLBACK_MAX_SLOT, CTypeID1);
+  lj_mem_growvec(cts->L, cbid, cts->cb.sizeid, CALLBACK_MAX_SLOT, CTypeID1,
+		 GCPOOL_LEAF);
   cts->cb.cbid = cbid;
   memset(cbid+top, 0, (cts->cb.sizeid-top)*sizeof(CTypeID1));
 found:
