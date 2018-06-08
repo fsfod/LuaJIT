@@ -415,7 +415,8 @@ static BCPos bcemit_INS(FuncState *fs, BCIns ins)
   if (LJ_UNLIKELY(pc >= fs->bclim)) {
     ptrdiff_t base = fs->bcbase - ls->bcstack;
     checklimit(fs, ls->sizebcstack, LJ_MAX_BCINS, "bytecode instructions");
-    lj_mem_growvec(fs->L, ls->bcstack, ls->sizebcstack, LJ_MAX_BCINS,BCInsLine);
+    lj_cmem_growvec(fs->L, ls->bcstack, ls->sizebcstack, LJ_MAX_BCINS,
+		    BCInsLine);
     fs->bclim = (BCPos)(ls->sizebcstack - base);
     fs->bcbase = ls->bcstack + base;
   }
@@ -1038,7 +1039,7 @@ static void var_new(LexState *ls, BCReg n, GCstr *name)
   if (LJ_UNLIKELY(vtop >= ls->sizevstack)) {
     if (ls->sizevstack >= LJ_MAX_VSTACK)
       lj_lex_error(ls, 0, LJ_ERR_XLIMC, LJ_MAX_VSTACK);
-    lj_mem_growvec(ls->L, ls->vstack, ls->sizevstack, LJ_MAX_VSTACK, VarInfo);
+    lj_cmem_growvec(ls->L, ls->vstack, ls->sizevstack, LJ_MAX_VSTACK, VarInfo);
   }
   lua_assert((uintptr_t)name < VARNAME__MAX ||
 	     lj_tab_getstr(fs->kt, name) != NULL);
@@ -1145,7 +1146,7 @@ static MSize gola_new(LexState *ls, GCstr *name, uint8_t info, BCPos pc)
   if (LJ_UNLIKELY(vtop >= ls->sizevstack)) {
     if (ls->sizevstack >= LJ_MAX_VSTACK)
       lj_lex_error(ls, 0, LJ_ERR_XLIMC, LJ_MAX_VSTACK);
-    lj_mem_growvec(ls->L, ls->vstack, ls->sizevstack, LJ_MAX_VSTACK, VarInfo);
+    lj_cmem_growvec(ls->L, ls->vstack, ls->sizevstack, LJ_MAX_VSTACK, VarInfo);
   }
   lua_assert(name == NAME_BREAK || lj_tab_getstr(fs->kt, name) != NULL);
   /* NOBARRIER: name is anchored in fs->kt and ls->vstack is not a GCobj. */

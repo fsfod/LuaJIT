@@ -441,8 +441,8 @@ int lj_lex_setup(lua_State *L, LexState *ls)
 void lj_lex_cleanup(lua_State *L, LexState *ls)
 {
   global_State *g = G(L);
-  lj_mem_freevec(g, ls->bcstack, ls->sizebcstack, BCInsLine);
-  lj_mem_freevec(g, ls->vstack, ls->sizevstack, VarInfo);
+  lj_cmem_freevec(g, ls->bcstack, ls->sizebcstack, BCInsLine);
+  lj_cmem_freevec(g, ls->vstack, ls->sizevstack, VarInfo);
   lj_buf_free(g, &ls->sb);
 }
 
