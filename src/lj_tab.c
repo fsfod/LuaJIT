@@ -144,6 +144,27 @@ static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
   return t;
 }
 
+/* Create a new empty table which supports the __gc metamethod. */
+LJ_FUNC GCtab *lj_tab_gcnew(lua_State *L)
+{
+  Node *nilnode;
+  GCtab *t = lj_mem_newobj(L, GCtab, GCPOOL_GCMM);
+  t->gcflags = LJ_GCFLAG_GREY;
+  t->gctype = (int8_t)(uint8_t)LJ_TTAB;
+  t->nomm = (uint8_t)~0;
+  t->colo = 0;
+  setmref(t->array, NULL);
+  setgcrefnull(t->metatable);
+  t->asize = 0;
+  t->hmask = 0;
+  nilnode = &G(L)->nilnode;
+  setmref(t->node, nilnode);
+#if LJ_GC64
+  setmref(t->freetop, nilnode);
+#endif
+  return t;
+}
+
 /* Create a new table.
 **
 ** IMPORTANT NOTE: The API differs from lua_createtable()!
