@@ -61,6 +61,9 @@ enum {
 
 /* LuaJIT public C API. */
 
+/* GC extensions. */
+LUA_API void *luaJIT_newuserdata_nogc(lua_State *L, size_t sz);
+
 /* Control the JIT engine. */
 LUA_API int luaJIT_setmode(lua_State *L, int idx, int mode);
 

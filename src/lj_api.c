@@ -740,16 +740,26 @@ LUA_API lua_State *lua_newthread(lua_State *L)
   return L1;
 }
 
-LUA_API void *lua_newuserdata(lua_State *L, size_t size)
+static void *lua_newuserdata_(lua_State *L, size_t size, GCPoolID p)
 {
   GCudata *ud;
   lj_gc_check(L);
   if (size > LJ_MAX_UDATA)
     lj_err_msg(L, LJ_ERR_UDATAOV);
-  ud = lj_udata_new(L, (MSize)size, getcurrenv(L));
+  ud = lj_udata_new(L, (MSize)size, getcurrenv(L), p);
   setudataV(L, L->top, ud);
   incr_top(L);
   return uddata(ud);
+}
+
+LUA_API void *lua_newuserdata(lua_State *L, size_t size)
+{
+  return lua_newuserdata_(L, size, GCPOOL_GCMM);
+}
+
+LUA_API void *luaJIT_newuserdata_nogc(lua_State *L, size_t size)
+{
+  return lua_newuserdata_(L, size, GCPOOL_GREY);
 }
 
 LUA_API void lua_concat(lua_State *L, int n)

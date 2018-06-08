@@ -514,7 +514,7 @@ LJLIB_CF(io_type)
 
 static GCobj *io_std_new(lua_State *L, FILE *fp, const char *name)
 {
-  IOFileUD *iof = (IOFileUD *)lua_newuserdata(L, sizeof(IOFileUD));
+  IOFileUD *iof = (IOFileUD *)luaJIT_newuserdata_nogc(L, sizeof(IOFileUD));
   GCudata *ud = udataV(L->top-1);
   ud->udtype = UDTYPE_IO_FILE;
   /* NOBARRIER: The GCudata is new (marked white). */
