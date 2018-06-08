@@ -13,6 +13,12 @@
 #include <immintrin.h>
 #include "malloc.h"
 
+#if LJ_TARGET_WINDOWS
+#define __AVX2
+#else
+#define __AVX2 __attribute__((__target__("avx2")))
+#endif
+
 #define idx2bit(i)		((uint32_t)(1) << (i))
 #define bitset_range(lo, hi)	((idx2bit((hi)-(lo))-1) << (lo))
 #define left_bits(x)		(((x) << 1) | (~((x) << 1)+1))
@@ -906,7 +912,8 @@ static MSize majorsweep(GCArena *arena, MSize start, MSize limit)
 }
 
 /* Best case sweep time 2k cycles real world seems tobe the same as simd 4-5k */
-static MSize sweep_avx(GCArena *arena, MSize start, MSize limit, int minor)
+
+__AVX2 static MSize sweep_avx(GCArena *arena, MSize start, MSize limit, int minor) 
 {
   MSize i;
   __m128i count = _mm_setzero_si128();
