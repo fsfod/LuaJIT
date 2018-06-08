@@ -15,21 +15,7 @@
 #include "lj_trace.h"
 #include "lj_vm.h"
 
-/* -- Prototypes ---------------------------------------------------------- */
-
-void LJ_FASTCALL lj_func_freeproto(global_State *g, GCproto *pt)
-{
-  lj_mem_free(g, pt, pt->sizept);
-}
-
 /* -- Upvalues ------------------------------------------------------------ */
-
-static void unlinkuv(GCupval *uv)
-{
-  lua_assert(uvprev(uvnext(uv)) == uv && uvnext(uvprev(uv)) == uv);
-  setgcrefr(uvnext(uv)->prev, uv->prev);
-  setgcrefr(uvprev(uv)->next, uv->next);
-}
 
 /* Find existing open upvalue for a stack slot or create a new one. */
 static GCupval *func_finduv(lua_State *L, TValue *slot)
@@ -93,13 +79,6 @@ void LJ_FASTCALL lj_func_closeuv(lua_State *L, TValue *level)
       lj_gc_closeuv(g, uv);
     }
   }
-}
-
-void LJ_FASTCALL lj_func_freeuv(global_State *g, GCupval *uv)
-{
-  if (!uv->closed)
-    unlinkuv(uv);
-  lj_mem_freet(g, uv);
 }
 
 /* -- Functions (closures) ------------------------------------------------ */
@@ -177,11 +156,3 @@ GCfunc *lj_func_newL_gc(lua_State *L, GCproto *pt, GCfuncL *parent)
   fn->l.nupvalues = (uint8_t)nuv;
   return fn;
 }
-
-void LJ_FASTCALL lj_func_free(global_State *g, GCfunc *fn)
-{
-  MSize size = isluafunc(fn) ? sizeLfunc((MSize)fn->l.nupvalues) :
-			       sizeCfunc((MSize)fn->c.nupvalues);
-  lj_mem_free(g, fn, size);
-}
-

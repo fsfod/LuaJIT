@@ -358,30 +358,6 @@ static size_t gc_propagate_gray(global_State *g)
 
 /* -- Sweep phase --------------------------------------------------------- */
 
-/* Type of GC free functions. */
-typedef void (LJ_FASTCALL *GCFreeFunc)(global_State *g, GCobj *o);
-
-/* GC free functions for LJ_TSTR .. LJ_TUDATA. ORDER LJ_T */
-static const GCFreeFunc gc_freefunc[] = {
-  (GCFreeFunc)lj_str_free,
-  (GCFreeFunc)lj_func_freeuv,
-  (GCFreeFunc)lj_state_free,
-  (GCFreeFunc)lj_func_freeproto,
-  (GCFreeFunc)lj_func_free,
-#if LJ_HASJIT
-  (GCFreeFunc)lj_trace_free,
-#else
-  (GCFreeFunc)0,
-#endif
-#if LJ_HASFFI
-  (GCFreeFunc)lj_cdata_free,
-#else
-  (GCFreeFunc)0,
-#endif
-  (GCFreeFunc)lj_tab_free,
-  (GCFreeFunc)lj_udata_free
-};
-
 /* Full sweep of a GC list. */
 #define gc_fullsweep(g, p)	gc_sweep(g, (p), ~(uint32_t)0)
 

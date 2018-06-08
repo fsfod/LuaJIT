@@ -58,32 +58,6 @@ GCcdata *lj_cdata_newx(CTState *cts, CTypeID id, CTSize sz, CTInfo info)
     return lj_cdata_newv(cts->L, id, sz, ctype_align(info));
 }
 
-/* Free a C data object. */
-void LJ_FASTCALL lj_cdata_free(global_State *g, GCcdata *cd)
-{
-  if (LJ_UNLIKELY(cd->marked & LJ_GC_CDATA_FIN)) {
-    GCobj *root;
-    makewhite(g, obj2gco(cd));
-    markfinalized(obj2gco(cd));
-    if ((root = gcref(g->gc.mmudata)) != NULL) {
-      setgcrefr(cd->nextgc, root->gch.nextgc);
-      setgcref(root->gch.nextgc, obj2gco(cd));
-      setgcref(g->gc.mmudata, obj2gco(cd));
-    } else {
-      setgcref(cd->nextgc, obj2gco(cd));
-      setgcref(g->gc.mmudata, obj2gco(cd));
-    }
-  } else if (LJ_LIKELY(!cdataisv(cd))) {
-    CType *ct = ctype_raw(ctype_ctsG(g), cd->ctypeid);
-    CTSize sz = ctype_hassize(ct->info) ? ct->size : CTSIZE_PTR;
-    lua_assert(ctype_hassize(ct->info) || ctype_isfunc(ct->info) ||
-	       ctype_isextern(ct->info));
-    lj_mem_free(g, cd, sizeof(GCcdata) + sz);
-  } else {
-    lj_mem_free(g, memcdatav(cd), sizecdatav(cd));
-  }
-}
-
 void lj_cdata_setfin(lua_State *L, GCcdata *cd, GCobj *obj, uint32_t it)
 {
   GCtab *t = ctype_ctsG(G(L))->finalizer;

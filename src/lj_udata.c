@@ -26,9 +26,3 @@ GCudata *lj_udata_new(lua_State *L, MSize sz, GCtab *env)
   setgcref(mainthread(g)->nextgc, obj2gco(ud));
   return ud;
 }
-
-void LJ_FASTCALL lj_udata_free(global_State *g, GCudata *ud)
-{
-  lj_mem_free(g, ud, sizeudata(ud));
-}
-

@@ -287,14 +287,3 @@ lua_State *lj_state_new(lua_State *L)
   return L1;
 }
 
-void LJ_FASTCALL lj_state_free(global_State *g, lua_State *L)
-{
-  lua_assert(L != mainthread(g));
-  if (obj2gco(L) == gcref(g->cur_L))
-    setgcrefnull(g->cur_L);
-  lj_func_closeuv(L, tvref(L->stack));
-  lua_assert(gcref(L->openupval) == NULL);
-  lj_mem_freevec(g, tvref(L->stack), L->stacksize, TValue);
-  lj_mem_freet(g, L);
-}
-
