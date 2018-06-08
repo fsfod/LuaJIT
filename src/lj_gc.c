@@ -431,6 +431,67 @@ static void gc_clearweak(GCobj *o)
   }
 }
 
+#define gc_string_freed(g, o) (--(g)->strnum)
+
+static void gc_sweep_str(global_State *g, GCRef *gcr)
+{
+  GCobj *o = gcref(*gcr);
+  if (((uintptr_t)o & 15)) {
+    GCRef *r = (GCRef*)((uintptr_t)o & ~(uintptr_t)15);
+    GCRef *w = NULL;
+    GCobj *sy = NULL;
+    uintptr_t wi = 0, ri = 15;
+    setgcrefnull(*gcr);
+    while ((intptr_t)ri >= 0) {
+      GCobj *sx = gcref(r[ri--]);
+      if (!sx) {
+	break;
+      }
+      if ((uintptr_t)sx & 15) {
+	if (sy) {
+	  lua_assert(wi);
+	  setgcref(w[--wi], sy);
+	  sy = NULL;
+	}
+	r = (GCRef*)((uintptr_t)sx & ~(uintptr_t)15);
+	ri = 15;
+	continue;
+      }
+      if (!ismarked(g, sx)) {
+	gc_string_freed(g, sx);
+	continue;
+      }
+      if (!wi) {
+	if (!w) {
+	  setgcref(*gcr, (GCobj*)((char*)r + 1));
+	} else {
+	  lua_assert(sy == NULL);
+	  sy = gcref(*w);
+	  setgcref(*w, (GCobj*)((char*)r + 1));
+	}
+	w = r;
+	lj_gc_markleaf(g, (void*)w);
+	wi = 15;
+	setgcref(w[wi], sx);
+	continue;
+      }
+      setgcref(w[--wi], sx);
+    }
+    if (sy) {
+      lua_assert(wi);
+      setgcref(w[--wi], sy);
+    }
+    while (wi) {
+      setgcrefnull(w[--wi]);
+    }
+  } else if (o) {
+    if (!ismarked(g, o)) {
+      setgcrefnull(*gcr);
+      gc_string_freed(g, o);
+    }
+  }
+}
+
 /* Call a userdata or cdata finalizer. */
 static void gc_call_finalizer(global_State *g, lua_State *L,
 			      cTValue *mo, GCobj *o)
@@ -599,15 +660,12 @@ static size_t gc_onestep(lua_State *L)
     g->gc.state = GCSsweepstring;  /* Start of sweep phase. */
     g->gc.sweepstr = 0;
     return 0;
-  case GCSsweepstring: {
-    GCSize old = g->gc.total;
-    gc_fullsweep(g, &g->strhash[g->gc.sweepstr++]);  /* Sweep one chain. */
-    if (g->gc.sweepstr > g->strmask)
-      g->gc.state = GCSsweep;  /* All string hash chains sweeped. */
-    lua_assert(old >= g->gc.total);
-    g->gc.estimate -= old - g->gc.total;
-    return GCSWEEPCOST;
+  case GCSsweepstring:
+    gc_sweep_str(g, &g->strhash[--g->gc.sweeppos]);
+    if (!g->gc.sweeppos) {
+      g->gc.state = GCSsweepthread;
     }
+    return sizeof(GCstr) * 4;
   case GCSsweep: {
     GCSize old = g->gc.total;
     setmref(g->gc.sweep, gc_sweep(g, mref(g->gc.sweep, GCRef), GCSWEEPMAX));
