@@ -787,7 +787,7 @@ void lj_gc_fullgc(lua_State *L)
 /* -- Write barriers ------------------------------------------------------ */
 
 /* Move the GC propagation frontier forward. */
-void lj_gc_barrierf(global_State *g, GCobj *o, GCobj *v)
+void lj_gc_barrierf(global_State *g, GCobj *o, GCobj *v, uint32_t it)
 {
   lua_assert(isblack(o) && iswhite(v) && !isdead(g, v) && !isdead(g, o));
   lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);

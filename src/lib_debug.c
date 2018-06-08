@@ -252,7 +252,7 @@ LJLIB_CF(debug_upvaluejoin)
     p[i] = &fn[i]->l.uvptr[n];
   }
   setgcrefr(*p[0], *p[1]);
-  lj_gc_objbarrier(L, fn[0], gcref(*p[1]));
+  lj_gc_objbarrier(L, fn[0], gcref(*p[1]), LJ_TUPVAL);
   return 0;
 }
 

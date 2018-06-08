@@ -70,7 +70,7 @@ LJ_FUNC void lj_gc_fullgc(lua_State *L);
       lj_gc_step_fixtop(L); }
 
 /* Write barriers. */
-LJ_FUNC void lj_gc_barrierf(global_State *g, GCobj *o, GCobj *v);
+LJ_FUNC void lj_gc_barrierf(global_State *g, GCobj *o, GCobj *v, uint32_t it);
 LJ_FUNCA void LJ_FASTCALL lj_gc_barrieruv(global_State *g, TValue *tv);
 LJ_FUNC void lj_gc_closeuv(global_State *g, GCupval *uv);
 #if LJ_HASJIT
@@ -100,11 +100,11 @@ static LJ_AINLINE void lj_gc_barrierback(global_State *g, GCtab *t)
 
 /* Barrier for stores to any other object. TValue and GCobj variant. */
 #define lj_gc_barrier(L, p, tv) \
-  { if (tviswhite(tv) && isblack(obj2gco(p))) \
-      lj_gc_barrierf(G(L), obj2gco(p), gcV(tv)); }
-#define lj_gc_objbarrier(L, p, o) \
-  { if (iswhite(obj2gco(o)) && isblack(obj2gco(p))) \
-      lj_gc_barrierf(G(L), obj2gco(p), obj2gco(o)); }
+  { if (tvisgcv(tv) && !LJ_LIKELY(obj2gco(p)->gch.gcflags & LJ_GCFLAG_GREY)) \
+      lj_gc_barrierf(G(L), obj2gco(p), gcV(tv), itype(tv)); }
+#define lj_gc_objbarrier(L, p, o, it) \
+  { if (!LJ_LIKELY(obj2gco(p)->gch.gcflags & LJ_GCFLAG_GREY)) \
+      lj_gc_barrierf(G(L), obj2gco(p), obj2gco(o), (it)); }
 
 /* Allocator. */
 LJ_FUNC void *lj_mem_realloc(lua_State *L, void *p, GCSize osz, GCSize nsz);

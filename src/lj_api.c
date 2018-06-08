@@ -927,7 +927,7 @@ LUA_API void lua_upvaluejoin(lua_State *L, int idx1, int n1, int idx2, int n2)
   api_check(L, isluafunc(fn1) && (uint32_t)n1 < fn1->l.nupvalues);
   api_check(L, isluafunc(fn2) && (uint32_t)n2 < fn2->l.nupvalues);
   setgcrefr(fn1->l.uvptr[n1], fn2->l.uvptr[n2]);
-  lj_gc_objbarrier(L, fn1, gcref(fn1->l.uvptr[n1]));
+  lj_gc_objbarrier(L, fn1, gcref(fn1->l.uvptr[n1]), LJ_TUPVAL);
 }
 
 LUALIB_API void *luaL_testudata(lua_State *L, int idx, const char *tname)
@@ -1037,7 +1037,7 @@ LUA_API int lua_setmetatable(lua_State *L, int idx)
   } else if (tvisudata(o)) {
     setgcref(udataV(o)->metatable, obj2gco(mt));
     if (mt)
-      lj_gc_objbarrier(L, udataV(o), mt);
+      lj_gc_objbarrier(L, udataV(o), mt, LJ_TTAB);
   } else {
     /* Flush cache, since traces specialize to basemt. But not during __gc. */
     if (lj_trace_flushall(L))
@@ -1079,7 +1079,7 @@ LUA_API int lua_setfenv(lua_State *L, int idx)
     L->top--;
     return 0;
   }
-  lj_gc_objbarrier(L, gcV(o), t);
+  lj_gc_objbarrier(L, gcV(o), t, LJ_TTAB);
   L->top--;
   return 1;
 }
