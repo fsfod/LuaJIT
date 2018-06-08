@@ -421,23 +421,23 @@ typedef struct GCproto {
 /* -- Upvalue object ------------------------------------------------------ */
 
 typedef struct GCupval {
-  GCHeader;
-  uint8_t closed;	/* Set if closed (i.e. uv->v == &uv->u.value). */
-  uint8_t immutable;	/* Immutable value. */
+  MRef v;		/* Points to stack slot (open) or below (closed). */
+  uint32_t uvflags;	/* Disambiguation hash, closed, notgrey, immutable. */
+#ifdef LJ_GC64
+  uint32_t unused_gc64;
+#endif
   union {
     TValue tv;		/* If closed: the value itself. */
-    struct {		/* If open: double linked list, anchored at thread. */
-      GCRef prev;
-      GCRef next;
-    };
+    GCRef nextgc;	/* If open: linked list of thread's open upvalues. */
   };
-  MRef v;		/* Points to stack slot (open) or above (closed). */
-  uint32_t dhash;	/* Disambiguation hash: dh1 != dh2 => cannot alias. */
 } GCupval;
 
-#define uvprev(uv_)	(&gcref((uv_)->prev)->uv)
-#define uvnext(uv_)	(&gcref((uv_)->next)->uv)
 #define uvval(uv_)	(mref((uv_)->v, TValue))
+
+#define UVFLAG_IMMUTABLE 0x01
+#define UVFLAG_CLOSED    0x02
+#define UVFLAG_NOTGREY   0x04
+#define UVFLAG_DHASHMASK 0xfffffff8u
 
 /* -- Function object (closures) ------------------------------------------ */
 
@@ -616,7 +616,6 @@ typedef struct global_State {
   TValue registrytv;	/* Anchor for registry. */
   TValue tmptv, tmptv2;	/* Temporary TValues. */
   Node nilnode;		/* Fallback 1-element hash part (nil key and value). */
-  GCupval uvhead;	/* Head of double-linked list of all open upvalues. */
   int32_t hookcount;	/* Instruction hook countdown. */
   int32_t hookcstart;	/* Start count for instruction hook counter. */
   lua_Hook hookf;	/* Hook function. */
@@ -714,7 +713,6 @@ LJ_STATIC_ASSERT(offsetof(GChead, gclist) == offsetof(GCtab, gclist));
 typedef union GCobj {
   GChead gch;
   GCstr str;
-  GCupval uv;
   lua_State th;
   GCproto pt;
   GCfunc fn;

@@ -216,7 +216,7 @@ static BCReg snap_usedef(jit_State *J, uint8_t *udf,
   while (o) {
     if (uvval(gco2uv(o)) < J->L->base) break;
     udf[uvval(gco2uv(o)) - J->L->base] = 0;
-    o = gcref(o->gch.nextgc);
+    o = gcref(gco2uv(o)->nextgc);
   }
 
 #define USE_SLOT(s)		udf[(s)] &= ~1

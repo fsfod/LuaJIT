@@ -1544,7 +1544,7 @@ static void rec_tsetm(jit_State *J, BCReg ra, BCReg rn, int32_t i)
 /* Check whether upvalue is immutable and ok to constify. */
 static int rec_upvalue_constify(jit_State *J, GCupval *uvp)
 {
-  if (uvp->immutable) {
+  if (uvp->uvflags & UVFLAG_IMMUTABLE) {
     cTValue *o = uvval(uvp);
     /* Don't constify objects that may retain large amounts of memory. */
 #if LJ_HASFFI
@@ -1569,9 +1569,10 @@ static int rec_upvalue_constify(jit_State *J, GCupval *uvp)
 /* Record upvalue load/store. */
 static TRef rec_upvalue(jit_State *J, uint32_t uv, TRef val)
 {
-  GCupval *uvp = &gcref(J->fn->l.uvptr[uv])->uv;
+  GCupval *uvp = gco2uv(gcref(J->fn->l.uvptr[uv]));
   TRef fn = getcurrf(J);
   IRRef uref;
+  uint32_t dhash;
   int needbarrier = 0;
   if (rec_upvalue_constify(J, uvp)) {  /* Try to constify immutable upvalue. */
     TRef tr, kfunc;
@@ -1594,8 +1595,9 @@ static TRef rec_upvalue(jit_State *J, uint32_t uv, TRef val)
   }
 noconstify:
   /* Note: this effectively limits LJ_MAX_UPVAL to 127. */
-  uv = (uv << 8) | (hashrot(uvp->dhash, uvp->dhash + HASH_BIAS) & 0xff);
-  if (!uvp->closed) {
+  dhash = uvp->uvflags & UVFLAG_DHASHMASK;
+  uv = (uv << 8) | (hashrot(dhash, dhash + HASH_BIAS) & 0xff);
+  if (!(uvp->uvflags & UVFLAG_CLOSED)) {
     uref = tref_ref(emitir(IRTG(IR_UREFO, IRT_PGC), fn, uv));
     /* In current stack? */
     if (uvval(uvp) >= tvref(J->L->stack) &&

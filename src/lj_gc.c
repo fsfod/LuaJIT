@@ -811,33 +811,31 @@ void lj_gc_barrierf(global_State *g, GCobj *o, GCobj *v, uint32_t it)
 /* Specialized barrier for closed upvalue. Pass &uv->tv. */
 void LJ_FASTCALL lj_gc_barrieruv(global_State *g, TValue *tv)
 {
-#define TV2MARKED(x) \
-  (*((uint8_t *)(x) - offsetof(GCupval, tv) + offsetof(GCupval, marked)))
-  if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic)
-    gc_mark(g, gcV(tv));
-  else
-    TV2MARKED(tv) = (TV2MARKED(tv) & (uint8_t)~LJ_GC_COLORS) | curwhite(g);
-#undef TV2MARKED
+  GCArena *a = (GCArena*)((uintptr_t)tv & ~(LJ_GC_ARENA_SIZE-1));
+  uint32_t idx = (uint32_t)((uintptr_t)tv & (LJ_GC_ARENA_SIZE-1)) >> 4;
+  GCupval *uv = (GCupval*)((char*)tv - offsetof(GCupval, tv));
+  idx -= (uint32_t)(offsetof(GCupval, tv) / 16);
+  lua_assert((uv->uvflags & UVFLAG_CLOSED));
+  lua_assert((uv->uvflags & UVFLAG_NOTGREY));
+  lua_assert(lj_gc_bit(a->block, &, idx));
+  if ((g->gc.state & GCS_barriers) && lj_gc_bit(a->mark, &, idx)) {
+    lj_gc_drain_ssb(g);
+    gc_marktv(g, tv);
+  } else {
+    uv->uvflags &= ~UVFLAG_NOTGREY;
+  }
 }
 
 /* Close upvalue. Also needs a write barrier. */
 void lj_gc_closeuv(global_State *g, GCupval *uv)
 {
-  GCobj *o = obj2gco(uv);
   /* Copy stack slot to upvalue itself and point to the copy. */
-  copyTV(mainthread(g), &uv->tv, uvval(uv));
+  copyTV(&G2GG(g)->L, &uv->tv, uvval(uv));
   setmref(uv->v, &uv->tv);
-  uv->closed = 1;
-  setgcrefr(o->gch.nextgc, g->gc.root);
-  setgcref(g->gc.root, o);
-  if (isgray(o)) {  /* A closed upvalue is never gray, so fix this. */
+  uv->uvflags |= UVFLAG_CLOSED | UVFLAG_NOTGREY;
     if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic) {
-      gray2black(o);  /* Make it black and preserve invariant. */
-      if (tviswhite(&uv->tv))
-	lj_gc_barrierf(g, o, gcV(&uv->tv));
-    } else {
-      makewhite(g, o);  /* Make it white, i.e. sweep the upvalue. */
-      lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);
+    if (tvisgcv(&uv->tv) && smallismarked(obj2gco(uv))) {
+      gc_marktv_(g, &uv->tv);
     }
   }
 }

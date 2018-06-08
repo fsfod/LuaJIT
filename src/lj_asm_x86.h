@@ -200,7 +200,7 @@ static void asm_fuseahuref(ASMState *as, IRRef ref, RegSet allow)
     case IR_UREFC:
       if (irref_isk(ir->op1)) {
 	GCfunc *fn = ir_kfunc(IR(ir->op1));
-	GCupval *uv = &gcref(fn->l.uvptr[(ir->op2 >> 8)])->uv;
+	GCupval *uv = gco2uv(gcref(fn->l.uvptr[(ir->op2 >> 8)]));
 #if LJ_GC64
 	int64_t ofs = dispofs(as, &uv->tv);
 	if (checki32(ofs) && checki32(ofs+4)) {
@@ -1347,16 +1347,16 @@ static void asm_uref(ASMState *as, IRIns *ir)
   Reg dest = ra_dest(as, ir, RSET_GPR);
   if (irref_isk(ir->op1)) {
     GCfunc *fn = ir_kfunc(IR(ir->op1));
-    MRef *v = &gcref(fn->l.uvptr[(ir->op2 >> 8)])->uv.v;
+    MRef *v = &gco2uv(gcref(fn->l.uvptr[(ir->op2 >> 8)]))->v;
     emit_rma(as, XO_MOV, dest|REX_GC64, v);
   } else {
     Reg uv = ra_scratch(as, RSET_GPR);
     Reg func = ra_alloc1(as, ir->op1, RSET_GPR);
     if (ir->o == IR_UREFC) {
       emit_rmro(as, XO_LEA, dest|REX_GC64, uv, offsetof(GCupval, tv));
-      asm_guardcc(as, CC_NE);
-      emit_i8(as, 1);
-      emit_rmro(as, XO_ARITHib, XOg_CMP, uv, offsetof(GCupval, closed));
+      asm_guardcc(as, CC_Z);
+      emit_i8(as, UVFLAG_CLOSED);
+      emit_rmro(as, XO_GROUP3b, XOg_TEST, uv, offsetof(GCupval, uvflags));
     } else {
       emit_rmro(as, XO_MOV, dest|REX_GC64, uv, offsetof(GCupval, v));
     }
@@ -1880,23 +1880,27 @@ static void asm_obar(ASMState *as, IRIns *ir)
   ra_evictset(as, RSET_SCRATCH);
   l_end = emit_label(as);
   args[0] = ASMREF_TMP1;  /* global_State *g */
-  args[1] = ir->op1;      /* TValue *tv      */
+  args[1] = ir->op1;	  /* TValue *tv	     */
   asm_gencall(as, ci, args);
   emit_loada(as, ra_releasetmp(as, ASMREF_TMP1), J2G(as->J));
   obj = IR(ir->op1)->r;
-  emit_sjcc(as, CC_Z, l_end);
-  emit_i8(as, LJ_GC_WHITES);
   if (irref_isk(ir->op2)) {
     GCobj *vp = ir_kgc(IR(ir->op2));
-    emit_rma(as, XO_GROUP3b, XOg_TEST, &vp->gch.marked);
-  } else {
-    Reg val = ra_alloc1(as, ir->op2, rset_exclude(RSET_SCRATCH&RSET_GPR, obj));
-    emit_rmro(as, XO_GROUP3b, XOg_TEST, val, (int32_t)offsetof(GChead, marked));
+    if ((uintptr_t)vp & (LJ_GC_ARENA_SIZE-1)) {
+      GCArena *a = (GCArena*)((uintptr_t)vp & ~(LJ_GC_ARENA_SIZE-1));
+      uint32_t idx = (uint32_t)((uintptr_t)vp & (LJ_GC_ARENA_SIZE-1)) >> 4;
+      uint8_t *m = &a->mark8[idx / 8];
+      if (!LJ_GC64 || (uintptr_t)m <= 0x7fffffffu) {
+	emit_sjcc(as, CC_NZ, l_end);
+	emit_i8(as, 1 << (idx & 7));
+	emit_rma(as, XO_GROUP3b, XOg_TEST, m);
+      }
+    }
   }
   emit_sjcc(as, CC_Z, l_end);
-  emit_i8(as, LJ_GC_BLACK);
+  emit_i8(as, UVFLAG_NOTGREY);
   emit_rmro(as, XO_GROUP3b, XOg_TEST, obj,
-	    (int32_t)offsetof(GCupval, marked)-(int32_t)offsetof(GCupval, tv));
+            -(int32_t)(offsetof(GCupval, tv) - offsetof(GCupval, uvflags)));
 }
 
 /* -- FP/int arithmetic and logic operations ------------------------------ */
