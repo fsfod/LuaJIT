@@ -15,6 +15,7 @@
 |.externnames extnames
 |
 |//-----------------------------------------------------------------------
+|
 |.if P64
 |.define X64, 1
 |.if WIN
@@ -472,22 +473,13 @@
 |.macro sseconst_tobit, reg, tmp	// Synthesize 2^52 + 2^51.
 |  sseconst_hi reg, tmp, 43380000
 |.endmacro
-|.define GC2, 1
+|
 |// Move table write barrier back. Overwrites reg.
 |.macro barrierback, tab, reg
-|.if GC2
-|  or byte tab->marked, LJ_GC_GRAY
-// cmp dword [DISPATCH+DISPATCH_GL(gc.state)], GCSpropagate
-|  mov reg, [DISPATCH+DISPATCH_GL(gc.grayssb)]
-|  mov dword [reg], tab
-|  add reg, 4
-|  mov dword [DISPATCH+DISPATCH_GL(gc.grayssb)], reg
-|.else
 |  and byte tab->marked, (uint8_t)~LJ_GC_BLACK	// black2gray(tab)
 |  mov reg, [DISPATCH+DISPATCH_GL(gc.grayagain)]
 |  mov [DISPATCH+DISPATCH_GL(gc.grayagain)], tab
 |  mov tab->gclist, reg
-|.endif
 |.endmacro
 |
 |//-----------------------------------------------------------------------
@@ -1405,22 +1397,6 @@ static void build_subroutines(BuildCtx *ctx)
   |  jmp aword [DISPATCH+OP*4+GG_DISP2STATIC]	// Retry FORI or JFORI.
   |.endif
   |
-  |->emptygrayssb:
-  |  push rdi
-  |  push rsi
-  |  push rax
-  |  push rcx
-  |  push rdx
-  |  sub rsp, 32
-  |  lea GL:FCARG1, [DISPATCH+GG_DISP2G]
-  |  call extern lj_gc_emptygrayssb@4
-  |  add rsp, 32
-  |  pop rdx
-  |  pop rcx
-  |  pop rax
-  |  pop rsi
-  |  pop rdi
-  |  ret
   |//-----------------------------------------------------------------------
   |//-- Fast functions -----------------------------------------------------
   |//-----------------------------------------------------------------------
@@ -1595,23 +1571,13 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov PC, [BASE-4]
   |  mov dword [BASE-4], LJ_TTAB		// Return original table.
   |  mov [BASE-8], TAB:RB
-  |.if GC2
-  |  test byte TAB:RB->marked, LJ_GC_GRAY   // !isgray(table)
-  |  jz >1
-  |.else
   |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
   |  jz >1
-  |.endif
   |  // Possible write barrier. Table is black, but skip iswhite(mt) check.
   |  barrierback TAB:RB, RC
-  |  and RC, GRAYSSB_MASK // Check SSB buffer overflow
-  |  jz >8
   |1:
   |  jmp ->fff_res1
-  |8: // Mark and empty the full SSB buffer
-  |  call ->emptygrayssb
-  |  movzx RA, PC_RA
-  |  jmp <1
+  |
   |.ffunc_2 rawget
   |  cmp dword [BASE+4], LJ_TTAB;  jne ->fff_fallback
   |.if X64WIN
@@ -4061,13 +4027,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov [RB+4], RD
     |  jz >1
     |  // Check barrier for closed upvalue.
-    |.if GC2
-    |  test byte [RB+TV2MARKOFS], LJ_GC_GRAY  // !isgray(table)
-    |  jz >2
-    |.else
     |  test byte [RB+TV2MARKOFS], LJ_GC_BLACK		// isblack(uv)
     |  jnz >2
-    |.endif
     |1:
     |  ins_next
     |
@@ -4075,9 +4036,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  sub RD, LJ_TISGCV
     |  cmp RD, LJ_TNUMX - LJ_TISGCV			// tvisgcv(v)
     |  jbe <1
-    |  //FIXME: forward barrier based on mark bit?
-    |  //test byte GCOBJ:RA->gch.marked, LJ_GC_WHITES	// iswhite(v)
-    |  //jz <1
+    |  test byte GCOBJ:RA->gch.marked, LJ_GC_WHITES	// iswhite(v)
+    |  jz <1
     |  // Crossed a write barrier. Move the barrier forward.
     |.if X64 and not X64WIN
     |  mov FCARG2, RB
@@ -4099,35 +4059,22 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov RD, UPVAL:RB->v
     |  mov [RD], GCOBJ:RA
     |  mov dword [RD+4], LJ_TSTR
-    |.if GC2
-    |  test byte UPVAL:RB->marked, LJ_GC_GRAY  // !isgray(table)
-    |  jz >2
-    |.else
     |  test byte UPVAL:RB->marked, LJ_GC_BLACK		// isblack(uv)
     |  jnz >2
-    |.endif
     |1:
     |  ins_next
     |
     |2:  // Check if string is white and ensure upvalue is closed.
-    |.if not GC2
     |  test byte GCOBJ:RA->gch.marked, LJ_GC_WHITES	// iswhite(str)
     |  jz <1
     |  cmp byte UPVAL:RB->closed, 0
     |  jz <1
-    |.else
-    | cmp dword [DISPATCH+DISPATCH_GL(gc.state)], GCSpause
-    | je >3
-    |.endif
     |  // Crossed a write barrier. Move the barrier forward.
     |  mov RB, BASE			// Save BASE (FCARG2 == BASE).
     |  mov FCARG2, RD
     |  lea GL:FCARG1, [DISPATCH+GG_DISP2G]
     |  call extern lj_gc_barrieruv@8	// (global_State *g, TValue *tv)
     |  mov BASE, RB			// Restore BASE.
-    |  jmp <1
-    |3:
-    |  or byte UPVAL:RB->marked, LJ_GC_GRAY
     |  jmp <1
     break;
   case BC_USETN:
@@ -4469,13 +4416,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cmp dword [RC+4], LJ_TNIL
     |  je >3				// Previous value is nil?
     |1:
-    |.if GC2
-    |  test byte TAB:RB->marked, LJ_GC_GRAY   // !isgray(table)
-    |  jz >7
-    |.else
     |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
     |  jnz >7
-    |.endif 
     |2:  // Set array slot.
     |.if X64
     |  mov RBa, [BASE+RA*8]
@@ -4504,18 +4446,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |
     |7:  // Possible table write barrier for the value. Skip valiswhite check.
     |  barrierback TAB:RB, RA
-    |.if GC2
-    |  and RA, GRAYSSB_MASK // Check SSB buffer overflow
-    |  jz >8
-    |.endif
     |  movzx RA, PC_RA			// Restore RA.
     |  jmp <2
-    |.if GC2
-    |8: // Mark and empty the full SSB buffer
-    |  call ->emptygrayssb
-    |  movzx RA, PC_RA
-    |  jmp <2
-    |.endif
     break;
   case BC_TSETS:
     |  ins_ABC	// RA = src, RB = table, RC = str const (~)
@@ -4538,13 +4470,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cmp dword [RA+4], LJ_TNIL
     |  je >4				// Previous value is nil?
     |2:
-    |.if GC2
-    |  test byte TAB:RB->marked, LJ_GC_GRAY   // !isgray(table)
-    |  jz >7
-    |.else
     |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
     |  jnz >7
-    |.endif
     |3:  // Set node value.
     |  movzx RC, PC_RA
     |.if X64
@@ -4608,13 +4535,6 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |
     |7:  // Possible table write barrier for the value. Skip valiswhite check.
     |  barrierback TAB:RB, RC		// Destroys STR:RC.
-    |.if GC2
-    |  test RC, GRAYSSB_MASK // Check SSB buffer overflow
-    |  jz >8
-    |  jmp <3
-    |8: // Mark and empty full SSB buffer
-    |  call ->emptygrayssb
-    |.endif
     |  jmp <3
     break;
   case BC_TSETB:
@@ -4628,13 +4548,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cmp dword [RC+4], LJ_TNIL
     |  je >3				// Previous value is nil?
     |1:
-    |.if GC2
-    |  test byte TAB:RB->marked, LJ_GC_GRAY   // !isgray(table)
-    |  jz >7
-    |.else
     |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
     |  jnz >7
-    |.endif
     |2:	 // Set array slot.
     |.if X64
     |  mov RAa, [BASE+RA*8]
@@ -4658,15 +4573,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |
     |7:  // Possible table write barrier for the value. Skip valiswhite check.
     |  barrierback TAB:RB, RA
-    |.if GC2
-    |  test RA, GRAYSSB_MASK // Check SSB buffer overflow
-    |  jz >8
     |  movzx RA, PC_RA			// Restore RA.
-    |  jmp <2
-    |8: // Mark and empty the full SSB buffer
-    |  call ->emptygrayssb
-    |.endif
-    |  movzx RA, PC_RA
     |  jmp <2
     break;
   case BC_TSETR:
@@ -4677,13 +4584,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |.else
     |  cvttsd2si RC, qword [BASE+RC*8]
     |.endif
-    |.if GC2
-    |  test byte TAB:RB->marked, LJ_GC_GRAY   // !isgray(table)
-    |  jz >7
-    |.else
     |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
     |  jnz >7
-    |.endif
     |2:
     |  cmp RC, TAB:RB->asize
     |  jae ->vmeta_tsetr
@@ -4704,13 +4606,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |
     |7:  // Possible table write barrier for the value. Skip valiswhite check.
     |  barrierback TAB:RB, RA
-    |  and RA, GRAYSSB_MASK // Check SSB buffer overflow
-    |  jz >8
     |  movzx RA, PC_RA			// Restore RA.
-    |  jmp <2
-    |8: // Mark and empty the full SSB buffer
-    |  call ->emptygrayssb
-    |  movzx RA, PC_RA
     |  jmp <2
     break;
 
@@ -4721,13 +4617,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |1:
     |  lea RA, [BASE+RA*8]
     |  mov TAB:RB, [RA-8]		// Guaranteed to be a table.
-    |.if GC2
-    |  test byte TAB:RB->marked, LJ_GC_GRAY   // !isgray(table)
-    |  jz >7
-    |.else
     |  test byte TAB:RB->marked, LJ_GC_BLACK	// isblack(table)
     |  jnz >7
-    |.endif
     |2:
     |  mov RD, MULTRES
     |  sub RD, 1
@@ -4779,11 +4670,6 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |
     |7:  // Possible table write barrier for any value. Skip valiswhite check.
     |  barrierback TAB:RB, RD
-    |  and RD, GRAYSSB_MASK // Check SSB buffer overflow
-    |  jz >8
-    |  jmp <2
-    |8: // Mark and empty the full SSB buffer
-    |  call ->emptygrayssb
     |  jmp <2
     break;
 
