@@ -249,7 +249,20 @@ LJLIB_CF(jit_util_funck)
   } else {
     if (~idx < (ptrdiff_t)pt->sizekgc) {
       GCobj *gc = proto_kgc(pt, idx);
-      setgcV(L, L->top-1, gc, ~gc->gch.gct);
+      uint32_t it;
+      switch ((uintptr_t)gc & PROTO_KGC_MASK) {
+      case PROTO_KGC_STR: it = LJ_TSTR; break;
+      case PROTO_KGC_PROTO: it = LJ_TPROTO; break;
+#if LJ_HASFFI
+      case PROTO_KGC_CDATA: it = LJ_TCDATA; break;
+#endif
+      default:
+	lua_assert(((uintptr_t)gc & PROTO_KGC_MASK) == PROTO_KGC_TABLE);
+	it = LJ_TTAB;
+	break;
+      }
+      gc = (GCobj*)((uintptr_t)gc & ~(uintptr_t)PROTO_KGC_MASK);
+      setgcV(L, L->top-1, gc, it);
       return 1;
     }
   }

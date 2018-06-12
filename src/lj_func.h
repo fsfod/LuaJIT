@@ -14,6 +14,6 @@ LJ_FUNCA void LJ_FASTCALL lj_func_closeuv(lua_State *L, TValue *level);
 /* Functions (closures). */
 LJ_FUNC GCfunc *lj_func_newC(lua_State *L, MSize nelems, GCtab *env);
 LJ_FUNC GCfunc *lj_func_newL_empty(lua_State *L, GCproto *pt, GCtab *env);
-LJ_FUNCA GCfunc *lj_func_newL_gc(lua_State *L, GCproto *pt, GCfuncL *parent);
+LJ_FUNCA GCfunc *lj_func_newL_gc(lua_State *L, uintptr_t pt_, GCfuncL *parent);
 
 #endif

@@ -3956,6 +3956,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |.if FFI
     |  ins_AND	// RA = dst, RD = cdata const (~)
     |  mov RD, [KBASE+RD*4]
+    |  and RD, -4
     |  mov dword [BASE+RA*8+4], LJ_TCDATA
     |  mov [BASE+RA*8], RD
     |  ins_next
@@ -4119,7 +4120,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov L:RB->base, BASE
     |.endif
     |  mov SAVE_PC, PC
-    |  // (lua_State *L, GCproto *pt, GCfuncL *parent)
+    |  // (lua_State *L, uintptr_t pt_, GCfuncL *parent)
     |  call extern lj_func_newL_gc
     |  // GCfuncL * returned in eax (RC).
     |  mov BASE, L:RB->base
@@ -4186,6 +4187,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  jae >3
     |2:
     |  mov TAB:FCARG2, [KBASE+RD*4]	// Caveat: FCARG2 == BASE
+    |  and TAB:FCARG2, -4
     |  mov L:FCARG1, L:RB		// Caveat: FCARG1 == RA
     |  call extern lj_tab_dup@8		// (lua_State *L, Table *kt)
     |  // Table * returned in eax (RC).

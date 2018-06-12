@@ -129,12 +129,13 @@ GCfunc *lj_func_newL_empty(lua_State *L, GCproto *pt, GCtab *env)
 }
 
 /* Do a GC check and create a new Lua function with inherited upvalues. */
-GCfunc *lj_func_newL_gc(lua_State *L, GCproto *pt, GCfuncL *parent)
+GCfunc *lj_func_newL_gc(lua_State *L, uintptr_t pt_, GCfuncL *parent)
 {
   GCfunc *fn;
   GCRef *puv;
   MSize i, nuv;
   TValue *base;
+  GCproto *pt = (GCproto*)(pt_ - PROTO_KGC_PROTO);
   lj_gc_check_fixtop(L);
   fn = func_newL(L, pt, tabref(parent->env));
   /* NOBARRIER: The GCfunc is new (marked white). */

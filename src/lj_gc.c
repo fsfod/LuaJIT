@@ -265,8 +265,17 @@ static void gc_traverse_proto(global_State *g, GCproto *pt)
 {
   ptrdiff_t i;
   gc_mark_str(proto_chunkname(pt));
-  for (i = -(ptrdiff_t)pt->sizekgc; i < 0; i++)  /* Mark collectable consts. */
-    gc_markobj(g, proto_kgc(pt, i));
+  for (i = -(ptrdiff_t)pt->sizekgc; i < 0; i++) {
+    GCobj *o = proto_kgc(pt, i);
+    LJ_STATIC_ASSERT((PROTO_KGC_STR & PROTO_KGC_PROTO) == 0);
+    LJ_STATIC_ASSERT((PROTO_KGC_CDATA & PROTO_KGC_PROTO) == 0);
+    LJ_STATIC_ASSERT((PROTO_KGC_TABLE & PROTO_KGC_PROTO) != 0);
+    if (((uintptr_t)o & PROTO_KGC_PROTO)) {
+      gc_markobj(g, (GCobj*)((uintptr_t)o & ~(uintptr_t)PROTO_KGC_MASK));
+    } else {
+      lj_gc_markleaf(g, (void*)((uintptr_t)o & ~(uintptr_t)PROTO_KGC_MASK));
+    }
+  }
 #if LJ_HASJIT
   if (pt->trace) gc_marktrace(g, pt->trace);
 #endif

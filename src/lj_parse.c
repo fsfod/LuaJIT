@@ -1378,10 +1378,23 @@ static void fs_fixup_k(FuncState *fs, GCproto *pt, void *kptr)
 	}
       } else {
 	GCobj *o = gcV(&n->key);
-	setgcref(((GCRef *)kptr)[~kidx], o);
-	lj_gc_objbarrier(fs->L, pt, o);
-	if (tvisproto(&n->key))
+	uintptr_t ot = (uintptr_t)o;
+	lua_assert(!(ot & PROTO_KGC_MASK));
+	if (tvisstr(&n->key)) {
+	  lua_assert(PROTO_KGC_STR == 0);
+	} else if (tvisproto(&n->key)) {
 	  fs_fixup_uv2(fs, gco2pt(o));
+	  ot |= PROTO_KGC_PROTO;
+#if LJ_HASFFI
+	} else if (tviscdata(&n->key)) {
+	  ot |= PROTO_KGC_CDATA;
+#endif
+	} else {
+	  lua_assert(tvistab(&n->key));
+	  ot |= PROTO_KGC_TABLE;
+	}
+	setgcrefp(((GCRef *)kptr)[~kidx], ot);
+	lj_gc_barrier(fs->L, pt, &n->key);
       }
     }
   }

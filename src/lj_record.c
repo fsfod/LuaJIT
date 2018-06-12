@@ -2273,7 +2273,7 @@ void lj_record_ins(jit_State *J)
     break;
 #if LJ_HASFFI
   case BC_KCDATA:
-    rc = lj_ir_kgc(J, proto_kgc(J->pt, ~(ptrdiff_t)rc), IRT_CDATA);
+    rc = lj_ir_kgc(J, (GCobj*)((uintptr_t)proto_kgc(J->pt, ~(ptrdiff_t)rc) - PROTO_KGC_CDATA), IRT_CDATA);
     break;
 #endif
 
@@ -2315,15 +2315,16 @@ void lj_record_ins(jit_State *J)
   case BC_TNEW:
     rc = rec_tnew(J, rc);
     break;
-  case BC_TDUP:
-    rc = emitir(IRTG(IR_TDUP, IRT_TAB),
-		lj_ir_ktab(J, gco2tab(proto_kgc(J->pt, ~(ptrdiff_t)rc))), 0);
+  case BC_TDUP: {
+    GCobj* t = proto_kgc(J->pt, ~(ptrdiff_t)rc);
+    t = (GCobj*)((uintptr_t)t - PROTO_KGC_TABLE);
+    rc = emitir(IRTG(IR_TDUP, IRT_TAB), lj_ir_ktab(J, gco2tab(t)), 0);
 #ifdef LUAJIT_ENABLE_TABLE_BUMP
     J->rbchash[(rc & (RBCHASH_SLOTS-1))].ref = tref_ref(rc);
     setmref(J->rbchash[(rc & (RBCHASH_SLOTS-1))].pc, pc);
     setgcref(J->rbchash[(rc & (RBCHASH_SLOTS-1))].pt, obj2gco(J->pt));
 #endif
-    break;
+    break; }
 
   /* -- Calls and vararg handling ----------------------------------------- */
 

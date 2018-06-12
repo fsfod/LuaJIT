@@ -396,6 +396,13 @@ typedef struct GCproto {
 #define PROTO_UV_LOCAL		0x8000	/* Upvalue for local slot. */
 #define PROTO_UV_IMMUTABLE	0x4000	/* Immutable upvalue. */
 
+/* Tag bits in bottom of kgc pointers. */
+#define PROTO_KGC_STR		0
+#define PROTO_KGC_CDATA		1
+#define PROTO_KGC_PROTO		2
+#define PROTO_KGC_TABLE		3
+#define PROTO_KGC_MASK		3
+
 #define proto_kgc(pt, idx) \
   check_exp((uintptr_t)(intptr_t)(idx) >= (uintptr_t)-(intptr_t)(pt)->sizekgc, \
 	    gcref(mref((pt)->k, GCRef)[(idx)]))
