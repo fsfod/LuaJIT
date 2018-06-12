@@ -51,6 +51,13 @@
 /* Mark a string object. */
 #define gc_mark_str(s)		((s)->marked &= (uint8_t)~LJ_GC_WHITES)
 
+static void gc_markuv(global_State *g, GCupval *uv)
+{
+  gc_marktv(g, uvval(uv));
+  if (uv->closed)
+    gray2black(o);  /* Closed upvalues are never gray. */
+}
+
 /* Mark a white GCobj. */
 static void gc_mark(global_State *g, GCobj *o)
 {
@@ -63,10 +70,7 @@ static void gc_mark(global_State *g, GCobj *o)
     if (mt) gc_markobj(g, mt);
     gc_markobj(g, tabref(gco2ud(o)->env));
   } else if (LJ_UNLIKELY(gct == ~LJ_TUPVAL)) {
-    GCupval *uv = gco2uv(o);
-    gc_marktv(g, uvval(uv));
-    if (uv->closed)
-      gray2black(o);  /* Closed upvalues are never gray. */
+    gc_markuv(g, gco2uv(o));
   } else if (gct != ~LJ_TSTR && gct != ~LJ_TCDATA) {
     lua_assert(gct == ~LJ_TFUNC || gct == ~LJ_TTAB ||
 	       gct == ~LJ_TTHREAD || gct == ~LJ_TPROTO || gct == ~LJ_TTRACE);
