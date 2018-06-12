@@ -4031,8 +4031,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov [RB+4], RD
     |  jz >1
     |  // Check barrier for closed upvalue.
-    |  test byte [RB+TV2MARKOFS], LJ_GC_BLACK		// isblack(uv)
-    |  jnz >2
+    |  test byte [RB+TV2MARKOFS], LJ_GCFLAG_GREY  // !isgray(table)
+    |  jz >2
     |1:
     |  ins_next
     |
@@ -4040,8 +4040,9 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  sub RD, LJ_TISGCV
     |  cmp RD, LJ_TNUMX - LJ_TISGCV			// tvisgcv(v)
     |  jbe <1
-    |  test byte GCOBJ:RA->gch.marked, LJ_GC_WHITES	// iswhite(v)
-    |  jz <1
+    |  //FIXME: forward barrier based on mark bit?
+    |  //test byte GCOBJ:RA->gch.marked, LJ_GC_WHITES	// iswhite(v)
+    |  //jz <1
     |  // Crossed a write barrier. Move the barrier forward.
     |.if X64 and not X64WIN
     |  mov FCARG2, RB
@@ -4063,22 +4064,23 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov RD, UPVAL:RB->v
     |  mov [RD], GCOBJ:RA
     |  mov dword [RD+4], LJ_TSTR
-    |  test byte UPVAL:RB->marked, LJ_GC_BLACK		// isblack(uv)
-    |  jnz >2
+    |  test byte UPVAL:RB->marked, LJ_GCFLAG_GREY  // !isgray(table)
+    |  jz >2
     |1:
     |  ins_next
     |
     |2:  // Check if string is white and ensure upvalue is closed.
-    |  test byte GCOBJ:RA->gch.marked, LJ_GC_WHITES	// iswhite(str)
-    |  jz <1
-    |  cmp byte UPVAL:RB->closed, 0
-    |  jz <1
+    | cmp dword [DISPATCH+DISPATCH_GL(gc.state)], GCSpause
+    | je >3
     |  // Crossed a write barrier. Move the barrier forward.
     |  mov RB, BASE			// Save BASE (FCARG2 == BASE).
     |  mov FCARG2, RD
     |  lea GL:FCARG1, [DISPATCH+GG_DISP2G]
     |  call extern lj_gc_barrieruv@8	// (global_State *g, TValue *tv)
     |  mov BASE, RB			// Restore BASE.
+    |  jmp <1
+    |3:
+    |  or byte UPVAL:RB->marked, LJ_GCFLAG_GREY
     |  jmp <1
     break;
   case BC_USETN:
