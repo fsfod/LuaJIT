@@ -1957,16 +1957,25 @@ static void asm_barrier(ASMState *as, Reg obj, Reg tmp, MCLabel l_end)
 
 static void asm_appendssb(ASMState *as, Reg obj, Reg tmp, MCLabel l_end)
 {
-  /* Exit if the gray SSB overflowed so it can be emptied*/
-  asm_guardcc(as, CC_Z);
-  emit_i32(as, GRAYSSB_MASK);
-  emit_mrm(as, XO_GROUP3, XOg_TEST, tmp);
+  MCode *p;
+  /* Exit if the gray SSB is full by checking for the sign flag when incrementing
+  ** the ssb size past 127
+  */
+  asm_guardcc(as, CC_S);
 
-  /* Append to gray SSB */
-  emit_setgl(as, tmp, gc.grayssb);
-  emit_gri(as, XG_ARITHi(XOg_ADD), tmp, LJ_GC64 ? 8 : 4);
-  emit_rmro(as, XO_MOVto | (LJ_GC64 ? REX_64 : 0), obj, tmp, 0);
-  emit_getgl(as, tmp, gc.grayssb);
+  /* Write the object to grey SSB buffer*/
+#if LJ_GC64
+  UNUSED(p);
+  emit_rmrxo(as, XO_MOVto, tab, RID_DISPATCH, tmp, XM_SCALE8,
+    GG_OFS(g.gc.ssb) - GG_OFS(dispatch));
+#else
+  p = as->mcp - 4;
+  *(int32_t *)p = (int32_t)(intptr_t)&J2G(as->J)->gc.ssb;
+  as->mcp = emit_opmx(XO_MOVto, XM_OFS0, XM_SCALE4, obj, RID_EBP, tmp, p);
+#endif
+  emit_i8(as, 1);
+  emit_opgl(as, XO_ARITHib, XOg_ADD, gc.ssbsize);
+  emit_opgl(as, XO_MOVZXb, tmp, gc.ssbsize);
 }
 
 static void asm_tbar(ASMState *as, IRIns *ir)

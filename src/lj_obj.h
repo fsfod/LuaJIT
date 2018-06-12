@@ -578,6 +578,11 @@ typedef struct PQueue {
   union GCArena** array;
 } PQueue;
 
+/* Both the interpreter and JIT will break if this is not 128 since they check
+** the limit based on a sign flag from 8 bit arithmetic.
+*/
+#define LJ_GC_SSB_CAPACITY 128 
+
 typedef struct GCState {
   GCSize total;		/* Memory currently allocated. */
   GCSize hugemem;	/* Memory currently allocated for huge objects. */
@@ -591,11 +596,11 @@ typedef struct GCState {
     };
     uint32_t statebits;
   };
+  uint8_t ssbsize;      /* Current top of gray SSB buffer */
   MSize sweepstr;	/* Sweep position in string table. */
   GCRef root;		/* List of all collectable objects. */
   MRef sweep;		/* Sweep position in root list. */
   GCRef gray;		/* List of gray objects. */
-  MRef grayssb;         /* Current top  of gray SSB buffer */
   GCRef grayagain;	/* List of objects for atomic traversal. */
   GCRef weak;		/* List of weak tables (to be cleared). */
   GCRef mmudata;	/* List of userdata (to be finalized). */
@@ -610,6 +615,7 @@ typedef struct GCState {
   MSize arenastop; /* Top of the arena list */
   struct ArenaFreeList* freelists;
   PQueue greypq;
+  GCRef ssb[LJ_GC_SSB_CAPACITY];
 } GCState;
 
 

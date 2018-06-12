@@ -139,7 +139,7 @@ static void gc_mark_start(global_State *g)
 {
   gc_setstate(g, GCSpropagate);
   if (!g->gc.isminor) {
-    lj_gc_resetgrayssb(g);
+    g->gc.ssbsize = 0;
     setgcrefnull(g->gc.grayagain);
   } else {
     setgcrefnull(g->gc.grayagain);
@@ -873,8 +873,6 @@ void lj_gc_freeall(global_State *g)
 
   lj_mem_freevec(g, g->gc.arenas, g->gc.arenassz, GCArena*);
   lj_mem_freevec(g, g->gc.freelists, g->gc.arenassz, ArenaFreeList);
-  lj_mem_freevec(g, (void*)(((intptr_t)mref(g->gc.grayssb, GCRef)) & ~GRAYSSB_MASK),
-                 GRAYSSBSZ, GCRef);
 }
 
 int lj_gc_getarenaid(global_State *g, void* arena)
@@ -1053,9 +1051,6 @@ void lj_gc_init(lua_State *L)
   g->gc.total = sizeof(GG_State);
   g->gc.pause = LUAI_GCPAUSE;
   g->gc.stepmul = LUAI_GCMUL;
-  /* Make sure the minimum slot is always base + 1 so we can tell empty and full apart */
-  setmref(g->gc.grayssb, ((GCRef*)lj_alloc_memalign(g->allocd,
-            GRAYSSBSZ*sizeof(GCRef), GRAYSSBSZ*sizeof(GCRef)))+1);
 
   g->gc.arenas = lj_mem_newvec(L, 16, GCArena*);
   g->gc.arenassz = 16;
@@ -1582,7 +1577,7 @@ void lj_gc_fullgc(lua_State *L)
           arena_towhite(lj_gc_arenaref(g, i));
         }
         gc_setstate(g, GCSpause);
-        lj_gc_resetgrayssb(g);
+        g->gc.ssbsize = 0;
       } else {
         lua_assert(0);
       }
@@ -1697,44 +1692,20 @@ void lj_gc_barriertrace(global_State *g, uint32_t traceno)
 }
 #endif
 
-void lj_gc_resetgrayssb(global_State *g)
-{
-  GCRef *list = mref(g->gc.grayssb, GCRef);
-  intptr_t mask = ((intptr_t)mref(g->gc.grayssb, GCRef)) & GRAYSSB_MASK;
-
-  if (mask == 0) {
-    list = list-GRAYSSBSZ;
-  } else {
-    list = (GCRef *)(((intptr_t)list) & ~GRAYSSB_MASK);
-  }
-
-  /* Leave dummy value at the start so we always know if the list is completely empty or full */
-  setmref(g->gc.grayssb, list+1);
-}
-
 void LJ_FASTCALL lj_gc_drain_ssb(global_State *g)
 {
-  GCRef *list = mref(g->gc.grayssb, GCRef);
-  intptr_t mask = ((intptr_t)mref(g->gc.grayssb, GCRef)) & GRAYSSB_MASK;
-  MSize i, limit;
+  MSize i;
 
-  if (mask == 0) {
-    list = list-GRAYSSBSZ;
-    limit = GRAYSSBSZ;
-  } else {
-    list = (GCRef *)(((intptr_t)list) & ~GRAYSSB_MASK);
-    limit = (MSize)(mask/sizeof(GCRef));
-  }
-  GCDEBUG("lj_gc_drain_ssb: size %d\n", limit);
+  GCDEBUG("lj_gc_drain_ssb: size %d\n", g->gc.ssbsize);
   if (!g->gc.isminor && g->gc.state != GCSpropagate && g->gc.state != GCSatomic) {
-    lj_gc_resetgrayssb(g);
+    g->gc.ssbsize = 0;
     return;
   }
 
   TIMER_START(gc_emptygrayssb);
   /* Skip first dummy value */
-  for (i = 1; i < limit; i++) {
-    GCobj *o = gcref(list[i]);
+  for (i = 0; i < g->gc.ssbsize; i++) {
+    GCobj *o = gcref(g->gc.ssb[i]);
     if (!gc_ishugeblock(o)) {
       /* Skip false positive triggered barriers since fast barrier only checks greybit
       ** and not if the object being stored into is black
@@ -1747,8 +1718,8 @@ void LJ_FASTCALL lj_gc_drain_ssb(global_State *g)
       hugeblock_mark(g, o);
     }
   }
+  g->gc.ssbsize = 0;
   TIMER_END(gc_emptygrayssb);
-  lj_gc_resetgrayssb(g);
 }
 
 void lj_gc_setfixed(lua_State *L, GCobj *o)
