@@ -72,8 +72,16 @@ static TraceNo trace_findfree(jit_State *J)
   if (osz >= lim)
     return 0;  /* Too many traces. */
   lj_mem_growvec(J->L, J->trace, J->sizetrace, lim, GCRef, GCPOOL_GREY);
-  for (; osz < J->sizetrace; osz++)
+#ifdef LUAJIT_USE_GDBJIT
+  J->gdbjit_entries = (MRef*)lj_mem_realloc(J->L, J->gdbjit_entries,
+      osz * sizeof(MRef), J->sizetrace * sizeof(MRef), GCPOOL_GREY);
+#endif
+  for (; osz < J->sizetrace; osz++) {
     setgcrefnull(J->trace[osz]);
+#ifdef LUAJIT_USE_GDBJIT
+    setmref(J->gdbjit_entries[osz], NULL);
+#endif
+  }
   return J->freetrace;
 }
 
@@ -281,7 +289,7 @@ int lj_trace_flushall(lua_State *L)
     if (T) {
       if (T->root == 0)
 	trace_flushroot(J, T);
-      lj_gdbjit_deltrace(J, T);
+      lj_gdbjit_deltraceno(J, (TraceNo)i);
       T->traceno = T->link = 0;  /* Blacklist the link for cont_stitch. */
       setgcrefnull(J->trace[i]);
     }
@@ -346,11 +354,10 @@ void lj_trace_initstate(global_State *g)
 void lj_trace_freestate(global_State *g)
 {
   jit_State *J = G2J(g);
-#ifdef LUA_USE_ASSERT
-  {  /* This assumes all traces have already been freed. */
-    ptrdiff_t i;
-    for (i = 1; i < (ptrdiff_t)J->sizetrace; i++)
-      lua_assert(i == (ptrdiff_t)J->cur.traceno || traceref(J, i) == NULL);
+#if LUAJIT_USE_GDBJIT
+  TraceNo i;
+  for (i = 1; i < J->sizetrace; i++) {
+    lj_gdbjit_deltraceno(J, i);
   }
 #endif
   lj_mcode_free(J);

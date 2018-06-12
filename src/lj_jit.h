@@ -261,9 +261,6 @@ typedef struct GCtrace {
   TraceNo1 nextside;	/* Next side trace of same root trace. */
   uint8_t sinktags;	/* Trace has SINK tags. */
   uint8_t unused1;
-#ifdef LUAJIT_USE_GDBJIT
-  void *gdbjit_entry;	/* GDB JIT entry. */
-#endif
 } GCtrace;
 
 #define gco2trace(o)	check_exp((o)->gch.gct == ~LJ_TTRACE, (GCtrace *)(o))
@@ -486,6 +483,10 @@ typedef struct jit_State {
   GCproto *prev_pt;	/* Previous prototype. */
   BCLine prev_line;	/* Previous line. */
   int prof_mode;	/* Profiling mode: 0, 'f', 'l'. */
+#endif
+
+#ifdef LUAJIT_USE_GDBJIT
+  MRef *gdbjit_entries; /* GDB JIT entries (same size as trace array). */
 #endif
 }
 #if LJ_TARGET_ARM
