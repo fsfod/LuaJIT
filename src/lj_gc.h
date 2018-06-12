@@ -23,19 +23,18 @@ enum {
 };
 
 /* Bitmasks for marked field of GCobj. */
-#define LJ_GC_GRAY	0x01
+#define LJ_GCFLAG_GREY	0x01
 #define LJ_GC_FINALIZED	0x08
 #define LJ_GC_WEAKKEY	0x08
 #define LJ_GC_WEAKVAL	0x10
 #define LJ_GC_CDATA_FIN	0x10
 #define LJ_GC_FIXED	0x20
-#define LJ_GC_COLORS	(LJ_GC_GRAY)
 #define LJ_GC_WEAK	(LJ_GC_WEAKKEY | LJ_GC_WEAKVAL)
 
 /* Macros to test and set GCobj colors. */
-#define isgray(x)	((obj2gco(x)->gch.marked & LJ_GC_GRAY))
-#define setgray(x)	(obj2gco(x)->gch.marked |= LJ_GC_GRAY)
-#define cleargray(x)	(obj2gco(x)->gch.marked &= ~LJ_GC_GRAY)
+#define isgray(x)	((obj2gco(x)->gch.marked & LJ_GCFLAG_GREY))
+#define setgray(x)	(obj2gco(x)->gch.marked |= LJ_GCFLAG_GREY)
+#define cleargray(x)	(obj2gco(x)->gch.marked &= ~LJ_GCFLAG_GREY)
 #define tviswhite(x)	(tvisgcv(x) && iswhite(gcV(x)))
 #define isdead(g, x)	(!gc_ishugeblock(x) ? arenaobj_isdead(x) : hugeblock_isdead(g, x))
 
@@ -122,7 +121,7 @@ LJ_FUNC void lj_gc_closeuv(global_State *g, GCupval *uv);
 LJ_FUNC void lj_gc_barriertrace(global_State *g, uint32_t traceno);
 #endif
 
-void LJ_FUNCA lj_gc_emptygrayssb(global_State *g);
+void LJ_FUNCA lj_gc_drain_ssb(global_State *g);
 void LJ_FUNC lj_gc_resetgrayssb(global_State *g);
 /* Must be a power of 2 */
 #define GRAYSSBSZ 64 /* Largest mask that fits in 1 byte imm */
@@ -137,7 +136,7 @@ static LJ_AINLINE void lj_gc_appendgrayssb(global_State *g, GCobj *o)
   ssb++;
   setmref(g->gc.grayssb, ssb);
   if (LJ_UNLIKELY((((uintptr_t)ssb) & GRAYSSB_MASK) == 0)) {
-    lj_gc_emptygrayssb(g);
+    lj_gc_drain_ssb(g);
   }
 }
 

@@ -1946,11 +1946,11 @@ static void asm_barrier(ASMState *as, Reg obj, Reg tmp, MCLabel l_end)
   emit_opgl(as, XO_GROUP3, XOg_TEST, gc.statebits);
 
   /* mark gray so barrier is not triggered again */
-  emit_i8(as, LJ_GC_GRAY);
+  emit_i8(as, LJ_GCFLAG_GREY);
   emit_rmro(as, XO_ARITHib, XOg_OR, obj, offsetof(GChead, marked));
 
   emit_sjcc(as, CC_NZ, l_end);
-  emit_i8(as, LJ_GC_GRAY);
+  emit_i8(as, LJ_GCFLAG_GREY);
   emit_rmro(as, XO_GROUP3b, XOg_TEST, obj, offsetof(GChead, marked));
   checkmclim(as);
 }
@@ -2008,7 +2008,7 @@ static void asm_obar(ASMState *as, IRIns *ir)
   }
   */
   emit_sjcc(as, CC_NZ, l_end);
-  emit_i8(as, LJ_GC_GRAY);
+  emit_i8(as, LJ_GCFLAG_GREY);
   emit_rmro(as, XO_GROUP3b, XOg_TEST, obj,
 	    (int32_t)offsetof(GCupval, marked)-(int32_t)offsetof(GCupval, tv));
 }

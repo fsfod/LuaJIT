@@ -1183,7 +1183,7 @@ static void atomic(global_State *g, lua_State *L)
   SECTION_START(gc_atomic);
   traces_toblack(g);
 
-  lj_gc_emptygrayssb(g); /* Mark anything left in the gray SSB buffer */
+  lj_gc_drain_ssb(g); /* Mark anything left in the gray SSB buffer */
   gc_mark_uv(g);  /* Need to remark open upvalues (the thread may be dead). */
   gc_propagate_gray(g);  /* Propagate any left-overs. */
 
@@ -1641,7 +1641,7 @@ void LJ_FASTCALL lj_gc_barrieruv(global_State *g, TValue *tv)
   if (g->gc.isminor || g->gc.state == GCSpropagate || g->gc.state == GCSatomic) {
     lj_gc_appendgrayssb(g, gcV(tv));
   } else {
-    TV2MARKED(tv)->marked |= LJ_GC_GRAY;
+    TV2MARKED(tv)->marked |= LJ_GCFLAG_GREY;
   }
 #undef TV2MARKED
 }
@@ -1712,7 +1712,7 @@ void lj_gc_resetgrayssb(global_State *g)
   setmref(g->gc.grayssb, list+1);
 }
 
-void LJ_FASTCALL lj_gc_emptygrayssb(global_State *g)
+void LJ_FASTCALL lj_gc_drain_ssb(global_State *g)
 {
   GCRef *list = mref(g->gc.grayssb, GCRef);
   intptr_t mask = ((intptr_t)mref(g->gc.grayssb, GCRef)) & GRAYSSB_MASK;
@@ -1725,7 +1725,7 @@ void LJ_FASTCALL lj_gc_emptygrayssb(global_State *g)
     list = (GCRef *)(((intptr_t)list) & ~GRAYSSB_MASK);
     limit = (MSize)(mask/sizeof(GCRef));
   }
-  GCDEBUG("lj_gc_emptygrayssb: size %d\n", limit);
+  GCDEBUG("lj_gc_drain_ssb: size %d\n", limit);
   if (!g->gc.isminor && g->gc.state != GCSpropagate && g->gc.state != GCSatomic) {
     lj_gc_resetgrayssb(g);
     return;
