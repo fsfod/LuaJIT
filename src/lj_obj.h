@@ -634,6 +634,7 @@ typedef struct global_State {
   GCState gc;		/* Garbage collector. */
   union GCArena *arena;
   union GCArena *travarena;  /* Traversal GC object arena */
+  union GCArena *llivedarena; /* Arena to allocate long lived objects like traces from */
   volatile int32_t vmstate;  /* VM state or current JIT code trace number. */
   SBuf tmpbuf;		/* Temporary string buffer. */
   GCRef mainthref;	/* Link to main thread. */

@@ -81,7 +81,7 @@ LJ_FUNC union GCArena *lj_gc_newarena(lua_State *L, uint32_t flags);
 LJ_FUNC void lj_gc_freearena(global_State *g, union GCArena *arena);
 LJ_FUNC GCArena *lj_gc_findnewarena(lua_State *L, int travobj);
 LJ_FUNC int lj_gc_getarenaid(global_State *g, void* arena);
-LJ_FUNC union GCArena *lj_gc_setactive_arena(lua_State *L, union GCArena *arena, int travobjs);
+LJ_FUNC union GCArena *lj_gc_setactive_arena(lua_State *L, union GCArena *arena, ArenaFlags flags);
 
 #define lj_gc_arenaref(g, i) \
   check_exp((i) < (g)->gc.arenastop, ((GCArena *)(((uintptr_t)(g)->gc.arenas[(i)]) & ~(ArenaCellMask))))

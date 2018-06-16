@@ -101,6 +101,7 @@ typedef enum ArenaFlags {
   ArenaFlag_SplitPage = 0x400,/* Pages allocated for the arena were part of a larger allocation */
   ArenaFlag_DeferMarks = 0x800,/* Arena has deferred mark object list */
   ArenaFlag_Finalizers = 0x1000,/* Arena has a finalizer list with objects in it */
+  ArenaFlag_LongLived  = 0x2000, /* Long lived objects should be allocated from an arena with this flag */
 } ArenaFlags;
 
 typedef struct ArenaExtra {
@@ -159,6 +160,7 @@ typedef struct ArenaFreeList {
   GCArena *owner;
   uint16_t freecells;
   uint16_t freeobjcount;
+  GCCellID1 sweeplimit;
   CellIdChunk *finalizbles;
   CellIdChunk *defermark;
 } ArenaFreeList;

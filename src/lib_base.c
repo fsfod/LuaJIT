@@ -517,10 +517,10 @@ LJLIB_CF(setarena)
   }
 
   if (arenatype != -1) {
-    lj_gc_setactive_arena(L, arena, arenatype);
+    lj_gc_setactive_arena(L, arena, arenatype == 1 ? ArenaFlag_TravObjs : 0);
   } else {
     lj_gc_setactive_arena(L, arena, 0);
-    lj_gc_setactive_arena(L, arena, 1);
+    lj_gc_setactive_arena(L, arena, ArenaFlag_TravObjs);
   }
 
   return 0;

@@ -933,13 +933,23 @@ GCArena* lj_gc_newarena(lua_State *L, uint32_t flags)
   return arena;
 }
 
+static GCArena *getarena_forflags(global_State *g, int requiredflags)
+{
+  if (requiredflags & ArenaFlag_LongLived) {
+    return g->llivedarena;
+  } else {
+    return (requiredflags & ArenaFlag_TravObjs) ? g->travarena : g->arena;
+  }
+}
+
 /* Find or create new arena to replace the currently active full one */
-GCArena *lj_gc_findnewarena(lua_State *L, int travobj)
+GCArena *lj_gc_findnewarena(lua_State *L, int flags)
 {
   global_State *g = G(L);
   MSize fallback = g->gc.arenastop, id = g->gc.arenastop;
-  GCArena *arena = NULL, *curarena = travobj ? g->travarena : g->arena;
-  uint32_t wantedflags = travobj ? ArenaFlag_TravObjs : 0;
+  GCArena *arena = NULL, *curarena = getarena_forflags(g, flags);
+  uint32_t wantedflags = flags & (ArenaFlag_TravObjs|ArenaFlag_LongLived);
+  int travobj = flags & ArenaFlag_TravObjs;
 
   for (MSize i = 0; i < g->gc.arenastop; i++) {
     ArenaFlags arenaflags = lj_gc_arenaflags(g, i);
@@ -967,21 +977,21 @@ GCArena *lj_gc_findnewarena(lua_State *L, int travobj)
   }
 
   if (!arena) {
-    arena = lj_gc_newarena(L, travobj ? ArenaFlag_TravObjs : 0);
+    arena = lj_gc_newarena(L, wantedflags);
   } else {
     uint32_t clearflags = ArenaFlag_Empty;
     /* Switching a non traversable arena to traversable objects */
     if (fallback) {
       if (travobj) {
-        clearflags |= ArenaFlag_TravObjs;
-      } else {
         lj_gc_setarenaflag(g, id, ArenaFlag_TravObjs);
+      } else {
+        clearflags |= ArenaFlag_TravObjs;
       }
       arena_setobjmode(L, arena, travobj);
     }
     lj_gc_cleararenaflags(g, id, clearflags);
   }
-  lj_gc_setactive_arena(L, arena, travobj);
+  lj_gc_setactive_arena(L, arena, wantedflags);
   return arena;
 }
 
@@ -1007,10 +1017,15 @@ void lj_gc_freearena(global_State *g, GCArena *arena)
 
 static void sweep_arena(global_State *g, MSize i, MSize celltop);
 
-GCArena *lj_gc_setactive_arena(lua_State *L, GCArena *arena, int travobjs)
+int lj_gc_isarena_active(global_State *g, GCArena *arena)
+{
+  return g->arena == arena || g->travarena == arena || g->llivedarena == arena;
+}
+
+GCArena *lj_gc_setactive_arena(lua_State *L, GCArena *arena, ArenaFlags newflags)
 {
   global_State *g = G(L);
-  GCArena *old = travobjs ? g->travarena : g->arena;
+  GCArena *old = getarena_forflags(g, newflags);
   MSize id = arena->extra.id;
   MSize flags = lj_gc_arenaflags(g, id);
   lua_assert(lj_gc_getarenaid(g, arena) != -1);
@@ -1033,13 +1048,15 @@ GCArena *lj_gc_setactive_arena(lua_State *L, GCArena *arena, int travobjs)
 
   GCDEBUG("setactive_arena: %d\n", id);
 
-  if (travobjs) {
-    lj_gc_setarenaflag(g, id, ArenaFlag_TravObjs);
+  if (newflags & ArenaFlag_LongLived) {
+    g->llivedarena = arena;
+  } else if (flags & ArenaFlag_TravObjs) {
     g->travarena = arena;
   } else {
     lj_gc_cleararenaflags(g, id, ArenaFlag_TravObjs);
     g->arena = arena;
   }
+  lj_gc_setarenaflag(g, id, newflags);
   return old;
 }
 
@@ -1062,6 +1079,7 @@ void lj_gc_init(lua_State *L)
   arena_creategreystack(L, g->travarena);
 
   g->arena = lj_gc_newarena(L, 0);
+  g->llivedarena = lj_gc_newarena(L, ArenaFlag_LongLived|ArenaFlag_TravObjs);
 }
 
 /* -- Collector ----------------------------------------------------------- */
@@ -1267,7 +1285,7 @@ static void sweep_arena(global_State *g, MSize i, MSize celltop)
     ** on setting an arena active and is used to filter out arenas for grey queue
     ** processing during mark propagation.
     */
-    if (arena != g->arena && arena != g->travarena) {
+    if (!lj_gc_isarena_active(g, arena)) {
       lj_gc_setarenaflag(g, i, ArenaFlag_Empty);
     }
     lj_gc_cleararenaflags(g, i, ArenaFlag_NoBump|ArenaFlag_ScanFreeSpace);
@@ -1319,12 +1337,17 @@ static void arenasweep_start(global_State *g)
   ** See lj_gc_setactive_arena where this checked and we flag the arena as swept.
   */
   if (!(lj_gc_arenaflags(g, g->arena->extra.id) & ArenaFlag_Swept)) {
-    sweep_arena(g, g->arena->extra.id, g->gc.curarena & 0xffff);
+    sweep_arena(g, g->arena->extra.id, arena_freelist(g->arena)->sweeplimit);
     lj_gc_setarenaflag(g, g->arena->extra.id, ArenaFlag_SweepNew);
   }
 
   if (g->travarena != g->arena && !(lj_gc_arenaflags(g, g->travarena->extra.id) & ArenaFlag_Swept)) {
-    sweep_arena(g, g->travarena->extra.id, g->gc.curarena >> 16);
+    sweep_arena(g, g->travarena->extra.id, arena_freelist(g->travarena)->sweeplimit);
+    lj_gc_setarenaflag(g, g->travarena->extra.id, ArenaFlag_SweepNew);
+  }
+
+  if (!(lj_gc_arenaflags(g, g->llivedarena->extra.id) & ArenaFlag_Swept)) {
+    sweep_arena(g, g->llivedarena->extra.id, arena_freelist(g->llivedarena)->sweeplimit);
     lj_gc_setarenaflag(g, g->travarena->extra.id, ArenaFlag_SweepNew);
   }
   g->gc.curarena = 0;
@@ -1367,10 +1390,14 @@ static void gc_sweepstart(global_State *g)
   lj_gc_setarenaflag(g, g->travarena->extra.id, ArenaFlag_SweepNew);
 
   sweep_arena(g, g->travarena->extra.id, 0);
+  
   /* Record celltop so we only sweep upto it and not objects created after the
   ** mark phase that will be still white
   */
-  g->gc.curarena = arena_topcellid(g->arena);
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    GCArena *arena = lj_gc_arenaref(g, i);
+    arena_freelist(arena)->sweeplimit = arena->celltopid;
+  }
 }
 
 static int gc_sweepend(lua_State *L)
@@ -1803,24 +1830,23 @@ int lj_mem_tryreclaim(lua_State *L)
   return 0;
 }
 
-GCobj *findarenaspace(lua_State *L, GCSize osize, int travobj)
+GCobj *findarenaspace(lua_State *L, GCSize osize, int flags)
 {
   global_State *g = G(L);
-  GCArena *arena = NULL, *curarena = travobj ? g->travarena : g->arena;
+  GCArena *arena = NULL, *curarena = getarena_forflags(g, flags);
   MSize cellnum = arena_roundcells(osize);
-  uint32_t flags = (travobj ? ArenaFlag_TravObjs : 0);
-  uint32_t mask = ArenaFlag_NoBump|ArenaFlag_Explicit|ArenaFlag_TravObjs;
+
 
   /* FIXME: be smarter about large allocations */
   if (!arena_canbump(curarena, cellnum)) {
     lj_gc_setarenaflag(g, lj_gc_getarenaid(g, curarena), ArenaFlag_NoBump);
   }
 
-  arena = lj_gc_findnewarena(L, travobj);
+  arena = lj_gc_findnewarena(L, flags);
 
   if (arena == NULL) {
     if (lj_mem_tryreclaim(L)) {
-      arena = lj_gc_findnewarena(L, travobj);
+      arena = lj_gc_findnewarena(L, flags);
     } else {
       lj_err_mem(L);
     }
@@ -1840,9 +1866,20 @@ GCobj *lj_mem_newgco_t(lua_State *L, GCSize osize, uint32_t gct)
 
   if (osize < ArenaOversized) {
     MSize realsz = lj_round(osize, 16);
-    o = (GCobj*)arena_alloc(istrav(gct) ? G(L)->travarena : G(L)->arena, osize);
+    GCArena *arena;
+
+    if (gct == ~LJ_TTRACE) {
+      arena = g->llivedarena;
+    } else {
+      arena = istrav(gct) ? G(L)->travarena : G(L)->arena;
+    }
+    o = (GCobj*)arena_alloc(arena, osize);
     if (LJ_UNLIKELY(o == NULL)) {
-      o = findarenaspace(L, osize, istrav(gct));
+      int flags = istrav(gct) ? ArenaFlag_TravObjs : 0;
+      if (gct == ~LJ_TTRACE) {
+        flags |= ArenaFlag_LongLived;
+      }
+      o = findarenaspace(L, osize, flags);
     }
     //GCDEBUG("Alloc(%d, %d) %s\n", ptr2arena(o)->extra.id, ptr2cell(o), lj_obj_itypename[gct]);
     g->gc.total += realsz;
