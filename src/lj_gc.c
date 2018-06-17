@@ -1456,12 +1456,14 @@ static size_t gc_onestep(lua_State *L)
     gc_mark_start(g);  /* Start a new GC cycle by marking all GC roots. */
     return 0;
   case GCSpropagate: {
+    TIMER_START(gc_propagate);
 #if ATOMIC_PROPAGATE
     GCSize total = 0;
     while(gc_propagate_gray(g));
 #else
    GCSize total = gc_propagate_gray(g); /* Propagate one gray object. */
 #endif
+   TIMER_END(gc_propagate);
     if (total != 0) {
       return total;
     } else {
@@ -1483,14 +1485,17 @@ static size_t gc_onestep(lua_State *L)
   case GCSsweepstring: {
     GCSize old = g->gc.total;
    // while (gc_sweepstring(g));
+    TIMER_START(sweepstring);
     gc_sweepstring(g);  /* Sweep one chain. */
     if (g->gc.sweepstr > g->strmask) {
       /* All string hash chains sweeped. */
+      TIMER_END(sweepstring);
       gc_setstate(g, GCSsweep);
       arenasweep_start(g);
     }
     lua_assert(old >= g->gc.total);
     g->gc.estimate -= old - g->gc.total;
+    TIMER_END(sweepstring);
     return GCSWEEPCOST;
   }
   case GCSsweep: {
@@ -1867,6 +1872,7 @@ GCobj *lj_mem_newgco_t(lua_State *L, GCSize osize, uint32_t gct)
   if (osize < ArenaOversized) {
     MSize realsz = lj_round(osize, 16);
     GCArena *arena;
+    TIMER_START(newgcobj);
 
     if (gct == ~LJ_TTRACE) {
       arena = g->llivedarena;
@@ -1883,6 +1889,7 @@ GCobj *lj_mem_newgco_t(lua_State *L, GCSize osize, uint32_t gct)
     }
     //GCDEBUG("Alloc(%d, %d) %s\n", ptr2arena(o)->extra.id, ptr2cell(o), lj_obj_itypename[gct]);
     g->gc.total += realsz;
+    TIMER_END(newgcobj);
   } else {
     o = hugeblock_alloc(L, osize, gct);
   }
@@ -1916,6 +1923,7 @@ void *lj_mem_reallocgc(lua_State *L, GCobj *owner, void *p, GCSize oldsz, GCSize
 
   if (newsz) {
     if (newsz < ArenaOversized) {
+      TIMER_START(allocgc);
       /* Try to shrink or extend the object inplace if theres free space after the object in the arena */
       if (oldsz && oldsz < ArenaOversized) {
         GCArena *arena = ptr2arena(p);
@@ -1923,6 +1931,7 @@ void *lj_mem_reallocgc(lua_State *L, GCobj *owner, void *p, GCSize oldsz, GCSize
           /*if(arena_tryext(arena, oldsz, newsz))*/
         } else {
           lj_mem_shrinkobj(L, p, (MSize)oldsz, (MSize)newsz);
+          TIMER_END(allocgc);
           return p;
         }
       }
@@ -1939,6 +1948,7 @@ void *lj_mem_reallocgc(lua_State *L, GCobj *owner, void *p, GCSize oldsz, GCSize
       }
       newsz = lj_round(newsz, 16);
       g->gc.total += (GCSize)newsz;
+      TIMER_END(allocgc);
     } else {
       mem = hugeblock_alloc(L, newsz, 0);
     }
