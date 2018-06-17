@@ -198,8 +198,6 @@ size_t lj_gc_separateudata(global_State *g, int all)
   lua_State *L = mainthread(g);
   size_t m = 0;
   CellIdChunk *list = idlist_new(L);
-  list->count = 0;
-  list->next = NULL;
   TIMER_START(gc_separateudata);
   for (MSize i = 0; i < g->gc.arenastop; i++) {
     GCArena *arena = lj_gc_arenaref(g, i);
@@ -823,7 +821,7 @@ void lj_gc_finalize_udata(lua_State *L)
         gc_finalize(L, arena_cellobj(arena, chunk->cells[j]));
       }
 
-      next = chunk->next;
+      next = idlist_next(chunk);
       idlist_freechunk(g, chunk);
       chunk = next;
     }

@@ -130,8 +130,8 @@ static void arena_freemem(global_State *g, GCArena* arena)
   if (mref(extra->finalizers, void)) {
     CellIdChunk *chunk = mref(extra->finalizers, CellIdChunk);
     while (chunk) {
-      CellIdChunk *next = chunk->next;
-      lj_mem_free(g, chunk, sizeof(CellIdChunk));
+      CellIdChunk *next = idlist_next(chunk);
+      idlist_freechunk(g, chunk);
       chunk = next;
     }
   }
@@ -758,7 +758,7 @@ void arena_marklist(global_State *g, GCArena *arena, CellIdChunk *list)
         gc_mark(g, arena_cellobj(arena, cell), arena_cellobj(arena, cell)->gch.gct);
       }
     }
-    list = list->next;
+    list = idlist_next(list);
   }
 }
 
@@ -1072,7 +1072,7 @@ int arena_adddefermark(lua_State *L, GCArena *arena, GCobj *o)
     setflag = 1;
   }
 
-  freelist->defermark = idlist_add(L, chunk, ptr2cell(o), o->gch.gct == ~LJ_TTAB);
+  freelist->defermark = idlist_add(L, chunk, ptr2cell(o));
   return setflag;
 }
 
@@ -1088,10 +1088,8 @@ int arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o)
     setmref(arena_extrainfo(arena)->finalizers, chunk);
     setflag = 1;
   }
-  /* Flag the cell entry as needing a meta lookup so we can skip touching the memory of cdata 
-  ** touch extra memory checking the object type for cdata that needs finalizing.
-  */
-  CellIdChunk *head = idlist_add(L, chunk, ptr2cell(o), o->gch.gct == ~LJ_TTAB || o->gch.gct == ~LJ_TUDATA);
+
+  CellIdChunk *head = idlist_add(L, chunk, ptr2cell(o));
   chunk = head;
   setmref(arena_extrainfo(arena)->finalizers, head);
   return setflag;
@@ -1101,53 +1099,55 @@ CellIdChunk *arena_separatefinalizers(global_State *g, GCArena *arena, CellIdChu
 {
   lua_State *L = mainthread(g);
   CellIdChunk *chunk = arena_finalizers(arena);
+  MRef *prev = &arena_extrainfo(arena)->finalizers;
+  int hasudata = lj_gc_arenaflags(g, arena->extra.id) & ArenaFlag_TravObjs;
 
   for (; chunk != NULL;) {
     MSize count = idlist_count(chunk);
-    uint32_t listmarks = chunk->count >> 5;
-    uint32_t markmask = (1 << chunk->count) -1;
     lua_assert(count <= (sizeof(chunk->cells)/2));
 
     for (size_t i = 0; i < count; i++) {
       GCCellID cell = chunk->cells[i];
       assert_allocated(arena, cell);
-
-      if (!arena_cellismarked(arena, cell)) {
-        GCobj *o = arena_cellobj(arena, cell);
-        /* If theres no __gc meta skip saving the cell */
-        if ((listmarks >> i) & 1) {
-          lua_assert(o->gch.gct == ~LJ_TUDATA);
-          if (lj_meta_fastg(g, tabref(o->gch.metatable), MM_gc)) {
-            /* We have to make sure the env\meta tables of the userdata are kept
-            ** alive past the sweep phase, in case there needed in the finalizer
-            ** phase that happends after the sweep.
-            ** TODO: Can we be smarter about this and only keep them alive until
-            ** the end of finalize phase.
-            */
-            gc_mark(g, o, ~LJ_TUDATA);
-            list = idlist_add(L, list, cell, 1);
-          }
-        } else {
-          lua_assert(o->gch.gct == ~LJ_TCDATA);
-          arena_markcell(arena, cell);
-          list = idlist_add(L, list, cell, 0);
-        }
-
-        markmask = markmask >> 1;
-        uint32_t cellmask = lj_rol(0xfffffffe, i);
-        listmarks = ((markmask & cellmask) & listmarks) | ((listmarks & ~markmask) ? ~cellmask : 0);
-
-        /* Swap the cellid at the end of the list into place of the one we removed */
-        /* FIXME: should really do 'stream compaction' and or sorting so theres better chance of the
-        ** next item is more likely tobe in cache
-        */
-        chunk->cells[i] = chunk->cells[--count];
-        i--;
+      /* Skip non white objects */
+      if (arena_cellismarked(arena, cell)) {
+        continue;
       }
+
+      GCobj *o = arena_cellobj(arena, cell);
+      if (hasudata && o->gch.gct == ~LJ_TUDATA) {
+        lua_assert(o->gch.gct == ~LJ_TUDATA);
+        if (lj_meta_fastg(g, tabref(o->gch.metatable), MM_gc)) {
+          /* We have to make sure the env\meta tables of the userdata are kept
+          ** alive past the sweep phase, in case there needed in the finalizer
+          ** phase that happens after the sweep.
+          ** TODO: Can we be smarter about this and only keep them alive until
+          ** the end of finalize phase.
+          */
+          //arena_clearcellmark(arena, cell);
+          gc_mark(g, o, ~LJ_TUDATA);
+        }
+      } else {
+        lua_assert(o->gch.gct == ~LJ_TCDATA);
+        arena_markcell(arena, cell);
+      }
+      list = idlist_add(L, list, cell);
+
+      chunk->cells[i] = chunk->cells[--count];
+      i--;
     }
-    chunk->count = count | (listmarks << 5);
+    
     lua_assert(idlist_count(chunk) < idlist_maxcells);
-    chunk = chunk->next;
+    if (count != 0) {
+      chunk->count = count;
+      prev = &chunk->next;
+      chunk = idlist_next(chunk);
+    } else {
+      CellIdChunk *next = idlist_next(chunk);
+      setmref(*prev, next);
+      idlist_freechunk(g, chunk);
+      chunk = next;
+    }
   }
 
   return list->count > 0 ? list : NULL;
