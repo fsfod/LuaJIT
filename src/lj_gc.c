@@ -230,7 +230,7 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
   if (mt)
     gc_mark_tab(g, mt);
   mode = lj_meta_fastg(g, mt, MM_mode);
-  if (mode && tvisstr(mode) && 0) {  /* Valid __mode field? */
+  if (mode && tvisstr(mode)) {  /* Valid __mode field? */
     const char *modestr = strVdata(mode);
     int c;
     while ((c = *modestr++)) {
@@ -246,6 +246,7 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
 #endif
       {
 	t->marked = (uint8_t)((t->marked & ~LJ_GC_WEAK) | weak);
+	lj_gc_setdeferredmark(mainthread(g), obj2gco(t));
       }
     }
   }
@@ -685,33 +686,30 @@ static int gc_mayclear(global_State *g, cTValue *o, int val)
   return 0;  /* Cannot clear. */
 }
 
-/* Clear collected entries from weak tables. */
-static void gc_clearweak(global_State *g, GCobj *o)
+/* Clear a weak tables. */
+static void gc_clearweak(global_State *g, GCtab *t)
 {
-  while (o) {
-    GCtab *t = gco2tab(o);
-    lua_assert((t->marked & LJ_GC_WEAK));
-    if ((t->marked & LJ_GC_WEAKVAL)) {
-      MSize i, asize = t->asize;
-      for (i = 0; i < asize; i++) {
-        /* Clear array slot when value is about to be collected. */
-        TValue *tv = arrayslot(t, i);
-        if (gc_mayclear(g, tv, 1))
-          setnilV(tv);
-      }
+
+  lua_assert((t->marked & LJ_GC_WEAK));
+  if ((t->marked & LJ_GC_WEAKVAL)) {
+    MSize i, asize = t->asize;
+    for (i = 0; i < asize; i++) {
+      /* Clear array slot when value is about to be collected. */
+      TValue *tv = arrayslot(t, i);
+      if (gc_mayclear(g, tv, 1))
+        setnilV(tv);
     }
-    if (t->hmask > 0) {
-      Node *node = noderef(t->node);
-      MSize i, hmask = t->hmask;
-      for (i = 0; i <= hmask; i++) {
-        Node *n = &node[i];
-        /* Clear hash slot when key or value is about to be collected. */
-        if (!tvisnil(&n->val) && (gc_mayclear(g, &n->key, 0) ||
-          gc_mayclear(g, &n->val, 1)))
-          setnilV(&n->val);
-      }
+  }
+  if (t->hmask > 0) {
+    Node *node = noderef(t->node);
+    MSize i, hmask = t->hmask;
+    for (i = 0; i <= hmask; i++) {
+      Node *n = &node[i];
+      /* Clear hash slot when key or value is about to be collected. */
+      if (!tvisnil(&n->val) && (gc_mayclear(g, &n->key, 0) ||
+        gc_mayclear(g, &n->val, 1)))
+        setnilV(&n->val);
     }
-    o = gcref(t->gclist);
   }
 }
 
@@ -1199,6 +1197,9 @@ void gc_deferred_sweep(global_State *g)
       if (arena_cellismarked(arena, id)) {
         if (o->gch.gct == ~LJ_TTHREAD) {
           sweep_threaduv((lua_State *)o);
+        } else if(o->gch.gct == ~LJ_TTAB) {
+          gc_clearweak(g, gco2tab(o));
+          idlist_remove(list, j, 0);
         }
         j++;
       } else {
@@ -1245,7 +1246,6 @@ static void atomic(global_State *g, lua_State *L)
   lj_buf_shrink(L, &g->tmpbuf);  /* Shrink temp buffer. */
 
   /* All marking done, clear weak tables. */
-  gc_clearweak(g, gcref(g->gc.weak));
   gc_sweep_uv(g);
   gc_deferred_sweep(g);
 
