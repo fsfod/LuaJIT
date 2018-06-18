@@ -1140,12 +1140,20 @@ int arena_checkfinalizers(global_State *g, GCArena *arena)
         idlist_markcell(chunk, i);
         numfinal++;
       }
-      if (count != idlist_count(chunk)) {
-        idlist_setcount(chunk, count);
-      }
     }
-    lua_assert(idlist_count(chunk) <= idlist_maxcells);
-    chunk = idlist_next(chunk);
+
+    if (count == 0) {
+      CellIdChunk *next = idlist_next(chunk);
+      setmref(*prev, next);
+      idlist_freechunk(g, chunk);
+      chunk = next;
+      continue;
+    } else {
+      idlist_setcount(chunk, count);
+      prev = &chunk->next;
+      lua_assert(idlist_count(chunk) <= idlist_maxcells);
+      chunk = idlist_next(chunk);
+    }
   }
 
   return numfinal;
