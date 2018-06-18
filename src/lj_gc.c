@@ -1719,21 +1719,9 @@ void lj_gc_closeuv(global_State *g, GCupval *uv)
   uv->closed = 1;
   //lua_assert(0); /*TODO: open upvalue cell id list for arenas . could also be list of threads in the arena as well */
 
-  if (tvisgcv(&uv->tv))
-  {
-    if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic) {
-      lj_gc_barrierf(g, o, gcV(&uv->tv));
-    } else {
-      if (g->gc.state != GCSpause)
-        arenaobj_toblack(gcV(&uv->tv));
-    }
-  }
-  if (arenaobj_isblack(o)) {  /* A closed upvalue is never gray, so fix this. */
-    if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic) {
-
-    } else {
-      // makewhite(g, o);  /* Make it white, i.e. sweep the upvalue. */
-      lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);
+  if (tvisgcv(&uv->tv) && g->gc.statebits & GCSneedsbarrier) {
+    if (arenaobj_isblack(o)) {
+      gc_markobj(g, gcV(&uv->tv));
     }
   }
 }
