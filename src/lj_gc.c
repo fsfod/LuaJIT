@@ -234,27 +234,28 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
     const char *modestr = strVdata(mode);
     int c;
     while ((c = *modestr++)) {
-      if (c == 'k') weak |= LJ_GC_WEAKKEY;
-      else if (c == 'v') weak |= LJ_GC_WEAKVAL;
+      if (c == 'k') weak |= LJ_GCFLAG_WEAKKEY;
+      else if (c == 'v') weak |= LJ_GCFLAG_WEAKVAL;
     }
     if (weak > 0) {  /* Weak tables are cleared in the atomic phase. */
-#if LJ_HASFFI
-      CTState *cts = ctype_ctsG(g);
-      if (cts && cts->finalizer == t) {
-	weak = (int)(~0u & ~LJ_GC_WEAKVAL);
-      } else
-#endif
-      {
-	t->marked = (uint8_t)((t->marked & ~LJ_GC_WEAK) | weak);
-	lj_gc_setdeferredmark(mainthread(g), obj2gco(t));
+      t->marked = (uint8_t)((t->marked & ~LJ_GCFLAG_WEAK) | weak);
+      GCRef *weaklist = mref(g->gc.weak, GCRef);
+      if (LJ_UNLIKELY(g->gc.weaknum == g->gc.weakcapacity)) {
+        lj_mem_growvec(gco2th(gcref(g->cur_L)), weaklist, g->gc.weakcapacity,
+                       LJ_MAX_MEM32, GCRef);
+        setmref(g->gc.weak, weaklist);
       }
+      setgcref(weaklist[g->gc.weaknum++], obj2gco(t));
     }
   }
   if (t->asize && !hascolo_array(t))
     gc_mark_gcvec(g, arrayslot(t, 0), t->asize * sizeof(TValue));
-  if (weak == LJ_GC_WEAK)  /* Nothing to mark if both keys/values are weak. */
+  if (t->hmask && !hascolo_hash(t))
+    gc_mark_gcvec(g, mref(t->node, void), t->hmask * sizeof(Node));
+  if (weak == LJ_GCFLAG_WEAK)  /* Nothing to mark if both keys/values are weak. */
     return 1;
-  if (!(weak & LJ_GC_WEAKVAL)) {  /* Mark array part. */
+
+  if (!(weak & LJ_GCFLAG_WEAKVAL)) {  /* Mark array part. */
     MSize i, asize = t->asize;
     for (i = 0; i < asize; i++) {
       TValue *tv = arrayslot(t, i);
@@ -278,14 +279,12 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
   if (t->hmask > 0) {  /* Mark hash part. */
     Node *node = noderef(t->node);
     MSize i, hmask = t->hmask;
-    if (!hascolo_hash(t))
-      gc_mark_gcvec(g, node, hmask * sizeof(Node));
     for (i = 0; i <= hmask; i++) {
       Node *n = &node[i];
       if (!tvisnil(&n->val)) {  /* Mark non-empty slot. */
         lua_assert(!tvisnil(&n->key));
-        if (!(weak & LJ_GC_WEAKKEY)) gc_marktv(g, &n->key);
-        if (!(weak & LJ_GC_WEAKVAL)) gc_marktv(g, &n->val);
+        if (!(weak & LJ_GCFLAG_WEAKKEY)) gc_marktv(g, &n->key);
+        if (!(weak & LJ_GCFLAG_WEAKVAL)) gc_marktv(g, &n->val);
       }
     }
   }
@@ -692,49 +691,6 @@ static void atomic_enqueue_finalizers(lua_State *L)
 #endif
 }
 
-/* Check whether we can clear a key or a value slot from a table. */
-static int gc_mayclear(global_State *g, cTValue *o, int val)
-{
-  if (tvisgcv(o)) {  /* Only collectable objects can be weak references. */
-    if (tvisstr(o)) {  /* But strings cannot be used as weak references. */
-      gc_mark_str(g, strV(o));  /* And need to be marked. */
-      return 0;
-    }
-    if (iswhite(g, gcV(o)))
-      return 1;  /* Object is about to be collected. */
-    if (tvisudata(o) && val && isfinalized(udataV(o)))
-      return 1;  /* Finalized userdata is dropped only from values. */
-  }
-  return 0;  /* Cannot clear. */
-}
-
-/* Clear a weak tables. */
-static void gc_clearweak(global_State *g, GCtab *t)
-{
-
-  lua_assert((t->marked & LJ_GC_WEAK));
-  if ((t->marked & LJ_GC_WEAKVAL)) {
-    MSize i, asize = t->asize;
-    for (i = 0; i < asize; i++) {
-      /* Clear array slot when value is about to be collected. */
-      TValue *tv = arrayslot(t, i);
-      if (gc_mayclear(g, tv, 1))
-        setnilV(tv);
-    }
-  }
-  if (t->hmask > 0) {
-    Node *node = noderef(t->node);
-    MSize i, hmask = t->hmask;
-    for (i = 0; i <= hmask; i++) {
-      Node *n = &node[i];
-      /* Clear hash slot when key or value is about to be collected. */
-      if (!tvisnil(&n->val) && (gc_mayclear(g, &n->key, 0) ||
-        gc_mayclear(g, &n->val, 1)))
-        setnilV(&n->val);
-    }
-  }
-}
-
 void lj_gc_setfinalizable(lua_State *L, GCobj *o, GCtab *mt)
 {
   lua_assert(o->gch.gct == ~LJ_TCDATA || o->gch.gct == ~LJ_TUDATA);
@@ -744,7 +700,6 @@ void lj_gc_setfinalizable(lua_State *L, GCobj *o, GCtab *mt)
   } else {
     hugeblock_setfinalizable(G(L), o);
   }
-  o->gch.marked |= LJ_GC_FINALIZED;
 }
 
 /* Call a userdata or cdata finalizer. */
@@ -919,6 +874,7 @@ void lj_gc_freeall(global_State *g)
 
   lj_mem_freevec(g, g->gc.arenas, g->gc.arenassz, GCArena*);
   lj_mem_freevec(g, g->gc.freelists, g->gc.arenassz, ArenaFreeList);
+  lj_mem_freevec(g, mref(g->gc.weak, GCRef), g->gc.weakcapacity, GCRef);
 }
 
 int lj_gc_getarenaid(global_State *g, void* arena)
@@ -1114,6 +1070,9 @@ void lj_gc_init(lua_State *L)
   g->gc.total = sizeof(GG_State);
   g->gc.pause = LUAI_GCPAUSE;
   g->gc.stepmul = LUAI_GCMUL;
+  setmref(g->gc.weak, lj_mem_newvec(L, 8, GCRef));
+  g->gc.weakcapacity = 8;
+  g->gc.weaknum = 0;
 
   g->gc.arenas = lj_mem_newvec(L, 16, GCArena*);
   g->gc.arenassz = 16;
@@ -1220,7 +1179,6 @@ void gc_deferred_sweep(global_State *g)
         if (o->gch.gct == ~LJ_TTHREAD) {
           sweep_threaduv((lua_State *)o);
         } else if(o->gch.gct == ~LJ_TTAB) {
-          gc_clearweak(g, gco2tab(o));
           idlist_remove(list, j, 0);
         }
         j++;
@@ -1233,6 +1191,64 @@ void gc_deferred_sweep(global_State *g)
         /* TODO: handle mark bits if we use them */
         lua_assert((list->count >> 15) == 0);
         idlist_remove(list, j, 0);
+      }
+    }
+  }
+}
+
+static void atomic_check_still_weak(global_State* g)
+{
+  GCRef *weak = mref(g->gc.weak, GCRef);
+  uint32_t n = g->gc.weaknum;
+  uint32_t i = 0;
+  g->gc.weaknum = 0;
+  for (; i < n; ++i) {
+    gc_traverse_tab(g, gco2tab(gcref(weak[i])));
+  }
+}
+
+static int gc_mayclear(global_State *g, cTValue *o, uint8_t val)
+{
+  if (tvisgcv(o)) {
+    if (tvisstr(o)) {
+      gc_mark_str(g, strV(o));
+      return 0;
+    }
+    if (iswhite(g, gcV(o)))
+      return 1;
+    if (val && tvistabud(o) && (gcV(o)->gch.marked & val))
+      return 1;
+  }
+  return 0;
+}
+
+static void atomic_clear_weak(global_State *g)
+{
+  GCRef *weak = mref(g->gc.weak, GCRef);
+  uint32_t wi = g->gc.weaknum;
+  g->gc.weaknum = 0;
+  while (wi--) {
+    GCtab *t = gco2tab(gcref(weak[wi]));
+    lua_assert((t->marked & LJ_GCFLAG_WEAK));
+    //lua_assert((t->marked & LJ_GCFLAG_GREY));
+    if ((t->marked & LJ_GCFLAG_WEAKVAL)) {
+      MSize i = t->asize;
+      while (i) {
+        TValue *tv = arrayslot(t, --i);
+        if (gc_mayclear(g, tv, LJ_GCFLAG_FINALIZED))
+          setnilV(tv);
+      }
+    }
+    t->marked &= ~(LJ_GCFLAG_GREY | LJ_GCFLAG_WEAK);
+    if (t->hmask) {
+      Node *n = noderef(t->node);
+      MSize i = t->hmask + 1;
+      for (; i; --i, ++n) {
+        if (tvisnil(&n->val))
+          continue;
+        if (gc_mayclear(g, &n->key, 0) ||
+            gc_mayclear(g, &n->val, LJ_GCFLAG_FINALIZED))
+          setnilV(&n->val);
       }
     }
   }
@@ -1262,9 +1278,13 @@ static void atomic(global_State *g, lua_State *L)
   gc_mark_threads(g);
   gc_propagate_gray(g);
 
+  atomic_check_still_weak(g);
+
   atomic_enqueue_finalizers(L);
   udsize = lj_gc_separateudata(g, 0);  /* Separate userdata to be finalized. */
   udsize += gc_propagate_gray(g);  /* And propagate the marks. */
+  
+  atomic_clear_weak(g);/* Clear dead and finalized entries from weak tables*/
   
   lj_buf_shrink(L, &g->tmpbuf);  /* Shrink temp buffer. */
 

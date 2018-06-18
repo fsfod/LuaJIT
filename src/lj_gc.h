@@ -28,13 +28,14 @@ typedef enum GCSFlags {
 } GCSFlags;
 
 /* Bitmasks for marked field of GCobj. */
-#define LJ_GCFLAG_GREY	0x01
-#define LJ_GC_FINALIZED	0x08
-#define LJ_GC_WEAKKEY	0x08
-#define LJ_GC_WEAKVAL	0x10
-#define LJ_GC_CDATA_FIN	0x10
-#define LJ_GC_FIXED	0x20
-#define LJ_GC_WEAK	(LJ_GC_WEAKKEY | LJ_GC_WEAKVAL)
+#define LJ_GCFLAG_GREY	     0x01
+#define LJ_GCFLAG_WEAKKEY    0x08
+#define LJ_GCFLAG_WEAKVAL    0x10
+#define LJ_GC_CDATA_FIN      0x10
+#define LJ_GCFLAG_FINALIZED  0x20
+#define LJ_GC_FIXED	0x40
+
+#define LJ_GCFLAG_WEAK	    (LJ_GCFLAG_WEAKKEY | LJ_GCFLAG_WEAKVAL)
 
 /* Macros to test and set GCobj colors. */
 #define isgray(x)	((obj2gco(x)->gch.marked & LJ_GCFLAG_GREY))
