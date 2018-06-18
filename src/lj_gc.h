@@ -66,7 +66,7 @@ void lj_gc_setfinalizable(lua_State *L, GCobj *o, GCtab *mt);
 void lj_gc_setdeferredmark(lua_State *L, GCobj *o);
 
 /* Collector. */
-LJ_FUNC size_t lj_gc_separateudata(global_State *g, int all);
+LJ_FUNC size_t lj_gc_scan_finalizers(global_State *g, int all);
 LJ_FUNC void lj_gc_finalize_udata(lua_State *L);
 #if LJ_HASFFI
 LJ_FUNC void lj_gc_finalize_cdata(lua_State *L);

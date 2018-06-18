@@ -192,8 +192,73 @@ static void gc_sweep_uv(global_State *g)
   }
 }
 
+static int check_arenafinalizers(global_State *g, GCArena *arena)
+{
+  lua_State *L = mainthread(g);
+  CellIdChunk *chunk = arena_finalizers(arena);
+  MRef *prev = &arena_extrainfo(arena)->finalizers;
+  int hasudata = lj_gc_arenaflags(g, arena->extra.id) & ArenaFlag_TravObjs;
+  int numfinal = 0;
+
+  for (; chunk != NULL;) {
+    MSize count = idlist_count(chunk);
+    lua_assert(count <= (sizeof(chunk->cells)/2));
+
+    for (size_t i = 0; i < count; i++) {
+      GCCellID cell = chunk->cells[i];
+      lua_assert(!cell || arena_cellisallocated(arena, cell));
+      if (cell == 0) {
+        chunk->cells[i] = chunk->cells[--count];
+        i--;
+        continue;
+      } else if (arena_cellismarked(arena, cell)) {
+        continue;
+      }
+
+      GCobj *o = arena_cellobj(arena, cell);
+      if (hasudata && o->gch.gct == ~LJ_TUDATA) {
+        if (lj_meta_fastg(g, tabref(o->gch.metatable), MM_gc)) {
+          /* We have to make sure the env\meta tables of the userdata are kept
+          ** alive past the sweep phase, in case there needed in the finalizer
+          ** phase that happens after the sweep.
+          */
+          gc_mark(g, o, ~LJ_TUDATA);
+          idlist_markcell(chunk, i);
+          numfinal++;
+        } else {
+          chunk->cells[i] = chunk->cells[--count];
+          i--;
+          continue;
+        }
+      } else {
+        lua_assert(o->gch.gct == ~LJ_TCDATA);
+        arena_markcell(arena, cell);
+        idlist_markcell(chunk, i);
+        numfinal++;
+      }
+      /* Mark that this value can be swept from weak tables */
+      o->gch.marked |= LJ_GCFLAG_FINALIZED;
+    }
+
+    if (count == 0) {
+      CellIdChunk *next = idlist_next(chunk);
+      setmref(*prev, next);
+      idlist_freechunk(g, chunk);
+      chunk = next;
+      continue;
+    } else {
+      idlist_setcount(chunk, count);
+      prev = &chunk->next;
+      lua_assert(idlist_count(chunk) <= idlist_maxcells);
+      chunk = idlist_next(chunk);
+    }
+  }
+
+  return numfinal;
+}
+
 /* Flag white cells to be finalized */
-size_t lj_gc_separateudata(global_State *g, int all)
+size_t lj_gc_scan_finalizers(global_State *g, int all)
 {
   lua_State *L = mainthread(g);
   size_t count = 0;
@@ -202,7 +267,7 @@ size_t lj_gc_separateudata(global_State *g, int all)
     GCArena *arena = lj_gc_arenaref(g, i);
 
     if (arena_finalizers(arena)) {
-      MSize objnum = arena_checkfinalizers(g, arena);
+      MSize objnum = check_arenafinalizers(g, arena);
       count += objnum;
       if (objnum) {
         GCDEBUG("arena(%d) has %d finalizations\n", i, objnum);
@@ -1281,7 +1346,8 @@ static void atomic(global_State *g, lua_State *L)
   atomic_check_still_weak(g);
 
   atomic_enqueue_finalizers(L);
-  udsize = lj_gc_separateudata(g, 0);  /* Separate userdata to be finalized. */
+  /* Flag white objects in the arena finalizer list. */
+  udsize = lj_gc_scan_finalizers(g, 0);
   udsize += gc_propagate_gray(g);  /* And propagate the marks. */
   
   atomic_clear_weak(g);/* Clear dead and finalized entries from weak tables*/

@@ -243,7 +243,7 @@ LUA_API void lua_close(lua_State *L)
 #endif
   setgcrefnull(g->cur_L);
   lj_func_closeuv(L, tvref(L->stack));
-  lj_gc_separateudata(g, 1);  /* Separate udata which have GC metamethods. */
+  lj_gc_scan_finalizers(g, 1);  /* Separate udata which have GC metamethods. */
 #if LJ_HASJIT
   G2J(g)->flags &= ~JIT_F_ON;
   G2J(g)->state = LJ_TRACE_IDLE;
@@ -256,7 +256,7 @@ LUA_API void lua_close(lua_State *L)
     L->cframe = NULL;
     if (lj_vm_cpcall(L, NULL, NULL, cpfinalize) == LUA_OK) {
       if (++i >= 10) break;
-      lj_gc_separateudata(g, 1);  /* Separate udata again. */
+      lj_gc_scan_finalizers(g, 1);  /* Separate udata again. */
       if (!(g->gc.stateflags & GCSFLAG_HASFINALIZERS))  /* Until nothing is left to do. */
 	break;
       g->gc.stateflags &= ~GCSFLAG_HASFINALIZERS;
