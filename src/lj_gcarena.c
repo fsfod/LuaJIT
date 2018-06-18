@@ -984,16 +984,14 @@ static MSize minorsweep(GCArena *arena)
   return used ? (1 << 16) : 0;
 }
 
-MSize arena_minorsweep(GCArena *arena, MSize limit)
+MSize arena_minorsweep(GCArena *arena, GCCellID cellend)
 {
-  MSize count = 0;
-  if (limit == 0) {
-    limit = arena_blockidx(arena_topcellid(arena))+1;
-    if (limit > MaxBlockWord) {
-      limit = MaxBlockWord;
-    }
-  } else {
-
+  MSize count = 0, limit;
+  if (!cellend)
+    cellend = arena_topcellid(arena);
+  limit = arena_blockidx(cellend)+1;
+  if (limit > MaxBlockWord) {
+    limit = MaxBlockWord;
   }
 
   lua_assert(arena_greysize(arena) == 0);
