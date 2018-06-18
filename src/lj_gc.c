@@ -670,6 +670,28 @@ static int gc_sweepstring(global_State *g)
   return ++g->gc.sweepstr <= g->strmask;
 }
 
+static void atomic_enqueue_finalizers(lua_State *L)
+{
+#if LJ_HASFFI
+  global_State *g = G(L);
+  CTState *cts = mref(g->ctype_state, CTState);
+  if (cts) {
+    GCtab *t = cts->finalizer;
+    Node *n = noderef(t->node);
+    MSize i = t->hmask + 1;
+    for (; i; --i, ++n) {
+      if (!tvisnil(&n->val) && tvisgcv(&n->key)) {
+        GCobj *o = gcV(&n->key);
+        if (iswhite(g, (void*)o)) {
+          lj_gc_setfinalizable(L, o, NULL);
+          gc_markobj(g, gcV(&n->val));
+        }
+      }
+    }
+  }
+#endif
+}
+
 /* Check whether we can clear a key or a value slot from a table. */
 static int gc_mayclear(global_State *g, cTValue *o, int val)
 {
@@ -1240,6 +1262,7 @@ static void atomic(global_State *g, lua_State *L)
   gc_mark_threads(g);
   gc_propagate_gray(g);
 
+  atomic_enqueue_finalizers(L);
   udsize = lj_gc_separateudata(g, 0);  /* Separate userdata to be finalized. */
   udsize += gc_propagate_gray(g);  /* And propagate the marks. */
   
