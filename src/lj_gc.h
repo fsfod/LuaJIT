@@ -19,6 +19,7 @@ enum {
   GCSfinalize    = 16,
   /* GC state is GCSpropagate/atomic or GC is in minor collection mode */
   GCSneedsbarrier = 0xff01,
+  GCSminorornotpause = 0xffff,
   GCSmakeblack = 4,
 };
 
