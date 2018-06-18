@@ -1553,12 +1553,15 @@ static size_t gc_onestep(lua_State *L)
     if (g->gc.stateflags & GCSFLAG_HASFINALIZERS) {
       if (tvref(g->jit_base))  /* Don't call finalizers on trace. */
         return LJ_MAX_MEM;
+      TIMER_START(gc_finalize);
       /* Finalize one object. */
       if (gc_finalize_step(L)) {
         if (g->gc.estimate > GCFINALIZECOST)
           g->gc.estimate -= GCFINALIZECOST;
+        TIMER_END(gc_finalize);
         return GCFINALIZECOST;
       }
+      TIMER_END(gc_finalize);
     }
     finalize_stop(L);
     return 0;
