@@ -568,10 +568,6 @@ typedef enum {
 #define basemt_obj(g, o)	((g)->gcroot[GCROOT_BASEMT+itypemap(o)])
 #define mmname_str(g, mm)	(strref((g)->gcroot[GCROOT_MMNAME+(mm)]))
 
-typedef enum {
-  GCFLAG_TOMINOR,
-} GCFlag;
-
 typedef struct PQueue {
   MSize size;
   MSize count;
@@ -599,11 +595,11 @@ typedef struct GCState {
   uint8_t ssbsize;      /* Current top of gray SSB buffer */
   MSize sweepstr;	/* Sweep position in string table. */
   GCRef root;		/* List of all collectable objects. */
-  MRef sweep;		/* Sweep position in root list. */
+  MSize sweepi;		/* Sweep position for some list in the current phase. */
+  void* sweep;		/* State for current sweep. */
   GCRef gray;		/* List of gray objects. */
   GCRef grayagain;	/* List of objects for atomic traversal. */
   GCRef weak;		/* List of weak tables (to be cleared). */
-  GCRef mmudata;	/* List of userdata (to be finalized). */
   GCSize debt;		/* Debt (how much GC is behind schedule). */
   GCSize estimate;	/* Estimate of memory actually in use. */
   MSize stepmul;	/* Incremental GC step granularity. */

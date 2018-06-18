@@ -1095,12 +1095,13 @@ int arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o)
   return setflag;
 }
 
-CellIdChunk *arena_separatefinalizers(global_State *g, GCArena *arena, CellIdChunk *list)
+int arena_checkfinalizers(global_State *g, GCArena *arena)
 {
   lua_State *L = mainthread(g);
   CellIdChunk *chunk = arena_finalizers(arena);
   MRef *prev = &arena_extrainfo(arena)->finalizers;
   int hasudata = lj_gc_arenaflags(g, arena->extra.id) & ArenaFlag_TravObjs;
+  int numfinal = 0;
 
   for (; chunk != NULL;) {
     MSize count = idlist_count(chunk);
@@ -1108,49 +1109,46 @@ CellIdChunk *arena_separatefinalizers(global_State *g, GCArena *arena, CellIdChu
 
     for (size_t i = 0; i < count; i++) {
       GCCellID cell = chunk->cells[i];
+      if (cell == 0) {
+        chunk->cells[i] = chunk->cells[--count];
+        i--;
+        continue;
+      }
+
       assert_allocated(arena, cell);
       /* Skip non white objects */
       if (arena_cellismarked(arena, cell)) {
         continue;
       }
-
       GCobj *o = arena_cellobj(arena, cell);
       if (hasudata && o->gch.gct == ~LJ_TUDATA) {
-        lua_assert(o->gch.gct == ~LJ_TUDATA);
         if (lj_meta_fastg(g, tabref(o->gch.metatable), MM_gc)) {
           /* We have to make sure the env\meta tables of the userdata are kept
           ** alive past the sweep phase, in case there needed in the finalizer
           ** phase that happens after the sweep.
-          ** TODO: Can we be smarter about this and only keep them alive until
-          ** the end of finalize phase.
           */
-          //arena_clearcellmark(arena, cell);
           gc_mark(g, o, ~LJ_TUDATA);
+          idlist_markcell(chunk, i);
+          numfinal++;
+        } else {
+          chunk->cells[i] = chunk->cells[--count];
+          i--;
         }
       } else {
         lua_assert(o->gch.gct == ~LJ_TCDATA);
         arena_markcell(arena, cell);
+        idlist_markcell(chunk, i);
+        numfinal++;
       }
-      list = idlist_add(L, list, cell);
-
-      chunk->cells[i] = chunk->cells[--count];
-      i--;
+      if (count != idlist_count(chunk)) {
+        idlist_setcount(chunk, count);
+      }
     }
-    
-    lua_assert(idlist_count(chunk) < idlist_maxcells);
-    if (count != 0) {
-      chunk->count = count;
-      prev = &chunk->next;
-      chunk = idlist_next(chunk);
-    } else {
-      CellIdChunk *next = idlist_next(chunk);
-      setmref(*prev, next);
-      idlist_freechunk(g, chunk);
-      chunk = next;
-    }
+    lua_assert(idlist_count(chunk) <= idlist_maxcells);
+    chunk = idlist_next(chunk);
   }
 
-  return list->count > 0 ? list : NULL;
+  return numfinal;
 }
 
 void arena_dumpwhitecells(global_State *g, GCArena *arena)

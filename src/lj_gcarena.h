@@ -100,7 +100,7 @@ typedef enum ArenaFlags {
   ArenaFlag_GGArena   = 0x200,
   ArenaFlag_SplitPage = 0x400,/* Pages allocated for the arena were part of a larger allocation */
   ArenaFlag_DeferMarks = 0x800,/* Arena has deferred mark object list */
-  ArenaFlag_Finalizers = 0x1000,/* Arena has a finalizer list with objects in it */
+  ArenaFlag_Finalizers = 0x1000,/* Arena has objects that need there finalizers to be run */
   ArenaFlag_LongLived  = 0x2000, /* Long lived objects should be allocated from an arena with this flag */
 } ArenaFlags;
 
@@ -161,7 +161,6 @@ typedef struct ArenaFreeList {
   uint16_t freecells;
   uint16_t freeobjcount;
   GCCellID1 sweeplimit;
-  CellIdChunk *finalizbles;
   CellIdChunk *defermark;
 } ArenaFreeList;
 
@@ -204,7 +203,7 @@ typedef struct HugeBlockTable {
 #define arena_extrainfo(arena) (&(arena)->extra)
 #define arena_finalizers(arena) mref(arena_extrainfo(arena)->finalizers, CellIdChunk)
 int arena_addfinalizer(lua_State *L, GCArena *arena, GCobj *o);
-CellIdChunk *arena_separatefinalizers(global_State *g, GCArena *arena, CellIdChunk *out);
+int arena_checkfinalizers(global_State *g, GCArena *arena);
 
 #define arena_blockidx(cell) (((cell) & ~BlocksetMask) >> 5)
 #define arena_getblock(arena, cell) ((arena)->block[(arena_blockidx(cell))])
@@ -528,11 +527,15 @@ static LJ_AINLINE void *arena_alloc(GCArena *arena, MSize size)
   return arena_cell(arena, cell);
 }
 
-#define idlist_count(list) ((list)->count & 31)
+#define idlist_countmask 31
+#define idlist_count(list) ((list)->count & idlist_countmask)
+#define idlist_setcount(list, count) ((list)->count = ((list)->count & ~idlist_countmask) | (count))
 #define idlist_next(list) (mref((list)->next, CellIdChunk))
 #define idlist_getmark(list, cellidx) ((list)->count & (1 << ((cellidx)+5)))
 #define idlist_markcell(list, cellidx) ((list)->count |= (1 << ((cellidx)+5)))
+#define idlist_clearmarks(list) ((list)->count &= ~idlist_countmask)
 #define idlist_maxcells 26
+
 
 void *lj_mem_realloc(lua_State *L, void *p, GCSize osz, GCSize nsz);
 
@@ -558,14 +561,22 @@ static LJ_INLINE CellIdChunk *idlist_add(lua_State *L, CellIdChunk *chunk, GCCel
   return chunk;
 }
 
-/* FIXME: does not fixup the list mark for either slot */
-static inline int idlist_remove(CellIdChunk *chunk, MSize idx)
+static inline int idlist_remove(CellIdChunk *chunk, MSize idx, int updatemark)
 {
   MSize count = idlist_count(chunk);
   lua_assert(idx < count && count > 0);
   /* Swap the value at the end of the list in to the index of the removed value */
   chunk->cells[idx] = chunk->cells[count-1];
-  return --chunk->count == 0;
+
+  if (updatemark) {
+    uint32_t marks = lj_rol(0xfffffffe, idx + 5) & chunk->count;
+    if (idlist_getmark(chunk, count-1)) {
+      marks |=  1 << (idx + 5);
+    }
+    chunk->count = marks;
+  }
+  chunk->count--;
+  return idlist_count(chunk) == 0;
 }
 
 #define idlist_freechunk(g, chunk) lj_mem_free(g, chunk, sizeof(CellIdChunk))

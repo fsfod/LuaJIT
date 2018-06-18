@@ -192,27 +192,30 @@ static void gc_sweep_uv(global_State *g)
   }
 }
 
-/* Separate userdata objects to be finalized */
+/* Flag white cells to be finalized */
 size_t lj_gc_separateudata(global_State *g, int all)
 {
   lua_State *L = mainthread(g);
-  size_t m = 0;
-  CellIdChunk *list = idlist_new(L);
+  size_t count = 0;
   TIMER_START(gc_separateudata);
   for (MSize i = 0; i < g->gc.arenastop; i++) {
     GCArena *arena = lj_gc_arenaref(g, i);
 
     if (arena_finalizers(arena)) {
-      CellIdChunk *whites = arena_separatefinalizers(g, arena, list);
-      if (whites) {
-        g->gc.freelists[i].finalizbles = list;
-        list = idlist_new(L);
+      MSize objnum = arena_checkfinalizers(g, arena);
+      count += objnum;
+      if (objnum) {
+        GCDEBUG("arena(%d) has %d finalizations\n", i, objnum);
+        lj_gc_setarenaflag(G(L), i, ArenaFlag_Finalizers);
       }
     }
   }
   TIMER_END(gc_separateudata);
-  m += hugeblock_checkfinalizers(g);
-  return m;
+  count += hugeblock_checkfinalizers(g);
+  if (count) {
+    g->gc.stateflags |= GCSFLAG_HASFINALIZERS;
+  }
+  return count;
 }
 
 /* -- Propagation phase --------------------------------------------------- */
@@ -717,9 +720,7 @@ void lj_gc_setfinalizable(lua_State *L, GCobj *o, GCtab *mt)
   lua_assert(o->gch.gct == ~LJ_TCDATA || o->gch.gct == ~LJ_TUDATA);
   if (!gc_ishugeblock(o)) {
     GCArena *arena = ptr2arena(o);
-    if(arena_addfinalizer(L, arena, o)){
-      lj_gc_setarenaflag(G(L), arena_extrainfo(arena)->id, ArenaFlag_Finalizers);
-    }
+    arena_addfinalizer(L, arena, o);
   } else {
     hugeblock_setfinalizable(G(L), o);
   }
@@ -786,34 +787,61 @@ static int gc_finalize_step(lua_State *L)
 {
   global_State *g = G(L);
   CellIdChunk *chunk;
+  MRef *prev = (MRef *)g->gc.sweep;
 
-  while (g->gc.curarena < g->gc.arenastop) {
+  for (; g->gc.curarena < g->gc.arenastop; g->gc.curarena++) {
     GCArena *arena = lj_gc_curarena(g);
-    chunk = arena_finalizers(arena);/*TODO: pending finalzer list*/
-    if (chunk && chunk->count == 0) {
-      chunk = chunk->next;
+    if (!(lj_gc_arenaflags(g, g->gc.curarena) & ArenaFlag_Finalizers)) {
+      prev = NULL;
+      g->gc.sweepi = 0;
+      continue;
     }
-
-    if (chunk != NULL) {
-      gc_finalize(L, (GCobj *)arena_cell(arena, chunk->cells[--chunk->count]));
-      return 1;
+    /* Continuing on from previous */
+    if (prev) {
+      chunk = mref(*(MRef *)prev, CellIdChunk);
     } else {
-      g->gc.curarena++;
+      prev = &arena_extrainfo(arena)->finalizers;
+      chunk = arena_finalizers(arena);
     }
+    lua_assert(!chunk || chunk->count != 0);
+
+    while (chunk) {
+      MSize i;
+      for (i = g->gc.sweepi; i < idlist_count(chunk); i++) {
+        if (idlist_getmark(chunk, i)) {
+          GCCellID id = chunk->cells[i];
+          GCDEBUG("Finalizing cell %d\n", id);
+          if (idlist_remove(chunk, i, 1)) {
+            *((MRef *)prev) = chunk->next;
+          }
+          /* Note idlist_remove will have swapped the cellid at the end of the
+          ** list in to the current index.
+          */
+          g->gc.sweepi = i;
+          g->gc.sweep = prev;
+          gc_finalize(L, (GCobj *)arena_cell(arena, id));
+          return 1;
+        }
+      }
+      prev = &chunk->next;
+      chunk = idlist_next(chunk);
+    }
+    prev = NULL;
+    lj_gc_cleararenaflags(g, g->gc.curarena, ArenaFlag_Finalizers);
   }
 
   return 0;
 }
 
-/* Finalize all userdata objects from mmudata list. */
-void lj_gc_finalize_udata(lua_State *L)
+/* Finalize all objects in an arenas. */
+void lj_gc_finalize_all(lua_State *L)
 {
   global_State *g = G(L);
   CellIdChunk *chunk;
 
   for (MSize i = 0; i < g->gc.arenastop; i++) {
     GCArena *arena = lj_gc_arenaref(g, i);
-    chunk = g->gc.freelists[i].finalizbles;
+    chunk = arena_finalizers(arena);
 
     while (chunk) {
       CellIdChunk *next;
@@ -825,7 +853,7 @@ void lj_gc_finalize_udata(lua_State *L)
       idlist_freechunk(g, chunk);
       chunk = next;
     }
-    g->gc.freelists[i].finalizbles = NULL;
+    setmref(arena_extrainfo(arena)->finalizers, NULL);
   }
 }
 
@@ -1181,7 +1209,7 @@ void gc_deferred_sweep(global_State *g)
         }
         /* TODO: handle mark bits if we use them */
         lua_assert((list->count >> 15) == 0);
-        idlist_remove(list, j);
+        idlist_remove(list, j, 0);
       }
     }
   }
@@ -1212,7 +1240,6 @@ static void atomic(global_State *g, lua_State *L)
   gc_propagate_gray(g);
 
   udsize = lj_gc_separateudata(g, 0);  /* Separate userdata to be finalized. */
- // gc_mark_mmudata(g);  /* Mark them. */
   udsize += gc_propagate_gray(g);  /* And propagate the marks. */
   
   lj_buf_shrink(L, &g->tmpbuf);  /* Shrink temp buffer. */
@@ -1401,9 +1428,12 @@ static void gc_sweepstart(global_State *g)
 static int gc_sweepend(lua_State *L)
 {
   global_State *g = G(L);
+  g->gc.sweepi = 0;
+  g->gc.sweep = NULL;
+  g->gc.curarena = 0;
   if (g->strnum <= (g->strmask >> 2) && g->strmask > LJ_MIN_STRTAB*2-1)
     lj_str_resize(L, g->strmask >> 1);  /* Shrink string table. */
-  if (gcref(g->gc.mmudata)) {  /* Need any finalizations? */
+  if (g->gc.stateflags & GCSFLAG_HASFINALIZERS) {  /* Need any finalizations? */
     gc_setstate(g, GCSfinalize);
 #if LJ_HASFFI
     g->gc.nocdatafin = 1;
@@ -1443,6 +1473,17 @@ static void gc_atomicsweep(lua_State *L)
   lua_assert(old >= g->gc.total);
   g->gc.estimate -= old - g->gc.total;
   gc_sweepend(L);
+}
+
+static void finalize_stop(lua_State *L)
+{
+  global_State *g = G(L);
+#if LJ_HASFFI
+  if (!g->gc.nocdatafin) lj_tab_rehash(L, ctype_ctsG(g)->finalizer);
+#endif
+  gc_setstate(g, GCSpause);  /* End of GC cycle. */
+  g->gc.debt = 0;
+  g->gc.stateflags &= ~GCSFLAG_HASFINALIZERS;
 }
 
 /* GC state machine. Returns a cost estimate for each step performed. */
@@ -1509,20 +1550,17 @@ static size_t gc_onestep(lua_State *L)
     return GCSWEEPMAX*GCSWEEPCOST;
   }
   case GCSfinalize:
-    if (gcref(g->gc.mmudata) != NULL) {
+    if (g->gc.stateflags & GCSFLAG_HASFINALIZERS) {
       if (tvref(g->jit_base))  /* Don't call finalizers on trace. */
         return LJ_MAX_MEM;
-      /* Finalize one userdata object. */
-      gc_finalize_step(L);
-      if (g->gc.estimate > GCFINALIZECOST)
-        g->gc.estimate -= GCFINALIZECOST;
-      return GCFINALIZECOST;
+      /* Finalize one object. */
+      if (gc_finalize_step(L)) {
+        if (g->gc.estimate > GCFINALIZECOST)
+          g->gc.estimate -= GCFINALIZECOST;
+        return GCFINALIZECOST;
+      }
     }
-#if LJ_HASFFI
-    if (!g->gc.nocdatafin) lj_tab_rehash(L, ctype_ctsG(g)->finalizer);
-#endif
-    gc_setstate(g, GCSpause);  /* End of GC cycle. */
-    g->gc.debt = 0;
+    finalize_stop(L);
     return 0;
   default:
     lua_assert(0);

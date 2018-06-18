@@ -22,6 +22,11 @@ enum {
   GCSmakeblack = 4,
 };
 
+typedef enum GCSFlags {
+  GCSFLAG_HASFINALIZERS = 1,
+  GCSFLAG_TOMINOR = 2,
+} GCSFlags;
+
 /* Bitmasks for marked field of GCobj. */
 #define LJ_GCFLAG_GREY	0x01
 #define LJ_GC_FINALIZED	0x08
