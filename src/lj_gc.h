@@ -133,7 +133,7 @@ void LJ_FUNCA lj_gc_drain_ssb(global_State *g);
 
 static LJ_AINLINE void lj_gc_appendgrayssb(global_State *g, GCobj *o)
 {
-  lua_assert(!isgray(o));
+  lua_assert(!isgray(o) || o->gch.gct == ~LJ_TUPVAL);
   setgcrefp(g->gc.ssb[g->gc.ssbsize], o);
   if (LJ_UNLIKELY(g->gc.ssbsize++ >= 127)) {
     lj_gc_drain_ssb(g);

@@ -485,6 +485,10 @@ GCSize gc_traverse(global_State *g, GCobj *o)
     setgcref(g->gc.grayagain, o);
     gc_traverse_thread(g, th);
     return sizeof(lua_State) + sizeof(TValue) * th->stacksize;
+  } else if (LJ_UNLIKELY(gct == ~LJ_TUPVAL)) {
+    gc_marktv(g, &(gco2uv(o)->tv));
+    cleargray(o);
+    return sizeof(GCupval);
   } else {
 #if LJ_HASJIT
     GCtrace *T = gco2trace(o);
@@ -1813,8 +1817,14 @@ void LJ_FASTCALL lj_gc_barrieruv(global_State *g, TValue *tv)
 /* Adjust the TValue pointer to upvalue its contained in */
 #define TV2MARKED(x) \
   ((GCupval *)(((char*)x)-offsetof(GCupval, tv)))
-  if (g->gc.isminor || g->gc.state == GCSpropagate || g->gc.state == GCSatomic) {
-    lj_gc_appendgrayssb(g, gcV(tv));
+  if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic) {
+    gc_marktv(g, tv);
+    //lj_gc_appendgrayssb(g, gcV(tv));
+  } else if (g->gc.isminor) {
+    if (arenaobj_isblack(TV2MARKED(tv))) {
+      lj_gc_appendgrayssb(g, TV2MARKED(tv));
+      TV2MARKED(tv)->marked |= LJ_GCFLAG_GREY;
+    }
   } else {
     TV2MARKED(tv)->marked |= LJ_GCFLAG_GREY;
   }
@@ -1836,6 +1846,7 @@ void lj_gc_closeuv(global_State *g, GCupval *uv)
       gc_markobj(g, gcV(&uv->tv));
     }
   }
+  cleargray(uv);
 }
 
 #if LJ_HASJIT
