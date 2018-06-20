@@ -1362,6 +1362,13 @@ static void atomic(global_State *g, lua_State *L)
   gc_sweep_uv(g);
   gc_deferred_sweep(g);
 
+  if (g->gc.stateflags & GCSFLAG_TOMINOR) {
+    lua_assert(!g->gc.isminor);
+    g->gc.stateflags &= ~GCSFLAG_TOMINOR;
+    g->gc.isminor = 15;
+    GCDEBUG("MINORGC(Started)  count %d", g->gc.isminor);
+  }
+
   /* Prepare for sweep phase. */
   g->gc.estimate = g->gc.total - (GCSize)udsize;  /* Initial estimate. */
   assert_greyempty(g);
@@ -1546,6 +1553,11 @@ static int gc_sweepend(lua_State *L)
   g->gc.curarena = 0;
   if (g->strnum <= (g->strmask >> 2) && g->strmask > LJ_MIN_STRTAB*2-1)
     lj_str_resize(L, g->strmask >> 1);  /* Shrink string table. */
+
+  if (!g->gc.isminor) {
+    g->gc.stateflags |= GCSFLAG_TOMINOR;
+  }
+
   if (g->gc.stateflags & GCSFLAG_HASFINALIZERS) {  /* Need any finalizations? */
     gc_setstate(g, GCSfinalize);
 #if LJ_HASFFI
