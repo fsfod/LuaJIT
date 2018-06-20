@@ -462,12 +462,9 @@ GCSize gc_traverse(global_State *g, GCobj *o)
   int gct = o->gch.gct;
   if (LJ_LIKELY(gct == ~LJ_TTAB)) {
     GCtab *t = gco2tab(o);
-    //TIMER_START(gc_traverse_tab);
     if (gc_traverse_tab(g, t) > 0) {
-     // lua_assert(0);
       //black2gray(o);  /* Keep weak tables gray. */
     }
-   // TIMER_END(gc_traverse_tab);
     return sizeof(GCtab) + sizeof(TValue) * t->asize +
 			   (t->hmask ? sizeof(Node) * (t->hmask + 1) : 0);
   } else if (LJ_LIKELY(gct == ~LJ_TFUNC)) {
@@ -648,10 +645,6 @@ static GCSize propagate_arenagrays(global_State *g, GCArena *arena, int limit, M
     setmref(arena->greytop, top+1);
     _mm_prefetch((char *)(arena->cells + *(top)), _MM_HINT_T0);
     total += gc_traverse(g, arena_cellobj(arena, cellid));
-
-    if (gct == ~LJ_TTAB && (arena_cell(arena, cellid)->marked & LJ_GC_WEAK)) {
-   //   arena_adddefermark(mainthread(g), arena, arena_cellobj(arena, cellid));
-    }
 
     count++;
     if (limit != -1 && count >(MSize)limit) {
