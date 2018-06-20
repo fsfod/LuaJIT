@@ -66,15 +66,42 @@ int getcellextent(global_State *g, int i, int cell)
 #define gc_assert(cond) lua_assert(cond)
 #endif
 
-#define tvisdead(g, tv) (tvisgcv(tv) && isdead(g, gcV(tv)))
+#define tvisdead(g, tv) (tvisgcv(tv) && checkobj(g, gcV(tv)))
 
-#define checklive(o) gc_assert(!isdead(g, obj2gco(o)))
-#define checklive_gcvec(o) gc_assert(!isdead(g, obj2gco(lj_gcvec_hdr(o))))
-#define checklivetv(tv) gc_assert(!tvisgcv(tv) || !isdead(g, gcV(tv)))
-#define checklivecon(cond, o) gc_assert(!(cond) || !isdead(g, obj2gco(o)))
+#define checklive(o) gc_assert(!checkobj(g, obj2gco(o)))
+#define checklive_gcvec(o) gc_assert(!checkobj(g, obj2gco(lj_gcvec_hdr(o))))
+#define checklivetv(tv) gc_assert(!tvisgcv(tv) || !checkobj(g, gcV(tv)))
+#define checklivecon(cond, o) gc_assert(!(cond) || !checkobj(g, obj2gco(o)))
+
+static int checkobj(global_State *g, GCobj *o) {
+  int arena = -1;
+  int cellid = -1;
+  CellState state;
+
+  if (!isdead(g,o)) {
+    return 0;
+  }
+
+  if (!gc_ishugeblock(o)) {
+    arena = arena_extrainfo(ptr2arena(o))->id;
+    cellid = ptr2cell(o);
+    state = arenaobj_cellstate(o);
+  }
+
+  lua_assert(0);
+}
 
 int livechecker(GCobj *o, void *user) {
   global_State *g = (global_State *)user;
+  int arena = -1;
+  int cellid = -1;
+  CellState state;
+
+  if (!gc_ishugeblock(o)) {
+    arena = arena_extrainfo(ptr2arena(o))->id;
+    cellid = ptr2cell(o);
+    state = arenaobj_cellstate(o);
+  }
 
   if (o->gch.gct == ~LJ_TTAB) {
     GCtab *t = gco2tab(o);
