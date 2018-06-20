@@ -138,13 +138,13 @@ static void gc_mark_gcroot(global_State *g)
 static void gc_mark_start(global_State *g)
 {
   gc_setstate(g, GCSpropagate);
-  if (!g->gc.isminor) {
-    g->gc.ssbsize = 0;
-    setgcrefnull(g->gc.grayagain);
-  } else {
-    setgcrefnull(g->gc.grayagain);
+  if (g->gc.isminor) {
     arenaobj_towhite(obj2gco(&G2GG(g)->L));
     arenaobj_towhite(obj2gco(mainthread(g)));
+    setgcrefnull(g->gc.grayagain);
+  } else {
+    g->gc.ssbsize = 0;
+    setgcrefnull(g->gc.grayagain);
   }
 
   arena_markcell(ptr2arena(G2GG(g)), MinCellId);
