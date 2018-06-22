@@ -594,6 +594,8 @@ typedef enum {
 #define mmname_str(g, mm) \
   ((GCstr*)((g)->metastrings + METASTRINGS_LEN - 16 - (mm) * 16))
 
+#define LJ_GC_SSB_CAPACITY 128
+
 typedef struct GCState {
   GCSize total;		/* Memory currently allocated. */
   GCSize threshold;	/* Memory threshold. */
@@ -612,6 +614,8 @@ typedef struct GCState {
   GCSize estimate;	/* Estimate of memory actually in use. */
   MSize stepmul;	/* Incremental GC step granularity. */
   MSize pause;		/* Pause between successive GC cycles. */
+  uint8_t ssbsize;
+  GCRef ssb[LJ_GC_SSB_CAPACITY];
 } GCState;
 
 enum {

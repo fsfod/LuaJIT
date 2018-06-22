@@ -369,6 +369,38 @@ static size_t gc_propagate_gray(global_State *g)
   return m;
 }
 
+void LJ_FASTCALL lj_gc_drain_ssb(global_State *g)
+{
+  uint32_t ssbsize = g->gc.ssbsize;
+  g->gc.ssbsize = 0;
+  if (!(g->gc.state & GCS_barriers)) {
+    return;
+  }
+  while (ssbsize) {
+    GCobj *o = gcref(g->gc.ssb[--ssbsize]);
+    lua_assert(o->gch.gcflags & LJ_GCFLAG_GREY);
+    if (LJ_LIKELY((uintptr_t)o & (LJ_GC_ARENA_SIZE-1))) {
+      GCArena *a = (GCArena*)((uintptr_t)o & ~(uintptr_t)(LJ_GC_ARENA_SIZE-1));
+      uint32_t idx = (uint32_t)((uintptr_t)o & (LJ_GC_ARENA_SIZE-1)) >> 4;
+      lua_assert(lj_gc_bit(a->block, &, idx));
+      if (!lj_gc_bit(a->mark, &, idx)) {
+        continue;
+      }
+      gc_pushgrey(g, a, idx);
+    } else {
+      uint32_t hhidx = gc_hugehash_find(g, (void*)o);
+      MRef* hugehash = mref(g->gc.hugehash, MRef);
+      if (!(mrefu(hugehash[hhidx]) & LJ_HUGEFLAG_MARK)) {
+        continue;
+      }
+      mrefu(hugehash[hhidx]) |= LJ_HUGEFLAG_GREY;
+      if (hhidx >= g->gc.hugegreyidx) {
+        g->gc.hugegreyidx = hhidx + 1;
+      }
+    }
+  }
+}
+
 /* -- Sweep phase --------------------------------------------------------- */
 
 /* Full sweep of a GC list. */
@@ -802,14 +834,21 @@ void lj_gc_fullgc(lua_State *L)
 /* Move the GC propagation frontier forward. */
 void lj_gc_barrierf(global_State *g, GCobj *o, GCobj *v, uint32_t it)
 {
-  lua_assert(isblack(o) && iswhite(v) && !isdead(g, v) && !isdead(g, o));
-  lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);
-  lua_assert(o->gch.gct != ~LJ_TTAB);
-  /* Preserve invariant during propagation. Otherwise it doesn't matter. */
-  if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic)
-    gc_mark(g, v);  /* Move frontier forward. */
-  else
-    makewhite(g, o);  /* Make it white to avoid the following barrier. */
+  lua_assert(!(o->gch.gcflags & LJ_GCFLAG_GREY));
+  lua_assert(o->gch.gctype != (int8_t)(uint8_t)LJ_TTAB);
+  if (!ismarked(g, o))
+    o->gch.gcflags |= LJ_GCFLAG_GREY;
+  else if ((g->gc.state & GCS_barriers)) {
+    lj_gc_drain_ssb(g);
+    if (LJ_UNLIKELY(it == LJ_TUPVAL)) {
+      gc_markuv(g, gco2uv(v));
+    } else if (it == LJ_TSTR || it == LJ_TCDATA) {
+      lua_assert(!g->gc.fmark);  /* Would need gc_markcdata if fmark true. */
+      lj_gc_markleaf(g, (void*)v);
+    } else {
+      gc_markobj(g, v);
+    }
+  }
 }
 
 /* Specialized barrier for closed upvalue. Pass &uv->tv. */
@@ -848,8 +887,10 @@ void lj_gc_closeuv(global_State *g, GCupval *uv)
 /* Mark a trace if it's saved during the propagation phase. */
 void lj_gc_barriertrace(global_State *g, uint32_t traceno)
 {
-  if (g->gc.state == GCSpropagate || g->gc.state == GCSatomic)
+  if ((g->gc.state & GCS_barriers)) {
+    lj_gc_drain_ssb(g);
     gc_marktrace(g, traceno);
+  }
 }
 #endif
 

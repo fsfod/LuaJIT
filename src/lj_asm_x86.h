@@ -1856,17 +1856,37 @@ static void asm_cnew(ASMState *as, IRIns *ir)
 
 static void asm_tbar(ASMState *as, IRIns *ir)
 {
-  Reg tab = ra_alloc1(as, ir->op1, RSET_GPR);
-  Reg tmp = ra_scratch(as, rset_exclude(RSET_GPR, tab));
-  MCLabel l_end = emit_label(as);
-  emit_movtomro(as, tmp|REX_GC64, tab, offsetof(GCtab, gclist));
-  emit_setgl(as, tab, gc.grayagain);
-  emit_getgl(as, tmp, gc.grayagain);
-  emit_i8(as, ~LJ_GC_BLACK);
-  emit_rmro(as, XO_ARITHib, XOg_AND, tab, offsetof(GCtab, marked));
-  emit_sjcc(as, CC_Z, l_end);
-  emit_i8(as, LJ_GC_BLACK);
-  emit_rmro(as, XO_GROUP3b, XOg_TEST, tab, offsetof(GCtab, marked));
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_gc_drain_ssb];
+  IRRef args[1];
+  Reg tab, tmp;
+  MCLabel l_end;
+  MCode *p;
+  LJ_STATIC_ASSERT(LJ_GC_SSB_CAPACITY == 128);
+  ra_evictset(as, RSET_SCRATCH);
+  l_end = emit_label(as);
+  args[0] = ASMREF_TMP1;  /* global_State *g */
+  asm_gencall(as, ci, args);
+  tmp = ra_releasetmp(as, ASMREF_TMP1);
+  tab = ra_alloc1(as, ir->op1, rset_exclude(RSET_GPR, tmp));
+  emit_loada(as, tmp, J2G(as->J));
+  emit_sjcc(as, CC_NS, l_end);
+#if LJ_GC64
+  UNUSED(p);
+  emit_rmrxo(as, XO_MOVto, tab, RID_DISPATCH, tmp, XM_SCALE8,
+             GG_OFS(g.gc.ssb) - GG_OFS(dispatch));
+#else
+  p = as->mcp - 4;
+  *(int32_t *)p = (int32_t)(intptr_t)&J2G(as->J)->gc.ssb;
+  as->mcp = emit_opmx(XO_MOVto, XM_OFS0, XM_SCALE4, tab, RID_EBP, tmp, p);
+#endif
+  emit_i8(as, 1);
+  emit_opgl(as, XO_ARITHib, XOg_ADD, gc.ssbsize);
+  emit_opgl(as, XO_MOVZXb, tmp, gc.ssbsize);
+  emit_i8(as, LJ_GCFLAG_GREY);
+  emit_rmro(as, XO_ARITHib, XOg_OR, tab, offsetof(GCtab, gcflags));
+  emit_sjcc(as, CC_NZ, l_end);
+  emit_i8(as, LJ_GCFLAG_GREY);
+  emit_rmro(as, XO_GROUP3b, XOg_TEST, tab, offsetof(GCtab, gcflags));
 }
 
 static void asm_obar(ASMState *as, IRIns *ir)

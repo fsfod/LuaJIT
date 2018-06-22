@@ -77,26 +77,26 @@ LJ_FUNC void lj_gc_closeuv(global_State *g, GCupval *uv);
 LJ_FUNC void lj_gc_barriertrace(global_State *g, uint32_t traceno);
 #endif
 
+LJ_FUNCA void LJ_FASTCALL lj_gc_drain_ssb(global_State *g);
+
 /* Move the GC propagation frontier back for tables (make it gray again). */
 static LJ_AINLINE void lj_gc_barrierback(global_State *g, GCtab *t)
 {
-  GCobj *o = obj2gco(t);
-  lua_assert(isblack(o) && !isdead(g, o));
-  lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);
-  black2gray(o);
-  setgcrefr(t->gclist, g->gc.grayagain);
-  setgcref(g->gc.grayagain, o);
+  lua_assert(!(t->gcflags & LJ_GCFLAG_GREY));
+  t->gcflags |= LJ_GCFLAG_GREY;
+  setgcref(g->gc.ssb[g->gc.ssbsize], obj2gco(t));
+  if (LJ_UNLIKELY(++g->gc.ssbsize >= LJ_GC_SSB_CAPACITY))
+    lj_gc_drain_ssb(g);
 }
 
 /* Barrier for stores to table objects. TValue and GCobj variant. */
-#define lj_gc_anybarriert(L, t)  \
-  { if (LJ_UNLIKELY(isblack(obj2gco(t)))) lj_gc_barrierback(G(L), (t)); }
+#define lj_gc_anybarriert(L, t) \
+  { if (!LJ_LIKELY(t->gcflags & LJ_GCFLAG_GREY)) \
+      lj_gc_barrierback(G(L), (t)); }
 #define lj_gc_barriert(L, t, tv) \
-  { if (tviswhite(tv) && isblack(obj2gco(t))) \
+  { if (tvisgcv(tv) && !LJ_LIKELY(t->gcflags & LJ_GCFLAG_GREY)) \
       lj_gc_barrierback(G(L), (t)); }
-#define lj_gc_objbarriert(L, t, o)  \
-  { if (iswhite(obj2gco(o)) && isblack(obj2gco(t))) \
-      lj_gc_barrierback(G(L), (t)); }
+#define lj_gc_objbarriert(L, t, o) lj_gc_anybarriert(L, t)
 
 /* Barrier for stores to any other object. TValue and GCobj variant. */
 #define lj_gc_barrier(L, p, tv) \

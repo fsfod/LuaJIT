@@ -170,6 +170,7 @@ typedef struct CCallInfo {
   _(ANY,	lj_gc_step_jit,		2,  FS, NIL, CCI_L) \
   _(ANY,	lj_gc_barrieruv,	2,  FS, NIL, 0) \
   _(ANY,	lj_mem_newgco,		2,  FS, PGC, CCI_L) \
+  _(ANY,	lj_gc_drain_ssb,	1,  FS, NIL, 0) \
   _(ANY,	lj_math_random_step, 1, FS, NUM, CCI_CASTU64) \
   _(ANY,	lj_vm_modi,		2,  FN, INT, 0) \
   _(ANY,	sinh,			1,   N, NUM, XA_FP) \
