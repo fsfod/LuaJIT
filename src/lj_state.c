@@ -255,7 +255,7 @@ static TValue *cpfinalize(lua_State *L, lua_CFunction dummy, void *ud)
   return NULL;
 }
 
-LUA_API void lua_close(lua_State *L)
+LUA_API void luaJIT_preclose(lua_State *L)
 {
   global_State *g = G(L);
   int i;
@@ -283,6 +283,11 @@ LUA_API void lua_close(lua_State *L)
 	break;
     }
   }
+}
+
+LUA_API void lua_close(lua_State *L)
+{
+  luaJIT_preclose(L);
   close_state(L);
 }
 

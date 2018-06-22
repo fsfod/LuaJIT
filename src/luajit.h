@@ -61,6 +61,9 @@ enum {
 
 /* LuaJIT public C API. */
 
+/* Variant of lua_close appropriate for use at process shutdown. */
+LUA_API void luaJIT_preclose(lua_State *L);
+
 /* GC extensions. */
 LUA_API void *luaJIT_newuserdata_nogc(lua_State *L, size_t sz);
 
