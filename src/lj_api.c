@@ -873,12 +873,8 @@ LUA_API void lua_getfenv(lua_State *L, int idx)
 {
   cTValue *o = index2adr(L, idx);
   api_checkvalidindex(L, o);
-  if (tvisfunc(o)) {
-    settabV(L, L->top, tabref(funcV(o)->c.env));
-  } else if (tvisudata(o)) {
-    settabV(L, L->top, tabref(udataV(o)->env));
-  } else if (tvisthread(o)) {
-    settabV(L, L->top, tabref(threadV(o)->env));
+  if (tvisfunc(o) || tvisudata(o) || tvisthread(o)) {
+    settabV(L, L->top, tabref(gcV(o)->gch.env));
   } else {
     setnilV(L->top);
   }
@@ -1069,12 +1065,8 @@ LUA_API int lua_setfenv(lua_State *L, int idx)
   api_checkvalidindex(L, o);
   api_check(L, tvistab(L->top-1));
   t = tabV(L->top-1);
-  if (tvisfunc(o)) {
-    setgcref(funcV(o)->c.env, obj2gco(t));
-  } else if (tvisudata(o)) {
-    setgcref(udataV(o)->env, obj2gco(t));
-  } else if (tvisthread(o)) {
-    setgcref(threadV(o)->env, obj2gco(t));
+  if (tvisfunc(o) || tvisudata(o) || tvisthread(o)) {
+    setgcref(gcV(o)->gch.env, obj2gco(t));
   } else {
     L->top--;
     return 0;
