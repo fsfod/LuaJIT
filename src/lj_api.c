@@ -1288,15 +1288,17 @@ LUA_API int lua_gc(lua_State *L, int what, int data)
 
 LUA_API lua_Alloc lua_getallocf(lua_State *L, void **ud)
 {
+  /* Provided for C libraries which try to play nice with the Lua allocator. */
   global_State *g = G(L);
-  if (ud) *ud = g->allocd;
-  return g->allocf;
+  if (ud) *ud = g->callocd;
+  return g->callocf;
 }
 
 LUA_API void lua_setallocf(lua_State *L, lua_Alloc f, void *ud)
 {
+  /* Only provided for symmetry with lua_getallocf; won't be used by LuaJIT. */
   global_State *g = G(L);
-  g->allocd = ud;
-  g->allocf = f;
+  g->callocd = ud;
+  g->callocf = f;
 }
 
