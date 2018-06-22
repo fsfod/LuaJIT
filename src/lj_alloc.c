@@ -11,13 +11,13 @@
 #define _GNU_SOURCE
 #endif
 
-#include "lj_def.h"
-#include "lj_arch.h"
+#include "lj_dispatch.h"
 #include "lj_alloc.h"
 
-#ifndef LUAJIT_USE_SYSMALLOC
+#define MAX_SIZE_T		(~(size_t)0)
+#define MFAIL			((void *)(MAX_SIZE_T))
 
-/* Determine system-specific block allocation method. */
+/* Determine system-specific allocation method. */
 #if LJ_TARGET_WINDOWS
 
 #define WIN32_LEAN_AND_MEAN
@@ -32,7 +32,6 @@
 #else
 
 #include <errno.h>
-/* If this include fails, then rebuild with: -DLUAJIT_USE_SYSMALLOC */
 #include <sys/mman.h>
 
 #define LJ_ALLOC_MMAP		1
@@ -76,77 +75,52 @@ static PNTAVM ntavm;
 */
 #define NTAVM_ZEROBITS		1
 
-static void init_mmap(void)
+void lj_alloc_init(void)
 {
   ntavm = (PNTAVM)GetProcAddress(GetModuleHandleA("ntdll.dll"),
 				 "NtAllocateVirtualMemory");
 }
-#define INIT_MMAP()	init_mmap()
 
-/* Win64 32 bit MMAP via NtAllocateVirtualMemory. */
-static void *CALL_MMAP(size_t size)
+static void *lj_virtual_alloc(void *hint, size_t size)
 {
-  DWORD olderr = GetLastError();
-  void *ptr = NULL;
-  long st = ntavm(INVALID_HANDLE_VALUE, &ptr, NTAVM_ZEROBITS, &size,
+  long st = ntavm(INVALID_HANDLE_VALUE, &hint, NTAVM_ZEROBITS, &size,
 		  MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
-  SetLastError(olderr);
-  return st == 0 ? ptr : MFAIL;
-}
-
-/* For direct MMAP, use MEM_TOP_DOWN to minimize interference */
-static void *DIRECT_MMAP(size_t size)
-{
-  DWORD olderr = GetLastError();
-  void *ptr = NULL;
-  long st = ntavm(INVALID_HANDLE_VALUE, &ptr, NTAVM_ZEROBITS, &size,
-		  MEM_RESERVE|MEM_COMMIT|MEM_TOP_DOWN, PAGE_READWRITE);
-  SetLastError(olderr);
-  return st == 0 ? ptr : MFAIL;
+  return st ? NULL : hint;
 }
 
 #else
 
-/* Win32 MMAP via VirtualAlloc */
-static void *CALL_MMAP(size_t size)
+void lj_alloc_init(void)
 {
-  DWORD olderr = GetLastError();
-  void *ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
-  SetLastError(olderr);
-  return ptr ? ptr : MFAIL;
 }
 
-/* For direct MMAP, use MEM_TOP_DOWN to minimize interference */
-static void *DIRECT_MMAP(size_t size)
+static void *lj_virtual_alloc(void *hint, size_t size)
 {
-  DWORD olderr = GetLastError();
-  void *ptr = VirtualAlloc(0, size, MEM_RESERVE|MEM_COMMIT|MEM_TOP_DOWN,
-			   PAGE_READWRITE);
-  SetLastError(olderr);
-  return ptr ? ptr : MFAIL;
+  return VirtualAlloc(hint, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
 }
 
 #endif
 
-/* This function supports releasing coalesed segments */
-static int CALL_MUNMAP(void *ptr, size_t size)
+static void *lj_alloc_malloc(size_t align, size_t nsize)
 {
-  DWORD olderr = GetLastError();
-  MEMORY_BASIC_INFORMATION minfo;
-  char *cptr = (char *)ptr;
-  while (size) {
-    if (VirtualQuery(cptr, &minfo, sizeof(minfo)) == 0)
-      return -1;
-    if (minfo.BaseAddress != cptr || minfo.AllocationBase != cptr ||
-	minfo.State != MEM_COMMIT || minfo.RegionSize > size)
-      return -1;
-    if (VirtualFree(cptr, 0, MEM_RELEASE) == 0)
-      return -1;
-    cptr += minfo.RegionSize;
-    size -= minfo.RegionSize;
+  void *p = lj_virtual_alloc(NULL, nsize);
+  if ((size_t)p & (align - 1)) {
+    int retry = 0;
+    do {
+      void *hint = (void*)((size_t)p & ~(align - 1));
+      VirtualFree(p, 0, MEM_RELEASE);
+      if ((p = lj_virtual_alloc((void*)((size_t)hint + align), nsize)))
+	break;
+      if ((p = lj_virtual_alloc(hint, nsize)) || ++retry == 10)
+	break;
+    } while((p = lj_virtual_alloc(NULL, nsize + align)));
   }
-  SetLastError(olderr);
-  return 0;
+  return p;
+}
+
+static void lj_alloc_free(void *ptr, size_t osize)
+{
+  VirtualFree(ptr, 0, MEM_RELEASE);
 }
 
 #elif LJ_ALLOC_MMAP
@@ -194,7 +168,6 @@ static void *mmap_probe(size_t size)
   /* Hint for next allocation. Doesn't need to be thread-safe. */
   static uintptr_t hint_addr = 0;
   static uintptr_t hint_prng = 0;
-  int olderr = errno;
   int retry;
   for (retry = 0; retry < LJ_ALLOC_MMAP_PROBE_MAX; retry++) {
     void *p = mmap((void *)hint_addr, size, MMAP_PROT, MMAP_FLAGS_PROBE, -1, 0);
@@ -202,7 +175,6 @@ static void *mmap_probe(size_t size)
     if ((addr >> LJ_ALLOC_MBITS) == 0 && addr >= LJ_ALLOC_MMAP_PROBE_LOWER) {
       /* We got a suitable address. Bump the hint address. */
       hint_addr = addr + size;
-      errno = olderr;
       return p;
     }
     if (p != MFAIL) {
@@ -235,7 +207,6 @@ static void *mmap_probe(size_t size)
       hint_addr &= (((uintptr_t)1 << LJ_ALLOC_MBITS)-1);
     } while (hint_addr < LJ_ALLOC_MMAP_PROBE_LOWER);
   }
-  errno = olderr;
   return MFAIL;
 }
 
@@ -257,9 +228,7 @@ static void *mmap_map32(size_t size)
     return mmap_probe(size);
 #endif
   {
-    int olderr = errno;
     void *ptr = mmap((void *)LJ_ALLOC_MMAP32_START, size, MMAP_PROT, MAP_32BIT|MMAP_FLAGS, -1, 0);
-    errno = olderr;
     /* This only allows 1GB on Linux. So fallback to probing to get 2GB. */
 #if LJ_ALLOC_MMAP_PROBE
     if (ptr == MFAIL) {
@@ -280,42 +249,55 @@ static void *mmap_map32(size_t size)
 #else
 static void *CALL_MMAP(size_t size)
 {
-  int olderr = errno;
-  void *ptr = mmap(NULL, size, MMAP_PROT, MMAP_FLAGS, -1, 0);
-  errno = olderr;
-  return ptr;
+  return mmap(NULL, size, MMAP_PROT, MMAP_FLAGS, -1, 0);
 }
 #endif
+
+static void *lj_alloc_malloc(size_t align, size_t nsize)
+{
+  void *p = CALL_MMAP(nsize);
+  if (p == MFAIL) return NULL;
+  if ((size_t)p & (align - 1)) {
+    void *base;
+    (void)munmap(p, nsize);
+    base = CALL_MMAP(nsize + align);
+    if (base == MFAIL) return NULL;
+    p = (void*)(((uintptr_t)base + align - 1) & ~(align - 1));
+    if (base != p) (void)munmap(base, (size_t)p - (size_t)base);
+    (void)munmap((char*)p + nsize, (size_t)base + align - (size_t)p);
+  }
+  return p;
+}
 
 #if LJ_64 && !LJ_GC64 && ((defined(__FreeBSD__) && __FreeBSD__ < 10) || defined(__FreeBSD_kernel__)) && !LJ_TARGET_PS4
 
 #include <sys/resource.h>
 
-static void init_mmap(void)
+void lj_alloc_init(void)
 {
   struct rlimit rlim;
   rlim.rlim_cur = rlim.rlim_max = 0x10000;
   setrlimit(RLIMIT_DATA, &rlim);  /* Ignore result. May fail later. */
 }
-#define INIT_MMAP()	init_mmap()
+
+#else
+
+void lj_alloc_init(void)
+{
+}
 
 #endif
 
-static int CALL_MUNMAP(void *ptr, size_t size)
+static void lj_alloc_free(void *ptr, size_t osize)
 {
-  int olderr = errno;
-  int ret = munmap(ptr, size);
-  errno = olderr;
-  return ret;
+  (void)munmap(ptr, osize);
 }
 
 #if LJ_ALLOC_MREMAP
 /* Need to define _GNU_SOURCE to get the mremap prototype. */
 static void *CALL_MREMAP_(void *ptr, size_t osz, size_t nsz, int flags)
 {
-  int olderr = errno;
   ptr = mremap(ptr, osz, nsz, flags);
-  errno = olderr;
   return ptr;
 }
 
@@ -331,32 +313,38 @@ static void *CALL_MREMAP_(void *ptr, size_t osz, size_t nsz, int flags)
 
 #endif
 
-
-#ifndef INIT_MMAP
-#define INIT_MMAP()		((void)0)
-#endif
-
-#ifndef DIRECT_MMAP
-#define DIRECT_MMAP(s)		CALL_MMAP(s)
-#endif
-
-#ifndef CALL_MREMAP
-#define CALL_MREMAP(addr, osz, nsz, mv) ((void)osz, MFAIL)
-#endif
-
-/* ----------------------------------------------------------------------- */
-
-
-void *lj_alloc_f(void *msp, void *ptr, size_t osize, size_t nsize)
+static void *lj_alloc_realloc(void *ptr, size_t osize, size_t align, size_t nsize)
 {
-  (void)osize;
-  if (nsize == 0) {
-    return lj_alloc_free(msp, ptr);
-  } else if (ptr == NULL) {
-    return lj_alloc_malloc(msp, nsize);
-  } else {
-    return lj_alloc_realloc(msp, ptr, nsize);
+  void *newptr;
+#if LJ_ALLOC_MREMAP
+  newptr = CALL_MREMAP(ptr, osize, nsize, CALL_MREMAP_MV);
+  if (newptr != MFAIL) {
+    if ((size_t)newptr & (align - 1))
+      ptr = newptr;
+    else
+      return newptr;
   }
+#endif
+  newptr = lj_alloc_malloc(align, nsize);
+  if (newptr) {
+    memcpy(newptr, ptr, osize < nsize ? osize : nsize);
+    lj_alloc_free(ptr, osize);
+  }
+  return newptr;
 }
 
-#endif
+void *lj_alloc_f(void *msp, void *ptr, size_t align, size_t osize, size_t nsize)
+{
+  ERRNO_SAVE;
+  if (nsize == 0) {
+    lj_alloc_free(ptr, osize);
+    ptr = NULL;
+  } else if (ptr == NULL) {
+    ptr = lj_alloc_malloc(align, nsize);
+  } else {
+    ptr = lj_alloc_realloc(ptr, osize, align, nsize);
+  }
+  ERRNO_RESTORE;
+  lua_assert(!((size_t)ptr & (align - 1)));
+  return ptr;
+}
