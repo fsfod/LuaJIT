@@ -130,9 +130,13 @@ static void *clib_loadlib(lua_State *L, const char *name, int global)
   return h;
 }
 
+void lj_clib_unloaddefault(void)
+{
+}
+
 static void clib_unloadlib(CLibrary *cl)
 {
-  if (cl->handle && cl->handle != CLIB_DEFHANDLE)
+  if (cl->handle)
     dlclose(cl->handle);
 }
 
@@ -215,18 +219,21 @@ static void *clib_loadlib(lua_State *L, const char *name, int global)
   return h;
 }
 
+void lj_clib_unloaddefault(void)
+{
+  MSize i;
+  for (i = CLIB_HANDLE_KERNEL32; i < CLIB_HANDLE_MAX; i++) {
+    void *h = clib_def_handle[i];
+    if (h) {
+      clib_def_handle[i] = NULL;
+      FreeLibrary((HINSTANCE)h);
+    }
+  }
+}
+
 static void clib_unloadlib(CLibrary *cl)
 {
-  if (cl->handle == CLIB_DEFHANDLE) {
-    MSize i;
-    for (i = CLIB_HANDLE_KERNEL32; i < CLIB_HANDLE_MAX; i++) {
-      void *h = clib_def_handle[i];
-      if (h) {
-	clib_def_handle[i] = NULL;
-	FreeLibrary((HINSTANCE)h);
-      }
-    }
-  } else if (cl->handle) {
+  if (cl->handle) {
     FreeLibrary((HINSTANCE)cl->handle);
   }
 }
@@ -280,6 +287,10 @@ static void *clib_loadlib(lua_State *L, const char *name, int global)
   lj_err_callermsg(L, "no support for loading dynamic libraries for this OS");
   UNUSED(name); UNUSED(global);
   return NULL;
+}
+
+void lj_clib_unloaddefault(void)
+{
 }
 
 static void clib_unloadlib(CLibrary *cl)
@@ -380,10 +391,10 @@ TValue *lj_clib_index(lua_State *L, CLibrary *cl, GCstr *name)
 /* -- C library management ------------------------------------------------ */
 
 /* Create a new CLibrary object and push it on the stack. */
-static CLibrary *clib_new(lua_State *L, GCtab *mt)
+static CLibrary *clib_new(lua_State *L, GCtab *mt, GCPoolID p)
 {
   GCtab *t = lj_tab_new(L, 0, 0);
-  GCudata *ud = lj_udata_new(L, sizeof(CLibrary), t);
+  GCudata *ud = lj_udata_new(L, sizeof(CLibrary), t, p);
   CLibrary *cl = (CLibrary *)uddata(ud);
   cl->cache = t;
   ud->udtype = UDTYPE_FFI_CLIB;
@@ -397,7 +408,7 @@ static CLibrary *clib_new(lua_State *L, GCtab *mt)
 void lj_clib_load(lua_State *L, GCtab *mt, GCstr *name, int global)
 {
   void *handle = clib_loadlib(L, strdata(name), global);
-  CLibrary *cl = clib_new(L, mt);
+  CLibrary *cl = clib_new(L, mt, GCPOOL_GCMM);
   cl->handle = handle;
 }
 
@@ -411,7 +422,7 @@ void lj_clib_unload(CLibrary *cl)
 /* Create the default C library object. */
 void lj_clib_default(lua_State *L, GCtab *mt)
 {
-  CLibrary *cl = clib_new(L, mt);
+  CLibrary *cl = clib_new(L, mt, GCPOOL_GREY);
   cl->handle = CLIB_DEFHANDLE;
 }
 
