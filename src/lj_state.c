@@ -179,6 +179,24 @@ static void close_state(lua_State *L)
     g->allocf(g->allocd, G2GG(g), sizeof(GG_State), 0);
 }
 
+static void pinstring_init(lua_State *L)
+{
+  const char *p =
+#define STRDEF(name, val) val "\0"
+#include "lj_pinstr.h"
+#undef STRDEF
+    "\0";
+  size_t len;
+  global_State *g = G(L);
+  setmref(g->gc.pool[GCPOOL_LEAF].bump, g->pinstrings + PINSTRINGS_LEN);
+  setmref(g->gc.pool[GCPOOL_LEAF].bumpbase, g->pinstrings);
+  for (; (len = strlen(p)); p += len + 1) {
+    (void)lj_str_new(L, p, len);
+  }
+  lua_assert(mref(g->gc.pool[GCPOOL_LEAF].bump, char) == g->pinstrings);
+  lua_assert(mref(g->gc.pool[GCPOOL_LEAF].bumpbase, char) == g->pinstrings);
+}
+
 #if LJ_64 && !LJ_GC64 && !(defined(LUAJIT_USE_VALGRIND) && defined(LUAJIT_USE_SYSMALLOC))
 lua_State *lj_state_newstate(lua_Alloc f, void *ud)
 #else

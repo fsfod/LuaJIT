@@ -408,6 +408,7 @@
 |// Assumes DISPATCH is relative to GL.
 #define DISPATCH_GL(field)	(GG_DISP2G + (int)offsetof(global_State, field))
 #define DISPATCH_J(field)	(GG_DISP2J + (int)offsetof(jit_State, field))
+#define DISPATCH_MMSTR(mm) (GG_DISP2G+i32ptr(mmname_str((global_State*)0, mm)))
 |
 #define PC2PROTO(field)  ((int)offsetof(GCproto, field)-(int)sizeof(GCproto))
 |
@@ -1518,7 +1519,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  test TAB:RB, TAB:RB
   |  mov dword [BASE-4], LJ_TNIL
   |  jz ->fff_res1
-  |  mov STR:RC, [DISPATCH+DISPATCH_GL(gcroot)+4*(GCROOT_MMNAME+MM_metatable)]
+  |  lea STR:RC, [DISPATCH+DISPATCH_MMSTR(MM_metatable)]
   |  mov dword [BASE-4], LJ_TTAB	// Store metatable as default result.
   |  mov [BASE-8], TAB:RB
   |  mov RA, TAB:RB->hmask

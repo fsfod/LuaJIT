@@ -531,13 +531,13 @@ enum {
 
 /* Metamethods. ORDER MM */
 #ifdef LJ_HASFFI
-#define MMDEF_FFI(_) _(new)
+#define MMDEF_FFI(_) _(new, "\3")
 #else
 #define MMDEF_FFI(_)
 #endif
 
 #if LJ_52 || LJ_HASFFI
-#define MMDEF_PAIRS(_) _(pairs) _(ipairs)
+#define MMDEF_PAIRS(_) _(pairs, "\5") _(ipairs, "\6")
 #else
 #define MMDEF_PAIRS(_)
 #define MM_pairs	255
@@ -545,16 +545,21 @@ enum {
 #endif
 
 #define MMDEF(_) \
-  _(index) _(newindex) _(gc) _(mode) _(eq) _(len) \
+  _(index, "\5") _(newindex, "\10") _(gc, "\2") _(mode, "\4") _(eq, "\2") \
+  _(len, "\3") \
   /* Only the above (fast) metamethods are negative cached (max. 8). */ \
-  _(lt) _(le) _(concat) _(call) \
+  _(lt, "\2") _(le, "\2") _(call, "\4") \
   /* The following must be in ORDER ARITH. */ \
-  _(add) _(sub) _(mul) _(div) _(mod) _(pow) _(unm) \
+  _(add, "\3") _(sub, "\3") _(mul, "\3") _(div, "\3") _(mod, "\3") \
+  _(pow, "\3") _(unm, "\3") \
+  /* End of ORDER ARITH. */ \
+  _(concat, "\6") \
   /* The following are used in the standard libraries. */ \
-  _(metatable) _(tostring) MMDEF_FFI(_) MMDEF_PAIRS(_)
+  _(metatable, "\11") _(tostring, "\10") MMDEF_FFI(_) MMDEF_PAIRS(_)
 
 typedef enum {
-#define MMENUM(name)	MM_##name,
+#define MMENUM(name, lenchar)	MM_##name##_, \
+  MM_##name = MM_##name##_ + ((sizeof(GCstr) + sizeof("__" #name) - 1) / 16),
 MMDEF(MMENUM)
 #undef MMENUM
   MM__MAX,
@@ -562,10 +567,21 @@ MMDEF(MMENUM)
   MM_FAST = MM_len
 } MMS;
 
+LJ_STATIC_ASSERT((int)MM_FAST < 8);
+
+/* Lua lexer tokens. */
+#define TKDEF(_, __) \
+  _(function, "\10") _(and, "\3") _(break, "\5") _(do, "\2") _(else, "\4") \
+  _(elseif, "\6") _(end, "\3") _(false, "\5") _(for, "\3") _(goto, "\4") \
+  _(if, "\2") _(in, "\2") _(local, "\5") _(nil, "\3") _(not, "\3") \
+  _(or, "\2") _(repeat, "\6") _(return, "\6") _(then, "\4") _(true, "\4") \
+  _(until, "\5") _(while, "\5") \
+  __(concat, ..) __(dots, ...) __(eq, ==) __(ge, >=) __(le, <=) __(ne, ~=) \
+  __(label, ::) __(number, <number>) __(name, <name>) __(string, <string>) \
+  __(eof, <eof>)
+
 /* GC root IDs. */
 typedef enum {
-  GCROOT_MMNAME,	/* Metamethod names. */
-  GCROOT_MMNAME_LAST = GCROOT_MMNAME + MM__MAX-1,
   GCROOT_BASEMT,	/* Metatables for base types. */
   GCROOT_BASEMT_NUM = GCROOT_BASEMT + ~LJ_TNUMX,
   GCROOT_IO_INPUT,	/* Userdata for default I/O input file. */
@@ -575,7 +591,8 @@ typedef enum {
 
 #define basemt_it(g, it)	((g)->gcroot[GCROOT_BASEMT+~(it)])
 #define basemt_obj(g, o)	((g)->gcroot[GCROOT_BASEMT+itypemap(o)])
-#define mmname_str(g, mm)	(strref((g)->gcroot[GCROOT_MMNAME+(mm)]))
+#define mmname_str(g, mm) \
+  ((GCstr*)((g)->metastrings + METASTRINGS_LEN - 16 - (mm) * 16))
 
 typedef struct GCState {
   GCSize total;		/* Memory currently allocated. */
@@ -596,6 +613,25 @@ typedef struct GCState {
   MSize stepmul;	/* Incremental GC step granularity. */
   MSize pause;		/* Pause between successive GC cycles. */
 } GCState;
+
+enum {
+#define TKSIZE1(name, lenchar) \
+  + ((sizeof(GCstr) + sizeof(#name) + 15) & ~(size_t)15)
+#define TKSIZE2(name, sym)
+  LEXSTRINGS_LEN = TKDEF(TKSIZE1, TKSIZE2),
+#undef TKSIZE1
+#undef TKSIZE2
+#define MMSIZE(name, lenchar) \
+  + ((sizeof(GCstr) + sizeof("__" #name) + 15) & ~(size_t)15)
+  METASTRINGS_LEN = MMDEF(MMSIZE),
+#undef MMSIZE
+#define ERRMEM_MSG "not enough memory"
+  PINSTRINGS_LEN = 0
+#define STRDEF(name, str) \
+  + ((sizeof(GCstr) + sizeof(str) + 15) & ~(size_t)15)
+#include "lj_pinstr.h"
+#undef STRDEF
+};
 
 /* Global state, shared by all threads of a Lua universe. */
 typedef struct global_State {
@@ -627,9 +663,25 @@ typedef struct global_State {
   MRef jit_base;	/* Current JIT code L->base or NULL. */
   MRef ctype_state;	/* Pointer to C type state. */
   GCRef gcroot[GCROOT_MAX];  /* GC roots. */
+  char LJ_ALIGN(16) lexstrings[LEXSTRINGS_LEN];
+  char LJ_ALIGN(16) metastrings[METASTRINGS_LEN];
+  char LJ_ALIGN(16) pinstrings[PINSTRINGS_LEN];
 } global_State;
 
 #define mainthread(g)	(&gcref(g->mainthref)->th)
+LJ_STATIC_ASSERT((offsetof(global_State, lexstrings) & 15) == 0);
+LJ_STATIC_ASSERT((offsetof(global_State, metastrings) & 15) == 0);
+LJ_STATIC_ASSERT((offsetof(global_State, pinstrings) & 15) == 0);
+
+enum {
+  PINSTR_OFFSET_ = PINSTRINGS_LEN
+#define STRDEF(name, str) , PINSTR_OFFSET_##name##_, \
+  PINSTR_OFFSET_##name = PINSTR_OFFSET_##name##_ - 1 - \
+  ((sizeof(GCstr) + sizeof(str) + 15) & ~(size_t)15)
+#include "lj_pinstr.h"
+#undef STRDEF
+};
+
 #define niltv(L) \
   check_exp(tvisnil(&G(L)->nilnode.val), &G(L)->nilnode.val)
 #define niltvg(g) \
