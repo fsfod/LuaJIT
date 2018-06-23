@@ -63,7 +63,7 @@ static void resizestack(lua_State *L, MSize n)
   lua_assert((MSize)(tvref(L->maxstack)-oldst)==L->stacksize-LJ_STACK_EXTRA-1);
   st = (TValue *)lj_mem_realloc(L, tvref(L->stack),
 				(MSize)(oldsize*sizeof(TValue)),
-				(MSize)(realsize*sizeof(TValue)));
+				(MSize)(realsize*sizeof(TValue)), GCPOOL_GREY);
   setmref(L->stack, st);
   delta = (char *)st - (char *)oldst;
   setmref(L->maxstack, st + n);
@@ -124,7 +124,7 @@ void LJ_FASTCALL lj_state_growstack1(lua_State *L)
 /* Allocate basic stack for new state. */
 static void stack_init(lua_State *L1, lua_State *L)
 {
-  TValue *stend, *st = lj_mem_newvec(L, LJ_STACK_START+LJ_STACK_EXTRA, TValue);
+  TValue *stend, *st = lj_mem_newvec(L, LJ_STACK_START+LJ_STACK_EXTRA, TValue, GCPOOL_GREY);
   setmref(L1->stack, st);
   L1->stacksize = LJ_STACK_START + LJ_STACK_EXTRA;
   stend = st + L1->stacksize;
@@ -169,7 +169,6 @@ static void close_state(lua_State *L)
   lj_ctype_freestate(g);
 #endif
   lj_buf_free(g, &g->tmpbuf);
-  lj_mem_freevec(g, tvref(L->stack), L->stacksize, TValue);
   lua_assert(g->gc.total == sizeof(GG_State));
 #ifndef LUAJIT_USE_SYSMALLOC
   if (g->allocf == lj_alloc_f)

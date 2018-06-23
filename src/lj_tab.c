@@ -61,7 +61,7 @@ static LJ_AINLINE void newhpart(lua_State *L, GCtab *t, uint32_t hbits)
   if (hbits > LJ_MAX_HBITS)
     lj_err_msg(L, LJ_ERR_TABOV);
   hsize = 1u << hbits;
-  node = lj_mem_newvec(L, hsize, Node);
+  node = lj_mem_newvec(L, hsize, Node, GCPOOL_GREY);
   setmref(t->node, node);
   setfreetop(t, node, &node[hsize]);
   t->hmask = hsize-1;
@@ -135,7 +135,7 @@ static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
     if (asize > 0) {
       if (asize > LJ_MAX_ASIZE)
 	lj_err_msg(L, LJ_ERR_TABOV);
-      setmref(t->array, lj_mem_newvec(L, asize, TValue));
+      setmref(t->array, lj_mem_newvec(L, asize, TValue, GCPOOL_GREY));
       t->asize = asize;
     }
   }
@@ -258,6 +258,10 @@ void lj_tab_resize(lua_State *L, GCtab *t, uint32_t asize, uint32_t hbits)
   Node *oldnode = noderef(t->node);
   uint32_t oldasize = t->asize;
   uint32_t oldhmask = t->hmask;
+  if (asize >= ((LJ_GC_ARENA_SIZE - LJ_GC_ARENA_SIZE/64) / 8)) {
+    /* Array part will be a huge block, so round up to a full huge block. */
+    asize = (asize + LJ_GC_ARENA_SIZE/8 - 1) & ~(LJ_GC_ARENA_SIZE/8 - 1);
+  }
   if (asize > oldasize) {  /* Array part grows? */
     TValue *array;
     uint32_t i;
@@ -266,13 +270,14 @@ void lj_tab_resize(lua_State *L, GCtab *t, uint32_t asize, uint32_t hbits)
     if (LJ_MAX_COLOSIZE != 0 && t->colo > 0) {
       /* A colocated array must be separated and copied. */
       TValue *oarray = tvref(t->array);
-      array = lj_mem_newvec(L, asize, TValue);
+      array = lj_mem_newvec(L, asize, TValue, GCPOOL_GREY);
       t->colo = (int8_t)(t->colo | 0x80);  /* Mark as separated (colo < 0). */
       for (i = 0; i < oldasize; i++)
 	copyTV(L, &array[i], &oarray[i]);
     } else {
       array = (TValue *)lj_mem_realloc(L, tvref(t->array),
-			  oldasize*sizeof(TValue), asize*sizeof(TValue));
+			  oldasize*sizeof(TValue), asize*sizeof(TValue),
+			  GCPOOL_GREY);
     }
     setmref(t->array, array);
     t->asize = asize;
@@ -301,19 +306,19 @@ void lj_tab_resize(lua_State *L, GCtab *t, uint32_t asize, uint32_t hbits)
     /* Physically shrink only separated arrays. */
     if (LJ_MAX_COLOSIZE != 0 && t->colo <= 0)
       setmref(t->array, lj_mem_realloc(L, array,
-	      oldasize*sizeof(TValue), asize*sizeof(TValue)));
+	      oldasize*sizeof(TValue), asize*sizeof(TValue), GCPOOL_GREY));
   }
   if (oldhmask > 0) {  /* Reinsert pairs from old hash part. */
-    global_State *g;
     uint32_t i;
     for (i = 0; i <= oldhmask; i++) {
       Node *n = &oldnode[i];
       if (!tvisnil(&n->val))
 	copyTV(L, lj_tab_set(L, t, &n->key), &n->val);
     }
-    g = G(L);
-    lj_mem_freevec(g, oldnode, oldhmask+1, Node);
+    lj_mem_realloc(L, oldnode, (GCSize)sizeof(Node) * (oldhmask+1), 0,
+		   GCPOOL_GREY);
   }
+  lj_gc_anybarriert(L, t);
 }
 
 static uint32_t countint(cTValue *key, uint32_t *bins)
@@ -375,6 +380,13 @@ static uint32_t bestasize(uint32_t bins[], uint32_t *narray)
       sz = (2u<<b)+1;
       na = sum;
     }
+  if (sz > 256) {
+    /* At medium/large sizes, powers of two are more allocation friendly. */
+    --sz;
+    if ((na + na/8) >= sz) {
+      sz <<= 1;
+    }
+  }
   *narray = sz;
   return na;
 }
