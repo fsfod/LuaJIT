@@ -258,7 +258,7 @@ LUA_API void luaJIT_preclose(lua_State *L)
 {
   global_State *g = G(L);
   int i;
-  L = mainthread(g);  /* Only the main thread can be closed. */
+  L = &G2GG(g)->L;  /* Only the main thread can be closed. */
 #if LJ_HASPROFILE
   luaJIT_profile_stop(L);
 #endif

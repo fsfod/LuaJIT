@@ -658,7 +658,6 @@ typedef struct global_State {
   uint8_t hookmask;	/* Hook mask. */
   uint8_t dispatchmode;	/* Dispatch mode. */
   uint8_t vmevmask;	/* VM event mask. */
-  GCRef mainthref;	/* Link to main thread. */
   TValue registrytv;	/* Anchor for registry. */
   TValue tmptv, tmptv2;	/* Temporary TValues. */
   Node nilnode;		/* Fallback 1-element hash part (nil key and value). */
@@ -680,7 +679,6 @@ typedef struct global_State {
   char LJ_ALIGN(16) pinstrings[PINSTRINGS_LEN];
 } global_State;
 
-#define mainthread(g)	(&gcref(g->mainthref)->th)
 LJ_STATIC_ASSERT((offsetof(global_State, lexstrings) & 15) == 0);
 LJ_STATIC_ASSERT((offsetof(global_State, metastrings) & 15) == 0);
 LJ_STATIC_ASSERT((offsetof(global_State, pinstrings) & 15) == 0);

@@ -94,8 +94,9 @@ static void gc_mark_start(global_State *g)
   setgcrefnull(g->gc.gray);
   setgcrefnull(g->gc.grayagain);
   setgcrefnull(g->gc.weak);
-  gc_markobj(g, mainthread(g));
-  gc_markobj(g, tabref(mainthread(g)->env));
+  lua_State *L = &G2GG(g)->L;
+  gc_markobj(g, obj2gco(L));
+  gc_markobj(g, gcref(L->env));
   gc_marktv(g, &g->registrytv);
   gc_mark_gcroot(g);
   g->gc.state = GCSpropagate;
