@@ -15,13 +15,6 @@
 #include "lj_trace.h"
 #include "lj_vm.h"
 
-/* -- Prototypes ---------------------------------------------------------- */
-
-void LJ_FASTCALL lj_func_freeproto(global_State *g, GCproto *pt)
-{
-  lj_mem_freegco(g, pt, pt->sizept);
-}
-
 /* -- Upvalues ------------------------------------------------------------ */
 
 static void unlinkuv(GCupval *uv)
@@ -175,12 +168,5 @@ GCfunc *lj_func_newL_gc(lua_State *L, GCproto *pt, GCfuncL *parent)
   }
   fn->l.nupvalues = (uint8_t)nuv;
   return fn;
-}
-
-void LJ_FASTCALL lj_func_free(global_State *g, GCfunc *fn)
-{
-  MSize size = isluafunc(fn) ? sizeLfunc((MSize)fn->l.nupvalues) :
-			       sizeCfunc((MSize)fn->c.nupvalues);
-  lj_mem_freegco(g, fn, size);
 }
 

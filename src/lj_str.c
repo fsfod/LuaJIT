@@ -201,9 +201,3 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
   return s;  /* Return newly interned string. */
 }
 
-void LJ_FASTCALL lj_str_free(global_State *g, GCstr *s)
-{
-  g->strnum--;
-  lj_mem_freegco(g, s, sizestring(s));
-}
-

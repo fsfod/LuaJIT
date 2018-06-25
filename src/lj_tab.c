@@ -247,19 +247,6 @@ void LJ_FASTCALL lj_tab_clear(GCtab *t)
   }
 }
 
-/* Free a table. */
-void LJ_FASTCALL lj_tab_free(global_State *g, GCtab *t)
-{
-  if (t->hmask > 0)
-    lj_mem_freevec(g, noderef(t->node), t->hmask+1, Node);
-  if (t->asize > 0 && LJ_MAX_COLOSIZE != 0 && t->colo <= 0)
-    lj_mem_freevec(g, tvref(t->array), t->asize, TValue);
-  if (LJ_MAX_COLOSIZE != 0 && t->colo)
-    lj_mem_freegco(g, t, sizetabcolo((uint32_t)t->colo & 0x7f));
-  else
-    lj_mem_freetgco(g, t);
-}
-
 /* -- Table resizing ------------------------------------------------------ */
 
 /* Resize a table to fit the new array/hash part sizes. */
