@@ -16,7 +16,13 @@ typedef enum TypeFilter {
   TFILTER_UDATA   = 1 << ~LJ_TUDATA,
 } TypeFilter;
 
-void checkarenas(global_State *g);
+typedef enum GCVERIFY_MODE {
+  GCVERIFY_LIVENESS = 1,
+  GCVERIFY_C_ALLOCATOR = 2,
+} GCVERIFY_MODE;
+
+void lj_gc_verify(global_State *g, GCVERIFY_MODE mode, void *skipobj);
+void checkarenas(global_State *g, GCobj *skip);
 void do_cellwatch(global_State *g);
 void print_deadobjs(global_State *g, TypeFilter filter);
 void arena_print_deadobjs(global_State *g, GCArena *arena, TypeFilter filter);

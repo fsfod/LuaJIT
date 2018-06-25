@@ -89,18 +89,29 @@ static int checkobj(global_State *g, GCobj *o) {
   }
 
   lua_assert(0);
+  return 0;
 }
 
+typedef struct LiveChecker_State{
+  global_State *g;
+  GCobj *skip;
+} LiveChecker_State;
+
 int livechecker(GCobj *o, void *user) {
-  global_State *g = (global_State *)user;
+  LiveChecker_State *state = (LiveChecker_State *)user;
+  global_State *g = state->g;
   int arena = -1;
   int cellid = -1;
-  CellState state;
+  CellState cstate;
 
   if (!gc_ishugeblock(o)) {
     arena = arena_extrainfo(ptr2arena(o))->id;
     cellid = ptr2cell(o);
-    state = arenaobj_cellstate(o);
+    cstate = arenaobj_cellstate(o);
+  }
+
+  if (o == state->skip) {
+    return 0;
   }
 
   if (o->gch.gct == ~LJ_TTAB) {
@@ -204,17 +215,18 @@ int livechecker(GCobj *o, void *user) {
   return 0;
 }
 
-void checkarenas(global_State *g) {
+void checkarenas(global_State *g, GCobj *skip)
+{
+  LiveChecker_State checkerstate = {0};
+  checkerstate.g = g;
+  checkerstate.skip = skip;
 
   for (MSize i = 0; i < g->gc.arenastop; i++) {
     GCArena *arena = lj_gc_arenaref(g, i);
     ArenaFlags flags = lj_gc_arenaflags(g, i);
 
-    if (!(flags & ArenaFlag_Empty)) {
-
-      //if (arena != g->arena) {
-        arena_visitobjects(arena, livechecker, g, g->gc.state >= GCSsweepstring ? CellState_Black : 0);
-     // }
+    if ((flags & (ArenaFlag_Empty|ArenaFlag_TravObjs)) == ArenaFlag_TravObjs) {
+      arena_visitobjects(arena, livechecker, &checkerstate, g->gc.state >= GCSsweepstring ? CellState_Black : 0);
     } else if(flags & ArenaFlag_Empty) {
       gc_assert(arena_topcellid(arena) == MinCellId && arena_greysize(arena) == 0);
     }
@@ -394,30 +406,14 @@ void TraceGC(global_State *g, int newstate)
     GCCount++;
   }
 
-
 /*
-  if (GCCount >= 0) {
-    int celllen = getcellextent(g, 1, 18991);
-    if (celllen != prevcelllen) {
-      lua_assert(celllen == 2);
-      prevcelllen = celllen;
-    }
-
-    //GCobj *o = getarenacellG(g, 7, 65515);
-    //CellState state_t = arenaobj_cellstate(t);
-    //CellState state_o = arenaobj_cellstate(o);
-    //lua_assert(state_t >= 0);
-    //lua_assert(state_o >= 0);
-  }
-
-
   perf_printcounters();
 */
 #if defined(DEBUG) || defined(GCDEBUG)
   check_arenamemused(g);
 
   if (1 || g->gc.state == GCSsweep || g->gc.isminor) {
-    checkarenas(g);
+    checkarenas(g, NULL);
   }
 
   if (g->gc.state == GCSatomic) {
@@ -456,7 +452,7 @@ void VERIFYGC(global_State *g);
 void sweepcallback(global_State *g, GCArena *arena, MSize i, int count)
 {
 #if defined(DEBUG) || defined(GCDEBUG)
-  VERIFYGC(g);
+  lj_gc_verify(g, GCVERIFY_LIVENESS, NULL);
   if (count == -1) {
     ArenaPrinterState state = {0};
     state.g = g;
@@ -475,44 +471,26 @@ void sweepcallback(global_State *g, GCArena *arena, MSize i, int count)
 #endif
 }
 
-void* check = NULL;
-MSize extent = 0;
+void lj_gc_verify(global_State *g, GCVERIFY_MODE mode, void *skipobj)
+{
+  check_arenamemused(g);
+  do_cellwatch(g);
+  if (mode & GCVERIFY_C_ALLOCATOR) {
+    lj_check_allocstate(g->allocd);
+  }
+  if (mode & GCVERIFY_LIVENESS) {
+    checkarenas(g, skipobj);
+  }
+}
+
+void VERIFYGC_SKIPOBJ(global_State *g, void *skip)
+{
+  lj_gc_verify(g, 0, skip);
+}
 
 void VERIFYGC(global_State *g)
 {
-
-  check_arenamemused(g);
-  do_cellwatch(g);
-  lj_check_allocstate(g->allocd);
-  //checkarenas(g);
-/*
-  int celllen = getcellextent(g, 1, 18991);
-  if (celllen != prevcelllen) {
-    lua_assert(celllen == 3);
-    prevcelllen = celllen;
-  }
-
-  GCArena *arena;
-  GCCellID cell;
-  if (check == NULL)return;
-  cell = ptr2cell(check);
-  arena = ptr2arena(check);
-
-  if (extent) {
-    int bit1 = arena_blockbit(cell);
-    int bit2 = arena_blockbit(cell+6);
-    GCBlockword *mark = arenaobj_getmarkword(check);
-    GCBlockword *block = arenaobj_getblockword(check);
-    GCBlockword extents = block[0]  | (mark[0] & ~block[0]);
-    const char * state = arena_dumpwordstate(arena, arena_blockidx(cell));
-
-    if (extent != arena_cellextent(arena, ptr2cell(check))) {
-      DebugBreak();
-    }
-  } else {
-    extent = arena_cellextent(arena, ptr2cell(check));
-  }
-  */
+  lj_gc_verify(g, 0, NULL);
 }
 
 void strings_toblack(global_State *g)

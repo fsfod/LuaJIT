@@ -55,9 +55,11 @@ static void gc_setstate(global_State *g, int newstate)
 #if DEBUG
 #define GCDEBUG(fmt, ...)  printf(fmt, __VA_ARGS__)
 extern void VERIFYGC(global_State *g);
+extern void VERIFYGC_SKIPOBJ(global_State *g, void *o);
 #else
 #define GCDEBUG(fmt, ...)
 #define VERIFYGC(g)
+#define VERIFYGC_SKIPOBJ(g)
 #endif
 
 
@@ -2053,7 +2055,6 @@ GCobj *lj_mem_newgco_t(lua_State *L, GCSize osize, uint32_t gct)
 
 void lj_mem_freegco(global_State *g, void *p, GCSize osize)
 {
-  VERIFYGC(g);
   if (!gc_ishugeblock(p)) {
     /* TODO: Free cell list */
     lua_assert(!arenaobj_isdead(p));
@@ -2064,14 +2065,13 @@ void lj_mem_freegco(global_State *g, void *p, GCSize osize)
   } else {
     hugeblock_free(g, p, osize);
   }
-  VERIFYGC(g);
 }
 
 void *lj_mem_reallocgc(lua_State *L, GCobj *owner, void *p, GCSize oldsz, GCSize newsz)
 {
   global_State *g = G(L);
   void* mem;
-  VERIFYGC(g);
+  VERIFYGC_SKIPOBJ(g, owner);
 
   if (newsz) {
     if (newsz < ArenaOversized) {
@@ -2115,7 +2115,7 @@ void *lj_mem_reallocgc(lua_State *L, GCobj *owner, void *p, GCSize oldsz, GCSize
   if (oldsz) {
     lj_mem_freegco(G(L), p, oldsz);
   }
-  VERIFYGC(g);
+  VERIFYGC_SKIPOBJ(g, owner);
   return mem;
 }
 
