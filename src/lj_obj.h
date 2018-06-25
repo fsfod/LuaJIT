@@ -583,6 +583,7 @@ typedef struct GCState {
   GCSize total;		/* Memory currently allocated. */
   GCSize hugemem;	/* Memory currently allocated for huge objects. */
   GCSize threshold;	/* Memory threshold. */
+  GCSize arenagrowth; 
   union {
     struct {
       uint8_t state;	/* GC state. */

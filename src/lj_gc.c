@@ -1068,17 +1068,17 @@ void lj_gc_freearena(global_State *g, GCArena *arena)
   lua_assert(arena_firstallocated(arena) == 0);
 
   arena_destroy(g, arena);
-
-  g->gc.arenastop--;
-  if (i != g->gc.arenastop) {
-    ArenaFreeList *freelist = g->gc.freelists + g->gc.arenastop;
+  if (i != (g->gc.arenastop-1)) {
+    MSize swapi = g->gc.arenastop - 1;
+    GCArena *arena2 = lj_gc_arenaref(g, swapi);
+    arena2->extra.id = i;
     /* Swap the arena at the end of the list to the position of the one we removed */
-    arena = g->gc.arenas[g->gc.arenastop];
-    g->gc.arenas[i] = arena;
-
-    arena->extra.id = i;
-    g->gc.freelists[i].owner = NULL;
-  }
+    g->gc.arenas[i] = g->gc.arenas[swapi];
+    memcpy(g->gc.freelists + i, g->gc.freelists + swapi, sizeof(ArenaFreeList));
+    setmref(arena2->freelist, g->gc.freelists + i);
+    g->gc.freelists[i].owner = arena2;
+  } 
+  g->gc.arenastop--;
 }
 
 static void sweep_arena(global_State *g, MSize i, MSize celltop);
@@ -1534,6 +1534,8 @@ static void gc_sweepstart(global_State *g)
   }
 }
 
+static void gc_finish(lua_State *L);
+
 static int gc_sweepend(lua_State *L)
 {
   global_State *g = G(L);
@@ -1554,8 +1556,7 @@ static int gc_sweepend(lua_State *L)
 #endif
     return 1;
   } else {  /* Otherwise skip this phase to help the JIT. */
-    gc_setstate(g, GCSpause);  /* End of GC cycle. */
-    g->gc.debt = 0;
+    gc_finish(L); /* End of GC cycle. */
     return 0;
   }
 }
@@ -1589,15 +1590,51 @@ static void gc_atomicsweep(lua_State *L)
   gc_sweepend(L);
 }
 
-static void finalize_stop(lua_State *L)
+static void gc_finish(lua_State *L)
 {
   global_State *g = G(L);
-#if LJ_HASFFI
-  if (!g->gc.nocdatafin) lj_tab_rehash(L, ctype_ctsG(g)->finalizer);
-#endif
-  gc_setstate(g, GCSpause);  /* End of GC cycle. */
-  g->gc.debt = 0;
+  MSize emptycount = 0, empty_trav = 0, i;
+  GCSize estdead = 0, free = 0;
+  gc_setstate(g, GCSpause);
   g->gc.stateflags &= ~GCSFLAG_HASFINALIZERS;
+  g->gc.debt = 0;
+  
+  for (MSize i = 0; i < g->gc.arenastop; i++) {
+    MSize flags = lj_gc_arenaflags(g, i) & (ArenaFlag_Empty | ArenaFlag_Explicit |  ArenaFlag_TravObjs);
+    GCArena *arena = lj_gc_arenaref(g, i);
+    if (flags & ArenaFlag_Empty) {
+      emptycount++;
+      if (flags & ArenaFlag_TravObjs)
+        empty_trav++;
+    } else {
+      MSize freesz = arena_get_freecellcount(arena) * 16;
+      lua_assert(freesz != 0 || g->gc.freelists[i].freeobjcount == 0);
+      free += freesz + (MaxCellId - arena->celltopid) * 16;
+
+      MSize avgsz = flags & ArenaFlag_TravObjs ? 32 : 24;
+      estdead += (GCSize)(g->gc.freelists[i].freeobjcount * avgsz);
+    }
+  }
+
+  if (emptycount && (g->gc.arenastop - emptycount) > 6) {
+    for (MSize i = 0; i < g->gc.arenastop; ) {
+      MSize flags = lj_gc_arenaflags(g, i) & (ArenaFlag_Empty | ArenaFlag_Explicit);
+      if (flags == ArenaFlag_Empty) {
+        lj_gc_freearena(g, lj_gc_arenaref(g, i));
+      } else {
+        i++;
+      }
+    }
+  }
+
+  GCSize arenamem = (g->gc.arenastop - emptycount) * ArenaMaxObjMem;
+  arenamem -= free;
+
+  if (g->gc.threshold > (g->gc.arenastop * ArenaSize) && emptycount > 6) {
+    g->gc.threshold;
+  }
+  
+  g->gc.arenagrowth = 0;
 }
 
 /* GC state machine. Returns a cost estimate for each step performed. */
@@ -1677,7 +1714,12 @@ static size_t gc_onestep(lua_State *L)
       }
       TIMER_END(gc_finalize);
     }
-    finalize_stop(L);
+#if LJ_HASFFI
+    if (!g->gc.nocdatafin) {
+      lj_tab_rehash(L, ctype_ctsG(g)->finalizer);
+    }
+#endif
+    gc_finish(L);
     return 0;
   default:
     lua_assert(0);
@@ -2037,6 +2079,7 @@ GCobj *lj_mem_newgco_t(lua_State *L, GCSize osize, uint32_t gct)
     }
     //GCDEBUG("Alloc(%d, %d) %s\n", ptr2arena(o)->extra.id, ptr2cell(o), lj_obj_itypename[gct]);
     g->gc.total += realsz;
+    g->gc.arenagrowth += realsz;
     TIMER_END(newgcobj);
   } else {
     o = hugeblock_alloc(L, osize, gct);
@@ -2055,7 +2098,8 @@ void lj_mem_freegco(global_State *g, void *p, GCSize osize)
 
     arena_free(g, ptr2arena(p), p, osize);
     osize = lj_round(osize, 16);
-    g->gc.total -= (GCSize)osize;
+    g->gc.total -= osize;
+    g->gc.arenagrowth -= osize;
   } else {
     hugeblock_free(g, p, osize);
   }
@@ -2094,6 +2138,7 @@ void *lj_mem_reallocgc(lua_State *L, GCobj *owner, void *p, GCSize oldsz, GCSize
       }
       newsz = lj_round(newsz, 16);
       g->gc.total += (GCSize)newsz;
+      g->gc.arenagrowth += newsz;
       TIMER_END(allocgc);
     } else {
       mem = hugeblock_alloc(L, newsz, 0);
