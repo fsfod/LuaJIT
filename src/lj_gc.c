@@ -1323,8 +1323,6 @@ static void atomic(global_State *g, lua_State *L)
 {
   size_t udsize;
   SECTION_START(gc_atomic);
-  traces_toblack(g);
-
   lj_gc_drain_ssb(g); /* Mark anything left in the gray SSB buffer */
   gc_mark_uv(g);  /* Need to remark open upvalues (the thread may be dead). */
   gc_propagate_gray(g);  /* Propagate any left-overs. */
@@ -1451,10 +1449,6 @@ static void sweep_traces(global_State *g)
     GCtrace *t = (GCtrace *)gcref(J->trace[i]);
     lua_assert(!t || t->traceno == i);
     if (t && iswhite(g, t)) {
-      for (int j = 1; j < J->sizetrace-1; j--) {
-        GCtrace *t2 = (GCtrace *)gcref(J->trace[i]);
-        //lua_assert(!t2 || t->nextside == i || t->nextroot == i);
-      }
       lj_trace_free(g, t);
     }
   }
