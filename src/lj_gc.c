@@ -1829,7 +1829,7 @@ void LJ_FASTCALL lj_gc_barrieruv(global_State *g, TValue *tv)
     //lj_gc_appendgrayssb(g, gcV(tv));
   } else if (g->gc.isminor) {
     if (arenaobj_isblack(TV2MARKED(tv))) {
-      lj_gc_appendgrayssb(g, TV2MARKED(tv));
+      lj_gc_appendgrayssb(g, obj2gco(TV2MARKED(tv)));
       TV2MARKED(tv)->marked |= LJ_GCFLAG_GREY;
     }
   } else {
