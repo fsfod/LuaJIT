@@ -747,7 +747,6 @@ static void atomic_enqueue_finalizers(lua_State *L)
         GCobj *o = gcV(&n->key);
         if (iswhite(g, (void*)o)) {
           lj_gc_setfinalizable(L, o, NULL);
-          gc_markobj(g, gcV(&n->val));
         }
       }
     }
@@ -1318,6 +1317,23 @@ static void atomic_clear_weak(global_State *g)
   }
 }
 
+static void atomic_mark_misc(global_State *g)
+{
+#if LJ_HASFFI
+  CTState *cts = mref(g->ctype_state, CTState);
+  if (cts) {
+    gc_markobj(g, obj2gco(cts->miscmap));
+    gc_markobj(g, obj2gco(cts->finalizer));
+    /*
+    while (g->gc.sweeppos < cts->top) {
+      CType *ct = cts->tab + g->gc.sweeppos++;
+      gc_marknleaf(g, gcref(ct->name));
+    }
+    */
+  }
+#endif
+}
+
 /* Atomic part of the GC cycle, transitioning from mark to sweep phase. */
 static void atomic(global_State *g, lua_State *L)
 {
@@ -1332,6 +1348,7 @@ static void atomic(global_State *g, lua_State *L)
   gc_markthread(g, L);  /* Mark running thread. */
   gc_traverse_curtrace(g);  /* Traverse current trace. */
   gc_mark_gcroot(g);  /* Mark GC roots (again). */
+  atomic_mark_misc(g);
   gc_propagate_gray(g);  /* Propagate all of the above. */
 
   gc_deferred_marking(g);
