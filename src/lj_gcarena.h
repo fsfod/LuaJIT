@@ -259,6 +259,7 @@ void arena_free(global_State *g, GCArena *arena, void* mem, MSize size);
 MSize arena_shrinkobj(void* obj, MSize newsize);
 MSize arena_cellextent(GCArena *arena, MSize cell);
 
+MSize arena_get_freecellcount(GCArena *arena);
 LUA_API uint32_t arenaobj_cellcount(void *o);
 LUA_API CellState arenaobj_cellstate(void *o);
 

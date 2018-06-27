@@ -554,6 +554,67 @@ uint32_t* arena_getfreerangs(lua_State *L, GCArena *arena)
   return ranges;
 }
 
+MSize arena_get_freecellcount(GCArena *arena)
+{
+  MSize i, maxblock = arena_blockidx(arena->celltopid) + 1;
+  GCCellID startcell = 0;
+  MSize top = 0, freespace = 0;
+
+  for (i = MinBlockWord; i < maxblock; i++) {
+    GCBlockword freecells = arena_getfree(arena, i);
+
+    if (!freecells) {
+      continue;
+    }
+
+    uint32_t freecell = lj_ffs(freecells);
+    GCBlockword mask = ((GCBlockword)0xffffffff) << (freecell+1);
+
+    for (; freecell < (BlocksetBits-1);) {
+      GCBlockword extents = (arena->mark[i] | arena->block[i]) & mask;
+      MSize extend;
+
+      if (extents == 0) { /* Found no free or allocated blocks */
+        if (startcell) {
+          freespace += freecell + ((i * BlocksetBits) - startcell);
+        }
+        /* The bit to mark the end of this cell is in another blockword */
+        //extend = freecell + (BlocksetBits - freecell);
+        startcell = (i * BlocksetBits) + freecell;
+        lua_assert(arena_cellstate(arena, startcell) == CellState_Free);
+        break;
+      } else {
+        /* Scan for the first non zero(extent) cell */
+        extend = lj_ffs(extents);
+      }
+
+      if (!startcell) {
+        freespace += extend-freecell;
+      } else {
+        freespace += freecell + ((i * BlocksetBits) - startcell);
+        startcell = 0;
+      }
+
+      /* Create a mask to remove the bits to the LSB backwards the end of the free segment */
+      mask = ((GCBlockword)0xffffffff) << (extend);
+
+      /* Don't try to bit scan an empty mask */
+      if ((extend+1) >= BlocksetBits  || !(extents & mask) || !(freecells & mask)) {
+        break;
+      }
+
+      freecell = lj_ffs(freecells & mask);
+      mask = ((GCBlockword)0xffffffff) << (freecell+1);
+    }
+  }
+  /* If we didn't find any other free or allocated block */
+  if (startcell) {
+    freespace += maxblock*BlocksetBits - startcell;
+  }
+
+  return freespace;
+}
+
 GCCellID arena_firstallocated(GCArena *arena)
 {
   MSize i, limit = MaxBlockWord;
