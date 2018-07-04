@@ -1991,6 +1991,7 @@ void *lj_mem_realloc(lua_State *L, void *p, GCSize osz, GCSize nsz)
   lua_assert((nsz == 0) == (p == NULL));
   lua_assert(checkptrGC(p));
   g->gc.total = (g->gc.total - osz) + nsz;
+  g->gc.ctotal = (g->gc.ctotal - osz) + nsz;
   lua_assert(g->gc.total >= sizeof(GG_State));
   return p;
 }

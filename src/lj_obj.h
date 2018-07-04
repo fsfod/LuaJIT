@@ -580,7 +580,8 @@ typedef struct PQueue {
 #define LJ_GC_SSB_CAPACITY 128 
 
 typedef struct GCState {
-  GCSize total;		/* Memory currently allocated. */
+  GCSize total;		/* Combined total memory currently allocated. */
+  GCSize ctotal;        /* Memory currently allocated from the C allocator. */
   GCSize hugemem;	/* Memory currently allocated for huge objects. */
   GCSize threshold;	/* Memory threshold. */
   GCSize arenagrowth; 

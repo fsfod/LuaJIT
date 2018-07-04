@@ -179,6 +179,7 @@ static LJ_AINLINE void lj_mem_free(global_State *g, void *p, size_t osize)
 {
   lua_assert(!p || ((((size_t*)p)[-1] & ~7)-8) >= osize);
   g->gc.total -= (GCSize)osize;
+  g->gc.ctotal -= (GCSize)osize;
   g->allocf(g->allocd, p, osize, 0);
 }
 
