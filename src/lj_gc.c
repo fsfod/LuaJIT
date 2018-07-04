@@ -1615,8 +1615,8 @@ static void gc_atomicsweep(lua_State *L)
 static void gc_finish(lua_State *L)
 {
   global_State *g = G(L);
-  MSize emptycount = 0, empty_trav = 0, i;
-  GCSize estdead = 0, free = 0;
+  MSize travnum = 0, emptycount = 0, empty_trav = 0, i;
+  GCSize estdead = 0, free = 0, bumpleft = 0;
   gc_setstate(g, GCSpause);
   g->gc.stateflags &= ~GCSFLAG_HASFINALIZERS;
   g->gc.debt = 0;
@@ -1629,9 +1629,11 @@ static void gc_finish(lua_State *L)
       if (flags & ArenaFlag_TravObjs)
         empty_trav++;
     } else {
+      MSize bumpspare = (MaxUsableCellId - arena->celltopid) * 16;
       MSize freesz = arena_get_freecellcount(arena) * 16;
-      lua_assert(freesz != 0 || g->gc.freelists[i].freeobjcount == 0);
-      free += freesz + (MaxCellId - arena->celltopid) * 16;
+      //lua_assert((freesz != 0 && freesz < ((arena_topcellid(arena)-MinCellId)) * 16) || g->gc.freelists[i].freeobjcount == 0);
+      free += freesz;
+      bumpleft += bumpspare;
 
       MSize avgsz = flags & ArenaFlag_TravObjs ? 32 : 24;
       estdead += (GCSize)(g->gc.freelists[i].freeobjcount * avgsz);
@@ -1642,20 +1644,41 @@ static void gc_finish(lua_State *L)
     for (MSize i = 0; i < g->gc.arenastop; ) {
       MSize flags = lj_gc_arenaflags(g, i) & (ArenaFlag_Empty | ArenaFlag_Explicit);
       if (flags == ArenaFlag_Empty) {
-        lj_gc_freearena(g, lj_gc_arenaref(g, i));
+        //lj_gc_freearena(g, lj_gc_arenaref(g, i));
+        i++;
       } else {
         i++;
       }
     }
   }
 
-  GCSize arenamem = (g->gc.arenastop - emptycount) * ArenaMaxObjMem;
-  arenamem -= free;
+  GCSize arena_total = (g->gc.arenastop - emptycount) * ArenaMaxObjMem - bumpleft;
+  double freemb = free / (1024.0*1024.0);
+  GCSize bumpsize = emptycount * ArenaMaxObjMem + bumpleft;
+  GCSize real_atotal = arena_total - free;
 
-  if (g->gc.threshold > (g->gc.arenastop * ArenaSize) && emptycount > 6) {
-    g->gc.threshold;
+  double trigratio = g->gc.arenagrowth/(double)g->gc.threshold;  
+  double trig_atotal = real_atotal/(double)g->gc.threshold;
+
+  GCDEBUG("GCFinish: freecells= %g MB, \n", freemb);
+
+  GCSize basetotal = g->gc.hugemem + g->gc.ctotal;
+  g->gc.total = basetotal + arena_total;
+  g->gc.estimate = basetotal + arena_total;
+  //g->gc.estimate -= free;
+
+  if (emptycount > 6) {
+    GCSize target = arena_total + (emptycount/2) *ArenaMaxObjMem;
+    double agrowth = g->gc.arenagrowth / (double)ArenaMaxObjMem;
+    //target += g->gc.arenagrowth g->gc.stepmul;
+    target += basetotal;
+
+    g->gc.threshold = target;
+  } else {
+    g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
   }
   
+  lua_assert(g->gc.threshold > g->gc.total);
   g->gc.arenagrowth = 0;
 }
 
@@ -1766,19 +1789,19 @@ int LJ_FASTCALL lj_gc_step(lua_State *L)
   do {
     lim -= (GCSize)gc_onestep(L);
     if (g->gc.state == GCSpause) {
-      g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
+      //g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
       g->vmstate = ostate;
       SECTION_END(gc_step);
       return 1;  /* Finished a GC cycle. */
     }
   } while (sizeof(lim) == 8 ? ((int64_t)lim > 0) : ((int32_t)lim > 0));
   if (g->gc.debt < GCSTEPSIZE) {
-    g->gc.threshold = g->gc.total + GCSTEPSIZE;
+    //g->gc.threshold = g->gc.total + GCSTEPSIZE;
     g->vmstate = ostate;
     ret = -1;
   } else {
     g->gc.debt -= GCSTEPSIZE;
-    g->gc.threshold = g->gc.total;
+   // g->gc.threshold = g->gc.total;
     g->vmstate = ostate;
     ret = 0;
   }
