@@ -1426,6 +1426,11 @@ static void sweep_arena(global_State *g, MSize i, MSize celltop)
     //arena_setrangewhite(arena, celltop, celltop+256);
   }
   empty = (count & 0x10000) == 0;
+
+  /* The sweep found large free ranges that bump allocation can happen in */
+  if (count & 0x20000) {
+    lj_gc_cleararenaflags(g, i, ArenaFlag_NoBump);
+  }
 #ifdef LJ_ENABLESTATS
   log_arenasweep(i, empty, (uint32_t)TicksEnd(), count & 0xffff, currtop, lj_gc_arenaflags(g, i));
 #endif

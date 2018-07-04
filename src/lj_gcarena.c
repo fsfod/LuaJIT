@@ -867,33 +867,236 @@ static __m128i simd_popcntbytes(__m128i vec)
   return _mm_add_epi8(popcnt1, popcnt2);
 }
 
+
+static __m128i bitmasktovec(int mask)
+{
+  __m128i testmask = _mm_set1_epi64x(0x8040201008040201);
+  __m128i shuffle = _mm_setr_epi32(0x0, 0x0, 0x01010101, 0x01010101);
+
+  __m128i masknum = _mm_cvtsi32_si128(~mask);
+  /* Broadcast the lower 8 bits of the mask to B0-B7 and upper 8 bits to B7-B15 */
+  __m128i maskvec = _mm_shuffle_epi8(masknum, shuffle);
+  __m128i maskedbits = _mm_and_si128(maskvec, testmask);
+
+  return _mm_cmpeq_epi8(maskedbits, _mm_setzero_si128());
+}
+
+// https://github.com/aklomp/sse-intrinsics-tests
+static inline __m128i _mm_cmpgt_epu8(__m128i x, __m128i y)
+{
+  // Returns 0xFF where x > y:
+  return _mm_andnot_si128(_mm_cmpeq_epi8(x, y), 
+                          _mm_cmpeq_epi8(_mm_max_epu8(x, y), x));
+}
+
+#define _mm_cmpgtz_epu8(v0) \
+         _mm_cmpgt_epi8(_mm_xor_si128(v0, _mm_set1_epi8(-128)), \
+                                          _mm_set1_epi8(-128)))
+
+#define _mm_cmpgtz_epu32(v0) \
+         _mm_cmpgt_epi8(_mm_xor_si128(v0, _mm_set1_epi8(-128)), \
+                                          _mm_set1_epi8(-128)))
+
+static LJ_AINLINE __m128i _mm_cmpgt_epu32(__m128i x, __m128i y)
+{
+  return _mm_cmpgt_epi32(_mm_sub_epi32(x, _mm_set1_epi32(0x80000000)),
+                         _mm_sub_epi32(y, _mm_set1_epi32(0x80000000)));
+}
+
+static LJ_AINLINE __m128i _mm_cmpgt_epu16(__m128i x, __m128i y)
+{
+  return _mm_cmpgt_epi16(_mm_sub_epi16(x, _mm_set1_epi16(0x8000)),
+    _mm_sub_epi16(y, _mm_set1_epi16(0x8000)));
+}
+
+static char *dumpwordstate(GCBlockword block, GCBlockword mark, char *buf);
+
+static __m128i makecmpvec(__m128i bytemask, __m128i prev)
+{
+  const __m128i wordmask = _mm_setr_epi32(0xff, 0xffff, 0xffffff, 0xffffffff);
+  const __m128i shuffword_topbyte = _mm_setr_epi8(
+    /* 0 */ 3, /* 1 */ 7, /* 2 */ 11, /* 3 */ 15,
+    /* 4 */ 3, /* 5 */ 7, /* 6 */ 11, /* 7 */ 15,
+    /* 8 */ 3, /* 9 */ 7, /* a */ 11, /* b */ 15,
+    /* c */ 3, /* d */ 7, /* e */ 11, /* f */ 15
+  );
+
+  bytemask = _mm_or_si128(prev, _mm_bslli_si128(bytemask, 4));
+
+  __m128i cmpvec = _mm_srli_epi32(bytemask, 1);
+  __m128i result = _mm_shuffle_epi8(cmpvec, shuffword_topbyte);
+  result = _mm_and_si128(result, wordmask);
+  return result;
+}
+
+#define VIDX_U32(v, i) (((uint32_t *)&v)[i])
+
+#define DEBUG_WORDSTATE(block, mark, wordname) \
+  wordname##2 = dumpwordstate(VIDX_U32(block, 0), VIDX_U32(mark, 0), wordname##1); \
+  wordname##3 = dumpwordstate(VIDX_U32(block, 1), VIDX_U32(mark, 1), wordname##2); \
+  wordname##4 = dumpwordstate(VIDX_U32(block, 2), VIDX_U32(mark, 2), wordname##3); \
+                dumpwordstate(VIDX_U32(block, 3), VIDX_U32(mark, 3), wordname##4);
+
+static __m128i coalessfree_32bit(__m128i block, __m128i newmark, __m128i *prevfree)
+{
+#ifdef DEBUG
+  char state[512] = {0};
+  char *pos, *word1 = state, *word2, *word3, *word4;
+  DEBUG_WORDSTATE(block, newmark, word);
+#endif
+  /* Words with no block bits pass along the free prefix and free end words can restart
+  *  words ending in a block will zero out the prefix.
+  */
+  __m128i noblocks = _mm_cmpeq_epi32(block, _mm_setzero_si128()); 
+  __m128i freeend = _mm_cmpgt_epu32(newmark, block);
+
+  __m128i freecmp = makecmpvec(freeend, *prevfree);
+  __m128i blockcmp = _mm_xor_si128(noblocks, _mm_set1_epi32(-1));
+  blockcmp = _mm_andnot_si128(freeend, blockcmp);
+  blockcmp = makecmpvec(blockcmp, _mm_setzero_si128());
+
+  /* Checked if that the previous words ended in a free bit */
+  __m128i clearfree = _mm_cmpgt_epi32(freecmp, blockcmp);
+  *prevfree = _mm_bsrli_si128(_mm_or_si128(_mm_and_si128(clearfree, noblocks), freeend), 12);
+  /* Don't clear any freeend words with block bits in them */  
+  clearfree = _mm_and_si128(clearfree, noblocks);
+
+  /* Clear free bits so there now extents */
+  __m128i mark = _mm_andnot_si128(clearfree, newmark);
+#ifdef DEBUG
+  DEBUG_WORDSTATE(block, mark, word);
+#endif
+  return mark;
+}
+
+static __m128i makecmpvec_8bit(uint32_t mask)
+{
+  const __m128i wordmask = _mm_set1_epi64x(0xFF7F3F1F0F070301);
+  const __m128i spreadmask = _mm_setr_epi8(
+    /* 0 */ 0, /* 1 */ 0, /* 2 */ 0, /* 3 */ 0,
+    /* 4 */ 0, /* 5 */ 0, /* 6 */ 0, /* 7 */ 0,
+    /* 8 */ 1, /* 9 */ 1, /* a */ 1, /* b */ 1,
+    /* c */ 1, /* d */ 1, /* e */ 1, /* f */ 1
+  );
+
+  __m128i cmpvec = _mm_cvtsi32_si128(mask);
+  __m128i result = _mm_shuffle_epi8(cmpvec, spreadmask);
+  result = _mm_and_si128(result, wordmask);
+  return result;
+}
+
+static __m128i coalessfree_8bit(__m128i block, __m128i newmark, int *prevfree)
+{
+  __m128i noblocks = _mm_cmpeq_epi8(block, _mm_setzero_si128());
+  __m128i freeend = _mm_cmpgt_epu8(newmark, block);
+  uint32_t freeend_mask = _mm_movemask_epi8(freeend);
+  /* Only keep block bits that don't end in a free cell */
+  uint32_t block_mask = ~freeend_mask & (uint16_t)~_mm_movemask_epi8(noblocks);
+
+#ifdef DEBUG
+  char state[512] = {0};
+  char *pos, *word1 = state, *word2, *word3, *word4;
+  DEBUG_WORDSTATE(block, newmark, word);
+#endif
+
+  /* Manually propagate the free end state of the lower 8 bits to upper 8 bits 
+  *  by setting bit 8 */
+  uint32_t lowend = ((freeend_mask | *prevfree) & 0xff) > (block_mask & 0xff) ? 0x100 : 0;
+  /* Shift everything right so were comparing clear mid bit */
+  uint32_t mask = ((freeend_mask << 1) & ~0x100) | *prevfree | lowend;
+  __m128i freecmp = makecmpvec_8bit(mask);
+  /* Set a fake block bit if the lower bits don't end in freeend */
+  __m128i blockcmp = makecmpvec_8bit(((block_mask << 1) & ~0x100) | (0x100 & ~lowend));
+
+  /* perform a simd check that previous non extent block bytes ended in a free bit */
+  __m128i clearfree = _mm_cmpgt_epu8(freecmp, blockcmp);
+  *prevfree = (freeend_mask | *prevfree) > block_mask ? 1 : 0;
+  /* Don't clear any freeend bytes with block bits in them */
+  clearfree = _mm_and_si128(clearfree, noblocks);
+
+  /* Clear free bits so there now extents */
+  __m128i mark = _mm_andnot_si128(clearfree, newmark);
+#ifdef DEBUG
+  DEBUG_WORDSTATE(block, mark, word);
+#endif
+  return mark;
+}
+
+#if 0
+void testclearfree()
+{
+
+#define VOR(v1, v2) (_mm_or_si128(v1, v2))
+
+  int LBits = 0x55555555;
+  int Hbits = 0xaaaaaaaa;
+  __m128i previsfree = _mm_cvtsi32_si128(-1);
+  __m128i Vones = _mm_set1_epi32(-1);
+  __m128i Vzero = _mm_setzero_si128();
+  __m128i halfonesL = _mm_setr_epi32(LBits, LBits, 0, 0);
+  __m128i halfonesH = _mm_setr_epi32(Hbits, Hbits, 0, 0);
+  __m128i upper_halfonesL = _mm_setr_epi32(0, 0, LBits, LBits);
+  __m128i upper_halfonesH = _mm_setr_epi32(0, 0, Hbits, Hbits);
+  __m128i W1onesL = _mm_setr_epi32(0, LBits, 0, 0);
+  __m128i W1onesH = _mm_setr_epi32(0, Hbits, 0, 0);
+  __m128i W2onesL = _mm_setr_epi32(0, 0, LBits, 0);
+  __m128i W2onesH = _mm_setr_epi32(0, 0, Hbits, 0);
+
+  coalessfree(W1onesH, VOR(W1onesL, upper_halfonesL), previsfree);
+  coalessfree(VOR(W1onesH, W2onesL), VOR(W1onesL, W2onesH), Vzero);
+  coalessfree(W1onesL, VOR(W1onesH, W2onesL), Vzero);
+  coalessfree(W1onesL, VOR(W1onesH, upper_halfonesL), previsfree);
+  coalessfree(W1onesH, W1onesL, previsfree);
+
+  coalessfree(W1onesL, W1onesH, previsfree);
+  coalessfree(W1onesH, W1onesL, previsfree);
+  coalessfree(Vzero, Vones, previsfree);
+}
+
+#endif
+
+static uint64_t maskrotate = 0x0;
+
 /* Time to sweep full 1mb arena uncached 4k(cached 800) cycles */
 static MSize sweep_simd(GCArena *arena, MSize start, MSize limit, int minor)
 {
   MSize i;
   __m128i count = _mm_setzero_si128();
   __m128i *pblock = (__m128i *)(arena->block), *pmark = (__m128i *)(arena->mark);
-  __m128i used = _mm_setzero_si128();
+  __m128i used = _mm_setzero_si128(), prevfree = _mm_cvtsi32_si128(-1);
   limit = lj_round(limit, 4)/4;/* Max block should be a multiple of 4*/
   MSize blockoffset = 0;// (MinBlockWord/4);
+  MSize freelen = 0;
+  uint32_t freeranges[(MaxBlockWord-MinBlockWord)/8] = {0};
+  uint32_t rangetop = 0, maxfree, free_edges = 0;
+  GCCellID rangestart = 0;
+  int bprevfree = 1;
 
   for (i = start/4; i < limit; i += 1) {
    // _mm_prefetch((char *)(pmark+i+4), 1);
     __m128i block = _mm_load_si128(pblock+i-blockoffset);
     __m128i mark = _mm_load_si128(pmark+i);
-    __m128i newmark;
+    __m128i newmark, freeend;
     /* Count whites that are swept to away */
     __m128i dead = _mm_andnot_si128(mark, block);
 
     if (!minor) {
       newmark = _mm_xor_si128(block, mark);
+      freeend = _mm_cmpgt_epu8(newmark, block);
     } else {
       newmark = _mm_or_si128(block, mark);
     }
-    _mm_store_si128(pmark+i, newmark);
+
     block = _mm_and_si128(block, mark);
     used = _mm_or_si128(block, used);
     _mm_store_si128(pblock+i - blockoffset, block);
+
+#if 1
+    newmark = coalessfree_8bit(block, newmark, &bprevfree);
+#else
+    newmark = coalessfree_32bit(block, newmark, &prevfree);
+#endif
+    _mm_store_si128(pmark+i, newmark);
 
     __m128i bytecount = simd_popcntbytes(dead);
 #if 0
@@ -905,20 +1108,59 @@ static MSize sweep_simd(GCArena *arena, MSize start, MSize limit, int minor)
     count = _mm_add_epi64(count, _mm_sad_epu8(bytecount, _mm_setzero_si128()));
 #endif
 
-    /* if block < mark word ends in a white */
-    //__m128i whiteend = _mm_cmplt_epi8(block, mark);
-    //
-    //__m128i noblocks = _mm_cmpeq_epi8(block, _mm_setzero_si128());
-    //__m128i extent = _mm_cmpeq_epi8(_mm_or_si128(block, mark), _mm_setzero_si128());
-    //
-    //__m128i previswhite = _mm_srli_si128(whiteend, 1);
-    //__m128i whiteonly = _mm_cmpeq_epi8(_mm_andnot_si128(mark, block), _mm_setzero_si128());
-    //
-    //__m128i clear = _mm_and_si128(noblocks, previswhite);
-    //int bp = _mm_movemask_epi8(clear);
-    //mark = _mm_andnot_si128(mark, clear);
-    //_mm_storeu_si128(pmark, mark);
+    __m128i ones = _mm_cmpeq_epi32(_mm_setzero_si128(), _mm_setzero_si128());
+    __m128i hasblocks = _mm_xor_si128(_mm_cmpeq_epi8(block, _mm_setzero_si128()), ones);
 
+    /* Does the bitmap byte have free bits in it */
+    __m128i nofree = _mm_cmpeq_epi8(newmark, _mm_setzero_si128());
+    __m128i hasfree = _mm_xor_si128(nofree, ones);
+
+
+    __m128i freeonly = _mm_andnot_si128(hasblocks, hasfree) ;
+
+    uint32_t freeend_mask = _mm_movemask_epi8(freeend);
+    uint32_t freeonly_mask = _mm_movemask_epi8(freeonly);
+    uint32_t block_mask = _mm_movemask_epi8(hasblocks);
+
+#ifdef DEBUG
+    char state[512] = {0};
+    char *word1 = state, *word2, *word3, *word4;
+    DEBUG_WORDSTATE(block, newmark, word);
+#endif 
+
+    /* If we have live objects in any of these four blocks check if we are 
+    ** currently in a free range mark the end of the current free range
+    */
+    if (block_mask) {
+      if (rangestart != 0) {
+        int firstnonfree = lj_ffs(block_mask);
+        int end = ((i*128) + firstnonfree*8);
+        int size = end - rangestart;
+        if (size > 128) {
+          freeranges[rangetop] = (size << 16) | rangestart;
+          rangetop++;
+          lua_assert(rangetop < (sizeof(freeranges)/4));
+        } else {
+          free_edges++;
+        }
+
+      }
+      rangestart = 0;
+    }
+ 
+    uint32_t freemask = freeend_mask >= block_mask ? freeend_mask : 0;
+
+    if (freeonly_mask > block_mask && (!freemask || freeonly_mask < freeend_mask)) {
+      freemask = freeonly_mask;
+    }
+
+    if (freemask && (!rangestart || block_mask)) {
+      /* Could try harder and bit scan the word that this cell is in to get 
+      ** the real free cell start.
+      */
+      int lastfree = lj_fls(freemask) + 1;
+      rangestart = (i*128) + lastfree*8;
+    }
   }
 
   used = _mm_or_si128(used, _mm_srli_si128(used, 8));
@@ -932,8 +1174,62 @@ static MSize sweep_simd(GCArena *arena, MSize start, MSize limit, int minor)
   count = _mm_add_epi32(_mm_srli_si128(count, 4), count);
 #endif
 
+  ArenaFreeList *freelist = arena_freelist(arena);
+  int hasliveobj = _mm_cvtsi128_si32(used);
   /* Set the 16th bit if there are still any reachable objects in the arena */
-  return (_mm_cvtsi128_si32(count) &  0xffff) | (_mm_cvtsi128_si32(used) ? (1 << 16) : 0);
+  MSize result = (_mm_cvtsi128_si32(count) &  0xffff) | (hasliveobj ? (1 << 16) : 0);
+
+  if (rangetop > 0 && hasliveobj) {
+    uint32_t range = freeranges[rangetop-1];
+    freelist->oversized = (uint32_t *)arena_cell(arena, range & 0xffff);
+    char state[512] = {0};
+    char *pos, *word1 = state, *word2, *word3, *word4;
+    word2 = arena_dumpwordstate(arena, arena_blockidx(range & 0xffff)-1, state);
+    arena_dumpwordstate(arena, arena_blockidx(range & 0xffff), word2);
+    if (rangetop > 1) {
+      freelist->listsz = ((range >> 16) * 16) / 4;
+      rangetop--;
+      freelist->top = rangetop;
+      memcpy(freelist->oversized, freeranges, rangetop * sizeof(uint32_t));
+    } else {
+      //freelist->oversized[0] = range;
+      freelist->listsz = 1;
+      freelist->top = 1;
+    }
+    result |= (1 << 17);
+  } else {
+    freelist->oversized = NULL;
+    freelist->top = 0;
+  }
+  
+  return result;
+}
+
+
+static __m128i simd_lastbitset(__m128i vec)
+{
+  const __m128i firstbit = _mm_setr_epi8(
+    /* 0 */ 0, /* 1 */ 1, /* 2 */ 2, /* 3 */ 1,
+    /* 4 */ 3, /* 5 */ 1, /* 6 */ 2, /* 7 */ 1,
+    /* 8 */ 4, /* 9 */ 1, /* a */ 2, /* b */ 1,
+    /* c */ 3, /* d */ 1, /* e */ 3, /* f */ 1
+  );
+
+  const __m128i lastbit = _mm_setr_epi8(
+    /* 0 */ 0, /* 1 */ 1, /* 2 */ 2, /* 3 */ 2,
+    /* 4 */ 3, /* 5 */ 3, /* 6 */ 3, /* 7 */ 3,
+    /* 8 */ 4, /* 9 */ 4, /* a */ 4, /* b */ 4,
+    /* c */ 4, /* d */ 4, /* e */ 4, /* f */ 4
+  );
+
+  const __m128i low_mask = _mm_set1_epi8(0x0f);
+
+  const __m128i lo = _mm_and_si128(vec, low_mask);
+  const __m128i hi = _mm_and_si128(_mm_srli_epi16(vec, 4), low_mask);
+  const __m128i bitslow = _mm_shuffle_epi8(firstbit, lo);
+  const __m128i bitshigh = _mm_srli_epi32(_mm_shuffle_epi8(firstbit, hi), 4);
+
+  return _mm_max_epi8(bitslow, bitshigh);
 }
 
 static MSize majorsweep(GCArena *arena, MSize start, MSize limit)
