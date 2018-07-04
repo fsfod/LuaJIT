@@ -1288,38 +1288,30 @@ LUA_API uint32_t arenaobj_cellcount(void *o)
   return arena_cellextent(arena, cell);
 }
 
-char tmp[256] = { 0 };
-
-const char* arena_dumpwordstate(GCArena *arena, int blockidx)
+static char *dumpwordstate(GCBlockword block, GCBlockword mark, char *buf)
 {
-  char *pos = tmp;
-  GCBlockword block = arena->block[blockidx];
-  GCBlockword mark = arena->mark[blockidx];
+  char *pos = buf;
   GCBlockword free = mark & ~block;
 
-  memset(pos, '-', 64);
-  pos += 64;
-  *(pos++) = '\n';
-
-  for (size_t i = 0; i < 32; i++) {
+  for (size_t i = 0; i < BlocksetBits; i++) {
     GCBlockword bit = 1 << i;
-    *(pos++) = '|';
+    *(pos++) = (i & 7) == 0 ? ';' : '|';
 
     if (!(bit & (mark | block))) {
-      *(pos++) = ' ';/* Extent cell */
+      *(pos++) = '-';/* Extent cell */
     } else if (free & bit) {
       *(pos++) = 'F';/* Freeded cell */
     } else {
       *(pos++) = mark & bit ? 'B' : 'W';/* Live cell */
     }
   }
-
-  *(pos++) = '\n';
-  memset(pos, '-', 64);
-  pos += 64;
-  *(pos++) = '\n';
   *(pos++) = 0;
-  return tmp;
+  return pos;
+}
+
+char *arena_dumpwordstate(GCArena *arena, int blockidx, char *buf)
+{
+  return dumpwordstate(arena->block[blockidx], arena->mark[blockidx], buf);
 }
 
 enum HugeFlags {

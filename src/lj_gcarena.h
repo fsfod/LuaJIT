@@ -308,7 +308,7 @@ static LJ_AINLINE GCArena *ptr2arena(void* ptr)
 
 LUA_API GCBlockword *arenaobj_getblockword(void *o);
 LUA_API GCBlockword *arenaobj_getmarkword(void *o);
-LUA_API const char* arena_dumpwordstate(GCArena *arena, int blockidx);
+LUA_API char* arena_dumpwordstate(GCArena *arena, int blockidx, char *buf);
 
 static inline CellState arena_cellstate(GCArena *arena, GCCellID cell)
 {
