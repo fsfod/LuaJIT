@@ -195,7 +195,7 @@ typedef struct HugeBlockTable {
 #define arena_cellobj(arena, cellidx) ((GCobj *)&(arena)->cells[(cellidx)])
 #define arena_celltop(arena) ((arena)->cells+arena_topcellid(arena))
 /* Can the arena bump allocate a min number of contiguous cells */
-#define arena_canbump(arena, mincells) ((arena_topcellid(arena)+mincells) < MaxUsableCellId)
+#define arena_canbump(arena, mincells) ((arena_topcellid(arena)+mincells) < (arena)->celltopmax)
 #define arena_topcellid(arena) ((arena)->celltopid)
 #define arena_blocktop(arena) ((arena_topcellid(arena) & ~BlocksetMask)/BlocksetBits)
 #define arena_freelist(arena) mref((arena)->freelist, ArenaFreeList)
