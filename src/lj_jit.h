@@ -106,6 +106,10 @@
   \
   _(\007, hotloop,	56)	/* # of iter. to detect a hot loop. */ \
   _(\007, hotfunc,	56*2)	/* # of iter. to detect a hot function. */ \
+  _(\013, penaltyloop, 36) /*. initial penalty hot counter back off value */ \
+  _(\013, penaltyfunc, (36*2)) /* initial penalty hot counter back off value  */ \
+  _(\016, penaltymaxloop, 25000) /* max the loop hot count backoff can be increased to */ \
+  _(\016, penaltymaxfunc, 50000) /* max the function hot count backoff can be increased to  */ \
   _(\007, hotexit,	10)	/* # of taken exits to start a side trace. */ \
   _(\007, tryside,	4)	/* # of attempts to compile a side trace. */ \
   \
@@ -289,8 +293,6 @@ typedef struct HotPenalty {
 } HotPenalty;
 
 #define PENALTY_SLOTS	64	/* Penalty cache slot. Must be a power of 2. */
-#define PENALTY_MIN	(36*2)	/* Minimum penalty value. */
-#define PENALTY_MAX	60000	/* Maximum penalty value. */
 #define PENALTY_RNDBITS	4	/* # of random bits to add to penalty value. */
 
 /* Round-robin backpropagation cache for narrowing conversions. */

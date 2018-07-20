@@ -10,9 +10,26 @@ local fhot = 56 * 2
 local lhot = 56
 local func_penalty = 36 * 2
 local loop_penalty = 36
-local maxattemps_func = 11
-local maxattemps_loop = 11
+local maxattemps_func = 9
+local maxattemps_loop = 6
 local random_backoff = 15
+
+local function getmaxcount(attempts, penalty)
+  local count = penalty + 16
+  for i = 1, attempts - 2 do
+    count = (count * 2) + 16
+    if count > 0xffff then
+      error("Attempt count of "..count.." for attempt "..i.." is larger than the max value of uint16_t")
+    end
+  end
+  return count
+end
+
+local countmax_func = getmaxcount(maxattemps_func, func_penalty)
+local countmax_loop = getmaxcount(maxattemps_loop, loop_penalty)
+print("penaltymaxfunc="..countmax_func, "penaltymaxloop="..countmax_loop)
+
+jit.opt.start("penaltymaxfunc="..countmax_func, "penaltymaxloop="..countmax_loop)
 
 local function calln(f, n, ...)
   for i = 1, n do

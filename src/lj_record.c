@@ -555,7 +555,7 @@ static int innerloopleft(jit_State *J, const BCIns *pc)
     if (mref(J->penalty[i].pc, const BCIns) == pc) {
       if ((J->penalty[i].reason == LJ_TRERR_LLEAVE ||
 	   J->penalty[i].reason == LJ_TRERR_LINNER) &&
-	  J->penalty[i].val >= 2*PENALTY_MIN)
+	  J->penalty[i].val >= (J->param[JIT_P_penaltyloop]*2))
 	return 1;
       break;
     }

@@ -334,7 +334,7 @@
 |
 |// Decrement hashed hotcount and trigger trace recorder if zero.
 |.macro hotloop, reg
-|  sub word [PCd+2], 2
+|  sub word [PCd+2], 1
 |  jb ->vm_hotloop
 |.endmacro
 |
