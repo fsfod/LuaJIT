@@ -105,13 +105,6 @@ LJLIB_CF(jit_sethot)
   GCproto *pt = check_Lproto(L, 0);
   int32_t count = lj_lib_checkint(L, 2);
   int32_t loopid = lj_lib_optint(L, 3, -1);
-  /*
-  ** Loops decrement the count by two instead of one like functions when using
-  ** shared hot counters.
-  */
-  if (loopid != -1) {
-    count = count * 2;
-  }
 
   if (count < 0 || count > 0xffff) {
     luaL_error(L, "bad hot count value");
@@ -126,13 +119,12 @@ LJLIB_CF(jit_sethot)
     BCIns *bc = proto_bc(pt);
     MSize hci = 0, i = 0;
     for (i = 0; i != pt->sizebc; i++) {
-      int iscountbc = bc_op(bc[i]) == BC_FORL || bc_op(bc[i]) == BC_ITERL ||
-                      bc_op(bc[i]) == BC_LOOP;
+      int iscountbc = bc_op(bc[i]) == BC_LOOPHC;
       if (iscountbc) {
         if (++hci == loopid) {
           BCIns *hcbc = bc + i;
-          int old = hotcount_get(L2GG(L), hcbc);
-          hotcount_set(L2GG(L), hcbc, count);
+          int old = hotcount_loop_get(hcbc-1);
+          hotcount_loop_set(hcbc-1, count);
           setintV(L->top-1, old);
           return 1;
         }

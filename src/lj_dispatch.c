@@ -464,7 +464,7 @@ static int call_init(lua_State *L, GCfunc *fn)
 }
 
 /* Call dispatch. Used by call hooks, hot calls or when recording. */
-ASMFunction LJ_FASTCALL lj_dispatch_call(lua_State *L, const BCIns *pc)
+ASMFunction LJ_FASTCALL lj_dispatch_call(lua_State *L, BCIns *pc)
 {
   ERRNO_SAVE
   GCfunc *fn = curr_func(L);
@@ -480,7 +480,7 @@ ASMFunction LJ_FASTCALL lj_dispatch_call(lua_State *L, const BCIns *pc)
 #ifdef LUA_USE_ASSERT
     ptrdiff_t delta = L->top - L->base;
 #endif
-    pc = (const BCIns *)((uintptr_t)pc & ~(uintptr_t)1);
+    pc = (BCIns *)((uintptr_t)pc & ~(uintptr_t)1);
     lj_trace_hot(J, pc);
     lua_assert(L->top - L->base == delta);
     goto out;

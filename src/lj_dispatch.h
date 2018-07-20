@@ -119,6 +119,12 @@ typedef struct GG_State {
 #define hotcount_set(gg, pc, val) \
   (hotcount_get((gg), (pc)) = (HotCount)(val))
 
+#define hotcount_loop_get(pc) \
+  ((HotCount)(((pc)[1]) >> 16))
+
+#define hotcount_loop_set(pc, val) \
+  (pc)[1] = (((pc)[1] & 0xffff) | ((val) << 16))
+
 /* Dispatch table management. */
 LJ_FUNC void lj_dispatch_init(GG_State *GG);
 #if LJ_HASJIT
@@ -128,7 +134,7 @@ LJ_FUNC void lj_dispatch_update(global_State *g);
 
 /* Instruction dispatch callback for hooks or when recording. */
 LJ_FUNCA void LJ_FASTCALL lj_dispatch_ins(lua_State *L, const BCIns *pc);
-LJ_FUNCA ASMFunction LJ_FASTCALL lj_dispatch_call(lua_State *L, const BCIns*pc);
+LJ_FUNCA ASMFunction LJ_FASTCALL lj_dispatch_call(lua_State *L, BCIns*pc);
 #if LJ_HASJIT
 LJ_FUNCA void LJ_FASTCALL lj_dispatch_stitch(jit_State *J, const BCIns *pc);
 #endif

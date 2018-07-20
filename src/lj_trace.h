@@ -34,7 +34,7 @@ LJ_FUNC void lj_trace_freestate(global_State *g);
 
 /* Event handling. */
 LJ_FUNC void lj_trace_ins(jit_State *J, const BCIns *pc);
-LJ_FUNCA void LJ_FASTCALL lj_trace_hot(jit_State *J, const BCIns *pc);
+LJ_FUNCA void LJ_FASTCALL lj_trace_hot(jit_State *J, BCIns *pc);
 LJ_FUNCA void LJ_FASTCALL lj_trace_stitch(jit_State *J, const BCIns *pc);
 LJ_FUNCA int LJ_FASTCALL lj_trace_exit(jit_State *J, void *exptr);
 
