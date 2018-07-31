@@ -1836,12 +1836,9 @@ static void asm_cnew(ASMState *as, IRIns *ir)
     return;
   }
 
-  /* Combine initialization of marked, gct and ctypeid. */
-  emit_movtomro(as, RID_ECX, RID_RET, offsetof(GCcdata, marked));
-  emit_gri(as, XG_ARITHi(XOg_OR), RID_ECX,
-	   (int32_t)((~LJ_TCDATA<<8)+(id<<16)));
-  emit_gri(as, XG_ARITHi(XOg_AND), RID_ECX, LJ_GC_WHITES);
-  emit_opgl(as, XO_MOVZXb, RID_ECX, gc.currentwhite);
+  /* Combine initialization of gcflags, gctype and ctypeid. */
+  emit_movmroi(as, RID_RET, offsetof(GCcdata, gcflags),
+               (id<<16)+((LJ_TCDATA&0xff)<<8)+0);
 
   args[0] = ASMREF_L;     /* lua_State *L */
   args[1] = ASMREF_TMP1;  /* MSize size   */

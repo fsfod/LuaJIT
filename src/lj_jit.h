@@ -259,7 +259,8 @@ typedef struct GCtrace {
   uint8_t unused1;
 } GCtrace;
 
-#define gco2trace(o)	check_exp((o)->gch.gct == ~LJ_TTRACE, (GCtrace *)(o))
+#define gco2trace(o) \
+  check_exp((o)->gch.gctype == (int8_t)(uint8_t)LJ_TTRACE, (GCtrace *)(o))
 #define traceref(J, n) \
   check_exp((n)>0 && (MSize)(n)<J->sizetrace, \
     (GCtrace *)((uintptr_t)gcrefu(J->trace[(n)]) & ~(uintptr_t)15))

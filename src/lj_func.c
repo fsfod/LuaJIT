@@ -36,8 +36,7 @@ static GCupval *func_finduv(lua_State *L, TValue *slot)
   }
   /* No matching upvalue found. Create a new one. */
   uv = lj_mem_newt(L, sizeof(GCupval), GCupval);
-  newwhite(g, uv);
-  uv->gct = ~LJ_TUPVAL;
+  uv->gctype = (int8_t)(uint8_t)~LJ_TUPVAL;
   setmref(uv->v, slot);  /* Pointing to the stack slot. */
   /* NOBARRIER: The GCupval is new (marked white) and open. */
   setgcrefr(uv->nextgc, *pp);  /* Insert into sorted list of open upvalues. */
@@ -49,7 +48,7 @@ static GCupval *func_finduv(lua_State *L, TValue *slot)
 static GCupval *func_emptyuv(lua_State *L)
 {
   GCupval *uv = (GCupval *)lj_mem_newgco(L, sizeof(GCupval));
-  uv->gct = ~LJ_TUPVAL;
+  uv->gctype = (int8_t)(uint8_t)~LJ_TUPVAL;
   setnilV(&uv->tv);
   setmref(uv->v, &uv->tv);
   return uv;
@@ -73,7 +72,8 @@ void LJ_FASTCALL lj_func_closeuv(lua_State *L, TValue *level)
 GCfunc *lj_func_newC(lua_State *L, MSize nelems, GCtab *env)
 {
   GCfunc *fn = (GCfunc *)lj_mem_newgco(L, sizeCfunc(nelems));
-  fn->c.gct = ~LJ_TFUNC;
+  fn->c.gcflags = LJ_GCFLAG_GREY;
+  fn->c.gctype = (int8_t)(uint8_t)LJ_TFUNC;
   fn->c.ffid = FF_C;
   fn->c.nupvalues = (uint8_t)nelems;
   /* NOBARRIER: The GCfunc is new (marked white). */
@@ -86,7 +86,8 @@ static GCfunc *func_newL(lua_State *L, GCproto *pt, GCtab *env)
 {
   uint32_t count;
   GCfunc *fn = (GCfunc *)lj_mem_newgco(L, sizeLfunc((MSize)pt->sizeuv));
-  fn->l.gct = ~LJ_TFUNC;
+  fn->l.gcflags = LJ_GCFLAG_GREY;
+  fn->l.gctype = (int8_t)(uint8_t)LJ_TFUNC;
   fn->l.ffid = FF_LUA;
   fn->l.nupvalues = 0;  /* Set to zero until upvalues are initialized. */
   /* NOBARRIER: Really a setgcref. But the GCfunc is new (marked white). */

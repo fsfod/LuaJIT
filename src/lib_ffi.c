@@ -516,9 +516,9 @@ LJLIB_CF(ffi_new)	LJLIB_REC(.)
       GCtab *t = cts->finalizer;
       if (gcref(t->metatable)) {
 	/* Add to finalizer table, if still enabled. */
+	cd->gcflags |= LJ_GCFLAG_CDATA_FIN;
 	copyTV(L, lj_tab_set(L, t, o-1), tv);
 	lj_gc_anybarriert(L, t);
-	cd->marked |= LJ_GC_CDATA_FIN;
       }
     }
   }

@@ -47,7 +47,7 @@ static TValue *index2adr(lua_State *L, int idx)
     return registry(L);
   } else {
     GCfunc *fn = curr_func(L);
-    api_check(L, fn->c.gct == ~LJ_TFUNC && !isluafunc(fn));
+    api_check(L, fn->c.gctype == (int8_t)(uint8_t)LJ_TFUNC && !isluafunc(fn));
     if (idx == LUA_ENVIRONINDEX) {
       TValue *o = &G(L)->tmptv;
       settabV(L, o, tabref(fn->c.env));
@@ -73,7 +73,8 @@ static TValue *stkindex2adr(lua_State *L, int idx)
 static GCtab *getcurrenv(lua_State *L)
 {
   GCfunc *fn = curr_func(L);
-  return fn->c.gct == ~LJ_TFUNC ? tabref(fn->c.env) : tabref(L->env);
+  return fn->c.gctype == (int8_t)(uint8_t)LJ_TFUNC ? tabref(fn->c.env)
+						   : tabref(L->env);
 }
 
 /* -- Miscellaneous API functions ----------------------------------------- */
@@ -167,7 +168,7 @@ static void copy_slot(lua_State *L, TValue *f, int idx)
     setgcref(L->env, obj2gco(tabV(f)));
   } else if (idx == LUA_ENVIRONINDEX) {
     GCfunc *fn = curr_func(L);
-    if (fn->c.gct != ~LJ_TFUNC)
+    if (fn->c.gctype != (int8_t)(uint8_t)LJ_TFUNC)
       lj_err_msg(L, LJ_ERR_NOENV);
     api_check(L, tvistab(f));
     setgcref(fn->c.env, obj2gco(tabV(f)));

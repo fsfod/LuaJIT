@@ -207,8 +207,8 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
   global_State *g = &GG->g;
   if (GG == NULL || !checkptrGC(GG)) return NULL;
   memset(GG, 0, sizeof(GG_State));
-  L->gct = ~LJ_TTHREAD;
-  L->marked = LJ_GC_WHITE0 | LJ_GC_FIXED | LJ_GC_SFIXED;  /* Prevent free. */
+  L->gcflags = LJ_GCFLAG_GREY;
+  L->gctype = (int8_t)(uint8_t)LJ_TTHREAD;
   L->dummy_ffid = FF_C;
   setmref(L->glref, g);
   g->gc.currentwhite = LJ_GC_WHITE0 | LJ_GC_FIXED;
@@ -293,7 +293,8 @@ LUA_API void lua_close(lua_State *L)
 lua_State *lj_state_new(lua_State *L)
 {
   lua_State *L1 = lj_mem_newobj(L, lua_State);
-  L1->gct = ~LJ_TTHREAD;
+  L1->gcflags = LJ_GCFLAG_GREY;
+  L1->gctype = (int8_t)(uint8_t)LJ_TTHREAD;
   L1->dummy_ffid = FF_C;
   L1->status = LUA_OK;
   L1->stacksize = 0;

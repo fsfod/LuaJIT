@@ -340,7 +340,7 @@ TValue *lj_meta_equal(lua_State *L, GCobj *o1, GCobj *o2, int ne)
     if (LJ_FR2) setnilV(top++);
     copyTV(L, top++, mo);
     if (LJ_FR2) setnilV(top++);
-    it = ~(uint32_t)o1->gch.gct;
+    it = (uint32_t)(int32_t)o1->gch.gctype;
     setgcV(L, top, o1, it);
     setgcV(L, top+1, o2, it);
     return top;  /* Trigger metamethod call. */

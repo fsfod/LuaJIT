@@ -407,30 +407,32 @@ static void gc_traverse_thread(global_State *g, lua_State *th)
 static size_t propagatemark(global_State *g)
 {
   GCobj *o = gcref(g->gc.gray);
-  int gct = o->gch.gct;
   lua_assert(isgray(o));
-  gray2black(o);
   setgcrefr(g->gc.gray, o->gch.gclist);  /* Remove from gray list. */
-  if (LJ_LIKELY(gct == ~LJ_TTAB)) {
+  int8_t gctype = o->gch.gctype;
+  lua_assert(ismarked(g, o));
+  lua_assert(o->gch.gcflags & LJ_GCFLAG_GREY);
+  o->gch.gcflags &= ~LJ_GCFLAG_GREY;
+  if (LJ_LIKELY(gctype == (int8_t)(uint8_t)LJ_TTAB)) {
     GCtab *t = gco2tab(o);
     if (gc_traverse_tab(g, t) > 0)
       black2gray(o);  /* Keep weak tables gray. */
     return sizeof(GCtab) + sizeof(TValue) * t->asize +
 			   (t->hmask ? sizeof(Node) * (t->hmask + 1) : 0);
-  } else if (LJ_LIKELY(gct == ~LJ_TFUNC)) {
+  } else if (LJ_LIKELY(gctype == (int8_t)(uint8_t)LJ_TFUNC)) {
     GCfunc *fn = gco2func(o);
     gc_traverse_func(g, fn);
     return isluafunc(fn) ? sizeLfunc((MSize)fn->l.nupvalues) :
 			   sizeCfunc((MSize)fn->c.nupvalues);
-  } else if (LJ_LIKELY(gct == ~LJ_TPROTO)) {
+  } else if (LJ_LIKELY(gctype == (int8_t)(uint8_t)LJ_TPROTO)) {
     GCproto *pt = gco2pt(o);
     gc_traverse_proto(g, pt);
     return pt->sizept;
-  } else if (LJ_LIKELY(gct == ~LJ_TTHREAD)) {
+  } else if (LJ_LIKELY(gctype == (int8_t)(uint8_t)LJ_TTHREAD)) {
     lua_State *th = gco2th(o);
     setgcrefr(th->gclist, g->gc.grayagain);
     setgcref(g->gc.grayagain, o);
-    black2gray(o);  /* Threads are never black. */
+    o->gch.gcflags |= LJ_GCFLAG_GREY;
     gc_traverse_thread(g, th);
     return sizeof(lua_State) + sizeof(TValue) * th->stacksize;
   } else {
@@ -678,7 +680,7 @@ static void gc_call_finalizer(global_State *g, lua_State *L,
   top = L->top;
   copyTV(L, top++, mo);
   if (LJ_FR2) setnilV(top++);
-  setgcV(L, top, o, ~o->gch.gct);
+  setgcV(L, top, o, (uint32_t)(int32_t)o->gch.gctype);
   L->top = top+1;
   errcode = lj_vm_pcall(L, top, 1+0, -1);  /* Stack: |mo|o| -> | */
   hook_restore(g, oldh);

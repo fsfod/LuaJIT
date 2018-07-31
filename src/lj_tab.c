@@ -105,7 +105,8 @@ static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
     Node *nilnode;
     lua_assert((sizeof(GCtab) & 7) == 0);
     t = (GCtab *)lj_mem_newgco(L, sizetabcolo(asize));
-    t->gct = ~LJ_TTAB;
+    t->gcflags = LJ_GCFLAG_GREY;
+    t->gctype = (int8_t)(uint8_t)LJ_TTAB;
     t->nomm = (uint8_t)~0;
     t->colo = (int8_t)asize;
     setmref(t->array, (TValue *)((char *)t + sizeof(GCtab)));
@@ -120,7 +121,8 @@ static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
   } else {  /* Otherwise separately allocate the array part. */
     Node *nilnode;
     t = lj_mem_newobj(L, GCtab);
-    t->gct = ~LJ_TTAB;
+    t->gcflags = LJ_GCFLAG_GREY;
+    t->gctype = (int8_t)(uint8_t)LJ_TTAB;
     t->nomm = (uint8_t)~0;
     t->colo = 0;
     setmref(t->array, NULL);

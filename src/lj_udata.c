@@ -14,8 +14,8 @@ GCudata *lj_udata_new(lua_State *L, MSize sz, GCtab *env)
 {
   GCudata *ud = lj_mem_newt(L, sizeof(GCudata) + sz, GCudata);
   global_State *g = G(L);
-  newwhite(g, ud);  /* Not finalized. */
-  ud->gct = ~LJ_TUDATA;
+  ud->gcflags = LJ_GCFLAG_GREY;
+  ud->gctype = (int8_t)(uint8_t)LJ_TUDATA;
   ud->udtype = UDTYPE_USERDATA;
   ud->len = sz;
   /* NOBARRIER: The GCudata is new (marked white). */

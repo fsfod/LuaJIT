@@ -39,9 +39,8 @@ GCcdata *lj_cdata_newv(lua_State *L, CTypeID id, CTSize sz, CTSize align)
   cdatav(cd)->offset = (uint16_t)((char *)cd - p);
   cdatav(cd)->extra = extra;
   cdatav(cd)->len = sz;
-  newwhite(g, obj2gco(cd));
-  cd->marked |= 0x80;
-  cd->gct = ~LJ_TCDATA;
+  cd->gcflags = LJ_GCFLAG_CDATA_VAR;
+  cd->gctype = (int8_t)(uint8_t)LJ_TCDATA;
   cd->ctypeid = id;
   return cd;
 }
@@ -65,11 +64,11 @@ void lj_cdata_setfin(lua_State *L, GCcdata *cd, GCobj *obj, uint32_t it)
     lj_gc_anybarriert(L, t);
     tv = lj_tab_set(L, t, &tmp);
     if (it == LJ_TNIL) {
+      cd->gcflags &= ~LJ_GCFLAG_CDATA_FIN;
       setnilV(tv);
-      cd->marked &= ~LJ_GC_CDATA_FIN;
     } else {
+      cd->gcflags |= LJ_GCFLAG_CDATA_FIN;
       setgcV(L, tv, obj, it);
-      cd->marked |= LJ_GC_CDATA_FIN;
     }
   }
 }

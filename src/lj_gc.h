@@ -13,20 +13,16 @@ enum {
   GCSpause, GCSpropagate, GCSatomic, GCSsweepstring, GCSsweep, GCSfinalize
 };
 
-/* Bitmasks for marked field of GCobj. */
-#define LJ_GC_WHITE0	0x01
-#define LJ_GC_WHITE1	0x02
-#define LJ_GC_BLACK	0x04
-#define LJ_GC_FINALIZED	0x08
-#define LJ_GC_WEAKKEY	0x08
-#define LJ_GC_WEAKVAL	0x10
-#define LJ_GC_CDATA_FIN	0x10
-#define LJ_GC_FIXED	0x20
-#define LJ_GC_SFIXED	0x40
+#define LJ_GCFLAG_GREY      0x01
+#define LJ_GCFLAG_WEAKKEY   0x02  /* Table with weak keys. */
+#define LJ_GCFLAG_WEAKVAL   0x04  /* Table with weak values. */
+#define LJ_GCFLAG_CDATA_FIN 0x02  /* CData with finalizer set. */
+#define LJ_GCFLAG_CDATA_VAR 0x04  /* CData with variable size. */
+#define LJ_GCFLAG_EPHKEY    0x08  /* Is a key in an ephemeron table. */
+#define LJ_GCFLAG_FINALIZE  0x10  /* Should be finalized. */
+#define LJ_GCFLAG_FINALIZED 0x20  /* Has been finalized. */
 
-#define LJ_GC_WHITES	(LJ_GC_WHITE0 | LJ_GC_WHITE1)
-#define LJ_GC_COLORS	(LJ_GC_WHITES | LJ_GC_BLACK)
-#define LJ_GC_WEAK	(LJ_GC_WEAKKEY | LJ_GC_WEAKVAL)
+#define LJ_GCFLAG_WEAK	    (LJ_GCFLAG_WEAKKEY | LJ_GCFLAG_WEAKVAL)
 
 /* Macros to test and set GCobj colors. */
 #define iswhite(x)	((x)->gch.marked & LJ_GC_WHITES)

@@ -342,7 +342,7 @@ typedef struct GCcdataVar {
 } GCcdataVar;
 
 #define cdataptr(cd)	((void *)((cd)+1))
-#define cdataisv(cd)	((cd)->marked & 0x80)
+#define cdataisv(cd)	((cd)->gcflags & LJ_GCFLAG_CDATA_VAR)
 #define cdatav(cd)	((GCcdataVar *)((char *)(cd) - sizeof(GCcdataVar)))
 #define cdatavlen(cd)	check_exp(cdataisv(cd), cdatav(cd)->len)
 #define sizecdatav(cd)	(cdatavlen(cd) + cdatav(cd)->extra)
@@ -804,14 +804,16 @@ typedef union GCobj {
 } GCobj;
 
 /* Macros to convert a GCobj pointer into a specific value. */
-#define gco2str(o)	check_exp((o)->gch.gct == ~LJ_TSTR, &(o)->str)
-#define gco2uv(o)	check_exp((o)->gch.gct == ~LJ_TUPVAL, &(o)->uv)
-#define gco2th(o)	check_exp((o)->gch.gct == ~LJ_TTHREAD, &(o)->th)
-#define gco2pt(o)	check_exp((o)->gch.gct == ~LJ_TPROTO, &(o)->pt)
-#define gco2func(o)	check_exp((o)->gch.gct == ~LJ_TFUNC, &(o)->fn)
-#define gco2cd(o)	check_exp((o)->gch.gct == ~LJ_TCDATA, &(o)->cd)
-#define gco2tab(o)	check_exp((o)->gch.gct == ~LJ_TTAB, &(o)->tab)
-#define gco2ud(o)	check_exp((o)->gch.gct == ~LJ_TUDATA, &(o)->ud)
+#define gco2_(o, t, f) \
+  check_exp((o)->gch.gctype == (int8_t)(uint8_t)(t), &(o)->f)
+#define gco2str(o)	((GCstr*)(o))
+#define gco2uv(o)	((GCupval*)(o))
+#define gco2th(o)	gco2_(o, LJ_TTHREAD, th)
+#define gco2pt(o)	gco2_(o, LJ_TPROTO, pt)
+#define gco2func(o)	gco2_(o, LJ_TFUNC, fn)
+#define gco2cd(o)	gco2_(o, LJ_TCDATA, cd)
+#define gco2tab(o)	gco2_(o, LJ_TTAB, tab)
+#define gco2ud(o)	gco2_(o, LJ_TUDATA, ud)
 
 /* Macro to convert any collectable object into a GCobj pointer. */
 #define obj2gco(v)	((GCobj *)(v))
