@@ -251,8 +251,7 @@ static TValue *cpfinalize(lua_State *L, lua_CFunction dummy, void *ud)
 {
   UNUSED(dummy);
   UNUSED(ud);
-  lj_gc_finalize_cdata(L);
-  lj_gc_finalize_udata(L);
+  lj_gc_finalizeall(L);
   /* Frame pop omitted. */
   return NULL;
 }
@@ -260,29 +259,27 @@ static TValue *cpfinalize(lua_State *L, lua_CFunction dummy, void *ud)
 LUA_API void luaJIT_preclose(lua_State *L)
 {
   global_State *g = G(L);
-  int i;
   L = &G2GG(g)->L;  /* Only the main thread can be closed. */
 #if LJ_HASPROFILE
   luaJIT_profile_stop(L);
 #endif
+  if (!lj_gc_anyfinalizers(g)) {
+    return;
+  }
   setgcrefnull(g->cur_L);
   lj_func_closeuv(L, tvref(L->stack));
-  lj_gc_separateudata(g, 1);  /* Separate udata which have GC metamethods. */
 #if LJ_HASJIT
   G2J(g)->flags &= ~JIT_F_ON;
   G2J(g)->state = LJ_TRACE_IDLE;
   lj_dispatch_update(g);
 #endif
-  for (i = 0;;) {
+  for (;;) {
     hook_enter(g);
     L->status = LUA_OK;
     L->base = L->top = tvref(L->stack) + 1 + LJ_FR2;
     L->cframe = NULL;
     if (lj_vm_cpcall(L, NULL, NULL, cpfinalize) == LUA_OK) {
-      if (++i >= 10) break;
-      lj_gc_separateudata(g, 1);  /* Separate udata again. */
-      if (gcref(g->gc.mmudata) == NULL)  /* Until nothing is left to do. */
-	break;
+      break;
     }
   }
 }

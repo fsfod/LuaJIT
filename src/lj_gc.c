@@ -574,6 +574,46 @@ static void gc_sweep_str(global_State *g, GCRef *gcr)
   }
 }
 
+static void atomic_enqueue_finalizer(global_State *g, GCobj *o)
+{
+  GCRef *finalize = mref(g->gc.finalize, GCRef);
+  if (LJ_UNLIKELY(g->gc.finalizenum == g->gc.finalizecapacity)) {
+    lj_mem_growvec(gco2th(gcref(g->cur_L)), finalize, g->gc.finalizecapacity,
+      LJ_MAX_MEM32, GCRef, GCPOOL_GREY);
+    setmref(g->gc.finalize, finalize);
+  }
+  setgcref(finalize[g->gc.finalizenum++], o);
+}
+    }
+  }
+  return p;
+}
+
+static void atomic_enqueue_finalizers(global_State *g)
+{
+#if LJ_HASFFI
+  CTState *cts = mref(g->ctype_state, CTState);
+  if (cts) {
+    GCtab *t = cts->finalizer;
+    Node *n = noderef(t->node);
+    MSize i = t->hmask + 1;
+    for (; i; --i, ++n) {
+      if (!tvisnil(&n->val) && tvisgcv(&n->key)) {
+        GCobj *o = gcV(&n->key);
+        if (!ismarked(g, (void*)o)) {
+          atomic_enqueue_finalizer(g, o);
+          gc_markcdata(g, gco2cd(o));
+          atomic_propagate_grey(g);
+          o->gch.gcflags |= LJ_GCFLAG_FINALIZE;
+        }
+      }
+    }
+  }
+#endif
+  atomic_enqueue_gcmm(g);
+  g->gc.gcmmnum = 0;
+}
+
 /* Call a userdata or cdata finalizer. */
 static void gc_call_finalizer(global_State *g, lua_State *L,
 			      cTValue *mo, GCobj *o)
@@ -598,45 +638,28 @@ static void gc_call_finalizer(global_State *g, lua_State *L,
     lj_err_throw(L, errcode);  /* Propagate errors. */
 }
 
-/* Finalize one userdata or cdata object from the mmudata list. */
-static void gc_finalize(lua_State *L)
+static void gc_finalize(global_State *g, lua_State *L, GCobj *o)
 {
-  global_State *g = G(L);
-  GCobj *o = gcnext(gcref(g->gc.mmudata));
   cTValue *mo;
-  lua_assert(tvref(g->jit_base) == NULL);  /* Must not be called on trace. */
-  /* Unchain from list of userdata to be finalized. */
-  if (o == gcref(g->gc.mmudata))
-    setgcrefnull(g->gc.mmudata);
-  else
-    setgcrefr(gcref(g->gc.mmudata)->gch.nextgc, o->gch.nextgc);
+  lua_assert(tvref(g->jit_base) == NULL);
 #if LJ_HASFFI
-  if (o->gch.gct == ~LJ_TCDATA) {
+  if (o->gch.gctype == (int8_t)(uint8_t)LJ_TCDATA) {
     TValue tmp, *tv;
-    /* Add cdata back to the GC list and make it white. */
-    setgcrefr(o->gch.nextgc, g->gc.root);
-    setgcref(g->gc.root, o);
-    makewhite(g, o);
-    o->gch.marked &= (uint8_t)~LJ_GC_CDATA_FIN;
-    /* Resolve finalizer. */
+    o->gch.gcflags &= ~(LJ_GCFLAG_FINALIZE | LJ_GCFLAG_CDATA_FIN);
     setcdataV(L, &tmp, gco2cd(o));
     tv = lj_tab_set(L, ctype_ctsG(g)->finalizer, &tmp);
     if (!tvisnil(tv)) {
-      g->gc.nocdatafin = 0;
       copyTV(L, &tmp, tv);
-      setnilV(tv);  /* Clear entry in finalizer table. */
+      setnilV(tv);
+      g->gc.fmark = 1;
       gc_call_finalizer(g, L, &tmp, o);
     }
     return;
   }
 #endif
-  /* Add userdata back to the main userdata list and make it white. */
-  setgcrefr(o->gch.nextgc, mainthread(g)->nextgc);
-  setgcref(mainthread(g)->nextgc, o);
-  makewhite(g, o);
-  /* Resolve the __gc metamethod. */
-  mo = lj_meta_fastg(g, tabref(gco2ud(o)->metatable), MM_gc);
-  if (mo)
+  o->gch.gcflags &= ~LJ_GCFLAG_FINALIZE;
+  o->gch.gcflags |= LJ_GCFLAG_FINALIZED;
+  if ((mo = lj_meta_fastg(g, tabref(o->gch.metatable), MM_gc)))
     gc_call_finalizer(g, L, mo, o);
 }
 
@@ -791,16 +814,20 @@ static size_t gc_onestep(lua_State *L)
       return 32 * sizeof(MRef);
     }
   case GCSfinalize:
-    if (gcref(g->gc.mmudata) != NULL) {
-      if (tvref(g->jit_base))  /* Don't call finalizers on trace. */
+    if (mrefu(g->jit_base)) /* Don't call finalizers on trace. */
 	return LJ_MAX_MEM;
-      gc_finalize(L);  /* Finalize one userdata object. */
-      if (g->gc.estimate > GCFINALIZECOST)
-	g->gc.estimate -= GCFINALIZECOST;
-      return GCFINALIZECOST;
+    while (g->gc.sweeppos) {
+      GCobj *o = gcref(mref(g->gc.finalize, GCRef)[--g->gc.sweeppos]);
+      if ((o->gch.gcflags & LJ_GCFLAG_FINALIZE)) {
+	gc_finalize(g, L, o);
+	return sizeof(GCudata) * 4;
+      }
     }
 #if LJ_HASFFI
-    if (!g->gc.nocdatafin) lj_tab_rehash(L, ctype_ctsG(g)->finalizer);
+    if (g->gc.fmark) {
+      g->gc.fmark = 0;
+      lj_tab_rehash(L, ctype_ctsG(g)->finalizer);
+    }
 #endif
     g->gc.state = GCSpause;  /* End of GC cycle. */
     g->gc.debt = 0;
@@ -808,6 +835,104 @@ static size_t gc_onestep(lua_State *L)
   default:
     lua_assert(0);
     return 0;
+  }
+}
+
+
+uint32_t lj_gc_anyfinalizers(global_State *g)
+{
+  MSize i;
+#if LJ_HASFFI
+  CTState *cts;
+  if ((cts = mref(g->ctype_state, CTState))) {
+    GCtab *t = cts->finalizer;
+    Node *n = noderef(t->node);
+    i = t->hmask + 1;
+    if (i > 2)
+      return i;
+    for (; --i; ++n) {
+      if (!tvisnil(&n->val) && tviscdata(&n->key))
+	return i;
+    }
+  }
+#endif
+  if ((i = g->gc.gcmmnum)) {
+    GCArena *a;
+    if (i > 1)
+      return i;
+    a = mref(*mref(g->gc.gcmm, MRef), GCArena);
+    for (i = LJ_GC_ARENA_BITMAP32_FST; i < LJ_GC_ARENA_BITMAP32_LEN; ++i) {
+      uint32_t mask = a->block32[i];
+      while (mask) {
+	GCobj *c = obj2gco(&a->cell[i*32 + lj_ffs(mask)]);
+	if (c != mref(g->gc.pool[GCPOOL_GCMM].bumpbase, GCobj)) {
+	  lua_assert(c->gch.gctype == (int8_t)(uint8_t)LJ_TUDATA ||
+	             c->gch.gctype == (int8_t)(uint8_t)LJ_TTAB);
+	  if (!(c->gch.gcflags & LJ_GCFLAG_FINALIZED)) {
+	    if (lj_meta_fastg(g, tabref(c->gch.metatable), MM_gc)) {
+	      return i;
+	    }
+	  }
+	}
+	mask &= (mask-1);
+      }
+    }
+  }
+  return 0;
+}
+
+/* Finalize all remaining finalizable GC objects. */
+void lj_gc_finalizeall(lua_State *L)
+{
+  uint32_t limit;
+  global_State *g;
+#if LJ_HASFFI
+  CTState *cts;
+#endif
+  gc_abortcycle(L);
+  g = G(L);
+  g->gc.fmark = 1;
+  for (limit = 10; limit--; ) {
+    g->gc.sweeppos = 0;
+#if LJ_HASFFI
+    if ((cts = mref(g->ctype_state, CTState))) {
+      GCtab *t = cts->finalizer;
+      Node *n = noderef(t->node);
+      MSize i = t->hmask + 1;
+      lj_gc_markleaf(g, (void*)t);
+      for (; i; --i, ++n) {
+	if (!tvisnil(&n->val) && tviscdata(&n->key)) {
+	  GCobj *o;
+	  gc_marktv_(g, &n->val);
+	  o = gcV(&n->key);
+	  if (!ismarked(g, (void*)o)) {
+	    atomic_enqueue_finalizer(g, o);
+	    gc_markcdata(g, gco2cd(o));
+	    atomic_propagate_grey(g);
+	    o->gch.gcflags |= LJ_GCFLAG_FINALIZE;
+	  }
+	}
+      }
+    }
+#endif
+    if (mrefu(g->gc.pool[GCPOOL_GCMM].bumpbase) !=
+        mrefu(g->gc.pool[GCPOOL_GCMM].bump)) {
+      uintptr_t bumpbase = mrefu(g->gc.pool[GCPOOL_GCMM].bumpbase);
+      GCArena *a = (GCArena*)(bumpbase & ~(LJ_GC_ARENA_SIZE-1));
+      uint32_t idx = (uint32_t)(bumpbase & (LJ_GC_ARENA_SIZE-1)) >> 4;
+      lj_gc_bit(a->mark, |=, idx);
+    }
+    atomic_enqueue_gcmm(g);
+    if (g->gc.finalizenum == 0)
+      break;
+    do {
+      GCobj *o = gcref(mref(g->gc.finalize, GCRef)[--g->gc.finalizenum]);
+      if ((o->gch.gcflags & LJ_GCFLAG_FINALIZE) || !limit) {
+	gc_finalize(g, L, o);
+      }
+    } while (g->gc.finalizenum);
+    g->gc.state = GCSatomic;
+    gc_abortcycle(L);
   }
 }
 
