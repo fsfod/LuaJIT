@@ -603,23 +603,14 @@ typedef enum {
 #define LJ_GC_SSB_CAPACITY 128
 
 typedef struct GCState {
-  GCSize total;		/* Memory currently allocated. */
-  GCSize threshold;	/* Memory threshold. */
-  uint8_t currentwhite;	/* Current white color. */
-  uint8_t state;	/* GC state. */
-  uint8_t nocdatafin;	/* No cdata finalizer called. */
-  uint8_t unused2;
-  MSize sweepstr;	/* Sweep position in string table. */
-  GCRef root;		/* List of all collectable objects. */
-  MRef sweep;		/* Sweep position in root list. */
-  GCRef gray;		/* List of gray objects. */
-  GCRef grayagain;	/* List of objects for atomic traversal. */
-  GCRef weak;		/* List of weak tables (to be cleared). */
-  GCRef mmudata;	/* List of userdata (to be finalized). */
-  GCSize debt;		/* Debt (how much GC is behind schedule). */
-  GCSize estimate;	/* Estimate of memory actually in use. */
-  MSize stepmul;	/* Incremental GC step granularity. */
-  MSize pause;		/* Pause between successive GC cycles. */
+  GCSize total;
+  GCSize threshold;
+  GCSize estimate;
+  MSize stepmul;
+  MSize pause;
+  uint8_t state;
+  uint8_t unused;
+  uint8_t fmark;
   uint8_t ssbsize;
   GCRef ssb[LJ_GC_SSB_CAPACITY];
 } GCState;
@@ -651,13 +642,13 @@ typedef struct global_State {
   lua_Alloc allocf;	/* Memory allocator. */
   void *allocd;		/* Memory allocator data. */
   GCState gc;		/* Garbage collector. */
-  volatile int32_t vmstate;  /* VM state or current JIT code trace number. */
   SBuf tmpbuf;		/* Temporary string buffer. */
   GCstr strempty;	/* Empty string. */
   uint8_t stremptyz;	/* Zero terminator of empty string. */
   uint8_t hookmask;	/* Hook mask. */
   uint8_t dispatchmode;	/* Dispatch mode. */
   uint8_t vmevmask;	/* VM event mask. */
+  volatile int32_t vmstate;  /* VM state or current JIT code trace number. */
   TValue registrytv;	/* Anchor for registry. */
   TValue tmptv, tmptv2;	/* Temporary TValues. */
   Node nilnode;		/* Fallback 1-element hash part (nil key and value). */
@@ -725,8 +716,8 @@ struct lua_State {
   TValue *top;		/* First free slot in the stack. */
   MRef maxstack;	/* Last free slot in the stack. */
   MRef stack;		/* Stack base. */
-  GCRef openupval;	/* List of open upvalues in the stack. */
   void *cframe;		/* End of C stack frame chain. */
+  GCRef openupval;	/* List of open upvalues in the stack. */
 };
 
 #define G(L)			(mref(L->glref, global_State))
