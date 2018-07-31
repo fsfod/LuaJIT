@@ -42,7 +42,7 @@ static LJ_AINLINE GCcdata *lj_cdata_new(CTState *cts, CTypeID id, CTSize sz)
   CType *ct = ctype_raw(cts, id);
   lua_assert((ctype_hassize(ct->info) ? ct->size : CTSIZE_PTR) == sz);
 #endif
-  cd = (GCcdata *)lj_mem_newgco(cts->L, sizeof(GCcdata) + sz);
+  cd = lj_mem_newt(cts->L, sizeof(GCcdata) + sz, GCcdata, GCPOOL_LEAF);
   cd->gcflags = 0;
   cd->gctype = (int8_t)(uint8_t)LJ_TCDATA;
   cd->ctypeid = ctype_check(cts, id);
@@ -52,7 +52,9 @@ static LJ_AINLINE GCcdata *lj_cdata_new(CTState *cts, CTypeID id, CTSize sz)
 /* Variant which works without a valid CTState. */
 static LJ_AINLINE GCcdata *lj_cdata_new_(lua_State *L, CTypeID id, CTSize sz)
 {
-  GCcdata *cd = (GCcdata *)lj_mem_newgco(L, sizeof(GCcdata) + sz);
+  GCcdata *cd = lj_mem_newt(L, sizeof(GCcdata)*2 + sz, GCcdata, GCPOOL_LEAF)+1;
+  LJ_STATIC_ASSERT(sizeof(GCcdata) == 4);
+  lua_assert((sz & 7) == 0);
   cd->gcflags = 0;
   cd->gctype = (int8_t)(uint8_t)LJ_TCDATA;
   cd->ctypeid = id;

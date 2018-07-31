@@ -249,7 +249,7 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
     } while ((intptr_t)i >= 0);
   }
   /* Nope, create a new string. */
-  s = lj_mem_newt(L, sizeof(GCstr)+len+1, GCstr);
+  s = lj_mem_newt(L, sizeof(GCstr)+len+1, GCstr, GCPOOL_LEAF);
   s->gcflags = (int8_t)(uint8_t)~LJ_TSTR;
   s->len = len;
   s->hash = h;

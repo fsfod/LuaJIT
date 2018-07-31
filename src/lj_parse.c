@@ -1581,7 +1581,7 @@ static GCproto *fs_finish(LexState *ls, BCLine line)
   ofsdbg = sizept; sizept += fs_prep_var(ls, fs, &ofsvar);
 
   /* Allocate prototype and initialize its fields. */
-  pt = (GCproto *)lj_mem_newgco(L, (MSize)sizept);
+  pt = lj_mem_newt(L, (MSize)sizept, GCproto, GCPOOL_GREY);
   pt->gcflags = LJ_GCFLAG_GREY;
   pt->gctype = (int8_t)(uint8_t)LJ_TPROTO;
   pt->sizept = (MSize)sizept;

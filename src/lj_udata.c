@@ -10,10 +10,9 @@
 #include "lj_gc.h"
 #include "lj_udata.h"
 
-GCudata *lj_udata_new(lua_State *L, MSize sz, GCtab *env)
+GCudata *lj_udata_new(lua_State *L, MSize sz, GCtab *env, GCPoolID p)
 {
-  GCudata *ud = lj_mem_newt(L, sizeof(GCudata) + sz, GCudata);
-  global_State *g = G(L);
+  GCudata *ud = lj_mem_newt(L, sizeof(GCudata) + sz, GCudata, p);
   ud->gcflags = LJ_GCFLAG_GREY;
   ud->gctype = (int8_t)(uint8_t)LJ_TUDATA;
   ud->udtype = UDTYPE_USERDATA;

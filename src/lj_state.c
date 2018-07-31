@@ -292,7 +292,7 @@ LUA_API void lua_close(lua_State *L)
 
 lua_State *lj_state_new(lua_State *L)
 {
-  lua_State *L1 = lj_mem_newobj(L, lua_State);
+  lua_State *L1 = lj_mem_newobj(L, lua_State, GCPOOL_GREY);
   L1->gcflags = LJ_GCFLAG_GREY;
   L1->gctype = (int8_t)(uint8_t)LJ_TTHREAD;
   L1->dummy_ffid = FF_C;

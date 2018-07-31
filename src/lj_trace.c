@@ -133,7 +133,7 @@ GCtrace * LJ_FASTCALL lj_trace_alloc(lua_State *L, GCtrace *T)
   size_t sz = sztr + szins +
 	      T->nsnap*sizeof(SnapShot) +
 	      T->nsnapmap*sizeof(SnapEntry);
-  GCtrace *T2 = lj_mem_newt(L, (MSize)sz, GCtrace);
+  GCtrace *T2 = lj_mem_newt(L, (MSize)sz, GCtrace, GCPOOL_GREY);
   char *p = (char *)T2 + sztr;
   T2->gcflags = LJ_GCFLAG_GREY;
   T2->gctype = (int8_t)(uint8_t)LJ_TTRACE;
