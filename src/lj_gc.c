@@ -37,6 +37,55 @@
 #define gray2black(x)		((x)->gch.marked |= LJ_GC_BLACK)
 #define isfinalized(u)		((u)->marked & LJ_GC_FINALIZED)
 
+static void gc_pushgrey(global_State *g, GCArena *a, uint32_t idx)
+{
+  uint16_t *grey = mref(a->head.grey, uint16_t);
+  uint16_t *greybot = mref(a->head.greybot, uint16_t);
+  MRef *gq;
+  uint32_t q;
+  lua_assert((idx >= LJ_GC_ARENA_SIZE/64/16) && (idx < LJ_GC_ARENA_SIZE/16));
+  LJ_STATIC_ASSERT(LJ_GC_ARENA_SIZE/16 <= 0x10000);
+  if (LJ_UNLIKELY(grey == greybot)) {
+    lua_State *L = gco2th(gcref(g->cur_L));
+    MSize gsz;
+    gq = mref(g->gc.gq, MRef);
+    gsz = ((MSize)mrefu(gq[a->shoulders.gqidx]) & LJ_GC_GSIZE_MASK);
+    if (gsz == 0) {
+      greybot = lj_mem_newvec(L, 16, uint16_t, GCPOOL_GREY);
+      grey = greybot + 16;
+    } else {
+      uint16_t *newbot = lj_mem_newt(L, gsz * 4, uint16_t, GCPOOL_GREY);
+      memcpy(newbot + gsz, greybot, gsz * 2);
+      greybot = newbot;
+      grey = newbot + gsz;
+    }
+    setmref(a->head.greybot, greybot);
+  }
+  *--grey = (uint16_t)idx;
+  setmref(a->head.grey, grey);
+  gq = mref(g->gc.gq, MRef);
+  q = a->shoulders.gqidx;
+  mrefu(gq[q]) += 1;
+  if (q > 2) {
+    MRef m = {mrefu(gq[q])};
+    MSize gsz = (MSize)(mrefu(m) & (LJ_GC_ARENA_SIZE-1));
+    uint32_t p = (q - 1) / 2;
+    if (gsz > (mrefu(gq[p]) & (LJ_GC_ARENA_SIZE-1))) {
+      do {
+	GCArena *pa = (GCArena*)(mrefu(gq[p]) & ~(LJ_GC_ARENA_SIZE - 1));
+	lua_assert(pa->shoulders.gqidx == p);
+	setmrefr(gq[q], gq[p]);
+	pa->shoulders.gqidx = q;
+	q = p;
+	if (p <= 2) break;
+	p = (p - 1) / 2;
+      } while (gsz > (mrefu(gq[p]) & (LJ_GC_ARENA_SIZE-1)));
+      a->shoulders.gqidx = q;
+      setmrefr(gq[q], m);
+    }
+  }
+}
+
 static uint32_t gc_hugehash_find(global_State *g, void *o)
 {
   uintptr_t p = (uintptr_t)o & ~(uintptr_t)(LJ_GC_ARENA_SIZE - 1);
