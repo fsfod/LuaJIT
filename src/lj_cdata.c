@@ -28,16 +28,9 @@ GCcdata *lj_cdata_newref(CTState *cts, const void *p, CTypeID id)
 /* Allocate variable-sized or specially aligned C data object. */
 GCcdata *lj_cdata_newv(lua_State *L, CTypeID id, CTSize sz, CTSize align)
 {
-  global_State *g;
-  MSize extra = sizeof(GCcdataVar) + sizeof(GCcdata) +
-		(align > CT_MEMALIGN ? (1u<<align) - (1u<<CT_MEMALIGN) : 0);
-  char *p = lj_mem_newt(L, extra + sz, char);
-  uintptr_t adata = (uintptr_t)p + sizeof(GCcdataVar) + sizeof(GCcdata);
-  uintptr_t almask = (1u << align) - 1u;
-  GCcdata *cd = (GCcdata *)(((adata + almask) & ~almask) - sizeof(GCcdata));
-  lua_assert((char *)cd - p < 65536);
-  cdatav(cd)->offset = (uint16_t)((char *)cd - p);
-  cdatav(cd)->extra = extra;
+  char *p = lj_mem_newaligned(L, sizeof(GCcdataVar) + sizeof(GCcdata),
+			      align > 3 ? 1u<<align : 8, sz, GCPOOL_LEAF);
+  GCcdata *cd = (GCcdata *)(p + sizeof(GCcdataVar));
   cdatav(cd)->len = sz;
   cd->gcflags = LJ_GCFLAG_CDATA_VAR;
   cd->gctype = (int8_t)(uint8_t)LJ_TCDATA;

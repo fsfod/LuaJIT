@@ -1840,6 +1840,10 @@ static void asm_cnew(ASMState *as, IRIns *ir)
   emit_movmroi(as, RID_RET, offsetof(GCcdata, gcflags),
                (id<<16)+((LJ_TCDATA&0xff)<<8)+0);
 
+  if (!(sz & 7)) {
+    LJ_STATIC_ASSERT(sizeof(GCcdata) == 4);
+    emit_addptr(as, RID_RET, (int32_t)(12 - (sz & 8)));
+  }
   args[0] = ASMREF_L;     /* lua_State *L */
   args[1] = ASMREF_TMP1;  /* MSize size   */
   asm_gencall(as, ci, args);

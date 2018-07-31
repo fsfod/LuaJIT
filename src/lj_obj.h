@@ -336,8 +336,6 @@ typedef struct GCcdata {
 
 /* Prepended to variable-sized or realigned C data objects. */
 typedef struct GCcdataVar {
-  uint16_t offset;	/* Offset to allocated memory (relative to GCcdata). */
-  uint16_t extra;	/* Extra space allocated (incl. GCcdata + GCcdatav). */
   MSize len;		/* Size of payload. */
 } GCcdataVar;
 

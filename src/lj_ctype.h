@@ -258,7 +258,7 @@ typedef struct CTState {
 #define CTINFO_REF(ref) \
   CTINFO(CT_PTR, (CTF_CONST|CTF_REF|CTALIGN_PTR) + (ref))
 
-#define CT_MEMALIGN	3	/* Alignment guaranteed by memory allocator. */
+#define CT_MEMALIGN	4	/* Alignment guaranteed by memory allocator. */
 
 /* -- Predefined types ---------------------------------------------------- */
 
