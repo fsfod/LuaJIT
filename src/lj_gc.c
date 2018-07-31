@@ -37,6 +37,42 @@
 #define gray2black(x)		((x)->gch.marked |= LJ_GC_BLACK)
 #define isfinalized(u)		((u)->marked & LJ_GC_FINALIZED)
 
+static uint32_t gc_hugehash_find(global_State *g, void *o)
+{
+  uintptr_t p = (uintptr_t)o & ~(uintptr_t)(LJ_GC_ARENA_SIZE - 1);
+  uint32_t idx = (uint32_t)((uintptr_t)o >> LJ_GC_ARENA_SIZE_LOG2);
+  MRef* hugehash = mref(g->gc.hugehash, MRef);
+  for (;;) {
+    idx &= g->gc.hugemask;
+    if ((mrefu(hugehash[idx]) & ~(uintptr_t)(LJ_GC_ARENA_SIZE - 1)) == p) {
+      return idx;
+    }
+    ++idx;
+    lua_assert(((p >> LJ_GC_ARENA_SIZE_LOG2) ^ idx) & g->gc.hugemask);
+  }
+}
+
+static void lj_gc_hugehash_swap(global_State *g, void *optr, void *nptr,
+				size_t nsz)
+{
+  MRef* hugehash;
+  uint32_t idx;
+  nptr = (void*)((uintptr_t)nptr | (nsz >> (LJ_GC_ARENA_SIZE_LOG2-2)));
+  idx = gc_hugehash_find(g, optr);
+  hugehash = mref(g->gc.hugehash, MRef);
+  nptr = (void*)((uintptr_t)nptr | (mrefu(hugehash[idx]) & 3));
+  setmref(hugehash[idx], 0);
+  idx = (uint32_t)((uintptr_t)nptr >> LJ_GC_ARENA_SIZE_LOG2);
+  for (;;) {
+    idx &= g->gc.hugemask;
+    if (!mrefu(hugehash[idx])) {
+      setmref(hugehash[idx], nptr);
+      return;
+    }
+    ++idx;
+  }
+}
+
 /* -- Mark phase ---------------------------------------------------------- */
 
 /* Mark a TValue (if needed). */
@@ -731,6 +767,28 @@ static size_t gc_onestep(lua_State *L)
       }
     }
     return GCSWEEPMAX*GCSWEEPCOST;
+  case GCSsweephuge:
+    if (g->gc.hugesweeppos) {
+      do {
+	MRef *m = &mref(g->gc.hugehash, MRef)[--g->gc.hugesweeppos];
+	lua_assert(!(mrefu(*m) & LJ_HUGEFLAG_GREY));
+	if (mrefu(*m)) {
+	  if ((mrefu(*m) & LJ_HUGEFLAG_MARK)) {
+	    mrefu(*m) &= ~(uintptr_t)LJ_HUGEFLAG_MARK;
+	  } else {
+	    void *base = (void*)(mrefu(*m) & ~(LJ_GC_ARENA_SIZE-1));
+	    size_t size = mrefu(*m) & (LJ_GC_ARENA_SIZE - 4);
+	    size <<= (LJ_GC_ARENA_SIZE_LOG2 - 2);
+	    setmref(*m, 0);
+	    g->gc.total -= (GCSize)size;
+	    g->gc.estimate -= (GCSize)size;
+	    g->allocf(g->allocd, base, LJ_GC_ARENA_SIZE, size, 0);
+	    lua_assert(g->gc.hugenum);
+	    --g->gc.hugenum;
+	  }
+	}
+      } while (g->gc.hugesweeppos & 31);
+      return 32 * sizeof(MRef);
     }
   case GCSfinalize:
     if (gcref(g->gc.mmudata) != NULL) {
@@ -896,6 +954,75 @@ void lj_gc_barriertrace(global_State *g, uint32_t traceno)
 #endif
 
 /* -- Allocator ----------------------------------------------------------- */
+
+static void lj_gc_hugehash_resize(lua_State *L, uint32_t newmask)
+{
+  global_State *g = G(L);
+  MRef* newhash = lj_mem_newvec(L, newmask+1, MRef, GCPOOL_GREY);
+  MRef* oldhash = mref(g->gc.hugehash, MRef);
+  uint32_t oidx, nidx, greyidx;
+  if (LJ_UNLIKELY(g->gc.hugesweeppos)) {
+    if (g->gc.state == GCSsweephuge) {
+      do { lj_gc_step(L); } while (g->gc.state == GCSsweephuge);
+    } else {
+      g->gc.hugesweeppos = newmask + 1;
+    }
+  }
+  memset(newhash, 0, sizeof(MRef) * (newmask+1));
+  greyidx = 0;
+  for (oidx = g->gc.hugemask; (int32_t)oidx >= 0; --oidx) {
+    if (mrefu(oldhash[oidx])) {
+      nidx = (uint32_t)(mrefu(oldhash[oidx]) >> LJ_GC_ARENA_SIZE_LOG2);
+      for (;;++nidx) {
+	nidx &= newmask;
+	if (!mrefu(newhash[nidx])) {
+	  if (mrefu(oldhash[oidx]) & LJ_HUGEFLAG_GREY) {
+	    if (nidx >= greyidx) {
+	      greyidx = nidx + 1;
+	    }
+	  }
+	  setmrefr(newhash[nidx], oldhash[oidx]);
+	  break;
+	}
+      }
+    }
+  }
+  setmref(g->gc.hugehash, newhash);
+  g->gc.hugemask = newmask;
+  g->gc.hugegreyidx = greyidx;
+}
+
+static void *lj_gc_new_huge_block(lua_State *L, size_t size)
+{
+  global_State *g = G(L);
+  void *block = g->allocf(g->allocd, NULL, LJ_GC_ARENA_SIZE, 0, size);
+  MRef* hugehash = mref(g->gc.hugehash, MRef);
+  uint32_t idx = (uint32_t)((uintptr_t)block >> LJ_GC_ARENA_SIZE_LOG2);
+  lua_assert((size & (LJ_GC_ARENA_SIZE - 1)) == 0);
+  if (block == NULL)
+    lj_err_mem(L);
+  g->gc.total += (GCSize)size;
+
+  for (;;++idx) {
+    idx &= g->gc.hugemask;
+    if (!mrefu(hugehash[idx])) {
+      char *toset = (char*)block + (size>>(LJ_GC_ARENA_SIZE_LOG2-2));
+      LJ_STATIC_ASSERT(LJ_GC_ARENA_SIZE_LOG2 >= 17);
+      /* 17 bits = size (15 bits), mark (1 bit), grey (1 bit). */
+      if (LJ_UNLIKELY(idx < g->gc.hugesweeppos))
+	toset += LJ_HUGEFLAG_MARK;
+      setmref(hugehash[idx], toset);
+      break;
+    }
+  }
+
+  if (LJ_UNLIKELY(++g->gc.hugenum * 4 == (g->gc.hugemask + 1) * 3)) {
+    /* Caveat: growing hugehash might allocate an arena or huge block. */
+    lj_gc_hugehash_resize(L, g->gc.hugemask * 2 + 1);
+  }
+
+  return block;
+}
 
 /* Call pluggable memory allocator to allocate or resize a fragment. */
 void *lj_mem_realloc(lua_State *L, void *p, GCSize osz, GCSize nsz)

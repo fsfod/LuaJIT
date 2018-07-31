@@ -241,6 +241,9 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
     return NULL;
   }
   L->status = LUA_OK;
+  g->gc.hugemask = 7;
+  setmref(g->gc.hugehash, lj_mem_newvec(L, g->gc.hugemask + 1, MRef,
+					GCPOOL_GREY));
   return L;
 }
 
