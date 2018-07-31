@@ -287,18 +287,14 @@ typedef const TValue cTValue;
 
 /* String object header. String payload follows. */
 typedef struct GCstr {
-  GCHeader;
-  uint8_t reserved;	/* Used by lexer for fast lookup of reserved words. */
-  uint8_t unused;
   MSize hash;		/* Hash of string. */
   MSize len;		/* Size of string. */
 } GCstr;
 
-#define strref(r)	(&gcref((r))->str)
+#define strref(r)	((GCstr*)gcref((r)))
 #define strdata(s)	((const char *)((s)+1))
 #define strdatawr(s)	((char *)((s)+1))
 #define strVdata(o)	strdata(strV(o))
-#define sizestring(s)	(sizeof(struct GCstr)+(s)->len+1)
 
 /* -- Userdata object ----------------------------------------------------- */
 
@@ -792,7 +788,6 @@ LJ_STATIC_ASSERT(offsetof(GCfuncL, ffid) == offsetof(lua_State, dummy_ffid));
 
 typedef union GCobj {
   GChead gch;
-  GCstr str;
   lua_State th;
   GCproto pt;
   GCfunc fn;
@@ -888,7 +883,7 @@ typedef union GCobj {
 #define lightudV(o)	check_exp(tvislightud(o), gcrefp((o)->gcr, void))
 #endif
 #define gcV(o)		check_exp(tvisgcv(o), gcval(o))
-#define strV(o)		check_exp(tvisstr(o), &gcval(o)->str)
+#define strV(o)		check_exp(tvisstr(o), (GCstr*)gcval(o))
 #define funcV(o)	check_exp(tvisfunc(o), &gcval(o)->fn)
 #define threadV(o)	check_exp(tvisthread(o), &gcval(o)->th)
 #define protoV(o)	check_exp(tvisproto(o), &gcval(o)->pt)

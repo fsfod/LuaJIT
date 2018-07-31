@@ -250,10 +250,8 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
   }
   /* Nope, create a new string. */
   s = lj_mem_newt(L, sizeof(GCstr)+len+1, GCstr, GCPOOL_LEAF);
-  s->gcflags = (int8_t)(uint8_t)~LJ_TSTR;
   s->len = len;
   s->hash = h;
-  s->reserved = 0;
   memcpy(strdatawr(s), str, len);
   strdatawr(s)[len] = '\0';  /* Zero-terminate string. */
   /* Add it to string hash table. */
