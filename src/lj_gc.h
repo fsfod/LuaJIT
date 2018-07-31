@@ -130,5 +130,13 @@ static LJ_AINLINE void lj_mem_free(global_State *g, void *p, size_t osize)
 #define lj_mem_newobj(L, t)	((t *)lj_mem_newgco(L, sizeof(t)))
 #define lj_mem_newt(L, s, t)	((t *)lj_mem_new(L, (s)))
 #define lj_mem_freet(g, p)	lj_mem_free(g, (p), sizeof(*(p)))
+/* C-style allocator. */
+LJ_FUNC void *lj_cmem_realloc(lua_State *L, void *ptr, size_t osz, size_t nsz);
+LJ_FUNC void *lj_cmem_grow(lua_State *L, void *ptr, MSize *szp, MSize lim,
+                           size_t esz);
+LJ_FUNC void lj_cmem_free(global_State *g, void *ptr, size_t osz);
+#define lj_cmem_freevec(g, p, n, t)  lj_cmem_free((g), (p), (n)*sizeof(t))
+#define lj_cmem_growvec(L, ptr, n, m, t) \
+  ((ptr) = (t *)lj_cmem_grow(L, (ptr), &(n), (m), sizeof(t)))
 
 #endif

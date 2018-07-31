@@ -926,16 +926,153 @@ void * LJ_FASTCALL lj_mem_newgco(lua_State *L, GCSize size)
   return o;
 }
 
-/* Resize growable vector. */
-void *lj_mem_grow(lua_State *L, void *p, MSize *szp, MSize lim, MSize esz)
+static LJ_AINLINE uint32_t lj_cmem_hash(void *o)
+{
+#if LJ_GC64
+  return hashrot(u32ptr(o), (uint32_t)((uintptr_t)o >> 32));
+#else
+  return hashrot(u32ptr(o), u32ptr(o) + HASH_BIAS);
+#endif
+}
+
+static void lj_gc_cmemhash_resize(lua_State *L, uint32_t newmask)
+{
+  global_State *g = G(L);
+  MRef* newhash = lj_mem_newvec(L, newmask+1, MRef, GCPOOL_GREY);
+  MRef* oldhash = mref(g->gc.cmemhash, MRef);
+  uint32_t oidx, nidx;
+  memset(newhash, 0, sizeof(MRef) * (newmask+1));
+  for (oidx = g->gc.cmemmask; (int32_t)oidx >= 0; --oidx) {
+    if (mrefu(oldhash[oidx])) {
+      nidx = lj_cmem_hash(mref(oldhash[oidx], void));
+      for (;;++nidx) {
+	nidx &= newmask;
+	if (!mrefu(newhash[nidx])) {
+	  setmrefr(newhash[nidx], oldhash[oidx]);
+	  break;
+	}
+      }
+    }
+  }
+  setmref(g->gc.cmemhash, newhash);
+  g->gc.cmemmask = newmask;
+}
+
+static void lj_cmem_pin(lua_State *L, void *ptr)
+{
+  global_State *g = G(L);
+  MRef* cmemhash = mref(g->gc.cmemhash, MRef);
+  uint32_t idx = lj_cmem_hash(ptr);
+  for (;;++idx) {
+    idx &= g->gc.cmemmask;
+    if (!mrefu(cmemhash[idx])) {
+      setmref(cmemhash[idx], ptr);
+      break;
+    }
+  }
+  if (g->gc.state >= GCSatomic && g->gc.state <= GCSsweep)
+    lj_gc_markleaf(g, ptr);
+  if (LJ_UNLIKELY(++g->gc.cmemnum * 4 == (g->gc.cmemmask + 1) * 3))
+    lj_gc_cmemhash_resize(L, g->gc.cmemmask * 2 + 1);
+}
+
+static void lj_cmem_unpin(global_State *g, void *ptr)
+{
+  MRef* cmemhash = mref(g->gc.cmemhash, MRef);
+  uint32_t idx = lj_cmem_hash(ptr);
+#if LUA_USE_ASSERT
+  uint32_t idx0 = idx - 1;
+  lua_assert(g->gc.cmemnum);
+#endif
+  --g->gc.cmemnum;
+  for (;;++idx) {
+    idx &= g->gc.cmemmask;
+    if (mref(cmemhash[idx], void) == ptr) {
+      setmref(cmemhash[idx], NULL);
+      break;
+    }
+#if LUA_USE_ASSERT
+    lua_assert((idx ^ idx0) & g->gc.cmemmask);
+#endif
+  }
+}
+
+void *lj_cmem_realloc(lua_State *L, void *ptr, size_t osz, size_t nsz)
+{
+  lua_assert((osz == 0) == (ptr == NULL));
+  void *nptr = NULL;
+  if (nsz) {
+    global_State *g = G(L);
+    if (nsz >= (LJ_GC_ARENA_SIZE - LJ_GC_ARENA_SIZE/64)) {
+      if (osz >= (LJ_GC_ARENA_SIZE - LJ_GC_ARENA_SIZE/64)) {
+	nptr = g->allocf(g->allocd, ptr, 1, osz, nsz);
+	if (nptr == NULL)
+	  lj_err_mem(L);
+	g->gc.total = (GCSize)((g->gc.total - osz) + nsz);
+	return nptr;
+      }
+      nptr = g->allocf(g->allocd, NULL, 1, 0, nsz);
+      if (nptr == NULL)
+    lj_err_mem(L);
+      g->gc.total += (GCSize)nsz;
+    } else {
+      GCPool *pool = &g->gc.pool[GCPOOL_LEAF];
+      uint32_t fmask = fmask_for_ncells(pool, (uint32_t)((nsz + 15) >> 4));
+      if (fmask) {
+	uint32_t fidx = lj_ffs(fmask);
+	GCCell *f = mref(pool->free[fidx], GCCell);
+	GCArena *arena;
+	uint32_t idx;
+	checkisfree(f);
+	lua_assert(f->free.ncells*16 >= nsz);
+	if (!setmrefr(pool->free[fidx], f->free.next)) {
+	  pool->freemask ^= (fmask & (uint32_t)-(int32_t)fmask);
+	}
+	arena = (GCArena*)((uintptr_t)f & ~(LJ_GC_ARENA_SIZE - 1));
+	nptr = (void*)(((uintptr_t)(f+f->free.ncells) - nsz) & ~(uintptr_t)15);
+	idx = (uint32_t)((uintptr_t)nptr & (LJ_GC_ARENA_SIZE - 1)) >> 4;
+	lj_gc_bit(arena->block, |=, idx);
+	if ((void*)f != nptr) {
+	  if (LJ_UNLIKELY(arena->shoulders.gqidx < g->gc.gqsweeppos)) {
+	    lj_gc_bit(arena->mark, |=, idx);
+	  }
+	  gc_add_to_free_list(pool, f, (u32ptr(nptr) - u32ptr(f)) >> 4);
+	}
+      } else {
+	nptr = lj_mem_new(L, (GCSize)nsz, GCPOOL_LEAF);
+      }
+      lj_cmem_pin(L, nptr);
+    }
+    if (osz) {
+      memcpy(nptr, ptr, osz < nsz ? osz : nsz);
+    }
+  }
+  if (osz) {
+    lj_cmem_free(G(L), ptr, osz);
+  }
+  return nptr;
+}
+
+void *lj_cmem_grow(lua_State *L, void *p, MSize *szp, MSize lim, size_t esz)
 {
   MSize sz = (*szp) << 1;
   if (sz < LJ_MIN_VECSZ)
     sz = LJ_MIN_VECSZ;
   if (sz > lim)
     sz = lim;
-  p = lj_mem_realloc(L, p, (*szp)*esz, sz*esz);
+  p = lj_cmem_realloc(L, p, (*szp)*esz, sz*esz);
   *szp = sz;
   return p;
 }
 
+void lj_cmem_free(global_State *g, void *ptr, size_t osz)
+{
+  lua_assert((osz == 0) == (ptr == NULL));
+  if (osz >= (LJ_GC_ARENA_SIZE - LJ_GC_ARENA_SIZE/64)) {
+    g->gc.total -= (GCSize)osz;
+    g->allocf(g->allocd, ptr, 1, osz, 0);
+  } else if (osz) {
+    lj_mem_free(g, &g->gc.pool[GCPOOL_LEAF], ptr, osz);
+    lj_cmem_unpin(g, ptr);
+  }
+}

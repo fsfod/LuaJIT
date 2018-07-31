@@ -608,6 +608,9 @@ typedef struct GCState {
   GCSize estimate;
   MSize stepmul;
   MSize pause;
+  MRef cmemhash;
+  uint32_t cmemnum;
+  uint32_t cmemmask;
   uint8_t state;
   uint8_t unused;
   uint8_t fmark;
