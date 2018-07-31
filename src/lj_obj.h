@@ -600,14 +600,32 @@ typedef enum {
 #define mmname_str(g, mm) \
   ((GCstr*)((g)->metastrings + METASTRINGS_LEN - 16 - (mm) * 16))
 
+typedef struct GCPool {
+  MRef bump;
+  MRef bumpbase;
+  uint32_t freemask;
+  MRef free[31];
+} GCPool;
+
+typedef enum {
+  GCPOOL_LEAF,	/* Non-traversable allocations (e.g. strings, cdata). */
+  GCPOOL_GREY,	/* Traversable allocations (i.e. can be grey). */
+  GCPOOL_GCMM,	/* Objects which require destruction (__gc or similar). */
+  GCPOOL_MAX
+} GCPoolID;
+
 #define LJ_GC_SSB_CAPACITY 128
 
 typedef struct GCState {
+  GCPool pool[GCPOOL_MAX];
   GCSize total;
   GCSize threshold;
   GCSize estimate;
   MSize stepmul;
   MSize pause;
+  MRef gq;
+  uint32_t gqsize;
+  MSize gqcapacity;
   MRef hugehash;
   MRef cmemhash;
   uint32_t hugenum;
@@ -615,6 +633,8 @@ typedef struct GCState {
   uint32_t hugegreyidx;
   uint32_t cmemnum;
   uint32_t cmemmask;
+  MSize sweeppos;
+  MSize gqsweeppos;
   MSize hugesweeppos;
   uint8_t state;
   uint8_t unused;

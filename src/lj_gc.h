@@ -44,6 +44,63 @@ enum {
 #define black2gray(x)	((x)->gch.marked &= (uint8_t)~LJ_GC_BLACK)
 #define fixstring(s)	((s)->marked |= LJ_GC_FIXED)
 #define markfinalized(x)	((x)->gch.marked |= LJ_GC_FINALIZED)
+typedef struct GCArenaHead {
+  MRef grey;
+  MRef greybot;
+} GCArenaHead;
+
+typedef struct GCArenaShoulders {
+  uint32_t gqidx; /* Index in grey queue. */
+  uint32_t size;
+  uint8_t pool;
+} GCArenaShoulders;
+
+LJ_STATIC_ASSERT(sizeof(GCArenaHead) <= (LJ_GC_ARENA_SIZE / 128 / 64));
+LJ_STATIC_ASSERT(sizeof(GCArenaShoulders) <= (LJ_GC_ARENA_SIZE / 128 / 64));
+
+typedef struct GCFree {
+  MRef next;
+  uint32_t ncells;
+} GCFree;
+
+typedef LJ_ALIGN(16) union GCCell {
+  struct { GCHeader; } gch;
+  GCFree free;
+  uint32_t pad[4];
+} GCCell;
+
+LJ_STATIC_ASSERT(sizeof(GCCell) == 16);
+
+#define LJ_GC_ARENA_BITMAP_LEN (LJ_GC_ARENA_SIZE / 128 / sizeof(uintptr_t))
+#define LJ_GC_ARENA_BITMAP_FST (LJ_GC_ARENA_BITMAP_LEN / 64)
+#define lj_gc_bit(map, op, idx) ((map)[(idx) / (sizeof(uintptr_t) * 8)] op \
+  ((uintptr_t)1 << ((idx) & (sizeof(uintptr_t) * 8 - 1))))
+
+#define LJ_GC_ARENA_BITMAP32_LEN (LJ_GC_ARENA_SIZE / 128 / 4)
+#define LJ_GC_ARENA_BITMAP32_FST (LJ_GC_ARENA_BITMAP32_LEN / 64)
+
+typedef union GCArena {
+  struct {
+    GCArenaHead head;
+    char neck[LJ_GC_ARENA_SIZE / 128 - sizeof(GCArenaHead)];
+    GCArenaShoulders shoulders;
+  };
+  struct {
+    uintptr_t block[LJ_GC_ARENA_BITMAP_LEN];
+    uintptr_t mark[LJ_GC_ARENA_BITMAP_LEN];
+  };
+  struct {
+    uint32_t block32[LJ_GC_ARENA_BITMAP32_LEN];
+    uint32_t mark32[LJ_GC_ARENA_BITMAP32_LEN];
+  };
+  struct {
+    uint8_t block8[LJ_GC_ARENA_BITMAP32_LEN*4];
+    uint8_t mark8[LJ_GC_ARENA_BITMAP32_LEN*4];
+  };
+  GCCell cell[LJ_GC_ARENA_SIZE / 16];
+} GCArena;
+
+#define LJ_GC_GSIZE_MASK (LJ_GC_ARENA_SIZE - 1)
 
 /* Collector. */
 LJ_FUNC size_t lj_gc_separateudata(global_State *g, int all);
