@@ -138,25 +138,6 @@ static void stack_init(lua_State *L1, lua_State *L)
 
 /* -- State handling ------------------------------------------------------ */
 
-/* Open parts that may cause memory-allocation errors. */
-static TValue *cpluaopen(lua_State *L, lua_CFunction dummy, void *ud)
-{
-  global_State *g = G(L);
-  UNUSED(dummy);
-  UNUSED(ud);
-  stack_init(L, L);
-  /* NOBARRIER: State initialization, all objects are white. */
-  setgcref(L->env, obj2gco(lj_tab_new(L, 0, LJ_MIN_GLOBAL)));
-  settabV(L, registry(L), lj_tab_new(L, 0, LJ_MIN_REGISTRY));
-  lj_str_resize(L, LJ_MIN_STRTAB-1);
-  lj_meta_init(L);
-  lj_lex_init(L);
-  fixstring(lj_err_str(L, LJ_ERR_ERRMEM));  /* Preallocate memory error msg. */
-  g->gc.threshold = 4*g->gc.total;
-  lj_trace_initstate(g);
-  return NULL;
-}
-
 static void close_state(lua_State *L)
 {
   global_State *g = G(L);
@@ -207,6 +188,9 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
   global_State *g = &GG->g;
   if (GG == NULL || !checkptrGC(GG)) return NULL;
   memset(GG, 0, sizeof(GG_State));
+  g->gc.threshold = LJ_GC_ARENA_SIZE * 5;
+  g->gc.pause = LUAI_GCPAUSE;
+  g->gc.stepmul = LUAI_GCMUL;
   L->gcflags = LJ_GCFLAG_GREY;
   L->gctype = (int8_t)(uint8_t)LJ_TTHREAD;
   L->dummy_ffid = FF_C;
@@ -231,16 +215,15 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
   setgcref(g->gc.root, obj2gco(L));
   setmref(g->gc.sweep, &g->gc.root);
   g->gc.total = sizeof(GG_State);
-  g->gc.pause = LUAI_GCPAUSE;
-  g->gc.stepmul = LUAI_GCMUL;
   lj_dispatch_init((GG_State *)L);
-  L->status = LUA_ERRERR+1;  /* Avoid touching the stack upon memory error. */
-  if (lj_vm_cpcall(L, NULL, NULL, cpluaopen) != 0) {
-    /* Memory allocation error: free partial state. */
-    close_state(L);
-    return NULL;
-  }
-  L->status = LUA_OK;
+  stack_init(L, L);
+  /* NOBARRIER: State initialization, all objects are white. */
+  setgcref(L->env, obj2gco(lj_tab_new(L, 0, LJ_MIN_GLOBAL)));
+  settabV(L, registry(L), lj_tab_new(L, 0, LJ_MIN_REGISTRY));
+  lj_str_resize(L, LJ_MIN_STRTAB-1);
+  lj_meta_init(L);
+  lj_lex_init(L);
+  lj_trace_initstate(g);
   g->gc.hugemask = 7;
   setmref(g->gc.hugehash, lj_mem_newvec(L, g->gc.hugemask + 1, MRef,
 					GCPOOL_GREY));
