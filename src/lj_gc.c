@@ -581,6 +581,35 @@ static void atomic_clear_weak(global_State *g)
   }
 }
 
+static void lj_gc_atomic(global_State *g, lua_State *L)
+{
+  lj_gc_drain_ssb(g);
+  gc_markobj(g, obj2gco(L));
+  gc_traverse_curtrace(g);
+  gc_mark_gcroot(g);
+  lj_buf_shrink(L, &g->tmpbuf);
+  atomic_mark_misc(g);
+  atomic_traverse_threads(g);
+  atomic_check_still_weak(g);
+  atomic_propagate_grey(g);
+  g->gc.fmark = 1;
+  atomic_visit_ephemerons(g);
+  atomic_propagate_grey(g);
+  if (mrefu(g->gc.pool[GCPOOL_GCMM].bumpbase) !=
+      mrefu(g->gc.pool[GCPOOL_GCMM].bump)) {
+    uintptr_t bumpbase = mrefu(g->gc.pool[GCPOOL_GCMM].bumpbase);
+    GCArena *a = (GCArena*)(bumpbase & ~(LJ_GC_ARENA_SIZE-1));
+    uint32_t idx = (uint32_t)(bumpbase & (LJ_GC_ARENA_SIZE-1)) >> 4;
+    lj_gc_bit(a->mark, |=, idx);
+  }
+  atomic_enqueue_finalizers(g);
+  g->gc.fmark = 0;
+  atomic_clear_weak(g);
+  gc_marknleaf(g, mref(g->gc.weak, void));
+  gc_marknleaf(g, mref(g->gc.finalize, void));
+  g->gc.estimate = g->gc.total;
+}
+
 #define gc_string_freed(g, o) (--(g)->strnum)
 
 static void gc_sweep_str(global_State *g, GCRef *gcr)
@@ -776,42 +805,6 @@ void lj_gc_freeall(global_State *g)
 }
 
 /* -- Collector ----------------------------------------------------------- */
-
-/* Atomic part of the GC cycle, transitioning from mark to sweep phase. */
-static void atomic(global_State *g, lua_State *L)
-{
-  size_t udsize;
-
-  gc_mark_uv(g);  /* Need to remark open upvalues (the thread may be dead). */
-  gc_propagate_gray(g);  /* Propagate any left-overs. */
-
-  setgcrefr(g->gc.gray, g->gc.weak);  /* Empty the list of weak tables. */
-  setgcrefnull(g->gc.weak);
-  lua_assert(!iswhite(obj2gco(mainthread(g))));
-  gc_markobj(g, L);  /* Mark running thread. */
-  gc_traverse_curtrace(g);  /* Traverse current trace. */
-  gc_mark_gcroot(g);  /* Mark GC roots (again). */
-  gc_propagate_gray(g);  /* Propagate all of the above. */
-
-  setgcrefr(g->gc.gray, g->gc.grayagain);  /* Empty the 2nd chance list. */
-  setgcrefnull(g->gc.grayagain);
-  gc_propagate_gray(g);  /* Propagate it. */
-
-  udsize = lj_gc_separateudata(g, 0);  /* Separate userdata to be finalized. */
-  gc_mark_mmudata(g);  /* Mark them. */
-  udsize += gc_propagate_gray(g);  /* And propagate the marks. */
-
-  /* All marking done, clear weak tables. */
-  gc_clearweak(gcref(g->gc.weak));
-
-  lj_buf_shrink(L, &g->tmpbuf);  /* Shrink temp buffer. */
-
-  /* Prepare for sweep phase. */
-  g->gc.currentwhite = (uint8_t)otherwhite(g);  /* Flip current white. */
-  g->strempty.marked = g->gc.currentwhite;
-  setmref(g->gc.sweep, &g->gc.root);
-  g->gc.estimate = g->gc.total - (GCSize)udsize;  /* Initial estimate. */
-}
 
 /* GC state machine. Returns a cost estimate for each step performed. */
 static size_t gc_onestep(lua_State *L)
