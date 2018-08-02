@@ -15,6 +15,7 @@
 #include "lj_ctype.h"
 #include "lj_ccallback.h"
 #include "lj_buf.h"
+#include "lj_clib.h"
 
 /* -- C type definitions -------------------------------------------------- */
 
@@ -629,6 +630,7 @@ void lj_ctype_freestate(global_State *g)
 {
   CTState *cts = ctype_ctsG(g);
   if (cts) {
+    lj_clib_unloaddefault();
     lj_ccallback_mcode_free(cts);
   }
 }
