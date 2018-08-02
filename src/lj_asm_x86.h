@@ -1778,7 +1778,7 @@ static void asm_cnew(ASMState *as, IRIns *ir)
   CTypeID id = (CTypeID)IR(ir->op1)->i;
   CTSize sz;
   CTInfo info = lj_ctype_info(cts, id, &sz);
-  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_mem_newgco];
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_mem_newleaf];
   IRRef args[4];
   lua_assert(sz != CTSIZE_INVALID || (ir->o == IR_CNEW && ir->op2 != REF_NIL));
 
