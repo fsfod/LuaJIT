@@ -207,11 +207,6 @@ LJLIB_CF(ffi_meta___le)		LJLIB_REC(cdata_arith MM_le)
   return ffi_arith(L);
 }
 
-LJLIB_CF(ffi_meta___concat)	LJLIB_REC(cdata_arith MM_concat)
-{
-  return ffi_arith(L);
-}
-
 /* Forward declaration. */
 static int lj_cf_ffi_new(lua_State *L);
 
@@ -273,6 +268,11 @@ LJLIB_CF(ffi_meta___pow)	LJLIB_REC(cdata_arith MM_pow)
 }
 
 LJLIB_CF(ffi_meta___unm)	LJLIB_REC(cdata_arith MM_unm)
+{
+  return ffi_arith(L);
+}
+
+LJLIB_CF(ffi_meta___concat)	LJLIB_REC(cdata_arith MM_concat)
 {
   return ffi_arith(L);
 }
