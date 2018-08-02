@@ -940,9 +940,11 @@ static LJ_AINLINE void setlightudV(TValue *o, void *p)
 #define setcont(o, f)		setlightudV((o), contptr(f))
 #endif
 
+#if LUA_USE_ASSERT
+LJ_FUNC uintptr_t lj_gc_checklive(lua_State *L, GCobj *o, uint32_t itype);
+#endif
 #define tvchecklive(L, o) \
-  UNUSED(L), lua_assert(!tvisgcv(o) || \
-  ((~itype(o) == gcval(o)->gch.gct) && !isdead(G(L), gcval(o))))
+  UNUSED(L), lua_assert(!tvisgcv(o) || lj_gc_checklive(L, gcval(o), itype(o)))
 
 static LJ_AINLINE void setgcVraw(TValue *o, GCobj *v, uint32_t itype)
 {
