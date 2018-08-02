@@ -43,6 +43,10 @@ static LJ_AINLINE GCcdata *lj_cdata_new(CTState *cts, CTypeID id, CTSize sz)
   lua_assert((ctype_hassize(ct->info) ? ct->size : CTSIZE_PTR) == sz);
 #endif
   cd = lj_mem_newt(cts->L, sizeof(GCcdata) + sz, GCcdata, GCPOOL_LEAF);
+  if (!(sz & 7)) {
+    LJ_STATIC_ASSERT(sizeof(GCcdata) == 4);
+    cd = (GCcdata*)((uintptr_t)cd + 12 - (sz & 8));
+  }
   cd->gcflags = 0;
   cd->gctype = (int8_t)(uint8_t)LJ_TCDATA;
   cd->ctypeid = ctype_check(cts, id);
