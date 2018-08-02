@@ -36,7 +36,6 @@ static GCupval *func_finduv(lua_State *L, TValue *slot)
   }
   /* No matching upvalue found. Create a new one. */
   uv = lj_mem_newt(L, sizeof(GCupval), GCupval, GCPOOL_GREY);
-  uv->gctype = (int8_t)(uint8_t)~LJ_TUPVAL;
   setmref(uv->v, slot);  /* Pointing to the stack slot. */
   /* NOBARRIER: The GCupval is new (marked white) and open. */
   setgcrefr(uv->nextgc, *pp);  /* Insert into sorted list of open upvalues. */
@@ -48,7 +47,6 @@ static GCupval *func_finduv(lua_State *L, TValue *slot)
 static GCupval *func_emptyuv(lua_State *L)
 {
   GCupval *uv = lj_mem_newobj(L, GCupval, GCPOOL_GREY);
-  uv->gctype = (int8_t)(uint8_t)~LJ_TUPVAL;
   setnilV(&uv->tv);
   setmref(uv->v, &uv->tv);
   return uv;
