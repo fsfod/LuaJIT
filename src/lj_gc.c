@@ -199,8 +199,6 @@ static void gc_mark_gcroot(global_State *g)
 /* Start a GC cycle and mark the root set. */
 static void gc_mark_start(global_State *g)
 {
-  setgcrefnull(g->gc.gray);
-  setgcrefnull(g->gc.grayagain);
   setgcrefnull(g->gc.weak);
   lua_State *L = &G2GG(g)->L;
   gc_markobj(g, obj2gco(L));
@@ -426,12 +424,8 @@ static void gc_traverse_thread(global_State *g, lua_State *th)
   lj_state_shrinkstack(th, gc_traverse_frames(g, th));
 }
 
-/* Propagate one gray object. Traverse it and turn it black. */
-static size_t propagatemark(global_State *g)
+static size_t gc_traverse(global_State *g, GCobj *o)
 {
-  GCobj *o = gcref(g->gc.gray);
-  lua_assert(isgray(o));
-  setgcrefr(g->gc.gray, o->gch.gclist);  /* Remove from gray list. */
   int8_t gctype = o->gch.gctype;
   lua_assert(ismarked(g, o));
   lua_assert(o->gch.gcflags & LJ_GCFLAG_GREY);
@@ -453,8 +447,6 @@ static size_t propagatemark(global_State *g)
     return pt->sizept;
   } else if (LJ_LIKELY(gctype == (int8_t)(uint8_t)LJ_TTHREAD)) {
     lua_State *th = gco2th(o);
-    setgcrefr(th->gclist, g->gc.grayagain);
-    setgcref(g->gc.grayagain, o);
     o->gch.gcflags |= LJ_GCFLAG_GREY;
     gc_traverse_thread(g, th);
     return sizeof(lua_State) + sizeof(TValue) * th->stacksize;
@@ -469,15 +461,6 @@ static size_t propagatemark(global_State *g)
     return 0;
 #endif
   }
-}
-
-/* Propagate all gray objects. */
-static size_t gc_propagate_gray(global_State *g)
-{
-  size_t m = 0;
-  while (gcref(g->gc.gray) != NULL)
-    m += propagatemark(g);
-  return m;
 }
 
 void LJ_FASTCALL lj_gc_drain_ssb(global_State *g)
@@ -1081,10 +1064,6 @@ void lj_gc_fullgc(lua_State *L)
   int32_t ostate = g->vmstate;
   setvmstate(g, GC);
   if (g->gc.state <= GCSatomic) {  /* Caught somewhere in the middle. */
-    setmref(g->gc.sweep, &g->gc.root);  /* Sweep everything (preserving it). */
-    setgcrefnull(g->gc.gray);  /* Reset lists from partial propagation. */
-    setgcrefnull(g->gc.grayagain);
-    setgcrefnull(g->gc.weak);
     g->gc.state = GCSsweepstring;  /* Fast forward to the sweep phase. */
     g->gc.sweepstr = 0;
   }
