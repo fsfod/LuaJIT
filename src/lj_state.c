@@ -275,6 +275,8 @@ LUA_API void lua_close(lua_State *L)
 
 lua_State *lj_state_new(lua_State *L)
 {
+  global_State *g;
+  GCRef *thread;
   lua_State *L1 = lj_mem_newobj(L, lua_State, GCPOOL_GREY);
   L1->gcflags = LJ_GCFLAG_GREY;
   L1->gctype = (int8_t)(uint8_t)LJ_TTHREAD;
@@ -289,6 +291,14 @@ lua_State *lj_state_new(lua_State *L)
   setgcrefr(L1->env, L->env);
   stack_init(L1, L);  /* init stack */
   lua_assert(iswhite(obj2gco(L1)));
+  g = G(L);
+  thread = mref(g->gc.thread, GCRef);
+  if (LJ_UNLIKELY(g->gc.threadnum == g->gc.threadcapacity)) {
+    lj_mem_growvec(L, thread, g->gc.threadcapacity, LJ_MAX_MEM32, GCRef,
+                   GCPOOL_GREY);
+    setmref(g->gc.thread, thread);
+  }
+  setgcref(thread[g->gc.threadnum++], obj2gco(L1));
   return L1;
 }
 

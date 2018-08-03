@@ -13,6 +13,7 @@ enum { /* Garbage collector states. Order matters. */
   GCSpropagate   =  1,
   GCSatomic      =  3,
   GCSsweepstring =  4,
+  GCSsweepthread =  8,
   GCSsweep       = 12,
   GCSfinalize    = 22,
 

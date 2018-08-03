@@ -623,6 +623,7 @@ typedef struct GCState {
   MRef hugehash;
   MRef cmemhash;
   MRef weak;
+  MRef thread;
   MRef finalize;
   uint32_t hugenum;
   uint32_t hugemask;
@@ -631,6 +632,8 @@ typedef struct GCState {
   uint32_t cmemmask;
   MSize weaknum;
   MSize weakcapacity;
+  MSize threadnum;
+  MSize threadcapacity;
   MSize finalizenum;
   MSize finalizecapacity;
   MSize sweeppos;

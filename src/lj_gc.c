@@ -848,9 +848,27 @@ static size_t gc_onestep(lua_State *L)
       } else {  /* Otherwise skip this phase to help the JIT. */
 	g->gc.state = GCSpause;  /* End of GC cycle. */
 	g->gc.debt = 0;
+  case GCSsweepthread:
+    if (g->gc.sweeppos < g->gc.threadnum) {
+      gc_sweep_one_thread(g);
+    } else {
+      uint32_t p;
+      gc_sweep_uv(&G2GG(g)->L);
+      g->gc.state = GCSsweep;
+      for (p = 0; p < GCPOOL_MAX; ++p) {
+	g->gc.pool[p].freemask = 0;
+	if (mrefu(g->gc.pool[p].bumpbase) < mrefu(g->gc.pool[p].bump)) {
+	  /* Avoid adding the pool's bump region to the freelists. */
+	  GCCell *c = mref(g->gc.pool[p].bumpbase, GCCell);
+	  GCArena *a = (GCArena*)((uintptr_t)c & ~(LJ_GC_ARENA_SIZE-1));
+	  uint32_t idx = (uint32_t)((uintptr_t)c & (LJ_GC_ARENA_SIZE-1)) >> 4;
+	  g->gc.estimate -= (GCSize)(mref(g->gc.pool[p].bump, char)-(char*)c);
+	  lj_gc_bit(a->block, |=, idx);
+	  lj_gc_bit(a->mark, |=, idx);
+	}
       }
     }
-    return GCSWEEPMAX*GCSWEEPCOST;
+    return sizeof(lua_State) + sizeof(GCupval) * 2;
   case GCSsweephuge:
     if (g->gc.hugesweeppos) {
       do {
