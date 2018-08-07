@@ -9,7 +9,7 @@
 #ifndef _LJ_OBJ_H
 #define _LJ_OBJ_H
 
-#include "lua.h"
+#include "luajit.h"
 #include "lj_def.h"
 #include "lj_arch.h"
 
@@ -670,7 +670,7 @@ typedef struct global_State {
   GCRef *strhash;	/* String hash table (hash chain anchors). */
   MSize strmask;	/* String hash mask (size of hash table - 1). */
   MSize strnum;		/* Number of strings in hash table. */
-  lua_Alloc allocf;	/* Memory allocator. */
+  luaJIT_alloc_callback allocf;  /* Memory allocator. */
   void *allocd;		/* Memory allocator data. */
   GCState gc;		/* Garbage collector. */
   SBuf tmpbuf;		/* Temporary string buffer. */

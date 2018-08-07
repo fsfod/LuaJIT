@@ -61,6 +61,11 @@ enum {
 
 /* LuaJIT public C API. */
 
+/* State creation. */
+typedef void *(*luaJIT_alloc_callback)(void *data, void *ptr, size_t align,
+				       size_t osize, size_t nsize);
+LUA_API lua_State *luaJIT_newstate(luaJIT_alloc_callback f, void* data);
+
 /* Variant of lua_close appropriate for use at process shutdown. */
 LUA_API void luaJIT_preclose(lua_State *L);
 

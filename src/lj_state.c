@@ -177,17 +177,17 @@ static void pinstring_init(lua_State *L)
   lua_assert(mref(g->gc.pool[GCPOOL_LEAF].bumpbase, char) == g->pinstrings);
 }
 
-#if LJ_64 && !LJ_GC64 && !(defined(LUAJIT_USE_VALGRIND) && defined(LUAJIT_USE_SYSMALLOC))
-lua_State *lj_state_newstate(lua_Alloc f, void *ud)
-#else
-LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
-#endif
+LUA_API lua_State *luaJIT_newstate(luaJIT_alloc_callback f, void *ud)
 {
-  GG_State *GG = (GG_State *)f(ud, NULL, 0, sizeof(GG_State));
+  GCArena *arena = f(ud, NULL, LJ_GC_ARENA_SIZE, 0, LJ_GC_ARENA_SIZE);
+  GG_State *GG = (GG_State *)((uint8_t*)arena + LJ_GC_ARENA_SIZE/64);
   lua_State *L = &GG->L;
   global_State *g = &GG->g;
-  if (GG == NULL || !checkptrGC(GG)) return NULL;
-  memset(GG, 0, sizeof(GG_State));
+  if (arena == NULL) return NULL;
+  if (!checkptrGC(GG) || ((uintptr_t)arena & (LJ_GC_ARENA_SIZE - 1))) {
+    f(ud, arena, LJ_GC_ARENA_SIZE, LJ_GC_ARENA_SIZE, 0);
+    return NULL;
+  }
   g->gc.threshold = LJ_GC_ARENA_SIZE * 5;
   g->gc.pause = LUAI_GCPAUSE;
   g->gc.stepmul = LUAI_GCMUL;
@@ -224,6 +224,8 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
   lj_meta_init(L);
   lj_lex_init(L);
   lj_trace_initstate(g);
+  g->allocf = f;
+  g->allocd = ud;
   g->gc.hugemask = 7;
   setmref(g->gc.hugehash, lj_mem_newvec(L, g->gc.hugemask + 1, MRef,
 					GCPOOL_GREY));
