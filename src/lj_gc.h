@@ -8,9 +8,16 @@
 
 #include "lj_obj.h"
 
-/* Garbage collector states. Order matters. */
-enum {
-  GCSpause, GCSpropagate, GCSatomic, GCSsweepstring, GCSsweep, GCSfinalize
+enum { /* Garbage collector states. Order matters. */
+  GCSpause       =  0,
+  GCSpropagate   =  1,
+  GCSatomic      =  3,
+  GCSsweepstring =  4,
+  GCSsweep       = 12,
+  GCSfinalize    = 22,
+
+  GCS_barriers = 1,
+  GCS_nojit    = 2,
 };
 
 #define LJ_GCFLAG_GREY      0x01
