@@ -25,6 +25,7 @@ LJ_FUNC_NORET void lj_trace_err_info(jit_State *J, TraceError e);
 /* Trace management. */
 LJ_FUNC GCtrace * LJ_FASTCALL lj_trace_alloc(lua_State *L, GCtrace *T);
 LJ_FUNC void LJ_FASTCALL lj_trace_free(global_State *g, GCtrace *T);
+LJ_FUNC void lj_trace_freeno(global_State *g, TraceNo no);
 LJ_FUNC void lj_trace_reenableproto(GCproto *pt);
 LJ_FUNC void lj_trace_flushproto(global_State *g, GCproto *pt);
 LJ_FUNC void lj_trace_flush(jit_State *J, TraceNo traceno);

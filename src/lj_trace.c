@@ -170,14 +170,20 @@ static void trace_save(jit_State *J, GCtrace *T)
 #endif
 }
 
-void LJ_FASTCALL lj_trace_free(global_State *g, GCtrace *T)
+void lj_trace_freeno(global_State *g, TraceNo no)
 {
   jit_State *J = G2J(g);
+  if (no < J->freetrace)
+    J->freetrace = no;
+  lj_gdbjit_deltraceno(J, no);
+}
+
+void LJ_FASTCALL lj_trace_free(global_State *g, GCtrace *T)
+{
   if (T->traceno) {
-    lj_gdbjit_deltrace(J, T);
-    if (T->traceno < J->freetrace)
-      J->freetrace = T->traceno;
-    setgcrefnull(J->trace[T->traceno]);
+    GCRef *ref = &G2J(g)->trace[T->traceno];
+    lj_trace_freeno(g, T->traceno);
+    setgcrefnull(*ref);
   }
 }
 
