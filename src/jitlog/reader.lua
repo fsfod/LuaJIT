@@ -502,6 +502,7 @@ local function make_msghandler(reader, base, funcs, name)
   if not funcs or (type(funcs) == "table" and #funcs == 0) then
     return function(self, buff, limit)
       local msg = reader(buff, limit)
+      msg:check(limit)
       base(self, msg, name, limit)
       return
     end
@@ -509,12 +510,14 @@ local function make_msghandler(reader, base, funcs, name)
     local f = (type(funcs) == "function" and funcs) or funcs[1]
     return function(self, buff, limit)
       local msg = reader(buff, limit)
+      msg:check(limit)
       f(self, msg, base(self, msg, name, limit))
       return
     end
   else
     return function(self, buff, limit)
       local msg = reader(buff, limit)
+      msg:check(limit)
       local ret1, ret2, ret3, ret4, ret5 = base(self, msg, name, limit)
       for _, f in ipairs(funcs) do
         f(self, msg, ret1, ret2, ret3, ret4, ret5)

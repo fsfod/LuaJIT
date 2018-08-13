@@ -742,6 +742,10 @@ function generator:mkfield(f)
   return ret
 end
 
+function generator:get_boundscheck(def)
+  return nil
+end
+
 function generator:write_struct(def, template)
   local fieldstr = ""
   local fieldgetters = {}
@@ -780,6 +784,7 @@ function generator:write_struct(def, template)
     cprefix = def.cprefix or "",
     fields = fieldstr,
     bitfields = fieldgetters,
+    boundscheck = self:get_boundscheck(def)
   }
 
   self:write(buildtemplate(template, template_args))
@@ -1220,6 +1225,23 @@ function generator:write_logfunc(def)
   end
 
   self:write(buildtemplate(template, template_args))
+end
+
+function generator:build_boundscheck(msgdef)
+  local checks = {}
+
+  for _, field in ipairs(msgdef.vlen_fields) do
+    local tvalues = {
+      field = field.name.."_offset",
+      name = field.name,
+      offset = field.offset,
+      element_size = field.element_size,
+    }
+    if field.kind ~= "table" then
+      table.insert(checks, buildtemplate(self.templates.boundscheck_line, tvalues))
+    end
+  end
+  return buildtemplate(self.templates.boundscheck_func, {name = msgdef.name, msgsize = msgdef.size, checks = checks})
 end
 
 function generator:write_enum(name, names, prefix)

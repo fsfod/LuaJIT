@@ -38,7 +38,7 @@ public struct {{name}}{  {{fields}}
   msgstruct = [[
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct Msg_{{name}}{  {{fields}}
-{{bitfields:  %s\n}}  public MsgId MsgId => (MsgId)(byte)header;
+{{bitfields:  %s\n}}  public MsgId MsgId => (MsgId)(byte)header;{{boundscheck}}
 };
 
 ]],
@@ -60,6 +60,25 @@ public struct Msg_{{name}}{  {{fields}}
 
   public static MsgPrinter[] MsgPrinters = {
 {{list:    Print_%s,\n}}  };
+]],
+
+  boundscheck_func = [[
+
+
+  public void Check(ulong limit) {
+{{checks :%s}}  }]],
+
+  boundscheck_line = [[
+    if({{field}} != 0) {
+      if({{field}} < 0 ||  (ulong)({{field}} + {{offset}}) > (limit-4)) {
+        throw new Exception("Bad field offset for {{name}}");
+      }
+
+      var offset = (ulong)({{field}}) + 4 + MsgInfo.GetArrayLength(ref {{field}}) * (ulong){{element_size}};
+      if(offset > limit) {
+        throw new Exception("Bad field length for {{name}}");
+      }
+    }
 ]],
 
 }
@@ -214,6 +233,13 @@ end
 
 function generator:fmt_namelookup(enum, idvar)
   return format("%s_names[(uint)%s]", enum, idvar)
+end
+
+function generator:get_boundscheck(def)
+  if not def.vlen_fields or #def.vlen_fields == 0 then
+    return ""
+  end
+  return self:build_boundscheck(def)
 end
 
 function generator:writefile(options)

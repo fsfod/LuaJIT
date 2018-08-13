@@ -121,6 +121,24 @@ end
   vtable = [[
   {{name}} = { {{offsets}} },
 ]],
+
+  boundscheck_func = [[
+  function {{name}}:check(limit)
+    local offset = {{msgsize}}
+    local msg = ffi_cast("char*", self)
+{{checks :%s}}  end]],
+
+  boundscheck_line = [[
+    offset = self.{{name}}_offset
+    if offset ~= 0 then
+      offset = offset + {{offset}}
+      assert(offset > 4 and offset <= (limit-4),  "Bad field offset for {{name}}")
+      
+      local count = getarray_count(msg, offset)
+      local size = 4 + (count * {{element_size}})
+      assert(size <= limit-offset, "Bad field length for {{name}}")
+    end
+]],
 }
 
 function generator:fmt_fieldget(def, f)
@@ -342,8 +360,14 @@ lib.type_list = {
       local funclist = struct_getters[def.name]
       local getters = {}
       if not funclist then
-        funclist = {}
+        funclist = {format("  %s.check = nop", def.name)}
       else
+        if #def.vlen_fields > 0 and not def.use_msgsize then
+          table.insert(funclist, self:build_boundscheck(def))
+        else
+          table.insert(funclist, format("  %s.check = nop", def.name))
+        end
+
         -- Build a table of properties names to getter functions used by the indexer
         for _, f in ipairs(def.fields) do
           if self:needs_accessor(def, f) and (not f.vlen or f.type == "string" or f.type == "stringlist") then
