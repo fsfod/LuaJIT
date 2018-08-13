@@ -651,6 +651,17 @@ static void rec_profile_ret(jit_State *J)
   }
 }
 
+static void rec_profile_ftrace(jit_State *J)
+{
+  if (J->pt && J2G(J)->vmevent_data) {
+    emitir(IRTG(IR_JLMARK, IRT_NIL), lj_ir_kgc(J, (GCobj *)J->pt, IRT_PROTO), 1);
+    /* 
+    ** FIXME is it possible to get duplicate entries from a trace exit
+    ** lj->needsnap or lj_snap_add(J);
+    */
+  }
+}
+
 #endif
 
 /* -- Record calls and returns -------------------------------------------- */
@@ -2422,14 +2433,17 @@ void lj_record_ins(jit_State *J)
 
   case BC_FUNCF:
     rec_func_lua(J);
+    rec_profile_ftrace(J);
     break;
   case BC_JFUNCF:
     rec_func_jit(J, rc);
+    rec_profile_ftrace(J);
     break;
 
   case BC_FUNCV:
     rec_func_vararg(J);
     rec_func_lua(J);
+    rec_profile_ftrace(J);
     break;
   case BC_JFUNCV:
     lua_assert(0);  /* Cannot happen. No hotcall counting for varag funcs. */

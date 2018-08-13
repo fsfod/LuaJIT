@@ -260,6 +260,26 @@ function tests.callmarkers()
   assert(markers[4].id == result.protos[3].id, markers[4].id)
 end
 
+function tests.jitcallmarkers()
+  jitlog.start()
+  local f1 = loadstring("return 1", "f1")
+  for i=1, 200 do
+    if i < 150 or i > 180 then
+      f1()
+    end
+  end
+  local result = parselog(jitlog.savetostring())
+  local markers = result.markers
+  assert(#markers == 169, #markers)
+  assert(#result.protos == 2, #result.protos)
+  
+  local pt = result.protos[1]
+  for i, m in ipairs(markers) do
+    -- print(i, m.flags == 1 and "JIT'ed" or "Interp")
+    assert(m.id == pt.id, pt.id)
+  end
+end
+
 if hasjit then
 
 function tests.tracexits()
