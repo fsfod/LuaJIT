@@ -252,19 +252,23 @@ local function make_msghandler(msgname, base, funcs)
   -- See if we can go for the simple case with no extra funcs call first
   if not funcs or (type(funcs) == "table" and #funcs == 0) then
     return function(self, buff, limit)
-      base(self, ffi.cast(msgname, buff), limit)
+      local msg = ffi.cast(msgname, buff)
+      msg:check(limit)
+      base(self, msg, limit)
       return
     end
   elseif type(funcs) == "function" or #funcs == 1 then
     local f = (type(funcs) == "function" and funcs) or funcs[1]
     return function(self, buff, limit)
       local msg = ffi.cast(msgname, buff)
+      msg:check(limit)
       f(self, msg, base(self, msg, limit))
       return
     end
   else
     return function(self, buff, limit)
       local msg = ffi.cast(msgname, buff)
+      msg:check(limit)
       local ret1, ret2, ret3, ret4, ret5 = base(self, msg, limit)
       for _, f in ipairs(funcs) do
         f(self, msg, ret1, ret2, ret3, ret4, ret5)

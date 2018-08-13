@@ -494,6 +494,10 @@ function generator:mkfield(f)
   return ret
 end
 
+function generator:get_boundscheck(def)
+  return nil
+end
+
 function generator:write_struct(name, def)
   local fieldstr = ""
   local fieldgetters = {}
@@ -534,7 +538,7 @@ function generator:write_struct(name, def)
     template = "struct"
   end
 
-  self:writetemplate(template, {name = name, fields = fieldstr, bitfields = fieldgetters})
+  self:writetemplate(template, {name = name, fields = fieldstr, bitfields = fieldgetters, boundscheck = self:get_boundscheck(def)})
   return #fieldgetters > 0 and fieldgetters
 end
 
@@ -767,6 +771,16 @@ function generator:write_logfunc(def)
     minbuffspace = minbuffspace,
   }
   self:write(buildtemplate(template, template_args))
+end
+
+function generator:build_boundscheck(msgdef)
+  local checks = {}
+
+  for _, field in ipairs(msgdef.vlen_fields) do
+    local len = self:fmt_fieldget(msgdef,  msgdef.fieldlookup[field.buflen])
+    table.insert(checks, buildtemplate(self.templates.boundscheck_line, {field = len, name = field.name, element_size = field.element_size}))
+  end
+  return buildtemplate(self.templates.boundscheck_func, {name = msgdef.name, msgsize = msgdef.size, checks = checks})
 end
 
 function generator:write_enum(name, names, prefix)

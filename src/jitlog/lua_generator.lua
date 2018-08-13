@@ -27,8 +27,13 @@ lib.{{name}} = {{name}}
 lib.msgsizes = msgsizes
 
 ]],
-
   struct = [[
+typedef struct {{name}}{
+  {{fields}}
+}__attribute__((packed)) {{name}};
+
+]],
+  msgstruct = [[
 typedef struct MSG_{{name}}{
   {{fields}}
 }__attribute__((packed))  MSG_{{name}};
@@ -77,6 +82,17 @@ end
   end
 
 ]],
+
+  boundscheck_func = [[
+  function {{name}}:check(limit)
+    local offset = {{msgsize}}
+{{checks :%s}}  end]],
+
+  boundscheck_line = [[
+
+    offset = offset + ({{field}} * {{element_size}})
+    assert(offset <= limit, "Bad field length for {{name}}")
+]]
 }
 
 function generator:fmt_fieldget(def, f)
@@ -223,8 +239,14 @@ ffi.cdef[[
     local funclist = struct_getters[def.name]
     local getters = {}
     if not funclist then
-      funclist = {}
+      funclist = {format("  %s.check = nop", def.name)}
     else
+      if #def.vlen_fields > 0 and not def.use_msgsize then
+        table.insert(funclist, self:build_boundscheck(def))
+      else
+        table.insert(funclist, format("  %s.check = nop", def.name))
+      end
+
       -- Build a table of properties names to getter functions used by the indexer
       for _, f in ipairs(def.fields) do
         if self:needs_accessor(def, f) and (not f.vlen or f.type == "string" or f.type == "stringlist") then
