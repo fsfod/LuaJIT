@@ -371,6 +371,7 @@ typedef struct GCproto {
   uint8_t sizeuv;	/* Number of upvalues. */
   uint8_t flags;	/* Miscellaneous flags (see below). */
   uint16_t trace;	/* Anchor for chain of root traces. */
+  uint32_t id;
   /* ------ The following fields are for debugging/tracebacks only ------ */
   GCRef chunkname;	/* Name of the chunk this function was defined in. */
   BCLine firstline;	/* First line of the function definition. */
@@ -623,6 +624,7 @@ typedef struct global_State {
   MRef ctype_state;	/* Pointer to C type state. */
   GCRef gcroot[GCROOT_MAX];  /* GC roots. */
 
+  uint32_t protocount;
   luaJIT_vmevent_callback vmevent_cb; /* User set VM event callback. */
   void *vmevent_data;                 /* VM event callback data. */
 } global_State;

@@ -354,6 +354,7 @@ function base_actions:gcproto(msg)
   local chunk = self.strings[addrtonum(msg.chunkname)]
   local proto = {
     owner = self,
+    id = msg.id,
     chunk = chunk, 
     firstline = msg.firstline, 
     numline = msg.numline,
