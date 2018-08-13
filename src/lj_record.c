@@ -653,6 +653,7 @@ static void rec_profile_ret(jit_State *J)
 
 static void rec_profile_ftrace(jit_State *J)
 {
+#if 0
   if (J->pt && J2G(J)->vmevent_data) {
     emitir(IRTG(IR_JLMARK, IRT_NIL), lj_ir_kgc(J, (GCobj *)J->pt, IRT_PROTO), 1);
     /* 
@@ -660,6 +661,7 @@ static void rec_profile_ftrace(jit_State *J)
     ** lj->needsnap or lj_snap_add(J);
     */
   }
+#endif
 }
 
 #endif

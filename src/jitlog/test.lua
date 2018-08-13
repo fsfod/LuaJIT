@@ -260,6 +260,9 @@ function tests.callmarkers()
   assert(markers[4].id == result.protos[3].id, markers[4].id)
 end
 
+-- JIT'ed call markers disabled for now
+if false then
+
 function tests.jitcallmarkers()
   jitlog.start()
   local f1 = loadstring("return 1", "f1")
@@ -278,6 +281,8 @@ function tests.jitcallmarkers()
     -- print(i, m.flags == 1 and "JIT'ed" or "Interp")
     assert(m.id == pt.id, pt.id)
   end
+end
+
 end
 
 if hasjit then
