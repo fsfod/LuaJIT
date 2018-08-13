@@ -43,6 +43,17 @@ local {{name}}_mt = {
 ffi.metatype("MSG_{{name}}", {{name}}_mt)
 
 ]],
+
+  boundscheck_func = [[
+check = function(msg, limit)
+      local offset = {{msgsize}}
+{{checks :%s}}    end]],
+
+  boundscheck_line = [[
+      offset = offset + ({{field}} * {{element_size}})
+      assert(offset <= limit, "Bad field length for {{name}}")
+
+]]
 }
 
 function generator:fmt_fieldget(def, f)
@@ -169,21 +180,29 @@ ffi.cdef("typedef uint32_t GCRef, MRef;")]])
 
 ffi.cdef[[
 ]=])
-  local struct_bitfields = {}
+  local struct_getters = {}
   for _, def in ipairs(self.msglist) do
-    local bitfields = self:write_struct(def.name, def)
-    if bitfields then
-      table.insert(struct_bitfields, {name = def.name, fields = bitfields})
+    local field_getters = self:write_struct(def.name, def)
+    if field_getters then
+      struct_getters[def.name] = field_getters
     end
   end
   self:write("]]\n")
 
- for _, def in ipairs(self.msglist) do
+  for _, def in ipairs(self.msglist) do
     self:writef("assert(ffi.sizeof('MSG_%s') == %d)\n", def.name, def.size)
   end
 
-  for _, struct in ipairs(struct_bitfields) do
-    self:writetemplate("msg_metatable", struct)
+  for _, def in ipairs(self.msglist) do
+    local funclist = struct_getters[def.name]
+    if not funclist then
+      funclist = {[[check = function() end]]}
+    elseif #def.vlen_fields > 0 and not def.use_msgsize then
+      table.insert(funclist, self:build_boundscheck(def))
+    else
+      table.insert(funclist, [[check = function() end]])
+    end   
+    self:writetemplate("msg_metatable", {name = def.name, msgdef = def, fields = funclist})
   end
 
   self:write([[

@@ -653,6 +653,16 @@ function generator:write_logfunc(def)
   self:write(self:buildtemplate(template, {name = def.name, args = args, fields = fields, vtotal = vtotal, vwrite = vwrite, minbuffspace = minbuffspace, msgsize = def.size}))
 end
 
+function generator:build_boundscheck(msgdef)
+  local checks = {}
+
+  for _, field in ipairs(msgdef.vlen_fields) do
+    local len = self:fmt_fieldget(msgdef,  msgdef.fieldlookup[field.buflen])
+    table.insert(checks, self:buildtemplate(self.templates.boundscheck_line, {field = len, name = field.name, element_size = field.element_size}))
+  end
+  return self:buildtemplate(self.templates.boundscheck_func, {name = msgdef.name, msgsize = msgdef.size, checks = checks})
+end
+
 function generator:write_enum(name, names, prefix)
   prefix = prefix and (prefix .. "_") or name
 
