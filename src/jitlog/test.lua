@@ -239,6 +239,27 @@ function tests.smallmarker()
   end
 end
 
+function tests.callmarkers()
+  jitlog.start()
+  local f1 = loadstring("return 1", "f1")
+  local f2 = loadstring("\nreturn 1, 2", "f2")
+  local f3 = loadstring('return function(...) return select("#", ...), ... end', "f3")
+  f1()
+  f2()
+  local f4 = f3()
+  f4(1, 2, 3)
+  
+  local result = parselog(jitlog.savetostring())
+  local markers = result.markers
+  assert(#markers == 4, #markers)
+  
+  assert(#result.protos == 4)
+  assert(markers[1].id == result.protos[1].id, markers[1].id)
+  assert(markers[2].id == result.protos[2].id, markers[2].id)
+  assert(markers[3].id == result.protos[4].id, markers[3].id)
+  assert(markers[4].id == result.protos[3].id, markers[4].id)
+end
+
 if hasjit then
 
 function tests.tracexits()

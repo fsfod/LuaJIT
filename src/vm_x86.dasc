@@ -482,6 +482,22 @@
 |  mov tab->gclist, reg
 |.endmacro
 |
+|.macro jl_writemarker, idreg, bufbase, rbuf
+|.if X64
+|  mov bufbase, qword [DISPATCH+DISPATCH_GL(vmevent_data)]
+|.else
+|  mov bufbase, dword [DISPATCH+DISPATCH_GL(vmevent_data)]
+|.endif
+|  mov rbuf, [bufbase + offsetof(SBuf, p)]
+|  shl idreg, 12
+|  or idreg, 2// MSGTYPE_smallmarker
+|  mov [rbuf], idreg
+|  add rbuf, 4
+|  mov [bufbase], rbuf
+|  mov idreg, [bufbase + offsetof(SBuf, e)]
+|  sub idreg, rbuf
+|.endmacro
+
 |//-----------------------------------------------------------------------
 
 /* Generate subroutines used by opcodes and other parts of the VM. */
@@ -2808,6 +2824,17 @@ static void build_subroutines(BuildCtx *ctx)
   |  jmp ->cont_nop
 #endif
   |
+  |->jitlog_growbuffer:
+  |  mov L:RB, SAVE_L 
+  |  mov L:RB->base, BASE
+  |  mov SAVE_PC, PC
+  |  mov TMP1, FCARG1
+  |  mov FCARG1, RB
+  |  call extern lj_jitlog_checkbuffer@4
+  |  mov BASE, L:RB->base
+  |  mov FCARG1, TMP1
+  |  ins_next
+  | 
   |//-----------------------------------------------------------------------
   |//-- Trace exit handler -------------------------------------------------
   |//-----------------------------------------------------------------------
@@ -5335,6 +5362,17 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  movzx RD, PC_RD
       |  jmp =>BC_JLOOP
     } else {
+      |.if X64
+      |  cmp qword  [DISPATCH+DISPATCH_GL(vmevent_data)], 0
+      |.else
+      |  cmp dword  [DISPATCH+DISPATCH_GL(vmevent_data)], 0
+      |.endif
+      |  jz >5
+      |  mov RA, [PC-4+PC2PROTO(id)]
+      |  jl_writemarker RA, RBa, RD
+      |  cmp RA, 127 // Make sure there 127 bytes space still left in the jitlog buffer
+      |  jle ->jitlog_growbuffer
+      |5:
       |  ins_next
     }
     |
@@ -5386,6 +5424,17 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  movzx RD, PC_RD
       |  jmp =>BC_JLOOP
     } else {
+      |.if X64
+      |  cmp qword  [DISPATCH+DISPATCH_GL(vmevent_data)], 0
+      |.else
+      |  cmp dword  [DISPATCH+DISPATCH_GL(vmevent_data)], 0
+      |.endif
+      |  jz >5
+      |  mov RA, [PC-4+PC2PROTO(id)]
+      |  jl_writemarker RA, RBa, RD
+      |  cmp RA, 127 // Make sure there 127 bytes space still left in the jitlog buffer
+      |  jle >4
+      |5:
       |  mov KBASE, [PC-4+PC2PROTO(k)]
       |  ins_next
     }
@@ -5396,6 +5445,9 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  sub RB, 1
     |  jnz <3
     |  jmp <2
+    |4:
+    |  mov KBASE, [PC-4+PC2PROTO(k)]
+    |  jmp ->jitlog_growbuffer
     break;
 
   case BC_FUNCC:
