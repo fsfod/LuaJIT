@@ -49,6 +49,7 @@ typedef struct jitlog_State {
   uint32_t traced_bc_capacity;
   uint64_t resetpoint;
   JITLogEventTypes events_written;
+  uint64_t trace_starttime;
 } jitlog_State;
 
 
@@ -421,6 +422,8 @@ static void jitlog_tracestart(jitlog_State *context, GCtrace *T)
   context->lastpc = proto_bcpos(J->pt, J->pc);
   context->traced_funcs_count = 0;
   context->traced_bc_count = 0;
+  context->trace_starttime = start_getticks();
+  J->tracetime = 0;
 }
 
 static int isstitched(jitlog_State *context, GCtrace *T)
@@ -462,6 +465,7 @@ static void write_exitstubs(jitlog_State *context, GCtrace *T)
 static void jitlog_writetrace(jitlog_State *context, GCtrace *T, int abort)
 {
   jit_State *J = G2J(context->g);
+  uint64_t duration = stop_getticks() - context->trace_starttime;
   GCproto *startpt = &gcref(T->startpt)->pt, *stoppt;
   BCPos startpc = proto_bcpos(startpt, mref(T->startpc, const BCIns));
   BCPos stoppc;
@@ -499,7 +503,8 @@ static void jitlog_writetrace(jitlog_State *context, GCtrace *T, int abort)
   }
 
   log_trace(&context->ub, T, abort, isstitched(context, T), J->parent, stoppt, stoppc, context->lastfunc, (uint16_t)abortreason, startpc, mcodesize, T->ir + T->nk, irsize,
-            context->traced_funcs, context->traced_funcs_count, context->traced_bc, context->traced_bc_count);
+            context->traced_funcs, context->traced_funcs_count, context->traced_bc, context->traced_bc_count,
+		    context->trace_starttime,  duration, J->tracetime);
 }
 
 static void jitlog_tracestop(jitlog_State *context, GCtrace *T)

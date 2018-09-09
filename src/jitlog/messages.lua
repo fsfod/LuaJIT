@@ -182,6 +182,9 @@ local msgs = {
     "calledfuncs : TracedFunc[calledfuncs_length]",
     "tracedbc_length : u32",
     "tracedbc : TracedBC[tracedbc_length]",
+    "starttime : u64",
+    "traceduration : u64",
+    "tracetime : u64",
 
     structcopy = {
       fields = {

@@ -31,6 +31,8 @@
 #include "lj_vmevent.h"
 #include "lj_target.h"
 
+#include "lj_vmperf.h"
+
 /* -- Error handling ------------------------------------------------------ */
 
 /* Synchronous abort with error message. */
@@ -726,8 +728,10 @@ void lj_trace_ins(jit_State *J, const BCIns *pc)
   J->pc = pc;
   J->fn = curr_func(J->L);
   J->pt = isluafunc(J->fn) ? funcproto(J->fn) : NULL;
+  uint64_t start = start_getticks();
   while (lj_vm_cpcall(J->L, NULL, (void *)J, trace_state) != 0)
     J->state = LJ_TRACE_ERR;
+  J->tracetime += stop_getticks() - start;
 }
 
 /* A hotcount triggered. Start recording a root trace. */
