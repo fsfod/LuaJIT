@@ -16,6 +16,7 @@
 #include "lauxlib.h"
 #include "lualib.h"
 #include "luajit.h"
+#include "jitlog.h"
 
 #include "lj_arch.h"
 
@@ -572,9 +573,20 @@ int main(int argc, char **argv)
   lua_State *L;
   if (!argv[0]) argv = empty_argv; else if (argv[0][0]) progname = argv[0];
   L = lua_open();
+  const char *jitlogpath = getenv("LUA_JITLOG");
   if (L == NULL) {
     l_message("cannot create state: not enough memory");
     return EXIT_FAILURE;
+  }
+  if (jitlogpath) {
+   JITLogUserContext *jlog = jitlog_start(L);
+   if (jitlogpath[0] != 0) {
+     int created = jitlog_setsink_mmap(jlog, jitlogpath, 0);
+     if (created < 0) {
+       l_message("Failed to create file to write the jitlog to");
+       return EXIT_FAILURE;
+     }
+   }
   }
   smain.argc = argc;
   smain.argv = argv;
