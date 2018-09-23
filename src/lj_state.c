@@ -29,6 +29,7 @@
 #include "lj_alloc.h"
 #include "luajit.h"
 #include "lj_vmevent.h"
+#include "jitlog.h"
 
 /* -- Stack handling ------------------------------------------------------ */
 
@@ -181,6 +182,27 @@ static void close_state(lua_State *L)
     g->allocf(g->allocd, G2GG(g), sizeof(GG_State), 0);
 }
 
+static void check_initjitlog(lua_State *L)
+{
+#if defined(LUAJIT_JITLOG_AUTOSTART) || defined(LUAJIT_JITLOG_ENVSTART)
+  JITLogUserContext *jlog;
+  const char *jitlogpath = getenv("LUA_JITLOG");
+
+#ifndef LUAJIT_JITLOG_AUTOSTART
+  if (!jitlogpath) {
+    return 0;
+  }
+#endif
+  jlog = jitlog_start(L);
+
+  if (jitlogpath) {
+    int sinkstatus = jitlog_setsink_mmap(jlog, jitlogpath, 0);
+  }
+#else
+  UNUSED(L);
+#endif
+}
+
 #if LJ_64 && !LJ_GC64 && !(defined(LUAJIT_USE_VALGRIND) && defined(LUAJIT_USE_SYSMALLOC))
 lua_State *lj_state_newstate(lua_Alloc f, void *ud)
 #else
@@ -211,6 +233,7 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
 #if !LJ_GC64
   setmref(g->nilnode.freetop, &g->nilnode);
 #endif
+  check_initjitlog(L);
   lj_buf_init(NULL, &g->tmpbuf);
   g->gc.state = GCSpause;
   setgcref(g->gc.root, obj2gco(L));
