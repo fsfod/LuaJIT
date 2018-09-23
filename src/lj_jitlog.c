@@ -22,6 +22,7 @@ typedef struct jitlog_State {
   UserBuf ub; /* Must be first so loggers can reference it just by casting the G(L)->vmevent_data pointer */
   JITLogUserContext user;
   global_State *g;
+  char loadstate;
 } jitlog_State;
 
 
@@ -58,10 +59,16 @@ static char* strlist_concat(const char *const *list, int limit, MSize *retsize)
 
 static void free_context(jitlog_State *context);
 
+static void jitlog_loadstage2(lua_State *L, jitlog_State *context);
+
 static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *eventdata)
 {
   VMEvent2 event = (VMEvent2)eventid;
   jitlog_State *context = contextptr;
+
+  if (context->loadstate == 1 && event != VMEVENT_DETACH && event != VMEVENT_STATE_CLOSING && event !=  VMEVENT_GC_STATECHANGE) {
+    jitlog_loadstage2(L, context);
+  }
 
   switch (event) {
     case VMEVENT_DETACH:
@@ -120,21 +127,46 @@ static int jitlog_isrunning(lua_State *L)
 
 LUA_API int luaopen_jitlog(lua_State *L);
 
-LUA_API JITLogUserContext* jitlog_start(lua_State *L)
+/* This Function may be called from another thread while the Lua state is still
+** running, so must not try interact with the Lua state in anyway except for
+** setting the VM event hook. The second state of loading is done when we get 
+** our first VM event is not from the GC.
+*/
+static jitlog_State *jitlog_start_safe(lua_State *L)
 {
-  jitlog_State *context ;
+  jitlog_State *context;
   lua_assert(!jitlog_isrunning(L));
 
   context = malloc(sizeof(jitlog_State));
-  memset(context, 0 , sizeof(jitlog_State));
+  memset(context, 0, sizeof(jitlog_State));
   context->g = G(L);
+  context->loadstate = 1;
 
   /* Default to a memory buffer */
   ubuf_init_mem(&context->ub, 0);
-  luaJIT_vmevent_sethook(L, jitlog_callback, context);
   write_header(context);
 
+  luaJIT_vmevent_sethook(L, jitlog_callback, context);
+  return context;
+}
+
+static void jitlog_loadstage2(lua_State *L, jitlog_State *context)
+{
+  lua_assert(context->loadstate == 1);
+  /* Flag that were inside stage 2 init since registering our Lua lib may  
+  *  trigger a VM event from the GC that would cause us to run this function
+  *  more than once.
+  */
+  context->loadstate = 2;
   lj_lib_prereg(L, "jitlog", luaopen_jitlog, tabref(L->env));
+  context->loadstate = 3;
+}
+
+LUA_API JITLogUserContext* jitlog_start(lua_State *L)
+{
+  jitlog_State *context;
+  lua_assert(!jitlog_isrunning(L));
+  context = jitlog_start_safe(L);
   return &context->user;
 }
 
@@ -244,10 +276,12 @@ static jitlog_State* jlib_getstate(lua_State *L)
 
 static int jlib_start(lua_State *L)
 {
+  jitlog_State *context;
   if (jitlog_isrunning(L)) {
     return 0;
   }
-  jitlog_start(L);
+  context = usr2ctx(jitlog_start(L));
+  jitlog_loadstage2(L, context);
   return 0;
 }
 
