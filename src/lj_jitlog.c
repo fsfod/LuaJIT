@@ -20,10 +20,19 @@
 
 #define JITLOG_FILE_VERSION 2
 
+typedef enum LoadState {
+  LoadState_SafeStart = 1,
+  /* Memorization tables and Lua API are being created */
+  LoadState_Starting,
+  LoadState_Running,
+  LoadState_PreShutdown,
+} LoadState;
+
 typedef struct jitlog_State {
   UserBuf ub; /* Must be first so loggers can reference it just by casting the G(L)->vmevent_data pointer */
   JITLogUserContext user;
   global_State *g;
+  char loadstate;
 } jitlog_State;
 
 
@@ -35,10 +44,16 @@ LJ_STATIC_ASSERT(offsetof(UserBuf, p) == 0);
 
 static void free_context(jitlog_State *context);
 
+static void jitlog_loadstage2(lua_State *L, jitlog_State *context);
+
 static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *eventdata)
 {
   VMEvent2 event = (VMEvent2)eventid;
   jitlog_State *context = contextptr;
+
+  if (context->loadstate == 1 && event != VMEVENT_DETACH && event != VMEVENT_STATE_CLOSING) {
+    jitlog_loadstage2(L, context);
+  }
 
   switch (event) {
     case VMEVENT_DETACH:
@@ -125,9 +140,14 @@ LUA_API JITLogUserContext* jitlog_getjlctx(lua_State *L) {
 
 LUA_API int luaopen_jitlog(lua_State *L);
 
-LUA_API JITLogUserContext* jitlog_start(lua_State *L)
+/* This Function may be called from another thread while the Lua state is still
+** running, so it must not try interact with the Lua state in anyway except for
+** setting the VM event hook. The second stage of loading is done when we get 
+** our first VM event that is not from the GC since we will be creating GC objects.
+*/
+static jitlog_State *jitlog_start_safe(lua_State *L, UserBuf *ub)
 {
-  jitlog_State *context ;
+  jitlog_State *context;
   lua_assert(!jitlog_isrunning(L));
 
   context = malloc(sizeof(jitlog_State));
@@ -136,16 +156,50 @@ LUA_API JITLogUserContext* jitlog_start(lua_State *L)
   }
   memset(context, 0, sizeof(jitlog_State));
   context->g = G(L);
+  context->loadstate = LoadState_SafeStart;
 
-  /* Default to a memory buffer to store events */
-  if (!ubuf_init_mem(&context->ub, 0)) {
-    free_context(context);
-    return NULL;
+  if (ub != NULL) {
+    memcpy(&context->ub, ub, sizeof(UserBuf));
+  } else { 
+    /* Default to a memory buffer to store events */
+    if (!ubuf_init_mem(&context->ub, 0)) {
+      free_context(context);
+      return NULL;
+    }
   }
-  luaJIT_vmevent_sethook(L, jitlog_callback, context);
+
   write_header(context);
 
+  luaJIT_vmevent_sethook(L, jitlog_callback, context);
+  return context;
+}
+
+static void jitlog_loadstage2(lua_State *L, jitlog_State *context)
+{
+  lua_assert(context->loadstate == 1);
+  /* Flag that were inside stage 2 init since registering our Lua lib may  
+  *  trigger a VM event from the GC that would cause us to run this function
+  *  more than once.
+  */
+  context->loadstate = 2;
   lj_lib_prereg(L, "jitlog", luaopen_jitlog, tabref(L->env));
+  context->loadstate = LoadState_Running;
+}
+
+LUA_API JITLogUserContext* jitlog_start(lua_State *L)
+{
+  jitlog_State *context;
+  lua_assert(!jitlog_isrunning(L));
+  context = jitlog_start_safe(L, NULL);
+  jitlog_loadstage2(L, context);
+  return &context->user;
+}
+
+LUA_API JITLogUserContext* jitlog_startasync(lua_State* L, UserBuf* sink) 
+{
+  jitlog_State* context;
+  lua_assert(!jitlog_isrunning(L));
+  context = jitlog_start_safe(L, sink);
   return &context->user;
 }
 

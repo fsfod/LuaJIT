@@ -12,6 +12,8 @@ typedef struct JITLogUserContext {
 LUA_API JITLogUserContext* jitlog_start(lua_State *L);
 LUA_API int jitlog_isrunning(lua_State *L); 
 LUA_API JITLogUserContext* jitlog_getjlctx(lua_State *L);
+/* Start the JITLog while the Lua state is still running code in another OS thread */
+LUA_API JITLogUserContext* jitlog_startasync(lua_State* L, UserBuf *sink);
 LUA_API void jitlog_close(JITLogUserContext *usrcontext);
 LUA_API int jitlog_save(JITLogUserContext *usrcontext, const char *path);
 LUA_API int jitlog_flush(JITLogUserContext* usrcontext);

@@ -130,3 +130,41 @@ UTEST_F(JITLogFile, buf_file) {
   jitlog_close(JL);
   ASSERT_FILESIZE(utest_fixture->tempfile, size);
 }
+
+UTEST(JITLog, create_async) {
+  lua_State* L1 = luaL_newstate();
+  ASSERT_NE(L1, NULL);
+
+  JITLogUserContext* ctx = jitlog_startasync(L1, NULL);
+  ASSERT_NE(ctx, NULL);
+
+  lua_gc(L1, LUA_GCCOLLECT, 1);
+  luaL_openlibs(L1);
+
+  lua_gc(L1, LUA_GCCOLLECT, 1);
+  jitlog_close(ctx);
+}
+
+UTEST_F(JITLogFile, create_async_sink) {
+  lua_State* L1 = luaL_newstate();
+  ASSERT_NE(L1, NULL);
+
+  UserBuf ub;
+  ASSERT_GT(ubuf_init_mmap(&ub, utest_fixture->tempfile, 0), 0);
+
+  JITLogUserContext* JL1 = jitlog_startasync(L1, &ub);
+  ASSERT_NE(JL1, NULL);
+
+  ASSERT_GT(jitlog_getsize(JL1), sizeof(MSG_header));
+
+  lua_gc(L1, LUA_GCCOLLECT, 1);
+  luaL_openlibs(L1);
+
+  lua_gc(L1, LUA_GCCOLLECT, 1);
+
+  size_t size = jitlog_getsize(JL1);
+  jitlog_close(JL1);
+  ASSERT_FILESIZE(utest_fixture->tempfile, size);
+
+  lua_close(L1);
+}
