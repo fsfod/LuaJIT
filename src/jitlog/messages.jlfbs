@@ -301,6 +301,8 @@ message trace{
   ir : [uint64] (argtype : IRIns *)
   snapshots : [TraceSnapshot]
   snapmap : [uint32] (buflen : nsnapmap)
+  tracedfuncs : [TracedFunc]
+  tracedbc : [TracedBC]
   structcopy = {
     fields = {
       id = "traceno",
@@ -329,6 +331,17 @@ struct TraceSnapshot{
   slot_count : uint8	// Number of valid slots. */
   topslot : uint8		// Maximum frame extent. */
   entry_count : uint8;	// Number of compressed entries. 
+}
+
+struct TracedFunc{
+  func : GCRefPtr // Address of function or proto if bit 1 is set in the address is set
+  bcindex : uint16
+  depth : uint16
+}
+
+struct TracedBC{
+  pc : int32
+  irtop : uint16 // Current max IR instruction when this byte code was executed
 }
 
 message exitstubs{
