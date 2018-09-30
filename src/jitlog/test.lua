@@ -3,13 +3,15 @@ local hasjit = pcall(require, "jit.opt")
 local format = string.format
 local reader_def = require("jitlog.reader_def")
 GC64 = reader_def.GC64
-local msgdef = require"jitlog.messages"
+local msgdef = require("jitlog.messages")
+local structdefs = require("jitlog.messages").structs
 local apigen = require"jitlog.generator"
 local readerlib = require("jitlog.reader")
 assert(readerlib.makereader())
 local jitlog = require("jitlog")
 
 local parser = apigen.create_parser()
+parser:parse_structlist(msgdef.structs)
 parser:parse_msglist(msgdef.messages)
 local msginfo_vm = parser:complete()
 

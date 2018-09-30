@@ -85,6 +85,7 @@ outpath = outpath or ""
 
 local apigen = require"jitlog.generator"
 local parser = apigen.create_parser()
+parser:parse_structlist(msgdef.structs)
 parser:parse_msglist(msgdef.messages)
 
 local data = parser:complete()

@@ -235,6 +235,51 @@ local function parse_structcopy(msgdef, structcopy, fieldlookup)
   return struct_arg
 end
 
+function parser:parse_struct(def)
+  
+  assert(def.name, "struct definition has no name")
+  local fieldlist = {}
+  local fieldlookup = {}
+  
+  if self.types[def.name] then
+    error(format("Bad struct name %s there is already a type with the same name", def.name))
+  end
+  
+  local fielddefs = split_fieldlist(def.fields)
+  assert(fielddefs[1], "struct definition contains no fields")
+  
+  local msgsize = 0
+  for _, field in ipairs(fielddefs) do
+    local name, ftype, length, argtype = parse_field(field)
+    
+    assert(name, "no name specified for field")
+    if fieldlookup[name] then
+      error("Duplicate field '"..name.."' in struct "..def.name)
+    end
+    
+    local typeinfo = self.types[ftype]
+    if not typeinfo then
+      error(format("No type found named %s used for field %s in struct %s", ftype, name, def.name))
+    elseif typeinfo.vsize or typeinfo.noarg then
+      error(format("Bad field type %s for field %s in struct %s uses a restricted type", ftype, name, def.name))
+    end
+    
+    local f = {name = name, type = ftype, offset = msgsize}
+    fieldlookup[name] = f
+    table.insert(fieldlist, f)  
+    msgsize = msgsize + typeinfo.size
+  end
+  
+  local result = {
+    name = def.name, 
+    fields = fieldlist, 
+    fieldlookup = fieldlookup, 
+    size = msgsize,
+    struct = true,
+  }
+  return result
+end
+
 --[[
 Field List
   noarg: Don't automatically generate an argument for the field in the generated logger function. Set for implict values like timestamp and string length
@@ -433,6 +478,16 @@ function parser:parse_msglist(msgs)
   end
 end
 
+function parser:parse_structlist(structs)
+  for _, def in ipairs(structs) do
+    local name = def.name
+    self:log("Parsing:", name)
+    local struct = self:parse_struct(def)
+    self.types[name] = struct
+    table.insert(self.structlist, struct)
+  end
+end
+
 local enum_mt = {
   __index = {
     add_entry = function(self, name, value)
@@ -497,6 +552,7 @@ end
 local copyfields = {
   "msglist",
   "enums",
+  "structlist",
   "msglookup",
   "sorted_msgnames",
   "types",
@@ -613,7 +669,7 @@ function generator:write_struct(name, def)
   end
 
   local template
-  if self.templates.msgstruct then
+  if not def.struct and self.templates.msgstruct then
     template = "msgstruct"
   else
     template = "struct"
@@ -935,9 +991,12 @@ function generator:write_namelists()
 end
 
 function generator:write_msgdefs(mode)
-  for _, def in ipairs(self.msglist) do
+  for _, def in ipairs(self.structlist) do
     self:write_struct(def.name, def)
   end
+  for _, def in ipairs(self.msglist) do
+    self:write_struct(def.name, def)
+  end  
 end
 
 local lang_generator = {}
@@ -975,6 +1034,7 @@ local api = {
   create_parser = function()
     local t = {
       msglist = {},
+      structlist = {},
       msglookup = {},
       enums = {},
       types = setmetatable({}, {__index = builtin_types})

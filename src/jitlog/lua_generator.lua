@@ -222,10 +222,12 @@ ffi.cdef("typedef uint32_t GCRef, MRef, GCSize;")]])
 ffi.cdef[[
 ]=])
   local struct_getters = {}
-  for _, def in ipairs(self.msglist) do
-    local field_getters = self:write_struct(def.name, def)
-    if field_getters then
-      struct_getters[def.name] = field_getters
+  for _, list in ipairs({self.structlist, self.msglist}) do
+    for _, def in ipairs(list) do
+      local field_getters = self:write_struct(def.name, def)
+      if field_getters then
+        struct_getters[def.name] = field_getters
+      end
     end
   end
   self:write("]]\n")
