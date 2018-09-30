@@ -795,6 +795,57 @@ function gctrace:get_consttab()
   return t
 end
 
+function gctrace:get_tracefunc(n)
+  local entry = self.tracedfuncs:get(n)
+  local func, depth, bcindex = entry.func, entry.depth, entry.bcindex
+  local address = addrtonum(band(func, -2ll))
+  -- Pointers are always aligned so a spared bit is used to flag pointers to protos
+  if band(func, 1) ~= 0 then
+    return self.owner.proto_lookup[address], address, depth, bcindex, true
+  else
+    return self.owner.func_lookup[address], address, depth, bcindex, false
+  end
+end
+
+function gctrace:get_tracedfuncs()
+  local funcs = {} 
+  for i = 0, self.tracedfuncs.length-1 do
+    local func, address, depth, bcindex, islua = self:get_tracefunc(i)
+    funcs[i+1] = {
+      func = func,
+      address = address,
+      depth = depth,
+      bcindex = bcindex,
+      islua = islua,
+    }
+  end
+  return funcs
+end
+
+function gctrace:print_tracedfuncs()
+  local tracedfuncs = self.tracedfuncs
+  print(string.format("Trace(%d) traced funcs = %d", self.id, tracedfuncs.length))
+  local depth = 0
+  
+  for i = 0, tracedfuncs.length-1 do
+    if tracedfuncs:get(i).depth > depth then
+      io.stdout:write("Entered ")
+    elseif tracedfuncs:get(i).depth < depth then
+      io.stdout:write("Returned to ")
+    end
+    local func, address, bcindex, islua
+    func, address, depth, bcindex, islua = self:get_tracefunc(i)
+
+    if func then
+      print(func)
+    end
+
+    if not func then
+      print("  failed to find "..(islua and "proto" or "function") .. " for GCRef " .. address)
+    end
+  end
+end
+
 msgobj_mt.trace = {
   __index = gctrace
 }
@@ -847,6 +898,8 @@ function readers:trace(msg)
   trace.snapmap = self:read_array("uint32_t", msg:get_snapmap())
   trace.ir = self:read_array("IRIns", msg:get_ir())
   trace.constants = self:read_array("IRIns", msg:get_constants())
+  trace.tracedfuncs = self:read_array("TracedFunc", msg:get_tracedfuncs())
+  trace.tracedbc = self:read_array("TracedBC", msg:get_tracedbc())
 
   if aborted then
     trace.abortcode = msg.abortcode

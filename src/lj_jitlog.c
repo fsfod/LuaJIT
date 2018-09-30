@@ -39,8 +39,15 @@ typedef struct jitlog_State {
   uint32_t funccount;
   GCfunc *startfunc;
   BCPos lastpc;
+  int32_t lastdepth;
   GCfunc *lastlua;
   GCfunc *lastfunc;
+  TracedFunc *traced_funcs;
+  uint32_t traced_funcs_count;
+  uint32_t traced_funcs_capacity;
+  TracedBC *traced_bc;
+  uint32_t traced_bc_count;
+  uint32_t traced_bc_capacity;
 } jitlog_State;
 
 
@@ -404,8 +411,11 @@ static void jitlog_tracestart(jitlog_State *context, GCtrace *T)
   memorize_proto(context, startpt);
 
   context->startfunc = J->fn;
+  context->lastdepth = J->framedepth;
   context->lastfunc = context->lastlua = J->fn;
   context->lastpc = proto_bcpos(J->pt, J->pc);
+  context->traced_funcs_count = 0;
+  context->traced_bc_count = 0;
 
   trace_start_Args args = {
     .id = T->traceno,
@@ -519,6 +529,10 @@ static void jitlog_writetrace(jitlog_State *context, GCtrace *T, int abort)
     .constant_count = REF_BIAS - T->nk, 
     .snapshots = (uint8_t*)T->snap,
     .snapshots_length = T->nsnap*sizeof(T->snap[0]),
+    .tracedfuncs = context->traced_funcs,
+    .tracedfuncs_length = context->traced_funcs_count,
+    .tracedbc = context->traced_bc,
+    .tracedbc_length = context->traced_bc_count,
   };
 
   log_trace(&context->ub, &args);
@@ -543,8 +557,40 @@ static void jitlog_traceabort(jitlog_State *context, GCtrace *T)
 static void jitlog_tracebc(jitlog_State *context)
 {
   jit_State *J = G2J(context->g);
-  if (context->lastfunc != J->fn) {
+
+  int func_changed = context->lastfunc != J->fn || context->traced_funcs_count == 0 || 
+                     J->framedepth != context->lastdepth;
+  if (func_changed) {
+    TracedFunc *change = context->traced_funcs + context->traced_funcs_count;
+    if (isluafunc(J->fn)) {
+      GCproto *pt = funcproto(J->fn);
+      /* Flag this pointer as being a proto instead of a function */
+      setgcrefp(change->func, ((uintptr_t)pt)|1);
+    } else {
+      setgcrefp(change->func, J->fn);
+    }
+    change->bcindex = context->traced_bc_count;
+    change->depth = J->framedepth;
+    memorize_func(context, J->fn);
+
+    if (++context->traced_funcs_count == context->traced_funcs_capacity) {
+      jl_growvec(context, context->traced_funcs, context->traced_funcs_capacity, LJ_MAX_MEM32, TracedFunc);
+    }
     context->lastfunc = J->fn;
+    context->lastdepth = J->framedepth;
+  }
+
+  if (J->pt || func_changed) {
+    TracedBC *trbc = context->traced_bc + context->traced_bc_count;
+    trbc->irtop = J->cur.nins - REF_BIAS;
+    if (J->pt) {
+      trbc->pc = proto_bcpos(J->pt, J->pc);
+    } else {
+      trbc->pc = -1;
+    }
+    if (++context->traced_bc_count == context->traced_bc_capacity) {
+      jl_growvec(context, context->traced_bc, context->traced_bc_capacity, LJ_MAX_MEM32, TracedBC);
+    }
   }
 
   if (J->pt) {
@@ -1033,6 +1079,11 @@ static void jitlog_loadstage2(lua_State *L, jitlog_State *context)
   context->strings = create_pinnedtab(L);
   context->protos = create_pinnedtab(L);
   context->funcs = create_pinnedtab(L);
+  context->traced_funcs = jl_newvec(context, 32, TracedFunc);
+  context->traced_funcs_capacity = 32;
+  context->traced_bc = jl_newvec(context, 32, TracedBC);
+  context->traced_bc_capacity = 32;
+
   lj_lib_prereg(L, "jitlog", luaopen_jitlog, tabref(L->env));
   context->loadstate = 3;
 }
@@ -1054,6 +1105,9 @@ static void free_context(jitlog_State *context)
   }
   ubuf_flush(ubuf);
   ubuf_free(ubuf);
+
+  jl_freevec(context, context->traced_funcs, context->traced_funcs_capacity, TracedFunc);
+  jl_freevec(context, context->traced_bc, context->traced_bc_capacity, TracedBC);
   free(context);
 }
 

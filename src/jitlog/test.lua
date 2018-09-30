@@ -393,6 +393,139 @@ it("function proto blacklisted", function()
   assert(blacklist[2].proto.chunk:find("test.lua"))
 end)
 
+local function print(s)
+  io.stdout:write(tostring(s).."\n")
+end
+
+local function addrtonum(address)
+  return (tonumber(bit.band(address, 0xffffffffffffULL)))
+end
+
+local function functoloc(result, addr)
+  local key = addrtonum(addr)
+  local pt = result.proto_lookup[key]
+  if key then
+    return pt:get_location(), false
+  elseif result.func_lookup[key] then
+    local func = result.func_lookup[key]
+    if func.fastfunc then
+      return "FastFunc "..func.fastfunc, true
+    else
+      return "C Func ".. addr, true
+    end
+  end
+end
+
+local function print_tracedfuncs(trace, result)
+  local called = trace.calledfuncs
+  print(string.format("Trace(%d) traced funcs = %d", trace.id, called.length))
+  local depth = 0
+  local prevpt
+  
+ -- io.stdout:write("Started in")
+  
+  for i = 0, called.length-1 do
+    if called:get(i).depth > depth then
+      io.stdout:write("Entered ")
+    elseif called:get(i).depth < depth then
+      io.stdout:write("Returned to ")
+    end
+    depth = called:get(i).depth
+    
+    local loc, isc = functoloc(result, called:get(i).func)
+    
+    if not loc then
+      print(loc)
+    else
+      print("  failed to find pt for GCRef "..called:get(i).func)
+    end
+  end
+end
+
+it("traced functions", function()
+  jit.off()
+  jit.on()
+  jitlog.start()
+  local chunk = loadstring([[
+    local function f1() return 2 end
+    local function f2() return (string_find("abc", "c")) end
+    local function f3() return (f1() + f2()) end
+    return f1, f2, f3
+  ]], "tracefuncs")
+  setfenv(chunk, {string_find = string.find})
+  local f1, f2, f3 = chunk()
+  jitlog.labelproto(f1, "f1")
+  jitlog.labelproto(f2, "f2")
+  jitlog.labelproto(f3, "f3")
+  jitfunc(f1)
+  jitfunc(f2)
+  jitfunc(f3)
+  assert(f3() == 5)
+
+  local result = parselog(jitlog.savetostring())
+  checkheader(result.header)
+  assert(#result.protos == 4)
+  assert(#result.traces == 3, #result.traces)
+
+  assert(result.traces[1].tracedfuncs.length == 1)
+  local funcs = result.traces[1]:get_tracedfuncs()
+  assert(#funcs == 1)
+  -- started in f1
+  assert(funcs[1].func.label == "f1")
+  assert(funcs[1].depth == 0)
+  assert(funcs[1].bcindex == 0)
+  assert(funcs[1].bcindex < result.traces[1].tracedbc.length)
+  
+  assert(result.traces[2].tracedfuncs.length == 3)
+  funcs = result.traces[2]:get_tracedfuncs()
+  assert(#funcs == 3)
+  -- started in f2
+  assert(funcs[1].func.label == "f2")
+  assert(funcs[1].depth == 0)
+  assert(funcs[1].bcindex == 0)
+  -- called string.find
+  assert(funcs[2].func.fastfunc == "string_find")
+  assert(funcs[2].depth == 1)
+  assert(funcs[2].bcindex > funcs[1].bcindex)
+  -- returned to f2
+  assert(funcs[3].func.label == "f2")
+  assert(funcs[3].depth == 0)
+  assert(funcs[3].bcindex > funcs[2].bcindex)
+  
+  local lasttrace = result.traces[#result.traces]
+  assert(lasttrace.tracedfuncs.length == 7, lasttrace.tracedfuncs.length)
+  funcs = lasttrace:get_tracedfuncs()
+  -- started in f3
+  assert(funcs[1].func.label == "f3")
+  assert(funcs[1].depth == 0)
+  assert(funcs[1].bcindex == 0)
+  -- entered function f1
+  assert(funcs[2].func.label == "f1")
+  assert(funcs[2].depth == 1)
+  assert(funcs[2].bcindex > funcs[1].bcindex)
+  -- retuned to f3
+  assert(funcs[3].func.label == "f3")
+  assert(funcs[3].depth == 0)
+  assert(funcs[3].bcindex > funcs[2].bcindex)
+  -- entered to f2
+  assert(funcs[4].func.label == "f2")
+  assert(funcs[4].depth == 1)
+  assert(funcs[4].bcindex > funcs[3].bcindex)
+  -- called string.find
+  assert(funcs[5].func.fastfunc == "string_find")
+  assert(funcs[5].depth == 2)
+  assert(funcs[5].bcindex > funcs[4].bcindex)
+  -- returned to f2
+  assert(funcs[6].func.label == "f2")
+  assert(funcs[6].depth == 1)
+  assert(funcs[6].bcindex > funcs[5].bcindex)
+  -- returned to f3
+  assert(funcs[7].func.label == "f3")
+  assert(funcs[7].depth == 0)
+  assert(funcs[7].bcindex > funcs[6].bcindex)
+  assert(funcs[7].bcindex < lasttrace.tracedbc.length)
+end)
+
 end
 
 it("GC state", function()

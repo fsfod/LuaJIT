@@ -260,6 +260,10 @@ module.messages = {
       snapshots : u8[snapshots_length]
       snapshots_length : u32
       snapmap : u32[nsnapmap]
+      tracedfuncs_length : u32
+      tracedfuncs : TracedFunc[tracedfuncs_length]
+      tracedbc_length : u32
+      tracedbc : TracedBC[tracedbc_length]
     ]],
     structcopy = {
       fields = {
@@ -372,6 +376,23 @@ module.structs = {
     fields = [[
       startpc : u32
       extent: u32
+    ]]
+  },
+
+  {
+    name = "TracedFunc",
+    fields = [[
+      func : GCRefPtr
+      bcindex : u16
+      depth : u16
+    ]]
+  },
+
+  {
+    name = "TracedBC",
+    fields = [[
+      pc : i32
+      irtop : u16
     ]]
   },
 }
