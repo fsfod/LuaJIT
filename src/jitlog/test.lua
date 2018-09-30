@@ -313,6 +313,88 @@ function tests.protobl()
   assert(blacklist[2].proto.chunk:find("test.lua"))
 end
 
+local function print(s)
+  io.stdout:write(tostring(s).."\n")
+end
+
+local function addrtonum(address)
+  return (tonumber(bit.band(address, 0xffffffffffffULL)))
+end
+
+local function functoloc(result, addr)
+  local key = addrtonum(addr)
+  local pt = result.proto_lookup[key]
+  if key then
+    return pt:get_location(), false
+  elseif self.func_lookup[key] then
+    local func = self.func_lookup[key]
+    if func.fastfunc then
+      return "FastFunc "..func.fastfunc, true
+    else
+      return "C Func ".. addr, true
+    end
+  end
+end
+
+local function print_tracedfuncs(trace, result)
+  local called = trace.calledfuncs
+  print(string.format("Trace(%d) traced funcs = %d", trace.id, called.length))
+  local depth = 0
+  local prevpt
+  
+ -- io.stdout:write("Started in")
+  
+  for i = 0, called.length-1 do
+    if called:get(i).depth > depth then
+      io.stdout:write("Entered ")
+    elseif called:get(i).depth < depth then
+      io.stdout:write("Returned to ")
+    end
+    depth = called:get(i).depth
+    
+    local loc, isc = functoloc(result, called:get(i).func)
+    
+    if not loc then
+      print(loc)
+    else
+      print("  failed to find pt for GCRef "..called:get(i).func)
+    end
+  end
+end
+
+function tests.tracefuncs()
+  jitlog.start()
+  local chunk = loadstring([[
+    local f1, f2, f3, f4
+    local string_find = ...
+    function f1() return (f2() + f3()) end
+    function f2() return 2 end
+    function f3() return string_find("abc", "c") end
+    return f1, f2, f3
+  ]], "tracefuncs")
+  local f1, f2, f3 = chunk(string.find)
+
+  nojit_loop(f2)
+  nojit_loop(f3)
+  local ret = nojit_loop(f1, 256)
+
+  assert(ret == 5)
+
+  local result = parselog(jitlog.savetostring())
+  checkheader(result.header)
+  assert(#result.protos == 4)
+  assert(result.traces[1].calledfuncs.length == 1)
+  --assert(result.traces[2].calledfuncs.length == 1)
+  
+  assert(#result.traces == 2, #result.traces)
+  for _, trace in ipairs(result.traces) do
+    trace:print_tracedfuncs()
+  end
+  local lasttrace = result.traces[#result.traces]
+  assert(lasttrace.calledfuncs)
+  assert(lasttrace.calledfuncs.length  == 3, lasttrace.calledfuncs.length)
+end
+
 end
 
 function tests.gcstate()

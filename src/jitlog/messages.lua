@@ -169,6 +169,10 @@ local msgs = {
     { name = "ir", length = "irlen", type = "u64", argtype = "IRIns *" },
     "snapshots : u64[nsnap]",
     "snapmap : u32[nsnapmap]",
+    "calledfuncs_length : u32",
+    "calledfuncs : TracedFunc[calledfuncs_length]",
+    "tracedbc_length : u32",
+    "tracedbc : TracedBC[tracedbc_length]",
 
     structcopy = {
       fields = {
@@ -240,6 +244,17 @@ local msgs = {
 }
 
 local structs = {
+  {
+    name = "TracedFunc",
+    "func : GCRefPtr",
+    "bcindex : u16",
+    "depth : u16",
+  },
+  {
+    name = "TracedBC",
+    "pc : i32",
+    "irtop : u16",
+  },
 }
 
 return {messages = msgs, structs = structs}

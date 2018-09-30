@@ -268,7 +268,12 @@ function gcproto:get_rawbc(index)
   return (self.bc:getbc(index))
 end
 
-local proto_mt = {__index = gcproto}
+local proto_mt = {
+  __index = gcproto,
+  __tostring = function(self) 
+    return "GCproto: ".. self:get_location() 
+  end,
+}
 
 local nullarray = {0}
 local nobc = ffi.new("protobc", 0, 1, nullarray)
@@ -545,6 +550,40 @@ function gctrace:get_irconstant(irref)
   end
 end
 
+function gctrace:print_tracedfuncs()
+  local called = self.calledfuncs
+  print(string.format("Trace(%d) traced funcs = %d", self.id, called.length))
+  local depth = 0
+  local prevpt
+  
+ -- io.stdout:write("Started in")
+  
+  for i = 0, called.length-1 do
+    if called:get(i).depth > depth then
+      io.stdout:write("Entered ")
+    elseif called:get(i).depth < depth then
+      io.stdout:write("Returned to ")
+    end
+    depth = called:get(i).depth
+
+    local func = self.owner.func_lookup[addrtonum(called:get(i).func)]
+    local pt
+    
+    if func then
+      print(func:tostring())
+    else
+      pt = self.owner.proto_lookup[addrtonum(called:get(i).func)]
+      if pt then
+        print(pt)
+      end
+    end
+
+    if not func and not pt then
+      print("  failed to find pt for GCRef "..called:get(i).func)
+    end
+  end
+end
+
 local trace_mt = {__index = gctrace}
 
 function base_actions:trace(msg)
@@ -572,6 +611,7 @@ function base_actions:trace(msg)
   trace.snapshots = self:read_array("SnapShot", msg:get_snapshots(), msg.nsnap)
   trace.snapmap = self:read_array("uint32_t", msg:get_snapmap(), msg.nsnapmap)
   trace.ir = self:read_array("IRIns", msg:get_ir(), msg.irlen)
+  trace.calledfuncs = self:read_array("TracedFunc", msg:get_calledfuncs(), msg.calledfuncs_length)
   
   if aborted then
     trace.abortcode = msg.abortcode
