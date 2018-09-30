@@ -25,8 +25,13 @@ lib.{{name}} = {{name}}
 lib.msgsizes = msgsizes
 
 ]],
-
   struct = [[
+typedef struct {{name}}{
+  {{fields}}
+}__attribute__((packed)) {{name}};
+
+]],
+  msgstruct = [[
 typedef struct MSG_{{name}}{
   {{fields}}
 }__attribute__((packed))  MSG_{{name}};
@@ -181,10 +186,12 @@ ffi.cdef("typedef uint32_t GCRef, MRef;")]])
 ffi.cdef[[
 ]=])
   local struct_getters = {}
-  for _, def in ipairs(self.msglist) do
-    local field_getters = self:write_struct(def.name, def)
-    if field_getters then
-      struct_getters[def.name] = field_getters
+  for _, list in ipairs({self.structlist, self.msglist}) do
+    for _, def in ipairs(list) do
+      local field_getters = self:write_struct(def.name, def)
+      if field_getters then
+        struct_getters[def.name] = field_getters
+      end
     end
   end
   self:write("]]\n")

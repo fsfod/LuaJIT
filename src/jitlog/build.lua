@@ -49,7 +49,8 @@ end
 local msgdef = require"jitlog.messages"
 local apigen = require"jitlog.generator"
 local parser = apigen.create_parser()
-parser:parse_msglist(msgdef)
+parser:parse_structlist(msgdef.structs)
+parser:parse_msglist(msgdef.messages)
 
 local data = parser:complete()
 apigen.write_c(data)

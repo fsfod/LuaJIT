@@ -239,4 +239,7 @@ local msgs = {
   },
 }
 
-return msgs
+local structs = {
+}
+
+return {messages = msgs, structs = structs}

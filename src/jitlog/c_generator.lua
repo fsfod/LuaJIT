@@ -34,6 +34,12 @@ const int32_t jitlog_msgsizes[{{count}}] = {
 ]],
 
   struct = [[
+typedef struct {{name}} { {{fields}}
+} LJ_PACKED {{name}};
+
+]],
+
+  msgstruct = [[
 typedef struct MSG_{{name}} { {{fields}}
 } LJ_PACKED MSG_{{name}};
 

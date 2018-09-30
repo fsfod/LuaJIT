@@ -111,6 +111,32 @@ function parser:log(...)
   end
 end
 
+function parser:get_arraytype(element_type)
+  local arraytype = element_type.."[]"
+  if self.types[arraytype] then
+    return arraytype, self.types[arraytype]
+  end
+  
+  local element_typeinfo = self.types[element_type]
+  if not element_typeinfo then
+    error(format("Unknown type '%s' used for array element ", element_type))
+  elseif element_typeinfo.vsize or element_typeinfo.noarg then
+    error(format("Bad type '%s' used for array element", element_type))
+  end
+  
+  local ctype = element_typeinfo.c or element_type
+  local typeinfo = {
+    vsize = true,
+    c = ctype.."*",
+    argtype = format("const %s *", ctype),
+    element_type = element_type,
+    element_size = element_typeinfo.size,
+  }
+  self.types[arraytype] = typeinfo
+  self.types[ctype.."[]"] = typeinfo
+  return arraytype, typeinfo
+end
+
 local function parse_field(field)
   if type(field) == "table" then
     assert(field.name, "missing name on table field declaration")
@@ -165,6 +191,48 @@ local function parse_structcopy(msgdef, structcopy, fieldlookup)
   end
 
   return struct_arg
+end
+
+function parser:parse_struct(def)
+  assert(def[1], "struct definition contains no fields")
+  assert(def.name, "struct definition has no name")
+  local fieldlist = {}
+  local fieldlookup = {}
+  
+  if self.types[def.name] then
+    error(format("Bad struct name %s there is already a type with the same name", def.name))
+  end
+  
+  local msgsize = 0
+  for _, field in ipairs(def) do
+    local name, ftype, argtype, length = parse_field(field)
+    
+    assert(name, "no name specifed for field")
+    if fieldlookup[name] then
+      error("Duplicate field '"..name.."' in struct "..def.name)
+    end
+    
+    local typeinfo = self.types[ftype]
+    if not typeinfo then
+      error(format("No type found named %s used for field %s in struct %s", ftype, name, def.name))
+    elseif typeinfo.vsize or typeinfo.noarg then
+      error(format("Bad field type %s for field %s in struct %s uses a restricted type", ftype, name, def.name))
+    end
+    
+    local f = {name = name, type = ftype, offset = msgsize}
+    fieldlookup[name] = f
+    table.insert(fieldlist, f)  
+    msgsize = msgsize + typeinfo.size
+  end
+  
+  local result = {
+    name = def.name, 
+    fields = fieldlist, 
+    fieldlookup = fieldlookup, 
+    size = msgsize,
+    struct = true,
+  }
+  return result
 end
 
 --[[
@@ -243,9 +311,8 @@ function parser:parse_msg(def)
       t.element_size = typeinfo.element_size or typeinfo.size
       -- Adjust the typename for primitive types to be an array
       if not typeinfo.element_size  then
-        t.type = ftype.."[]"
-        typeinfo = self.types[t.type]
-        assert(typeinfo, "unknown buffer type")
+        local arraytype, typeinfo = self:get_arraytype(ftype)
+        t.type = arraytype
       end
 
       -- If no length field name was specified make sure its one of the special cases it can be inferred
@@ -344,6 +411,16 @@ function parser:parse_msglist(msgs)
   end
 end
 
+function parser:parse_structlist(structs)
+  for _, def in ipairs(structs) do
+    local name = def.name
+    self:log("Parsing:", name)
+    local struct = self:parse_struct(def)
+    self.types[name] = struct
+    table.insert(self.structlist, struct)
+  end
+end
+
 parser.builtin_msgorder = {
   header = 0,
   enumdef = 1,
@@ -370,6 +447,7 @@ end
 
 local copyfields = {
   "msglist",
+  "structlist",
   "msglookup",
   "sorted_msgnames",
   "types",
@@ -519,7 +597,14 @@ function generator:write_struct(name, def)
     end
   end
 
-  self:writetemplate("struct", {name = name, fields = fieldstr, bitfields = fieldgetters})
+  local template
+  if not def.struct and self.templates.msgstruct then
+    template = "msgstruct"
+  else
+    template = "struct"
+  end
+
+  self:writetemplate(template, {name = name, fields = fieldstr, bitfields = fieldgetters})
   return #fieldgetters > 0 and fieldgetters
 end
 
@@ -752,9 +837,12 @@ function generator:write_msgsizes(dispatch_table)
 end
 
 function generator:write_msgdefs()
-  for _, def in ipairs(self.msglist) do
+  for _, def in ipairs(self.structlist) do
     self:write_struct(def.name, def)
   end
+  for _, def in ipairs(self.msglist) do
+    self:write_struct(def.name, def)
+  end  
 end
 
 function generator:write_cheader(options)
@@ -830,6 +918,7 @@ local api = {
   create_parser = function()
     local t = {
       msglist = {},
+      structlist = {},
       msglookup = {},
       types = setmetatable({}, {__index = builtin_types})
     }
