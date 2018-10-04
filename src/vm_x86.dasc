@@ -116,6 +116,7 @@
 |.type NARGS,		int
 |.type TRACE,		GCtrace
 |.type SBUF,		SBuf
+|.type BCBP,		BCBreakpoint
 |
 |// Stack layout while in interpreter. Must match with lj_frame.h.
 |//-----------------------------------------------------------------------
@@ -2658,6 +2659,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  jz >1
   |  test RDL, LUA_MASKLINE
   |  jz >5
+  |->vm_inshook_nocheck:
   |1:
   |  mov L:RB, SAVE_L
   |  mov L:RB->base, BASE
@@ -5298,6 +5300,25 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  branchPC RD
     |  ins_next
     break;
+	
+  case BC_BP:
+    |  mov RA, [DISPATCH+DISPATCH_GL(breakpoints)]
+	|  mov RC, [PC-4]
+	|  shr RC, 8
+	|  imul RC, sizeof(BCBreakpoint)
+	|  lea BCBP:RA, [RA+RC]
+	|  jmp aword BCBP:RA->action
+	|->vm_bp_continue:
+	|  mov RC, BCBP:RA->orig // Load orignal bytecode replaced by the breakpoint
+    |  movzx RA, RCH
+	|  movzx OP, RCL
+	|  shr RC, 16
+	|.if X64
+	|  jmp aword [DISPATCH+OP*8]
+	|.else
+	|  jmp aword [DISPATCH+OP*4]
+	|.endif
+	break;
 
   /* -- Function headers -------------------------------------------------- */
 

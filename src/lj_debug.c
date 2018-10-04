@@ -18,6 +18,7 @@
 #if LJ_HASJIT
 #include "lj_jit.h"
 #endif
+#include "lj_vm.h"
 
 /* -- Frames -------------------------------------------------------------- */
 
@@ -698,5 +699,270 @@ LUALIB_API void luaL_traceback (lua_State *L, lua_State *L1, const char *msg,
       lua_concat(L, (int)(L->top - L->base) - top);
   }
   lua_concat(L, (int)(L->top - L->base) - top);
+}
+
+/* -- breakpoint API ---------------------------------------------------- */
+
+static int isvalidoffset(lua_State *L, GCproto *pt, int bcpos)
+{
+  return bcpos >= 0 && bcpos < pt->sizebc;
+}
+
+static int findbp(lua_State *L, GCproto *p, int offset)
+{
+  BCIns bc;
+  lua_assert(isvalidoffset(L, p, offset));
+
+  bc = proto_bc(p)[offset];
+  if (bc_op(bc) == BC_BP) {
+    global_State *g = G(L);
+    int bpid = bc >> 8;
+    lua_assert(offset == g->breakpoints[bpid].offset);
+    return bpid;
+  } else {
+    return -1;
+  }
+}
+
+static BCIns realinstr(lua_State *L, GCproto *p, int offset)
+{
+  int id = findbp(L, p, offset);
+  if (id < 0) {
+    return proto_bc(p)[offset];
+  } else {
+    return G(L)->breakpoints[id].orig;
+  }
+}
+
+int lj_debug_getbcpos(GCproto* pt, BCLine lineNumber)
+{
+  BCPos i;
+  char *lineinfo = mref(pt->lineinfo, char);
+  if (pt->numline != 0 && (pt->firstline > lineNumber || (pt->firstline + pt->numline) < lineNumber)) {
+    return -1;
+  }
+  lineNumber -= pt->firstline;
+
+  for (i = 0; i < pt->sizebc; i++) {
+    BCLine bcline;
+    if (pt->numline < 256) {
+      bcline = (BCLine)((const uint8_t *)lineinfo)[i];
+    } else if (pt->numline < 65536) {
+      bcline = (BCLine)((const uint16_t *)lineinfo)[i];
+    } else {
+      bcline = (BCLine)((const uint32_t *)lineinfo)[i];
+    }
+    if (bcline == lineNumber) {
+      return i;
+    }
+    if (bcline > lineNumber) {
+      break;
+    }
+  }
+  return -1;
+}
+
+int lj_debug_clearbp(lua_State *L, int id)
+{
+  global_State *g = G(L);
+  BCBreakpoint *bp = g->breakpoints + id;
+  GCproto *pt;
+
+  if (id < 0 || id > g->bpnum || bp->proto == NULL) {
+    return 0;
+  }
+  pt = bp->proto;
+  bp->proto = NULL;
+  proto_bc(pt)[bp->offset] = bp->orig;
+  /* Unlink this breakpoint from the list of breakpoints set for the same proto */
+  if (bp->next || id != pt->firstbp) {
+    BCBreakpoint *prev, *curr = g->breakpoints + pt->firstbp;
+    prev = curr;
+    while (bp->next) {
+      if (curr == bp) {
+        prev->next = bp->next;
+        break;
+      }
+      prev = curr;
+      curr = curr->next;
+    }
+  }
+
+  if (id == (g->bpnum-1)) {
+    g->bpnum--;
+  } else {
+
+  }
+  return 1;
+}
+
+static int avoidpseudo(lua_State *L, GCproto *p, int bcpos)
+{
+  BCIns i;
+  BCIns pr;
+  int ci;
+
+  if (bcpos == 0) {
+    /* Don't patch function headers for now */
+    bcpos++;
+  }
+
+  i = proto_bc(p)[bcpos];
+
+  pr = realinstr(L, p, bcpos);
+
+  if (bc_op(i) == BC_JMP) {
+    // a JMP opcode following a conditional is a pseudo instruction that
+    // will never be hit and cannot be safely patched (in lvm.c, these
+    // opcode handlers look ahead and assume a JMP follows them)
+    if (bc_op(pr) <= BC_ISNUM) {
+      return bcpos - 1;
+    } else {
+      lua_assert(0 && "to do check loop ops");
+      /*
+      switch (bc_op(pr)) {
+        case BC_LOOP:
+        case BC_FORL:
+        case BC_F:
+        return offset - 1;
+        default:
+        return offset; // bare JMP, which is fine.
+      }
+      */
+    }
+  }
+
+  return bcpos;
+}
+
+static int getlinebp(lua_State *L, GCproto *pt, int line)
+{
+  int pc = lj_debug_getbcpos(pt, line);
+  if (pc == -1) {
+    return -1;
+  }
+  pc = avoidpseudo(L, pt, pc);
+  return pc;
+}
+
+int lj_debug_setbp(lua_State *L, GCproto *pt, BCPos pc)
+{
+  global_State *g = G(L);
+  BCBreakpoint *bp;
+  int id;
+
+  pc = avoidpseudo(L, pt, pc);
+  id = findbp(L, pt, pc);
+
+  if (id == -1) {
+    if (g->bpnum == g->bpsz) {
+      lj_mem_growvec(L, g->breakpoints, g->bpsz, LJ_MAX_MEM, BCBreakpoint);
+    }
+    id = g->bpnum++;
+    bp = g->breakpoints + id;
+    bp->orig = proto_bc(pt)[pc];
+    bp->offset = pc;
+    bp->proto = pt;
+    bp->action = lj_vm_bp_continue;
+    proto_bc(pt)[pc] = BCINS_AD(BC_BP, 0, id);
+
+    if (pt->firstbp == -1) {
+      pt->firstbp = id;
+    }
+  } else {
+    lua_assert(g->bpnum > id && pt->firstbp != -1);
+  }
+
+  //p->halts[id].hook = hook;
+
+  return id;
+}
+
+int lj_debug_setlinebp(lua_State *L, GCproto *pt, int line)
+{
+  global_State *g = G(L);
+  int pc = lj_debug_getbcpos(pt, line);
+  if (pc == -1) {
+    return -1;
+  }
+  return lj_debug_setbp(L, pt, pc);
+}
+
+static GCproto *getproto(lua_State *L, int index)
+{
+  GCfunc *f;
+  if (!lua_isfunction(L, index) || lua_iscfunction(L, index)) {
+    return NULL;
+  } else {
+    f = funcV(L->base + (index - 1));
+    return funcproto(f);
+  }
+}
+
+LUA_API int lua_sethalt(lua_State *L, int line, lua_Hook hook)
+{
+  GCproto *p = getproto(L, 1);
+  if (p != NULL && isvalidoffset(L, p, line)) {
+    int id = lj_debug_setlinebp(L, p, line);
+    return id;
+  } else {
+    return -1;
+  }
+}
+
+LUA_API int lua_setprotohalt(lua_State *L, void* pv, const char *chunkName, int lineNumber, lua_Hook hook)
+{
+  GCproto *p = (GCproto*)pv;
+  int id = lj_debug_setlinebp(L, p, lineNumber);
+  if (id != -1) {
+
+  }
+  return id;
+}
+
+LUA_API int lua_clearprotohalt(lua_State *L, void *pv, const char *chunkName, int lineNumber)
+{
+  GCproto *pt = (GCproto*)pv;
+  int id = getlinebp(L, pt, lineNumber);
+  if (id == -1)
+    return 0;
+
+  return lj_debug_clearbp(L, id);
+}
+
+LUA_API int lua_clearhalt(lua_State *L, int lineno)
+{
+  GCproto *pt = getproto(L, 1);
+  if (pt != NULL && isvalidoffset(L, pt, lineno)) {
+    int id = getlinebp(L, pt, lineno);
+    return lj_debug_clearbp(L, id);
+  }
+  return 0;
+}
+
+void lj_debug_pushbps(lua_State *L, GCproto *p)
+{
+  global_State *g = G(L);
+  BCBreakpoint *bp;
+  if (p->firstbp == -1) {
+    return;
+  }
+  lua_createtable(L, 0, 0);
+  bp = g->breakpoints + p->firstbp;
+  while (bp) {
+    lua_pushinteger(L, bp->offset + 1);
+    lua_rawseti(L, -2, (int)(bp - g->breakpoints));
+    bp = bp->next;
+  }
+}
+
+LUA_API void lua_gethalts(lua_State *L)
+{
+  GCproto *p = getproto(L, 1);
+  if (p != NULL) {
+    lj_debug_pushbps(L, p);
+  } else {
+    lua_pushnil(L);
+  }
 }
 

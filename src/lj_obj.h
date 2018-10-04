@@ -377,6 +377,7 @@ typedef struct GCproto {
   MRef lineinfo;	/* Compressed map from bytecode ins. to source line. */
   MRef uvinfo;		/* Upvalue names. */
   MRef varinfo;		/* Names and compressed extents of local variables. */
+  int32_t firstbp;
 } GCproto;
 
 /* Flags for prototype. */
@@ -590,6 +591,19 @@ typedef struct GCState {
   MSize pause;		/* Pause between successive GC cycles. */
 } GCState;
 
+struct BCBreakpoint;
+
+typedef struct BCBreakpoint {
+  void *action;
+  void *user;
+  GCproto *proto;
+  uint16_t flags;
+  uint16_t mode;
+  BCPos offset;
+  BCIns orig; /* The bytecode that breakpoint replaced */
+  struct BCBreakpoint *next; /* next breakpoint set in the same proto */
+} BCBreakpoint;
+
 /* Global state, shared by all threads of a Lua universe. */
 typedef struct global_State {
   GCRef *strhash;	/* String hash table (hash chain anchors). */
@@ -614,6 +628,9 @@ typedef struct global_State {
   int32_t hookcstart;	/* Start count for instruction hook counter. */
   lua_Hook hookf;	/* Hook function. */
   lua_CFunction wrapf;	/* Wrapper for C function calls. */
+  BCBreakpoint *breakpoints;
+  MSize bpnum;
+  MSize bpsz;
   lua_CFunction panic;	/* Called as a last resort for errors. */
   BCIns bc_cfunc_int;	/* Bytecode for internal C function calls. */
   BCIns bc_cfunc_ext;	/* Bytecode for external C function calls. */

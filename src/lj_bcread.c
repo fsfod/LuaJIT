@@ -354,6 +354,7 @@ GCproto *lj_bcread_proto(LexState *ls)
   pt->sizeuv = (uint8_t)sizeuv;
   pt->flags = (uint8_t)flags;
   pt->trace = 0;
+  pt->firstbp = -1;
   setgcref(pt->chunkname, obj2gco(ls->chunkname));
 
   /* Close potentially uninitialized gap between bc and kgc. */

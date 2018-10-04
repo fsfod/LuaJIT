@@ -357,6 +357,55 @@ LJLIB_CF(debug_gethook)
   return 3;
 }
 
+static GCproto *check_proto(lua_State *L, int idx)
+{
+  TValue *o = L->base + (idx - 1);
+  if (L->top > o) {
+    if (tvisproto(o)) {
+      return protoV(o);
+    } else if (tvisfunc(o) && isluafunc(funcV(o))) {
+      return funcproto(funcV(o));
+    }
+  }
+  lj_err_argt(L, 1, LUA_TFUNCTION);
+  return NULL;  /* unreachable */
+}
+
+
+LJLIB_CF(debug_setbp)
+{
+  GCproto *pt = check_proto(L, 1);
+  int line = luaL_checkint(L, 2);
+  int id = lj_debug_setlinebp(L, pt, line);
+  if (id == -1) {
+    lua_pushnil(L);
+    return 1;
+  }
+  }
+  return 1;
+}
+
+LJLIB_CF(debug_clearbp)
+{
+  TValue *arg = lj_lib_checkany(L, 1);
+  int id = -1;
+  if (tvisnumber(arg)) {
+    id = numberVint(arg);
+    lua_pushboolean(L, lj_debug_clearbp(L, id));
+  } else {
+    GCproto *pt = check_proto(L, 1);
+
+    lua_pushboolean(L, lj_debug_clearbp(L, id));
+  }
+  return 1;
+}
+
+static int db_gethalts(lua_State *L)
+{
+  GCproto *pt = check_proto(L, 1);
+  lua_gethalts(L);
+  return 1;
+}
 /* ------------------------------------------------------------------------ */
 
 LJLIB_CF(debug_debug)

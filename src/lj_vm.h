@@ -48,6 +48,7 @@ LJ_ASMF void lj_vm_inshook(void);
 LJ_ASMF void lj_vm_rethook(void);
 LJ_ASMF void lj_vm_callhook(void);
 LJ_ASMF void lj_vm_profhook(void);
+LJ_ASMF void lj_vm_bp_continue(void);
 
 /* Trace exit handling. */
 LJ_ASMF void lj_vm_exit_handler(void);
