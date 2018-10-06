@@ -45,10 +45,12 @@ LJ_ASMF double lj_vm_foldfpm(double x, int op);
 /* Dispatch targets for recording and hooks. */
 LJ_ASMF void lj_vm_record(void);
 LJ_ASMF void lj_vm_inshook(void);
+LJ_ASMF void vm_inshook_nocheck(void);
 LJ_ASMF void lj_vm_rethook(void);
 LJ_ASMF void lj_vm_callhook(void);
 LJ_ASMF void lj_vm_profhook(void);
 LJ_ASMF void lj_vm_bp_continue(void);
+LJ_ASMF void lj_vm_bp_call(void);
 
 /* Trace exit handling. */
 LJ_ASMF void lj_vm_exit_handler(void);

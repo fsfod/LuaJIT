@@ -84,7 +84,7 @@ enum {
 #define frame_delta(f)		(frame_ftsz(f) >> 3)
 #define frame_sized(f)		(frame_ftsz(f) & ~FRAME_TYPEP)
 
-enum { LJ_CONT_TAILCALL, LJ_CONT_FFI_CALLBACK };  /* Special continuations. */
+enum { LJ_CONT_TAILCALL, LJ_CONT_FFI_CALLBACK, LJ_CONT_BREAKPOINT };  /* Special continuations. */
 
 #if LJ_FR2
 #define frame_contpc(f)		(frame_pc((f)-2))

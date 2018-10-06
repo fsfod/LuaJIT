@@ -18,6 +18,7 @@
 #include "lj_err.h"
 #include "lj_debug.h"
 #include "lj_lib.h"
+#include "lj_vm.h"
 
 /* ------------------------------------------------------------------------ */
 
@@ -374,6 +375,7 @@ static GCproto *check_proto(lua_State *L, int idx)
 
 LJLIB_CF(debug_setbp)
 {
+  global_State *g = G(L);
   GCproto *pt = check_proto(L, 1);
   int line = luaL_checkint(L, 2);
   int id = lj_debug_setlinebp(L, pt, line);
@@ -381,7 +383,17 @@ LJLIB_CF(debug_setbp)
     lua_pushnil(L);
     return 1;
   }
+
+  if ((L->top- L->base) > 2) {
+    TValue *o = L->base + 2;
+    if (!tvisfunc(o) || !isluafunc(funcV(o))) {
+      lj_err_argt(L, 3, LUA_TFUNCTION);
+    }
+    g->breakpoints[id].action = lj_vm_bp_call;
+    /* FIXME: callback can be GC'ed */
+    g->breakpoints[id].user = (void *)funcV(o);
   }
+  lua_pushinteger(L, id);
   return 1;
 }
 
