@@ -867,7 +867,7 @@ int lj_debug_setbp(lua_State *L, GCproto *pt, BCPos pc)
     bp->offset = pc;
     bp->proto = pt;
     bp->action = lj_vm_bp_continue;
-    proto_bc(pt)[pc] = BCINS_AD(BC_BP, 0, id);
+    proto_bc(pt)[pc] = (BC_BP | (id << 8));
 
     if (pt->firstbp == -1) {
       pt->firstbp = id;
