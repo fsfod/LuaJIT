@@ -738,10 +738,13 @@ int lj_debug_getbcpos(GCproto* pt, BCLine lineNumber)
 {
   BCPos i;
   char *lineinfo = mref(pt->lineinfo, char);
-  if (pt->numline != 0 && (pt->firstline > lineNumber || (pt->firstline + pt->numline) < lineNumber)) {
+  if (!proto_lineinfo(pt) || lineNumber > pt->numline) {
     return -1;
   }
-  lineNumber -= pt->firstline;
+
+  if (lineNumber == 0) {
+    return 0;
+  }
 
   for (i = 0; i < pt->sizebc; i++) {
     BCLine bcline;
@@ -753,7 +756,7 @@ int lj_debug_getbcpos(GCproto* pt, BCLine lineNumber)
       bcline = (BCLine)((const uint32_t *)lineinfo)[i];
     }
     if (bcline == lineNumber) {
-      return i;
+      return i + 1;
     }
     if (bcline > lineNumber) {
       break;
