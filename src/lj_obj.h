@@ -601,7 +601,7 @@ typedef struct BCBreakpoint {
   uint16_t mode;
   BCPos offset;
   BCIns orig; /* The bytecode that breakpoint replaced */
-  struct BCBreakpoint *next; /* next breakpoint set in the same proto */
+  int next; /* next breakpoint set in the same proto */
 } BCBreakpoint;
 
 /* Global state, shared by all threads of a Lua universe. */

@@ -778,17 +778,20 @@ int lj_debug_clearbp(lua_State *L, int id)
   bp->proto = NULL;
   proto_bc(pt)[bp->offset] = bp->orig;
   /* Unlink this breakpoint from the list of breakpoints set for the same proto */
-  if (bp->next || id != pt->firstbp) {
+  if (bp->next != -1 || id != pt->firstbp) {
     BCBreakpoint *prev, *curr = g->breakpoints + pt->firstbp;
     prev = curr;
-    while (bp->next) {
+    while (bp->next != -1) {
       if (curr == bp) {
         prev->next = bp->next;
         break;
       }
       prev = curr;
-      curr = curr->next;
+      curr = g->breakpoints + curr->next;
     }
+  }
+  if (bp->next == -1 && id == pt->firstbp) {
+    pt->firstbp = -1;
   }
 
   if (id == (g->bpnum-1)) {
@@ -867,10 +870,17 @@ int lj_debug_setbp(lua_State *L, GCproto *pt, BCPos pc)
     bp->offset = pc;
     bp->proto = pt;
     bp->action = lj_vm_bp_continue;
+    bp->next = -1;
     proto_bc(pt)[pc] = (BC_BP | (id << 8));
 
     if (pt->firstbp == -1) {
       pt->firstbp = id;
+    } else {
+      BCBreakpoint *last = g->breakpoints + pt->firstbp;
+      while (last->next != -1) {
+        last = g->breakpoints + last->next;
+      }
+      last->next = id;
     }
   } else {
     lua_assert(g->bpnum > id && pt->firstbp != -1);
@@ -946,16 +956,16 @@ LUA_API int lua_clearhalt(lua_State *L, int lineno)
 void lj_debug_pushbps(lua_State *L, GCproto *p)
 {
   global_State *g = G(L);
-  BCBreakpoint *bp;
-  if (p->firstbp == -1) {
+  int id = p->firstbp;
+  lua_createtable(L, 0, 0);
+  if (id == -1) {
     return;
   }
-  lua_createtable(L, 0, 0);
-  bp = g->breakpoints + p->firstbp;
-  while (bp) {
-    lua_pushinteger(L, bp->offset + 1);
+  while (id != -1) {
+    BCBreakpoint *bp = g->breakpoints + id;
+    lua_pushinteger(L, bp->offset);
     lua_rawseti(L, -2, (int)(bp - g->breakpoints));
-    bp = bp->next;
+    id = bp->next;
   }
 }
 
