@@ -867,7 +867,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov PC, [RB-12]			// Restore PC from [cont|PC].
   |.if X64
   |  movsxd RAa, dword [RB-16]		// May be negative on WIN64 with debug.
-  |  cmp RA, 3
+  |  cmp RA, LJ_CONT_BREAKPOINT
   |  je >2
   |.if FFI
   |  cmp RA, 1
@@ -877,7 +877,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  add RAa, KBASEa
   |.else
   |  mov RA, dword [RB-16]
-  |  cmp RA, 3
+  |  cmp RA, LJ_CONT_BREAKPOINT
   |  je >2
   |.if FFI
   |  cmp RA, 1
@@ -5347,7 +5347,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
 	|  mov dword [BASE-4], RB // Write frame size delta
 	|  mov RBa, BCBP:RA->user
 	|  mov dword [BASE-8], RB
-	|  mov dword [BASE-16], 3
+	|  mov dword [BASE-16], LJ_CONT_BREAKPOINT
 	|  mov [BASE-12], PC
 	// Pass the breakpoint id to the function
 	|  mov RD, [PC-4]
