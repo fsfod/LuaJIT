@@ -631,6 +631,7 @@ typedef struct global_State {
   BCBreakpoint *breakpoints;
   MSize bpnum;
   MSize bpsz;
+  MRef bpcontinue;
   lua_CFunction panic;	/* Called as a last resort for errors. */
   BCIns bc_cfunc_int;	/* Bytecode for internal C function calls. */
   BCIns bc_cfunc_ext;	/* Bytecode for external C function calls. */

@@ -953,7 +953,8 @@ void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
         }
       }  /* Otherwise continue with another __concat call. */
     } else if(frame_contv(frame) == LJ_CONT_BREAKPOINT) {
-      global_State g
+      global_State *g = J2G(J);
+      setmref(g->bpcontinue, frame_pc(frame));
     } else {
       /* Result type already specialized. */
       lua_assert(cont == lj_cont_condf || cont == lj_cont_condt);

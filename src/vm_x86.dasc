@@ -5322,12 +5322,16 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
 	|  shr RC, 8
 	|  imul RC, sizeof(BCBreakpoint)
 	|  lea BCBP:RA, [RA+RC]
+	|  cmp PC, dword [DISPATCH+DISPATCH_GL(bpcontinue)]
+	|  je >1
 	|  jmp aword BCBP:RA->action
+	| 1:
+	|  mov dword [DISPATCH+DISPATCH_GL(bpcontinue)], 0
 	|->vm_bp_continue:
 	|  cmp PC_OP, BC_BP // Check if the breakpoint was removed
-	|  jne >2
+	|  jne >3
 	|  mov RC, BCBP:RA->orig // Load orignal bytecode replaced by the breakpoint
-	| 1:
+	| 2:
     |  movzx RA, RCH
 	|  movzx OP, RCL
 	|  shr RC, 16
@@ -5336,9 +5340,9 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
 	|.else
 	|  jmp aword [DISPATCH+OP*4]
 	|.endif
-	| 2:
+	| 3:
 	|  mov RC, [PC]
-	|  jmp >1
+	|  jmp >2
 	|->vm_bp_call:
 	|  // RA = base, (RB = nresults+1,) RC = nargs+1 | extra_nargs
 	// Shift the stack base to currents functions frame size
