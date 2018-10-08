@@ -757,6 +757,53 @@ void lj_record_tailcall(jit_State *J, BCReg func, ptrdiff_t nargs)
     lj_trace_err(J, LJ_TRERR_LUNROLL);
 }
 
+static void lj_record_breakpoint(jit_State *J, int id)
+{
+  global_State *g = J2G(J);
+  BCBreakpoint *bp = g->breakpoints + id;
+  int offset = id * sizeof(BCBreakpoint);
+  TRef func, tbp, tptr, *fbase;
+  lua_assert(id >= 0 && id < g->bpnum);
+
+  if (bp->action != lj_vm_bp_call) {
+    lj_trace_err(J, LJ_TRERR_RECERR);
+  }
+ // pt = funcproto((GCfunc *)bp->user);
+
+  /* Check the breakpoint is not removed from the functions bytecode */
+  tptr = emitir(IRT(IR_XLOAD, IRT_INT), lj_ir_kptr(J, proto_bc(bp->proto) + bp->offset), 0);
+  emitir(IRTG(IR_EQ, IRT_INT), tptr, lj_ir_kint(J, proto_bc(bp->proto)[bp->offset]));
+
+  func = lj_ir_kfunc(J, bp->user);
+  /* breakpoints can't be added on trace so try to only load the breakpoint list pointer once */
+  tbp = emitir(IRT(IR_XLOAD, IRT_PTR), lj_ir_kptr(J, &g->breakpoints), IRXLOAD_READONLY);
+  tbp = emitir(IRT(IR_ADD, IRT_PTR), tbp, lj_ir_kint(J, id * sizeof(BCBreakpoint)));
+  /* Make sure the breakpoint action doesn't change */
+  tptr = emitir(IRT(IR_ADD, IRT_PTR), tbp, lj_ir_kint(J, offsetof(BCBreakpoint, action)));
+  emitir(IRTG(IR_EQ, IRT_PTR), emitir(IRT(IR_XLOAD, IRT_PTR), tptr, 0), lj_ir_kintp(J, bp->action));
+
+  BCReg s, top = curr_proto(J->L)->framesize + 2+LJ_FR2;
+  fbase = J->base + top;
+  
+  J->base += top;
+  J->baseslot += top;
+  J->framedepth += 2;
+
+#if LJ_FR2
+  fbase[0] = lj_ir_kfunc(J, bp->user);
+  fbase[1] = TREF_FRAME;
+  fbase[-2] = lj_ir_k64(J, IR_KPTR, LJ_CONT_BREAKPOINT);
+  fbase[-1] = TREF_CONT;
+#else
+  fbase[-2] = lj_ir_kptr(J, (void*)LJ_CONT_BREAKPOINT) | TREF_CONT;
+  fbase[-1] = lj_ir_kfunc(J, bp->user) | TREF_FRAME;
+#endif
+  /* setup arguments */
+  J->maxslot = 1;
+  fbase[0] = lj_ir_kint(J, id);
+  setnumV(J->L->base + top, id);
+}
+
 /* Check unroll limits for down-recursion. */
 static int check_downrec_unroll(jit_State *J, GCproto *pt)
 {
@@ -885,26 +932,28 @@ void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
       BCReg bslot = bc_b(*(frame_contpc(frame)-1));
       TRef tr = gotresults ? J->base[cbase+rbase] : TREF_NIL;
       if (bslot != J->maxslot) {  /* Concatenate the remainder. */
-	TValue *b = J->L->base, save;  /* Simulate lower frame and result. */
-	J->base[J->maxslot] = tr;
-	copyTV(J->L, &save, b-(2<<LJ_FR2));
-	if (gotresults)
-	  copyTV(J->L, b-(2<<LJ_FR2), b+rbase);
-	else
-	  setnilV(b-(2<<LJ_FR2));
-	J->L->base = b - cbase;
-	tr = rec_cat(J, bslot, cbase-(2<<LJ_FR2));
-	b = J->L->base + cbase;  /* Undo. */
-	J->L->base = b;
-	copyTV(J->L, b-(2<<LJ_FR2), &save);
+        TValue *b = J->L->base, save;  /* Simulate lower frame and result. */
+        J->base[J->maxslot] = tr;
+        copyTV(J->L, &save, b-(2<<LJ_FR2));
+        if (gotresults)
+          copyTV(J->L, b-(2<<LJ_FR2), b+rbase);
+        else
+          setnilV(b-(2<<LJ_FR2));
+        J->L->base = b - cbase;
+        tr = rec_cat(J, bslot, cbase-(2<<LJ_FR2));
+        b = J->L->base + cbase;  /* Undo. */
+        J->L->base = b;
+        copyTV(J->L, b-(2<<LJ_FR2), &save);
       }
       if (tr) {  /* Store final result. */
-	BCReg dst = bc_a(*(frame_contpc(frame)-1));
-	J->base[dst] = tr;
-	if (dst >= J->maxslot) {
-	  J->maxslot = dst+1;
-	}
+        BCReg dst = bc_a(*(frame_contpc(frame)-1));
+        J->base[dst] = tr;
+        if (dst >= J->maxslot) {
+          J->maxslot = dst+1;
+        }
       }  /* Otherwise continue with another __concat call. */
+    } else if(frame_contv(frame) == LJ_CONT_BREAKPOINT) {
+      global_State g
     } else {
       /* Result type already specialized. */
       lua_assert(cont == lj_cont_condf || cont == lj_cont_condt);
@@ -2419,7 +2468,9 @@ void lj_record_ins(jit_State *J)
     if (ra < J->maxslot)
       J->maxslot = ra;  /* Shrink used slots. */
     break;
-
+  case BC_BP:
+    lj_record_breakpoint(J, (ins >> 8));
+    break;
   /* -- Function headers -------------------------------------------------- */
 
   case BC_FUNCF:
