@@ -377,8 +377,19 @@ LJLIB_CF(debug_setbp)
 {
   global_State *g = G(L);
   GCproto *pt = check_proto(L, 1);
-  int line = luaL_checkint(L, 2);
-  int id = lj_debug_setlinebp(L, pt, line);
+  int id, line = luaL_checkint(L, 2);
+  /* If the user passed true the treat the line number as bytecode index */
+  if ((L->top - L->base) > 2 && tvistrue(L->base + 2)) {
+    if (line >= pt->sizebc) {
+      lj_err_argv(L, 2, LJ_ERR_IDXRNG);
+    }
+    id = lj_debug_setbp(L, pt, line);
+  } else {
+    if (line > pt->numline) {
+      lj_err_argv(L, 2, LJ_ERR_IDXRNG);
+    }
+    id = lj_debug_setlinebp(L, pt, line);
+  }
   if (id == -1) {
     lua_pushnil(L);
     return 1;
