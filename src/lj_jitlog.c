@@ -77,6 +77,50 @@ static void write_enumdef(jitlog_State *context, const char *name, const char *c
   free(namesblob);
 }
 
+typedef enum ObjType {
+  OBJTYPE_STRING,
+  OBJTYPE_UPVALUE,
+  OBJTYPE_THREAD,
+  OBJTYPE_PROTO,
+  OBJTYPE_LFUNC,
+  OBJTYPE_CFUNC,
+  OBJTYPE_TRACE,
+  OBJTYPE_CDATA,
+  OBJTYPE_TABLE,
+  OBJTYPE_UDATA,
+} ObjType;
+
+static ObjType obj_type(GCobj *o) {
+  switch (o->gch.gct) {
+  case ~LJ_TSTR:
+    return OBJTYPE_STRING;
+  case ~LJ_TUPVAL:
+    return OBJTYPE_UPVALUE;
+  case ~LJ_TTHREAD:
+    return OBJTYPE_THREAD;
+  case ~LJ_TPROTO:
+    return OBJTYPE_PROTO;
+  case ~LJ_TFUNC:
+    return isluafunc(&o->fn) ? OBJTYPE_LFUNC : OBJTYPE_CFUNC;
+  case ~LJ_TTRACE:
+    return OBJTYPE_TRACE;
+  case ~LJ_TCDATA:
+    return OBJTYPE_CDATA;
+  case ~LJ_TTAB:
+    return OBJTYPE_TABLE;
+  case ~LJ_TUDATA:
+    return OBJTYPE_UDATA;
+  default:
+    lua_assert(0);
+    return -1;
+  }
+}
+
+void jitlog_labelobj(jitlog_State *context, GCobj *o, const char *label, int flags)
+{
+  log_obj_label(&context->ub, obj_type(o), o, label, flags);
+}
+
 #if LJ_HASJIT
 
 static const uint32_t large_traceid = 1 << 14;
@@ -681,6 +725,36 @@ static int jlib_writemarker(lua_State *L)
   return 0;
 }
 
+static int jlib_labelobj(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  TValue *obj = lj_lib_checkany(L, 1);
+  size_t size = 0;
+  const char *label = luaL_checklstring(L, 2, &size);
+  int flags = luaL_optint(L, 3, 0);
+
+  if (!tvisgcv(obj)) {
+    luaL_error(L, "Expected an GC object for the first the parameter to label in the log");
+  }
+  jitlog_labelobj(context, gcV(obj), label, flags);
+  return 0;
+}
+
+static int jlib_labelproto(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  TValue *obj = lj_lib_checkany(L, 1);
+  size_t size = 0;
+  const char *label = luaL_checklstring(L, 2, &size);
+  int flags = luaL_optint(L, 3, 0);
+
+  if (!tvisfunc(obj) || !isluafunc(funcV(obj))) {
+    luaL_error(L, "Expected a Lua function for the first the parameter to label in the log");
+  }
+  jitlog_labelobj(context, obj2gco(funcproto(funcV(obj))), label, flags);
+  return 0;
+}
+
 static const luaL_Reg jitlog_lib[] = {
   {"start", jlib_start},
   {"shutdown", jlib_shutdown},
@@ -692,6 +766,8 @@ static const luaL_Reg jitlog_lib[] = {
   {"writemarker", jlib_writemarker},
   {"setmode", jlib_setmode},
   {"getmode", jlib_getmode},
+  {"labelobj", jlib_labelobj},
+  {"labelproto", jlib_labelproto},
   {NULL, NULL},
 };
 

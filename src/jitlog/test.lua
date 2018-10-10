@@ -365,6 +365,27 @@ it("GC atomic time", function()
   end
 end)
 
+it("object label", function()
+  local t1 = {table = true}
+  jitlog.start()
+  local f1 = loadstring("return 1")
+  jitlog.labelobj(f1, "f1")
+  jitlog.labelobj(t1, "t1")
+  assert(f1() == 1)
+
+  local result = parselog(jitlog.savetostring())
+  local labels = result.objlabel_lookup
+  assert(labels.t1)
+  assert(labels.t1.objtype == "table")
+  assert(labels.t1.label == "t1")
+  assert(result.objlabels[labels.t1.address] == labels.t1)
+  
+  assert(labels.f1)
+  assert(labels.f1.objtype == "func_lua")
+  assert(labels.f1.label == "f1")
+  assert(result.objlabels[labels.f1.address] == labels.f1)
+end)
+
 local failed = false
 
 pcall(jitlog.shutdown)
