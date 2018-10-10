@@ -150,3 +150,10 @@ message statechange (no_vtable) {
   state : 8
   flags : 8
 }
+
+message obj_label{
+  objtype : 4
+  obj : GCRefPtr
+  label : string
+  flags : 20
+}

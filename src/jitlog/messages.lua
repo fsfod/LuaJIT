@@ -167,6 +167,16 @@ module.messages = {
       flags : 8
     ]]
   },
+
+  {
+    name = "obj_label",
+    fields = [[
+      objtype : 4
+      obj : GCRefPtr
+      label : string
+      flags : 20
+    ]]
+  },
 }
 
 module.structs = {

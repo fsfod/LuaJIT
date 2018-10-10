@@ -10,6 +10,11 @@ local fbreaders = {}
 local api = {}
 local msgobj_mt = {}
 
+-- Just mask to the lower 48 bits that will fit in to a double
+local function addrtonum(address)
+  return (tonumber(bit.band(address, 0x7fffffffffffULL)))
+end
+
 function readers:stringmarker(msg)
   local label = msg.label
   local flags = msg.flags
@@ -105,6 +110,38 @@ function fbreaders:enumdef(msg)
   enum.__name = name
   self:log_msg("enumdef", "Enum(%s): %s", name, table.concat(names,","))
   return enum, name, names
+end
+
+local objtypes = util.make_enum{
+  "string",
+  "upvalue",
+  "thread",
+  "proto",
+  "func_lua",
+  "func_c",
+  "trace",
+  "cdata",
+  "table",
+  "userdata"
+}
+
+function readers:obj_label(msg)
+  local address = addrtonum(msg.obj)
+  local label = msg.label
+  local flags = msg.flags
+  local objtype = objtypes[msg.objtype]
+
+  local objlabel = {
+    eventid = self.eventid,
+    objtype = objtype,
+    label = label,
+    flags = flags,
+    address = address,
+  }
+  self:log_msg("obj_label", "ObjLabel(%s): type = %s, address = 0x%x, flags = %d", label, objtype, address, flags)
+  self.objlabels[address] = objlabel
+  self.objlabel_lookup[label] = objlabel
+  return objlabel
 end
 
 function readers:trace_exit(msg)
@@ -293,6 +330,8 @@ local function init(self)
   self.atomictime = {}
   self.gctime = {}
   self.gcmaxpause = 0
+  self.objlabels = {}
+  self.objlabel_lookup = {}
 
   return t
 end
