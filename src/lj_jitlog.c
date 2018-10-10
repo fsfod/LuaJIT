@@ -866,6 +866,24 @@ static int jlib_addmarker(lua_State *L)
   return 0;
 }
 
+static int jlib_labelobj(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  TValue *obj = lj_lib_checkany(L, 1);
+  size_t size = 0;
+  const char *label = luaL_checklstring(L, 2, &size);
+  int flags = luaL_optint(L, 3, 0);
+
+  if (!tvisgcv(obj)) {
+    luaL_error(L, "Expected an GC object for the first the parameter to label an the log");
+  }
+  if (tvisfunc(obj)) {
+    memorize_func(context, funcV(obj));
+  }
+  log_objlabel(&context->ub, ~itype(obj), gcV(obj), label, flags);
+  return 0;
+}
+
 static const luaL_Reg jitlog_lib[] = {
   {"start", jlib_start},
   {"shutdown", jlib_shutdown},
@@ -875,6 +893,7 @@ static const luaL_Reg jitlog_lib[] = {
   {"getsize", jlib_getsize},
   {"setlogsink", jlib_setlogsink},
   {"addmarker", jlib_addmarker},
+  {"labelobj", jlib_labelobj},
   {NULL, NULL},
 };
 

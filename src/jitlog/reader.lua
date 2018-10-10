@@ -409,6 +409,26 @@ function base_actions:gcfunc(msg)
   return func
 end
 
+function base_actions:objlabel(msg)
+  local address = addrtonum(msg.obj)
+  local obj = self.func_lookup[address] or self.proto_lookup[address]
+  if obj then
+    obj.label = msg:get_label()
+    obj.label_flags = msg:get_flags()
+    return obj
+  else
+    local label = {
+      eventid = self.eventid,
+      objtype = msg:get_objtype(),
+      label = msg:get_label(),
+      flags = msg:get_flags(),
+      address = msg.obj,
+    }
+    self.objlabels[address] = label
+    return label
+  end
+end
+
 function base_actions:protoloaded(msg)
   local address = addrtonum(msg.address)
   local created = msg.time
@@ -970,6 +990,7 @@ local function makereader(mixins)
     gcstatecount = 0, -- number times the gcstate changed
     enums = {},
     loaded_scripts = {},
+    objlabels = {},
     verbose = false,
     logfilter = {
       --header = true,

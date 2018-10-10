@@ -435,6 +435,24 @@ function tests.scriptload()
   assert(scripts[2].source:find([["@jitlog/test.lua"]])) 
 end
 
+function tests.objlabel()
+  local t1 = {table = true}
+  print(tostring(t1))
+  jitlog.start()
+  local f1 = loadstring("return 1")
+  jitlog.labelobj(f1, "f1")
+  jitlog.labelobj(t1, "t1")
+  assert(f1() == 1)
+  local result = parselog(jitlog.savetostring())
+  assert(#result.protos == 1)
+  assert(#result.functions == 1)
+  assert(result.functions[1].label == "f1")
+  local address, tlabel = next(result.objlabels)
+  assert(tlabel)
+  assert(tlabel.label == "t1")
+  assert(tlabel.objtype == 11)
+end
+
 local failed = false
 
 pcall(jitlog.shutdown)

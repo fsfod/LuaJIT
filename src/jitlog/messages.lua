@@ -229,6 +229,14 @@ local msgs = {
     "totalmem : u32",
     "strnum : u32",
   },
+
+  {
+    name = "objlabel",
+    "objtype : 4",
+    "obj : GCRefPtr",
+    "label : string",
+    "flags : 20",
+  },
 }
 
 return msgs
