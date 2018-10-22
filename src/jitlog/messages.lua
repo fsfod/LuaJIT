@@ -112,6 +112,21 @@ local msgs = {
   },
 
   {
+    name = "loadscript",
+    "time : timestamp",
+    "isloadstart : bool",
+    "isfile : bool",
+    "name : string",
+    "mode : string",
+  },
+
+  {
+    name = "scriptsrc",
+    "length : u32",
+    "sourcechunk : string[length]",
+  },
+
+  {
     name = "traceexit_small",
     "isgcexit : bool",
     "traceid : 14",

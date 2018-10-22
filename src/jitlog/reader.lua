@@ -290,6 +290,44 @@ function base_actions:gcproto(msg)
   return proto
 end
 
+function base_actions:loadscript(msg)
+  local info
+  
+  if msg:get_isloadstart() then
+    info = {
+      eventid = self.eventid,
+      name = msg:get_name(),
+      isfile =  msg:get_isfile(),
+      loadstart = msg.time,
+    }
+    tinsert(self.loaded_scripts, info)
+    self.loading_script = info
+    self:log_msg("loadscript", "Script(LoadStart): name= %s isfile= %s", info.name, info.isfile)
+  else
+    local info = self.loading_script
+    if info then
+      info.stop_eventid = self.eventid
+      info.loadstop = msg.time
+      self:log_msg("loadscript", "Script(LoadStop): name= %s, events= %d", info.name, self.eventid - info.eventid)
+    else
+      self:log_msg("loadscript", "Script(LoadStop):  Missing LoadStop")
+    end
+    self.loading_script = nil
+  end
+
+  return info
+end
+
+function base_actions:scriptsrc(msg)
+  local script = self.loading_script
+  self:log_msg("scriptsrc", "script source chunk: length= %d", msg.length)
+  
+  if not script then
+    return
+  end
+  script.source = (script.source or "") .. msg:get_sourcechunk()
+end
+
 function base_actions:protoloaded(msg)
   local address = addrtonum(msg.address)
   local created = msg.time
@@ -681,6 +719,7 @@ local function makereader(mixins)
     gccount = 0, -- number GC full cycles that have been seen in the log
     gcstatecount = 0, -- number times the gcstate changed
     enums = {},
+    loaded_scripts = {},
     verbose = false,
     logfilter = {
       --header = true,

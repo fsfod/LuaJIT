@@ -23,6 +23,8 @@ typedef struct jitlog_State {
   JITLogUserContext user;
   global_State *g;
   char loadstate;
+  lua_Reader luareader;
+  void* luareader_data;
   GCtab *strings;
   uint32_t strcount;
   GCtab *protos;
@@ -230,6 +232,43 @@ static void jitlog_gcstate(jitlog_State *context, int newstate)
   log_gcstate(&context->ub, newstate, g->gc.state, g->gc.total, g->strnum);
 }
 
+static const char *luareader_override(lua_State *L, void *ud, size_t *sz)
+{
+  jitlog_State *context = (jitlog_State *)ud;
+  const char *result = context->luareader(L, context->luareader_data, sz);
+
+  if (result && *sz != 0) {
+    log_scriptsrc(&context->ub, result, (uint32_t)*sz);
+  }
+  return result;
+}
+
+void jitlog_loadscript(jitlog_State *context, VMEventData_LoadScript *eventdata)
+{
+  if (eventdata) {
+    log_loadscript(&context->ub, 1, eventdata->isfile, eventdata->name, "");
+    if ((context->user.logfilter & LOGFILTER_SCRIPT_SOURCE) == LOGFILTER_SCRIPT_SOURCE) {
+      return;
+    }
+    if (eventdata->code) {
+      if(!jitlog_isfiltered(context, LOGFILTER_LOADSTRING_SOURCE))
+        log_scriptsrc(&context->ub, eventdata->code, (uint32_t)eventdata->codesize);
+    } else {
+      if (jitlog_isfiltered(context, LOGFILTER_FILE_SOURCE)) {
+        return;
+      }
+      /* Override the lua_Reader used to load the script to capture its source */
+      context->luareader = *eventdata->luareader;
+      context->luareader_data = *eventdata->luareader_data;
+      *eventdata->luareader = (void*)luareader_override;
+      *eventdata->luareader_data = context;
+    }
+  } else {
+    /* The Lua script has finished being loaded */
+    log_loadscript(&context->ub, 0, 0, "", "");
+  }
+}
+
 static void jitlog_protoloaded(jitlog_State *context, GCproto *pt)
 {
   if (jitlog_isfiltered(context, LOGFILTER_PROTO_LOADED)) {
@@ -261,6 +300,9 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
       jitlog_traceflush(context, (FlushReason)(uintptr_t)eventdata);
       break;
 #endif
+    case VMEVENT_LOADSCRIPT:
+      jitlog_loadscript(context, (VMEventData_LoadScript*)eventdata);
+      break;
     case VMEVENT_BC:
       jitlog_protoloaded(context, (GCproto*)eventdata);
       break;

@@ -298,6 +298,66 @@ function tests.protoloaded()
   assert(result.protos[2].createdid > result.protos[1].createdid)
 end
 
+function tests.scriptload()
+  local chunk1 = [[
+    function f1() return 1 end
+    function f2() return 2 end
+  ]]
+  local chunk2 = [[ return 2 ]]
+  
+  jitlog.start()
+  loadstring(chunk1, "chunk1")
+  loadstring(chunk2)
+  local result = parselog(jitlog.savetostring())
+  
+  assert(#result.loaded_scripts == 2, #result.loaded_scripts)
+  assert(#result.protos == 4)
+  local pt = result.protos
+  local scripts = result.loaded_scripts
+  
+  assert(scripts[1].name == "chunk1")
+  assert(scripts[1].source == chunk1)
+  assert(scripts[1].isfile == false)
+  
+  assert(scripts[2].name == chunk2)
+  assert(scripts[2].source == chunk2)
+  assert(scripts[2].isfile == false)
+  
+  assert(scripts[1].eventid < scripts[1].stop_eventid)
+  assert(scripts[1].loadstart < scripts[1].loadstop)
+  
+  assert(scripts[1].stop_eventid > pt[1].createdid)
+  assert(scripts[1].stop_eventid > pt[2].createdid)
+  assert(scripts[1].stop_eventid > pt[3].createdid)
+  assert(scripts[2].eventid < pt[4].createdid)
+
+  assert(scripts[1].loadstop < scripts[2].loadstart)
+  assert(scripts[2].loadstart < scripts[2].loadstop)
+  
+  assert(scripts[1].stop_eventid < scripts[2].eventid)
+  assert(scripts[2].eventid < scripts[2].stop_eventid)
+  
+  jitlog.reset()
+  loadstring("function")
+  loadfile("jitlog/test.lua")
+  local result = parselog(jitlog.savetostring())
+  
+  assert(#result.loaded_scripts == 2)
+  assert(#result.protos > 0)
+  
+  local scripts = result.loaded_scripts
+  -- Check a failed parse is handled correctly
+  assert(scripts[1].name == "function")
+  assert(scripts[1].source == "function")
+  assert(scripts[1].stop_eventid == scripts[1].eventid+2) -- we get a source chuck message before it errors
+ 
+  -- Check we get the correct events and data when a Lua file is loaded instead of a string
+  assert(scripts[2].name == "@jitlog/test.lua")
+  assert(scripts[2].isfile == true)
+  assert(scripts[2].source ~= nil)
+  assert(scripts[2].source:find([["@jitlog/test.lua"]])) 
+end
+
 local failed = false
 
 pcall(jitlog.shutdown)
