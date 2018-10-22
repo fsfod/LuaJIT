@@ -27,6 +27,8 @@ typedef struct jitlog_State {
   char loadstate;
   uint32_t traceexit;
   JITLogMode mode;
+  lua_Reader luareader;
+  void* luareader_data;
   GCtab *strings;
   uint32_t strcount;
   GCtab *protos;
@@ -398,6 +400,56 @@ static void jitlog_gcatomic_stage(jitlog_State *context, int atomicstage)
   log_statechange(&context->ub, STATEKIND_GC_ATOMIC, atomicstage, 0);
 }
 
+static const char *luareader_override(lua_State *L, void *ud, size_t *sz)
+{
+  jitlog_State *context = (jitlog_State *)ud;
+  const char *result = context->luareader(L, context->luareader_data, sz);
+
+  if (result && *sz != 0) {
+    log_scriptsrc(&context->ub, result, (uint32_t)*sz);
+  }
+  return result;
+}
+
+void jitlog_loadscript(jitlog_State *context, lua_State *L, VMEventData_LoadScript *eventdata)
+{
+  if (eventdata) {
+    loadscript_Args args = {
+      .isloadstart = 1,
+      .isfile = eventdata->isfile,
+      .caller_ffid = curr_func(L)->c.gct == ~LJ_TFUNC ? curr_func(L)->c.ffid : FF_C,
+      .name = eventdata->name,
+      .mode = eventdata->mode ? eventdata->mode : "",
+    };
+    log_loadscript(&context->ub, &args);
+    if ((context->user.logfilter & LOGFILTER_SCRIPT_SOURCE) == LOGFILTER_SCRIPT_SOURCE) {
+      return;
+    }
+    if (eventdata->code) {
+      if(!jitlog_isfiltered(context, LOGFILTER_LOADSTRING_SOURCE))
+        log_scriptsrc(&context->ub, eventdata->code, (uint32_t)eventdata->codesize);
+    } else {
+      if (jitlog_isfiltered(context, LOGFILTER_FILE_SOURCE)) {
+        return;
+      }
+      /* Override the lua_Reader used to load the script to capture its source */
+      context->luareader = *eventdata->luareader;
+      context->luareader_data = *eventdata->luareader_data;
+      *eventdata->luareader = (void*)luareader_override;
+      *eventdata->luareader_data = context;
+    }
+  } else {
+    loadscript_Args args = {
+      .isloadstart = 0,
+      .caller_ffid = curr_func(L)->c.gct == ~LJ_TFUNC ? curr_func(L)->c.ffid : FF_C,
+      .name = "",
+      .mode = "",
+    };
+    /* The Lua script has finished being loaded */
+    log_loadscript(&context->ub, &args);
+  }
+}
+
 static void jitlog_protoloaded(jitlog_State *context, GCproto *pt)
 {
   if (jitlog_isfiltered(context, LOGFILTER_PROTO_LOADED)) {
@@ -429,6 +481,9 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
       jitlog_traceflush(context, (FlushReason)(uintptr_t)eventdata);
       break;
 #endif
+    case VMEVENT_LOADSCRIPT:
+      jitlog_loadscript(context, L, (VMEventData_LoadScript*)eventdata);
+      break;
     case VMEVENT_BC:
       jitlog_protoloaded(context, (GCproto*)eventdata);
       break;
@@ -553,6 +608,14 @@ static const char *const bc_names[] = {
   #undef BCNAME
 };
 
+static const char *const fastfunc_names[] = {
+  "Lua",
+  "C",
+  #define FFDEF(name)   #name,
+  #include "lj_ffdef.h"
+  #undef FFDEF
+};
+
 #define write_enum(context, name, strarray) write_enumdef(context, name, strarray, (sizeof(strarray)/sizeof(strarray[0])), 0)
 
 static void write_header(jitlog_State *context)
@@ -586,6 +649,7 @@ static void write_header(jitlog_State *context)
   write_enum(context, "gcstate", gcstates);
   write_enum(context, "gcatomic_stages", gcatomic_stages);
   write_enum(context, "bc", bc_names);
+  write_enum(context, "fastfuncs", fastfunc_names);
 
   for (int i = 0; enuminfo_list[i].name; i++) {
     write_enumdef(context, enuminfo_list[i].name, enuminfo_list[i].namelist, enuminfo_list[i].count, 0);

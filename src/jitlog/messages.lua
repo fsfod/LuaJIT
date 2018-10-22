@@ -175,6 +175,26 @@ module.messages = {
   },
 
   {
+    name = "loadscript",
+    fields = [[
+      time : timestamp
+      isloadstart : bool
+      isfile : bool
+      caller_ffid : u8
+      name : string
+      mode : string
+    ]]
+  },
+
+  {
+    name = "scriptsrc",
+    fields = [[
+      length : u32
+      sourcechunk : string[length]
+    ]]
+  },
+
+  {
     name = "traceexit_small",
     fields = [[
       isgcexit : bool
