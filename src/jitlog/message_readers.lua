@@ -303,10 +303,15 @@ function readers:obj_proto(msg)
     varnames = msg.varnames,
     varinfo = self:read_array("VarRecord", msg:get_varinfo()),
     kgc = self:read_array("GCRef", msg:get_kgc()),
+    script = self.loading_script,
   }
   setmetatable(proto, self.msgobj_mt.proto)
   proto.hotslot = band(rshift(proto.bcaddr, 2), 64-1)
   self.proto_lookup[address] = proto
+
+  if self.loading_script then
+    table.insert(self.loading_script.protos, proto)
+  end
   
   local bclen = proto.bclen
   local bcarray
@@ -353,6 +358,48 @@ function api:pc2proto(pc)
     end
   end
   return nil, nil
+end
+
+function readers:loadscript(msg)
+  local info
+  
+  if msg.isloadstart then
+    info = {
+      eventid = self.eventid,
+      name = msg.name,
+      isfile =  msg.isfile,
+      loadstart = msg.time,
+      caller_ffid = msg.caller_ffid,
+      load_kind = self.vmdef.fastfuncs[msg.caller_ffid],
+      protos = {}
+    }
+    tinsert(self.loaded_scripts, info)
+    self.loading_script = info
+    self:log_msg("loadscript", "Script(LoadStart): name= %s isfile= %s load_kind=%s", info.name, info.isfile, info.load_kind)
+  else
+    info = self.loading_script
+    if info then
+      info.stop_eventid = self.eventid
+      info.loadstop = msg.time
+      self:log_msg("loadscript", "Script(LoadStop): name= %s, events= %d", info.name, self.eventid - info.eventid)
+    else
+      self:log_msg("loadscript", "Script(LoadStop):  Missing LoadStop")
+    end
+    self.loading_script = nil
+  end
+
+  return info
+end
+
+function readers:scriptsrc(msg)
+  local chunk = msg.sourcechunk
+  self:log_msg("scriptsrc", "script source chunk: length= %d", #chunk)
+
+  local script = self.loading_script
+  if not script or not chunk or #chunk == 0 then
+    return
+  end
+  script.source = (script.source or "") .. chunk
 end
 
 function readers:protoloaded(msg)
@@ -447,6 +494,7 @@ function fbreaders:VMDef(msg)
     gcatomic_stages = util.make_enum(msg:get_gcatomic_stages()),
     bc = util.make_enum(msg:get_bc()),
     bc_mode = self:read_array("uint16_t", msg:get_bc_mode()),
+    fastfuncs = util.make_enum(msg:get_fastfuncs()),
   }
   return vmdef
 end
@@ -561,6 +609,7 @@ local function init(self)
   self.gcmaxpause = 0
   self.objlabels = {}
   self.objlabel_lookup = {}
+  self.loaded_scripts = {}
 
   return t
 end

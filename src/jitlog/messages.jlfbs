@@ -129,6 +129,7 @@ table VMDef{
   gcatomic_stages : stringlist
   bc : stringlist
   bc_mode : [uint16]
+  fastfuncs : stringlist
 }
 
 message gcstate {
@@ -230,4 +231,17 @@ struct VarRecord{
 message protoloaded{
   time : timestamp
   address : GCRefPtr
+}
+
+message loadscript{
+  time : timestamp
+  isloadstart : bool
+  isfile : bool
+  caller_ffid : uint8
+  name : string
+  mode : string
+}
+
+message scriptsrc{
+  sourcechunk : string (explicit_length)
 }
