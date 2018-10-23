@@ -747,6 +747,24 @@ it("script load", function()
   
 end)
 
+it("jitlog reset point", function()
+  jitlog.start()
+  local size = jitlog.getsize()
+  jitlog.setresetpoint()
+  -- Force some gcstate messages to be written
+  collectgarbage("collect")
+  assert(jitlog.getsize() > size)
+  assert(jitlog.reset_tosavepoint())
+  assert(jitlog.getsize() == size)
+  
+  collectgarbage("stop")
+  local log = jitlog.savetostring()
+  collectgarbage("restart")
+  local result = parselog(log)
+  assert(result.gccount == 0)
+  assert(result.gcstatecount == 0)
+end)
+
 local failed = false
 
 pcall(jitlog.shutdown)

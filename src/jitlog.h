@@ -21,6 +21,26 @@ typedef enum JITLogFilter {
   LOGFILTER_SCRIPT_SOURCE     = LOGFILTER_LOADSTRING_SOURCE | LOGFILTER_FILE_SOURCE,
 } JITLogFilter;
 
+typedef enum JITLogEventTypes {
+  JITLOGEVENT_TRACE_COMPLETED   = 0x1,
+  JITLOGEVENT_TRACE_ABORT       = 0x2,
+  JITLOGEVENT_TRACE_EXITS       = 0x4,
+  JITLOGEVENT_TRACE_FLUSH       = 0x8,
+  
+  JITLOGEVENT_LOADSCRIPT        = 0x10,
+  JITLOGEVENT_PROTO_BLACKLISTED = 0x20,
+  JITLOGEVENT_PROTO_LOADED      = 0x40,
+  JITLOGEVENT_ENUMDEF           = 0x80,
+  JITLOGEVENT_MARKER            = 0x100,
+  JITLOGEVENT_OBJLABEL          = 0x200,
+  JITLOGEVENT_GCOBJ             = 0x400,
+  JITLOGEVENT_GCSTATE           = 0x800,
+
+  JITLOGEVENT_SHOULDRESET = JITLOGEVENT_TRACE_EXITS | JITLOGEVENT_GCSTATE | JITLOGEVENT_TRACE_ABORT,
+
+  JITLOGEVENT_OTHER             = 0x80000000,
+} JITLogEventTypes;
+
 typedef struct JITLogUserContext {
   void *userdata;
   JITLogFilter logfilter;
@@ -44,6 +64,24 @@ LUA_API int jitlog_save(JITLogUserContext *usrcontext, const char *path);
 LUA_API void jitlog_reset(JITLogUserContext *usrcontext);
 LUA_API int jitlog_setmode(JITLogUserContext *usrcontext, JITLogMode mode, int enabled);
 LUA_API int jitlog_getmode(JITLogUserContext* usrcontext, JITLogMode mode);
+
+/* 
+** Save the current position in the jitlog as a reset point that we can 
+** roll back to if no interesting events have happened since it
+*/
+LUA_API void jitlog_setresetpoint(JITLogUserContext *usrcontext);
+LUA_API int jitlog_reset_tosavepoint(JITLogUserContext *usrcontext);
+
+/*
+** Message visitor api
+*/
+typedef int visitmsg_cb(void* state, uint8_t msgid, void* msg);
+LUA_API int jitlog_visitmsgs(JITLogUserContext *usrcontext, visitmsg_cb callback, void* callbackud, size_t start);
+
+/* Returns the offset of the first message with the specified type or -1 if none are found */
+LUA_API int64_t jitlog_first_msgoffset(JITLogUserContext* usrcontext, int msgtype, size_t start);
+/* Returns the offset of the last message with the specified type or -1 if none are found */
+LUA_API int64_t jitlog_last_msgoffset(JITLogUserContext* usrcontext, int msgtype, size_t start);
 
 /*
 ** Set a user supplied buffer as the sink for data written to the jitlog.
