@@ -537,6 +537,21 @@ function tests.objlabel()
   assert(tlabel.objtype == 11)
 end
 
+function tests.resetpoint()
+  jitlog.start()
+  local size = jitlog.getsize()
+  jitlog.setresetpoint()
+  -- Force some gcstate messages to be written
+  collectgarbage("collect")
+  assert(jitlog.getsize() > size)
+  assert(jitlog.reset_tosavepoint())
+  assert(jitlog.getsize() == size)
+  
+  local result = parselog(jitlog.savetostring())
+  assert(result.gccount == 0)
+  assert(result.gcstatecount == 0)
+end
+
 local failed = false
 
 pcall(jitlog.shutdown)

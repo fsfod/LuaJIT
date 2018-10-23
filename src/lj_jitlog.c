@@ -45,6 +45,8 @@ typedef struct jitlog_State {
   TracedBC *traced_bc;
   uint32_t traced_bc_count;
   uint32_t traced_bc_capacity;
+  uint64_t resetpoint;
+  JITLogEventTypes events_written;
 } jitlog_State;
 
 
@@ -107,6 +109,7 @@ static void write_enumdef(jitlog_State *context, const char *name, const char *c
   char *namesblob = strlist_concat(names, namecount, &size);
   log_enumdef(&context->ub, isbitflags, name, namecount, namesblob, size);
   free(namesblob);
+  context->events_written |= JITLOGEVENT_ENUMDEF;
 }
 
 static int memorize_gcref(lua_State *L,  GCtab* t, TValue* key, uint32_t *count) {
@@ -132,6 +135,7 @@ static int memorize_string(jitlog_State *context, GCstr *s)
 
   if ((context->mode & JITLogMode_DisableMemorization) || memorize_gcref(L, context->strings, &key, &context->strcount)) {
     log_gcstring(&context->ub, s, strdata(s));
+    context->events_written |= JITLOGEVENT_GCOBJ;
     return 1;
   } else {
     return 0;
@@ -210,6 +214,7 @@ static void memorize_proto(jitlog_State *context, GCproto *pt)
   }
 
   log_gcproto(&context->ub, pt, proto_bc(pt), proto_bc(pt), mref(pt->k, GCRef),  lineinfo, linesize, proto_varinfo(pt), (uint32_t)vinfosz);
+  context->events_written |= JITLOGEVENT_GCOBJ;
 }
 
 static void memorize_func(jitlog_State *context, GCfunc *fn)
@@ -236,6 +241,7 @@ static void memorize_func(jitlog_State *context, GCfunc *fn)
   } else {
     log_gcfunc(&context->ub, fn, fn->c.f, fn->l.ffid, fn->c.upvalue, fn->c.nupvalues);
   }
+  context->events_written |= JITLOGEVENT_GCOBJ;
 }
 
 #if LJ_HASJIT
@@ -343,6 +349,7 @@ static void jitlog_tracestop(jitlog_State *context, GCtrace *T)
     return;
   }
   jitlog_writetrace(context, T, 0);
+  context->events_written |= JITLOGEVENT_TRACE_COMPLETED;
 }
 
 static void jitlog_traceabort(jitlog_State *context, GCtrace *T)
@@ -351,6 +358,7 @@ static void jitlog_traceabort(jitlog_State *context, GCtrace *T)
     return;
   }
   jitlog_writetrace(context, T, 1);
+  context->events_written |= JITLOGEVENT_TRACE_ABORT;
 }
 
 static void jitlog_tracebc(jitlog_State *context)
@@ -413,18 +421,21 @@ static void jitlog_exit(jitlog_State *context, VMEventData_TExit *exitState)
   } else {
     log_traceexit(&context->ub, exitState->gcexit, J->parent, J->exitno);
   }
+  context->events_written |= JITLOGEVENT_TRACE_EXITS;
 }
 
 static void jitlog_protobl(jitlog_State *context, VMEventData_ProtoBL *data)
 {
   memorize_proto(context, data->pt);
   log_protobl(&context->ub, data->pt, data->pc);
+  context->events_written |= JITLOGEVENT_PROTO_BLACKLISTED;
 }
 
 static void jitlog_traceflush(jitlog_State *context, FlushReason reason)
 {
   jit_State *J = G2J(context->g);
   log_alltraceflush(&context->ub, reason, J->param[JIT_P_maxtrace], J->param[JIT_P_maxmcode] << 10);
+  context->events_written |= JITLOGEVENT_TRACE_FLUSH;
 }
 
 #endif
@@ -436,6 +447,7 @@ static void jitlog_gcstate(jitlog_State *context, int newstate)
     return;
   }
   log_gcstate(&context->ub, newstate, g->gc.state, g->gc.total, g->strnum);
+  context->events_written |= JITLOGEVENT_GCSTATE;
 }
 
 static const char *luareader_override(lua_State *L, void *ud, size_t *sz)
@@ -445,12 +457,14 @@ static const char *luareader_override(lua_State *L, void *ud, size_t *sz)
 
   if (result && *sz != 0) {
     log_scriptsrc(&context->ub, result, (uint32_t)*sz);
+    context->events_written |= JITLOGEVENT_LOADSCRIPT;
   }
   return result;
 }
 
 void jitlog_loadscript(jitlog_State *context, VMEventData_LoadScript *eventdata)
 {
+  context->events_written |= JITLOGEVENT_LOADSCRIPT;
   if (eventdata) {
     log_loadscript(&context->ub, 1, eventdata->isfile, eventdata->name, "");
     if ((context->user.logfilter & LOGFILTER_SCRIPT_SOURCE) == LOGFILTER_SCRIPT_SOURCE) {
@@ -482,6 +496,7 @@ static void jitlog_protoloaded(jitlog_State *context, GCproto *pt)
   }
   memorize_proto(context, pt);
   log_protoloaded(&context->ub, pt);
+  context->events_written |= JITLOGEVENT_PROTO_LOADED;
 }
 
 static void free_context(jitlog_State *context);
@@ -770,6 +785,9 @@ LUA_API void jitlog_reset(JITLogUserContext *usrcontext)
   lj_tab_clear(context->protos);
   lj_tab_clear(context->funcs);
   ubuf_reset(&context->ub);
+
+  context->events_written = 0;
+  context->resetpoint = 0;
   write_header(context);
 }
 
@@ -831,6 +849,26 @@ LUA_API void jitlog_writemarker(JITLogUserContext *usrcontext, const char *label
 {
   jitlog_State *context = usr2ctx(usrcontext);
   log_stringmarker(&context->ub, flags, label);
+  context->events_written |= JITLOGEVENT_MARKER;
+}
+
+LUA_API void jitlog_setresetpoint(JITLogUserContext *usrcontext)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+  context->resetpoint = ubuf_getoffset(&context->ub);
+  context->events_written = 0;
+}
+
+LUA_API int jitlog_reset_tosavepoint(JITLogUserContext *usrcontext)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+  int keepmsgs = (context->events_written & ~JITLOGEVENT_SHOULDRESET) != 0;
+  context->events_written = 0;
+
+  if (context->resetpoint && !keepmsgs) {
+    return ubuf_try_setoffset(&context->ub, context->resetpoint);
+  }
+  return 0;
 }
 
 
@@ -1013,10 +1051,27 @@ static int jlib_labelobj(lua_State *L)
   return 0;
 }
 
+static int jlib_setresetpoint(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  jitlog_setresetpoint(ctx2usr(context));
+  return 0;
+}
+
+static int jlib_reset_tosavepoint(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  int result = jitlog_reset_tosavepoint(ctx2usr(context));
+  lua_pushboolean(L, result);
+  return 1;
+}
+
 static const luaL_Reg jitlog_lib[] = {
   {"start", jlib_start},
   {"shutdown", jlib_shutdown},
   {"reset", jlib_reset},
+  {"setresetpoint", jlib_setresetpoint},
+  {"reset_tosavepoint", jlib_reset_tosavepoint},
   {"save", jlib_save},
   {"savetostring", jlib_savetostring},
   {"getsize", jlib_getsize},
