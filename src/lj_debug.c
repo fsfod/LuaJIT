@@ -851,6 +851,38 @@ static int getlinebp(lua_State *L, GCproto *pt, int line)
   return pc;
 }
 
+static int create_breakpoint(lua_State *L, GCproto *pt, BCPos pc)
+{
+  global_State *g = G(L);
+  BCBreakpoint *bp;
+  int id;
+  lua_assert(bc_op(proto_bc(pt)[pc]) != BC_BP);
+
+  if (g->bpnum == g->bpsz) {
+    lj_mem_growvec(L, g->breakpoints, g->bpsz, LJ_MAX_MEM, BCBreakpoint);
+  }
+  id = g->bpnum++;
+  bp = g->breakpoints + id;
+  bp->orig = proto_bc(pt)[pc];
+  bp->offset = pc;
+  bp->proto = pt;
+  bp->action = lj_vm_bp_continue;
+  bp->next = -1;
+  bp->user = NULL;
+  proto_bc(pt)[pc] = (BC_BP | (id << 8));
+
+  if (pt->firstbp == -1) {
+    pt->firstbp = id;
+  } else {
+    BCBreakpoint *last = g->breakpoints + pt->firstbp;
+    while (last->next != -1) {
+      last = g->breakpoints + last->next;
+    }
+    last->next = id;
+  }
+  return id;
+}
+
 int lj_debug_setbp(lua_State *L, GCproto *pt, BCPos pc)
 {
   global_State *g = G(L);
@@ -861,27 +893,13 @@ int lj_debug_setbp(lua_State *L, GCproto *pt, BCPos pc)
   id = findbp(L, pt, pc);
 
   if (id == -1) {
+    id = create_breakpoint(L, pt, pc);
     if (g->bpnum == g->bpsz) {
       lj_mem_growvec(L, g->breakpoints, g->bpsz, LJ_MAX_MEM, BCBreakpoint);
     }
-    id = g->bpnum++;
-    bp = g->breakpoints + id;
-    bp->orig = proto_bc(pt)[pc];
-    bp->offset = pc;
-    bp->proto = pt;
-    bp->action = lj_vm_bp_continue;
-    bp->next = -1;
-    proto_bc(pt)[pc] = (BC_BP | (id << 8));
 
-    if (pt->firstbp == -1) {
-      pt->firstbp = id;
-    } else {
-      BCBreakpoint *last = g->breakpoints + pt->firstbp;
-      while (last->next != -1) {
-        last = g->breakpoints + last->next;
-      }
-      last->next = id;
-    }
+    bp = g->breakpoints + id;
+    bp->action = lj_vm_bp_continue;
   } else {
     lua_assert(g->bpnum > id && pt->firstbp != -1);
   }
