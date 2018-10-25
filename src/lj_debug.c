@@ -19,6 +19,7 @@
 #include "lj_jit.h"
 #endif
 #include "lj_vm.h"
+#include "lj_dispatch.h"
 
 /* -- Frames -------------------------------------------------------------- */
 
@@ -880,6 +881,21 @@ static int create_breakpoint(lua_State *L, GCproto *pt, BCPos pc)
     }
     last->next = id;
   }
+  return id;
+}
+
+int lj_debug_createbp_counter(lua_State *L, GCproto *pt, BCPos pc, int count)
+{
+  global_State *g = G(L);
+  int id = create_breakpoint(L, pt, pc);
+  BCBreakpoint *bp = g->breakpoints + id;
+
+  if (count == -1) {
+    count = G2J(g)->param[JIT_P_hotloop];
+  }
+
+  bp->action = lj_vm_bp_hotcount;
+  bp->user = (void *)(uintptr_t)count;
   return id;
 }
 

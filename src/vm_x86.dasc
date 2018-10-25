@@ -5043,6 +5043,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       /* fallthrough */
     case BC_RET0:
       |5:
+	  |  cmp PC_OP, BC_BP
+	  |  je >8
       |  cmp PC_RB, RDL			// More results expected?
       |  ja >6
     default:
@@ -5076,6 +5078,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  add RA, RB
     }
     |  jmp <1
+	|8:
+	|  mov RA, [DISPATCH+DISPATCH_GL(breakpoints)]
+	|  mov RD, [PC-4]
+	|  shr RD, 8
+	|  imul RD, sizeof(BCBreakpoint)
+	|  movzx RD, byte [RA+RD + offsetof(BCBreakpoint, orig)]
+	| jmp <1
     break;
 
   /* -- Loops and branches ------------------------------------------------ */
@@ -5322,6 +5331,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
 	|  shr RC, 8
 	|  imul RC, sizeof(BCBreakpoint)
 	|  lea BCBP:RA, [RA+RC]
+	// Check if we already executed the action 
 	|  cmp PC, dword [DISPATCH+DISPATCH_GL(bpcontinue)]
 	|  je >1
 	|  jmp aword BCBP:RA->action
@@ -5366,6 +5376,10 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  movsd qword [BASE], xmm0
 	|  mov RD, 2
     |  ins_callt
+	|->vm_bp_hotcount:
+	|  sub dword BCBP:RA->user, 1
+	|  jb ->vm_hotloop
+	|  jmp ->vm_bp_continue
 	break;
 
   /* -- Function headers -------------------------------------------------- */
