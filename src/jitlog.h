@@ -29,6 +29,13 @@ typedef struct JITLogUserContext {
 typedef enum JITLogMode {
   /* Log the current values of machine registers when a trace exited */
   JITLogMode_TraceExitRegs = 0x01,
+  /*
+  ** Disable memorizing of what GC objects have been written to the jitlog and
+  ** instead always write them to it. This avoid the memorization Lua tables effecting
+  ** the rate the GC runs at when trying to benchmark things at the cost of writing
+  ** duplicate data to the jitlog.
+  */
+  JITLogMode_DisableMemorization = 0x02,
 } JITLogMode;
 
 LUA_API JITLogUserContext* jitlog_start(lua_State *L);
