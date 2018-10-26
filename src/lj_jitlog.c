@@ -138,11 +138,12 @@ static int memorize_string(jitlog_State *context, GCstr *s)
     /*TODO: don't keep around large strings */
   }
 
-  if (memorize_gcref(L, context->strings, &key, &context->strcount)) {
+  if ((context->mode & JITLogMode_DisableMemorization) || memorize_gcref(L, context->strings, &key, &context->strcount)) {
     write_gcstring(&context->ub, s);
     return 1;
+  } else {
+    return 0;
   }
-  return 0;
 }
 
 static MSize uvinfo_size(GCproto* pt) {
@@ -258,7 +259,7 @@ static void memorize_proto(jitlog_State* context, GCproto* pt)
   int i;
   setprotoV(L, &key, pt);
 
-  if (!memorize_gcref(L, context->protos, &key, &context->protocount)) {
+  if (!(context->mode & JITLogMode_DisableMemorization) && !memorize_gcref(L, context->protos, &key, &context->protocount)) {
     /* Already written this proto to the jitlog */
     return;
   }
@@ -310,7 +311,7 @@ static void memorize_func(jitlog_State* context, GCfunc* fn)
   TValue key;
   setfuncV(L, &key, fn);
 
-  if (!memorize_gcref(L, context->funcs, &key, &context->funccount)) {
+  if (!(context->mode & JITLogMode_DisableMemorization) && !memorize_gcref(L, context->funcs, &key, &context->funccount)) {
     return;
   }
 
@@ -1260,6 +1261,7 @@ static void jitlog_shutdown(jitlog_State *context)
   }
 
   free_context(context);
+
 }
 
 LUA_API void jitlog_close(JITLogUserContext *usrcontext)
@@ -1363,6 +1365,7 @@ LUA_API int jitlog_setmode(JITLogUserContext *usrcontext, JITLogMode mode, int e
 
   switch (mode) {
     case JITLogMode_TraceExitRegs:
+    case JITLogMode_DisableMemorization:
       break;
     default:
       /* Unknown mode return false */
@@ -1468,6 +1471,7 @@ typedef struct ModeEntry {
 
 static const ModeEntry jitlog_modes[] = {
   {"texit_regs", JITLogMode_TraceExitRegs},
+  {"nomemo", JITLogMode_DisableMemorization},
 };
 
 static int jlib_setmode(lua_State *L)
