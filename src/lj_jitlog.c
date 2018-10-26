@@ -26,6 +26,7 @@ typedef struct jitlog_State {
   global_State *g;
   char loadstate;
   int max_exitstub;
+  JITLogMode mode;
   lua_Reader luareader;
   void* luareader_data;
   GCtab *strings;
@@ -123,11 +124,12 @@ static int memorize_string(jitlog_State *context, GCstr *s)
     /*TODO: don't keep around large strings */
   }
 
-  if (memorize_gcref(L, context->strings, &key, &context->strcount)) {
+  if ((context->mode & JITLogMode_DisableMemorization) || memorize_gcref(L, context->strings, &key, &context->strcount)) {
     log_gcstring(&context->ub, s, strdata(s));
     return 1;
+  } else {
+    return 0;
   }
-  return 0;
 }
 
 static const uint8_t* collectvarinfo(GCproto* pt)
@@ -172,8 +174,9 @@ static void memorize_proto(jitlog_State *context, GCproto *pt)
   int i;
   memorize_string(context, strref(pt->chunkname));
   setprotoV(L, &key, pt);
-  /* Only write each proto once to the jitlog */
-  if (!memorize_gcref(L, context->protos, &key, &context->protocount)) {
+
+  if (!(context->mode & JITLogMode_DisableMemorization) && !memorize_gcref(L, context->protos, &key, &context->protocount)) {
+    /* Already written this proto to the jitlog */
     return;
   }
 
@@ -209,7 +212,7 @@ static void memorize_func(jitlog_State *context, GCfunc *fn)
   TValue key;
   setfuncV(L, &key, fn);
 
-  if (!memorize_gcref(L, context->funcs, &key, &context->funccount)) {
+  if (!(context->mode & JITLogMode_DisableMemorization) && !memorize_gcref(L, context->funcs, &key, &context->funccount)) {
     return;
   }
 
@@ -697,6 +700,11 @@ static void jitlog_shutdown(jitlog_State *context)
   free_pinnedtab(L, context->protos);
   free_pinnedtab(L, context->funcs);
   free_context(context);
+
+  /* Flush all the traces if some are directly writing to the jitlog */
+  if (context->mode & JITLogMode_FlushOnShutdown) {
+    lj_trace_flushall(L, FLUSHREASON_PROFILETOGGLE);
+  }
 }
 
 LUA_API void jitlog_close(JITLogUserContext *usrcontext)
@@ -778,6 +786,26 @@ LUA_API void jitlog_writemarker(JITLogUserContext *usrcontext, const char *label
   log_stringmarker(&context->ub, flags, label);
 }
 
+
+LUA_API int jitlog_setmode(JITLogUserContext *usrcontext, JITLogMode mode, int enabled)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+
+  switch (mode) {
+    case JITLogMode_DisableMemorization:
+      break;
+    default:
+      return 0;
+  }
+
+  if (enabled) {
+    context->mode |= mode;
+  } else {
+    context->mode &= ~mode;
+  }
+  return 1;
+}
+
 /* -- Lua module to control the JITLog ------------------------------------ */
 
 static jitlog_State* jlib_getstate(lua_State *L)
@@ -856,6 +884,60 @@ static int jlib_getsize(lua_State *L)
   return 1;
 }
 
+typedef struct ModeEntry {
+  const char *key;
+  JITLogMode mode;
+} ModeEntry;
+
+static const ModeEntry jitlog_modes[] = {
+  {"nomemo", JITLogMode_DisableMemorization},
+};
+
+static int jlib_setmode(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  const char *key = luaL_checkstring(L, 1);
+  TValue *enabled = lj_lib_checkany(L, 2);
+  MSize i = 0;
+  int mode = -1;
+
+  for (; i != (sizeof(jitlog_modes)/sizeof(ModeEntry)) ;i++) {
+    if (strcmp(key, jitlog_modes[i].key) == 0) {
+      mode = jitlog_modes[i].mode;
+      break;
+    }
+  }
+
+  if (mode == -1) {
+    luaL_error(L, "Unknown mode key '%s'", key);
+  }
+
+  setboolV(L->top-1, jitlog_setmode(ctx2usr(context), mode, tvistruecond(enabled)));
+  return 1;
+}
+
+static int jlib_getmode(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  const char *key = luaL_checkstring(L, 1);
+  MSize i = 0;
+  int mode = -1;
+
+  for (; i != (sizeof(jitlog_modes)/sizeof(ModeEntry)); i++) {
+    if (strcmp(key, jitlog_modes[i].key) == 0) {
+      mode = jitlog_modes[i].mode;
+      break;
+    }
+  }
+
+  if (mode == -1) {
+    luaL_error(L, "Unknown mode key '%s'", key);
+  }
+
+  setboolV(L->top-1, context->mode & mode);
+  return 1;
+}
+
 static int jlib_addmarker(lua_State *L)
 {
   jitlog_State *context = jlib_getstate(L);
@@ -892,6 +974,8 @@ static const luaL_Reg jitlog_lib[] = {
   {"savetostring", jlib_savetostring},
   {"getsize", jlib_getsize},
   {"setlogsink", jlib_setlogsink},
+  {"setmode", jlib_setmode},
+  {"getmode", jlib_getmode},
   {"addmarker", jlib_addmarker},
   {"labelobj", jlib_labelobj},
   {NULL, NULL},

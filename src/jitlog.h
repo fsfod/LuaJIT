@@ -26,10 +26,23 @@ typedef struct JITLogUserContext {
   JITLogFilter logfilter;
 } JITLogUserContext;
 
+typedef enum JITLogMode {
+  /*
+  ** Disable memorizing of what GC objects have been written to the jitlog and
+  ** instead always write them to it. This avoid the memorization Lua tables effecting
+  ** the rate the GC runs at when trying to benchmark things at the cost of writing
+  ** duplicate data to the jitlog.
+  */
+  JITLogMode_DisableMemorization = 0x1,
+  /* Flush all traces when shutting down the jitlog */
+  JITLogMode_FlushOnShutdown     = 0x2,
+} JITLogMode;
+
 LUA_API JITLogUserContext* jitlog_start(lua_State *L);
 LUA_API void jitlog_close(JITLogUserContext *usrcontext);
 LUA_API int jitlog_save(JITLogUserContext *usrcontext, const char *path);
 LUA_API void jitlog_reset(JITLogUserContext *usrcontext);
+LUA_API int jitlog_setmode(JITLogUserContext *usrcontext, JITLogMode mode, int enabled);
 
 /*
 ** Set a user supplied buffer as the sink for data written to the jitlog.
