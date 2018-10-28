@@ -35,6 +35,13 @@
 
 /* -- Error handling ------------------------------------------------------ */
 
+void lj_setjitstate(jit_State *J, int state)
+{
+  // TODO: jitlog callback
+  lj_vmevent_callback(J->L, VMEVENT_JIT_STATE, (void *)(intptr_t)state);
+  J->state = state;
+}
+
 /* Synchronous abort with error message. */
 void lj_trace_err(jit_State *J, TraceError e)
 {
@@ -550,7 +557,7 @@ static int trace_downrec(jit_State *J)
     return 0;  /* NYI: down-recursion with RETM. */
   J->parent = 0;
   J->exitno = 0;
-  J->state = LJ_TRACE_RECORD;
+  lj_setjitstate(J, LJ_TRACE_RECORD);
   trace_start(J);
   return 1;
 }
@@ -572,7 +579,7 @@ static int trace_abort(jit_State *J)
     e = (TraceError)numberVint(L->top-1);
   if (e == LJ_TRERR_MCODELM) {
     L->top--;  /* Remove error object */
-    J->state = LJ_TRACE_ASM;
+    lj_setjitstate(J, LJ_TRACE_ASM);
     return 1;  /* Retry ASM with new MCode area. */
   }
   /* Penalize or blacklist starting bytecode instruction. */
@@ -649,7 +656,7 @@ static TValue *trace_state(lua_State *L, lua_CFunction dummy, void *ud)
   retry:
     switch (J->state) {
     case LJ_TRACE_START:
-      J->state = LJ_TRACE_RECORD;  /* trace_start() may change state. */
+      lj_setjitstate(J, LJ_TRACE_RECORD);  /* trace_start() may change state. */
       trace_start(J);
       lj_dispatch_update(J2G(J));
       break;
@@ -683,7 +690,7 @@ static TValue *trace_state(lua_State *L, lua_CFunction dummy, void *ud)
 	  J->cur.link = 0;
 	  J->cur.linktype = LJ_TRLINK_NONE;
 	  J->loopref = J->cur.nins;
-	  J->state = LJ_TRACE_RECORD;  /* Try to continue recording. */
+	  lj_setjitstate(J, LJ_TRACE_RECORD);  /* Try to continue recording. */
 	  break;
 	}
 	J->loopref = J->chain[IR_LOOP];  /* Needed by assembler. */
@@ -691,7 +698,7 @@ static TValue *trace_state(lua_State *L, lua_CFunction dummy, void *ud)
       lj_opt_split(J);
       lj_opt_sink(J);
       if (!J->loopref) J->cur.snap[J->cur.nsnap-1].count = SNAPCOUNT_DONE;
-      J->state = LJ_TRACE_ASM;
+      lj_setjitstate(J, LJ_TRACE_ASM);
       break;
 
     case LJ_TRACE_ASM:
@@ -699,7 +706,7 @@ static TValue *trace_state(lua_State *L, lua_CFunction dummy, void *ud)
       lj_asm_trace(J, &J->cur);
       trace_stop(J);
       setvmstate(J2G(J), INTERP);
-      J->state = LJ_TRACE_IDLE;
+      lj_setjitstate(J, LJ_TRACE_IDLE);
       lj_dispatch_update(J2G(J));
       return NULL;
 
@@ -711,7 +718,7 @@ static TValue *trace_state(lua_State *L, lua_CFunction dummy, void *ud)
       if (trace_abort(J))
 	goto retry;
       setvmstate(J2G(J), INTERP);
-      J->state = LJ_TRACE_IDLE;
+      lj_setjitstate(J, LJ_TRACE_IDLE);
       lj_dispatch_update(J2G(J));
       return NULL;
     }
@@ -746,7 +753,7 @@ void LJ_FASTCALL lj_trace_hot(jit_State *J, const BCIns *pc)
       !(J2G(J)->hookmask & (HOOK_GC|HOOK_VMEVENT))) {
     J->parent = 0;  /* Root trace. */
     J->exitno = 0;
-    J->state = LJ_TRACE_START;
+    lj_setjitstate(J, LJ_TRACE_START);
     lj_trace_ins(J, pc-1);
   }
   ERRNO_RESTORE
@@ -762,7 +769,7 @@ static void trace_hotside(jit_State *J, const BCIns *pc)
       ++snap->count >= J->param[JIT_P_hotexit]) {
     lua_assert(J->state == LJ_TRACE_IDLE);
     /* J->parent is non-zero for a side trace. */
-    J->state = LJ_TRACE_START;
+    lj_setjitstate(J, LJ_TRACE_START);
     lj_trace_ins(J, pc);
   }
 }
@@ -775,7 +782,7 @@ void LJ_FASTCALL lj_trace_stitch(jit_State *J, const BCIns *pc)
       !(J2G(J)->hookmask & (HOOK_GC|HOOK_VMEVENT))) {
     J->parent = 0;  /* Have to treat it like a root trace. */
     /* J->exitno is set to the invoking trace. */
-    J->state = LJ_TRACE_START;
+    lj_setjitstate(J, LJ_TRACE_START);
     lj_trace_ins(J, pc);
   }
 }

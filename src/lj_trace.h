@@ -40,7 +40,7 @@ LJ_FUNCA int LJ_FASTCALL lj_trace_exit(jit_State *J, void *exptr);
 
 /* Signal asynchronous abort of trace or end of trace. */
 #define lj_trace_abort(g)	(G2J(g)->state &= ~LJ_TRACE_ACTIVE)
-#define lj_trace_end(J)		(J->state = LJ_TRACE_END)
+#define lj_trace_end(J)		(lj_setjitstate((J), LJ_TRACE_END))
 
 #else
 

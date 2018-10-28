@@ -253,6 +253,8 @@ static void canonicalize_slots(jit_State *J)
   }
 }
 
+void lj_setjitstate(jit_State *J, int state);
+
 /* Stop recording. */
 void lj_record_stop(jit_State *J, TraceLink linktype, TraceNo lnk)
 {
