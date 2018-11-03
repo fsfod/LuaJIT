@@ -383,7 +383,7 @@ GCproto *lj_bcread_proto(LexState *ls)
     setmref(pt->uvinfo, NULL);
     setmref(pt->varinfo, NULL);
   }
-#if LJ_HASJIT
+#if LJ_SEPARATE_COUNTERS
   pt->hotcount = L2J(ls->L)->param[JIT_P_hotfunc] - 1;
 #endif
   return pt;

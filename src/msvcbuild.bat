@@ -32,11 +32,11 @@
 if exist minilua.exe.manifest^
   %LJMT% -manifest minilua.exe.manifest -outputresource:minilua.exe
 
-@set DASMFLAGS=-D WIN -D JIT -D FFI -D P64
+@set DASMFLAGS=-D WIN -D JIT -D FFI -D SEPARATE_COUNTERS -D P64
 @set LJARCH=x64
 @minilua
 @if errorlevel 8 goto :X64
-@set DASMFLAGS=-D WIN -D JIT -D FFI
+@set DASMFLAGS=-D WIN -D JIT -D FFI -D SEPARATE_COUNTERS
 @set LJARCH=x86
 @set LJCOMPILE=%LJCOMPILE% /arch:SSE2
 :X64

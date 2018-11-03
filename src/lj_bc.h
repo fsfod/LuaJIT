@@ -56,6 +56,12 @@
   (((BCIns)(o))|((BCIns)(a)<<8)|((BCIns)(d)<<16))
 #define BCINS_AJ(o, a, j)	BCINS_AD(o, a, (BCPos)((int32_t)(j)+BCBIAS_J))
 
+#if LJ_SEPARATE_COUNTERS
+  #define BCDEF_LOOPHC(_)  _(LOOPHC, ___, ___, lit, ___)
+#else
+  #define BCDEF_LOOPHC(_) 
+#endif
+
 /* Bytecode instruction definition. Order matters, see below.
 **
 ** (name, filler, Amode, Bmode, Cmode or Dmode, metamethod)
@@ -183,7 +189,7 @@
   _(LOOP,	rbase,	___,	jump,	___) \
   _(ILOOP,	rbase,	___,	jump,	___) \
   _(JLOOP,	rbase,	___,	lit,	___) \
-  _(LOOPHC,	___,	___,	lit,	___) \
+  BCDEF_LOOPHC(_) \
   \
   _(JMP,	rbase,	___,	jump,	___) \
   \

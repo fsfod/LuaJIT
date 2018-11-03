@@ -54,9 +54,9 @@ lj_asm.o: lj_asm.c lj_obj.h lua.h luaconf.h lj_def.h lj_arch.h lj_gc.h \
 lj_bc.o: lj_bc.c lj_obj.h lua.h luaconf.h lj_def.h lj_arch.h lj_bc.h \
  lj_bcdef.h
 lj_bcread.o: lj_bcread.c lj_obj.h lua.h luaconf.h lj_def.h lj_arch.h \
- lj_gc.h lj_err.h lj_errmsg.h lj_buf.h lj_str.h lj_tab.h lj_bc.h \
- lj_ctype.h lj_cdata.h lualib.h lj_lex.h lj_bcdump.h lj_state.h \
- lj_strfmt.h
+ lj_gc.h lj_err.h lj_errmsg.h lj_buf.h lj_str.h lj_tab.h lj_bc.h lj_jit.h \
+ lj_ir.h lj_dispatch.h lj_ctype.h lj_cdata.h lualib.h lj_lex.h \
+ lj_bcdump.h lj_state.h lj_strfmt.h
 lj_bcwrite.o: lj_bcwrite.c lj_obj.h lua.h luaconf.h lj_def.h lj_arch.h \
  lj_gc.h lj_buf.h lj_str.h lj_bc.h lj_ctype.h lj_dispatch.h lj_jit.h \
  lj_ir.h lj_strfmt.h lj_bcdump.h lj_lex.h lj_err.h lj_errmsg.h lj_vm.h
@@ -162,12 +162,11 @@ lj_opt_narrow.o: lj_opt_narrow.c lj_obj.h lua.h luaconf.h lj_def.h \
 lj_opt_sink.o: lj_opt_sink.c lj_obj.h lua.h luaconf.h lj_def.h lj_arch.h \
  lj_ir.h lj_jit.h lj_iropt.h lj_target.h lj_target_*.h
 lj_opt_split.o: lj_opt_split.c lj_obj.h lua.h luaconf.h lj_def.h \
- lj_arch.h lj_err.h lj_errmsg.h lj_buf.h lj_gc.h lj_str.h lj_ir.h \
- lj_jit.h lj_ircall.h lj_iropt.h lj_dispatch.h lj_bc.h lj_vm.h
+ lj_arch.h
 lj_parse.o: lj_parse.c lj_obj.h lua.h luaconf.h lj_def.h lj_arch.h \
  lj_gc.h lj_err.h lj_errmsg.h lj_debug.h lj_buf.h lj_str.h lj_tab.h \
  lj_func.h lj_state.h lj_bc.h lj_ctype.h lj_strfmt.h lj_lex.h lj_parse.h \
- lj_vm.h lj_vmevent.h
+ lj_vm.h lj_vmevent.h lj_dispatch.h lj_jit.h lj_ir.h
 lj_profile.o: lj_profile.c lj_obj.h lua.h luaconf.h lj_def.h lj_arch.h \
  lj_buf.h lj_gc.h lj_str.h lj_frame.h lj_bc.h lj_debug.h lj_dispatch.h \
  lj_jit.h lj_ir.h lj_trace.h lj_traceerr.h lj_profile.h luajit.h
@@ -240,7 +239,7 @@ host/buildvm_fold.o: host/buildvm_fold.c host/buildvm.h lj_def.h lua.h \
  luaconf.h lj_arch.h lj_obj.h lj_def.h lj_arch.h lj_ir.h lj_obj.h
 host/buildvm_lib.o: host/buildvm_lib.c host/buildvm.h lj_def.h lua.h luaconf.h \
  lj_arch.h lj_obj.h lj_def.h lj_arch.h lj_bc.h lj_lib.h lj_obj.h \
- host/buildvm_libbc.h
+ host/buildvm_libbc.h host/buildvm_libbc_counters.h
 host/buildvm_peobj.o: host/buildvm_peobj.c host/buildvm.h lj_def.h lua.h \
  luaconf.h lj_arch.h lj_bc.h lj_def.h lj_arch.h
 host/minilua.o: host/minilua.c

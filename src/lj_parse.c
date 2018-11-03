@@ -1576,7 +1576,7 @@ static GCproto *fs_finish(LexState *ls, BCLine line)
   pt->numparams = fs->numparams;
   pt->framesize = fs->framesize;
   setgcref(pt->chunkname, obj2gco(ls->chunkname));
-#if LJ_HASJIT
+#if LJ_SEPARATE_COUNTERS
   pt->hotcount = L2J(ls->L)->param[JIT_P_hotfunc] - 1;
 #endif
 
@@ -2353,10 +2353,12 @@ static void parse_break(LexState *ls)
 
 static void emit_loophotcount(FuncState *fs)
 {
+#if LJ_SEPARATE_COUNTERS
 #if LJ_HASJIT
   bcemit_AD(fs, BC_LOOPHC, 0, L2J(fs->L)->param[JIT_P_hotloop] - 1);
 #else
   bcemit_AD(fs, BC_LOOPHC, 0, 0);
+#endif
 #endif
 }
 
@@ -2503,7 +2505,7 @@ static void parse_for_num(LexState *ls, GCstr *varname, BCLine line)
   emit_loophotcount(fs);
   fs->bcbase[loopend].line = line;  /* Fix line for control ins. */
   jmp_patchins(fs, loopend, loop+1);
-  jmp_patchins(fs, loop, fs->pc-1);
+  jmp_patchins(fs, loop, fs->pc-LJ_SEPARATE_COUNTERS);
 }
 
 /* Try to predict whether the iterator is next() and specialize the bytecode.

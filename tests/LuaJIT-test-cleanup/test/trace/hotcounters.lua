@@ -25,11 +25,22 @@ local function getmaxcount(attempts, penalty)
   return count
 end
 
+local seperate_penalty = true
+
+if not pcall(jit.opt.start, "penaltymaxfunc="..func_penalty) then 
+  maxattemps_func = 11
+  maxattemps_loop = 11
+  seperate_penalty = false
+end
+
 local countmax_func = getmaxcount(maxattemps_func, func_penalty)
 local countmax_loop = getmaxcount(maxattemps_loop, loop_penalty)
 print("penaltymaxfunc="..countmax_func, "penaltymaxloop="..countmax_loop)
 
-jit.opt.start("penaltymaxfunc="..countmax_func, "penaltymaxloop="..countmax_loop)
+if seperate_penalty then
+  jit.opt.start("penaltymaxfunc="..countmax_func, "penaltymaxloop="..countmax_loop)
+end
+
 
 local function calln(f, n, ...)
   for i = 1, n do

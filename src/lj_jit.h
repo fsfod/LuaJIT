@@ -95,6 +95,17 @@
 #define JIT_P_sizemcode_DEFAULT		32
 #endif
 
+#define funchot_scale 2
+
+#if LJ_SEPARATE_COUNTERS
+#define JIT_PARAMDEF_COUNTERS(_) \
+  _(\007, hotfunc, (56*2))	        /* # of iter. to detect a hot function. */ \
+  _(\013, penaltyfunc, (36*2))      /* initial penalty hot counter back off value  */ \
+  _(\016, penaltymaxfunc, (25000*2)) /* max the function hot count backoff can be increased to  */ 
+#else
+#define JIT_PARAMDEF_COUNTERS(_)
+#endif
+
 /* Optimization parameters and their defaults. Length is a char in octal! */
 #define JIT_PARAMDEF(_) \
   _(\010, maxtrace,	1000)	/* Max. # of traces in cache. */ \
@@ -105,11 +116,8 @@
   _(\011, minstitch,	0)	/* Min. # of IR ins for a stitched trace. */ \
   \
   _(\007, hotloop,	56)	/* # of iter. to detect a hot loop. */ \
-  _(\007, hotfunc,	56*2)	/* # of iter. to detect a hot function. */ \
   _(\013, penaltyloop, 36) /*. initial penalty hot counter back off value */ \
-  _(\013, penaltyfunc, (36*2)) /* initial penalty hot counter back off value  */ \
   _(\016, penaltymaxloop, 25000) /* max the loop hot count backoff can be increased to */ \
-  _(\016, penaltymaxfunc, 50000) /* max the function hot count backoff can be increased to  */ \
   _(\007, hotexit,	10)	/* # of taken exits to start a side trace. */ \
   _(\007, tryside,	4)	/* # of attempts to compile a side trace. */ \
   \
@@ -122,6 +130,7 @@
   _(\011, sizemcode,	JIT_P_sizemcode_DEFAULT) \
   /* Max. total size of all machine code areas (in KBytes). */ \
   _(\010, maxmcode,	512) \
+  JIT_PARAMDEF_COUNTERS(_) \
   /* End of list. */
 
 enum {

@@ -427,14 +427,29 @@
 |
 #define PC2PROTO(field)  ((int)offsetof(GCproto, field)-(int)sizeof(GCproto))
 |
+|
 |// Decrement hashed hotcount and trigger trace recorder if zero.
 |.macro hotloop, reg
+|.if SEPARATE_COUNTERS
 |  sub word [PC+2], 1
+|.else
+|  mov reg, PC
+|  shr reg, 1
+|  and reg, HOTCOUNT_PCMASK
+|  sub word [DISPATCH+reg+GG_DISP2HOT], HOTCOUNT_LOOP
+|.endif
 |  jb ->vm_hotloop
 |.endmacro
 |
 |.macro hotcall, reg
+|.if SEPARATE_COUNTERS
 |  sub word [PC-4+PC2PROTO(hotcount)], 1
+|.else
+|  mov reg, PC
+|  shr reg, 1
+|  and reg, HOTCOUNT_PCMASK
+|  sub word [DISPATCH+reg+GG_DISP2HOT], HOTCOUNT_CALL
+|.endif
 |  jb ->vm_hotcall
 |.endmacro
 |
@@ -5242,19 +5257,27 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  mov RB, [RA]
       |  mov [RA-8], RB
       |  jmp =>BC_JLOOP
+      |.if SEPARATE_COUNTERS
       |2:
       |  ins_next2 // Skips over BC_LOOPHC
+      |.endif
     } else {
       |  branchPC RD			// Otherwise save control var + branch.
       |  mov RD, [RA]
       |  mov [RA-4], RB
       |  mov [RA-8], RD
+      |.if SEPARATE_COUNTERS
       |1:
       |  ins_next
       |2:
       |  add PC, 4  // Skip over BC_LOOPHC
       |  jmp <1
+      |.endif
     }
+    |.if not SEPARATE_COUNTERS
+    |2:
+    |  ins_next
+    |.endif
     break;
 
   case BC_LOOP:
@@ -5268,12 +5291,17 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     break;
   case BC_ILOOP:
     |  ins_A	// RA = base, RD = target (loop extent)
+    |.if SEPARATE_COUNTERS
     |  ins_next2
+    |.else
+    |  ins_next
+    |.endif
     break;
+#if LJ_SEPARATE_COUNTERS
   case BC_LOOPHC:
     |  ins_next
     break;
-
+#endif
   case BC_JLOOP:
     |.if JIT
     |  ins_AD	// RA = base (ignored), RD = traceno

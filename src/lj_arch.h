@@ -498,6 +498,12 @@
 #define LJ_HASJIT		1
 #endif
 
+#if !LUAJIT_NO_SEPARATE_COUNTERS && LJ_HASJIT && LJ_TARGET_X86ORX64
+#define LJ_SEPARATE_COUNTERS 1
+#else
+#define LJ_SEPARATE_COUNTERS 0
+#endif
+
 /* Disable or enable the FFI extension. */
 #if defined(LUAJIT_DISABLE_FFI) || defined(LJ_ARCH_NOFFI)
 #define LJ_HASFFI		0

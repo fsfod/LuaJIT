@@ -372,13 +372,21 @@ static void blacklist_pc(GCproto *pt, BCIns *pc)
   pt->flags |= PROTO_ILOOP;
 }
 
+
+
 /* Penalize a bytecode instruction. */
 static void penalty_pc(jit_State *J, GCproto *pt, BCIns *pc, TraceError e)
 {
+  uint32_t i, val, maxval;
+#if LJ_SEPARATE_COUNTERS
   int isloop = proto_bcpos(pt, pc) != 0;
-  uint32_t i, val = J->param[isloop ? JIT_P_penaltyloop : JIT_P_penaltyfunc];
-  uint32_t maxval = (uint32_t)J->param[isloop ? JIT_P_penaltymaxloop : 
-                                                JIT_P_penaltymaxfunc];
+  val = J->param[isloop ? JIT_P_penaltyloop : JIT_P_penaltyfunc];
+  maxval = (uint32_t)J->param[isloop ? JIT_P_penaltymaxloop :
+                                       JIT_P_penaltymaxfunc];
+#else
+  val = J->param[JIT_P_penaltyloop] * 2;
+  maxval = (uint32_t)J->param[JIT_P_penaltymaxloop] * 2;
+#endif
   for (i = 0; i < PENALTY_SLOTS; i++)
     if (mref(J->penalty[i].pc, const BCIns) == pc) {  /* Cache slot found? */
       /* First try to bump its hotcount several times. */
@@ -397,15 +405,20 @@ static void penalty_pc(jit_State *J, GCproto *pt, BCIns *pc, TraceError e)
 setpenalty:
   J->penalty[i].val = (uint16_t)val;
   J->penalty[i].reason = e;
+
+#if LJ_SEPARATE_COUNTERS
   /* If the pc is the function header set the hot count in the proto */
   if (!isloop) {
     lua_assert(val == J->param[JIT_P_penaltyfunc] || val > pt->hotcount);
-    pt->hotcount = val;
+    hotcount_set_pt(J2GG(J), pt, pc, val);
   } else {
     lua_assert(bc_op(pc[1]) == BC_LOOPHC);
-    lua_assert(val == J->param[JIT_P_penaltyloop] || val > hotcount_loop_get(pc));
-    hotcount_loop_set(pc, val);
+    lua_assert(val == J->param[JIT_P_penaltyloop] || val > hotcount_get_loop(J2GG(J), pc));
+    hotcount_set_loop(J2GG(J), pc, val);
   }
+#else
+  hotcount_set(J2GG(J), pc+1, val);
+#endif
 }
 
 /* -- Trace compiler state machine ---------------------------------------- */
@@ -586,10 +599,10 @@ static int trace_abort(jit_State *J)
       if (e == LJ_TRERR_RETRY) {
         /* Immediate retry. */
         if (proto_bcpos(startpt, startpc) == 0) {
-          startpt->hotcount = 1;
+          hotcount_set_pt(J2GG(J), startpt, startpc, 1);
         } else {
           lua_assert(bc_op(startpc[0]) > BC_FORI || bc_op(startpc[0]) <= BC_JLOOP);
-          hotcount_set(J2GG(J), startpc+1, 1);
+          hotcount_set_loop(J2GG(J), startpc, 1);
         }
       } else {
         penalty_pc(J, startpt, startpc, e);
@@ -749,14 +762,17 @@ void LJ_FASTCALL lj_trace_hot(jit_State *J, BCIns *pc)
   /* Note: pc is the interpreter bytecode PC here. It's offset by 1. */
   ERRNO_SAVE
   /* Reset hotcount. */
+#if LJ_SEPARATE_COUNTERS
   if (bc_op(pc[-1]) >= BC_FUNCF && bc_op(pc[-1]) <= BC_JFUNCV) {
     GCproto *pt = (GCproto *)(((char *)(pc-1)) - sizeof(GCproto));
     lua_assert(pt->hotcount == 0xffff);
-    pt->hotcount = J->param[JIT_P_hotfunc] - 1;
-  } else {
-    BCIns *loop = pc-1;
-    lua_assert(hotcount_loop_get(loop) == 0xffff);
-    hotcount_loop_set(loop, J->param[JIT_P_hotloop] - 1);
+    hotcount_set_pt(J2GG(J), pt, pc, J->param[JIT_P_hotfunc] - 1);
+  } 
+  else 
+#endif
+  {
+    lua_assert(hotcount_get_loop(J2GG(J), pc-1) == 0xffff || hotcount_get_loop(J2GG(J), pc-1) == 0xfffe);
+    hotcount_set_loop(J2GG(J), pc-1, J->param[JIT_P_hotloop] - 1);
   }
   
   /* Only start a new trace if not recording or inside __gc call or vmevent. */

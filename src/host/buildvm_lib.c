@@ -7,7 +7,12 @@
 #include "lj_obj.h"
 #include "lj_bc.h"
 #include "lj_lib.h"
+
+#if LJ_SEPARATE_COUNTERS
+#include "buildvm_libbc_counters.h"
+#else
 #include "buildvm_libbc.h"
+#endif
 
 /* Context for library definitions. */
 static uint8_t obuf[8192];

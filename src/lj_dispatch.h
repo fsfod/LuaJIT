@@ -114,16 +114,27 @@ typedef struct GG_State {
 #define GG_DISP2HOT	(GG_OFS(hotcount) - GG_OFS(dispatch))
 #define GG_DISP2STATIC	(GG_LEN_DDISP*(int)sizeof(ASMFunction))
 
+#if LJ_SEPARATE_COUNTERS
+#define hotcount_get_pt(gg, pt, pc) ((pt)->hotcount)
+#define hotcount_set_pt(gg, pt, pc, value) ((pt)->hotcount = (value))
+
+#define hotcount_get_loop(gg, pc) \
+  ((HotCount)(((pc)[1]) >> 16))
+
+#define hotcount_set_loop(gg, pc, val) \
+  (pc)[1] = (((pc)[1] & 0xffff) | ((val) << 16))
+#else
 #define hotcount_get(gg, pc) \
   (gg)->hotcount[(u32ptr(pc)>>2) & (HOTCOUNT_SIZE-1)]
 #define hotcount_set(gg, pc, val) \
   (hotcount_get((gg), (pc)) = (HotCount)(val))
 
-#define hotcount_loop_get(pc) \
-  ((HotCount)(((pc)[1]) >> 16))
+#define hotcount_get_pt(gg, pt, pc) ((void)pt, hotcount_get(gg, (pc)+1))
+#define hotcount_set_pt(gg, pt, pc, val) (hotcount_set(gg, (pc)+1, val), (void)pt)
 
-#define hotcount_loop_set(pc, val) \
-  (pc)[1] = (((pc)[1] & 0xffff) | ((val) << 16))
+#define hotcount_get_loop(gg, pc) hotcount_get(gg, (pc)+1)
+#define hotcount_set_loop(gg, pc, val) hotcount_set(gg, (pc)+1, val)
+#endif
 
 /* Dispatch table management. */
 LJ_FUNC void lj_dispatch_init(GG_State *GG);
