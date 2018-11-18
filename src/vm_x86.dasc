@@ -345,11 +345,24 @@
 |  jmp aword [DISPATCH+OP*4]
 |.endif
 |.endmacro
+|.macro ins_NEXT2
+|  mov RC, [PC+4]
+|  movzx RA, RCH
+|  movzx OP, RCL
+|  add PC, 8
+|  shr RC, 16
+|.if X64
+|  jmp aword [DISPATCH+OP*8]
+|.else
+|  jmp aword [DISPATCH+OP*4]
+|.endif
+|.endmacro
 |
 |// Instruction footer.
 |.if 1
 |  // Replicated dispatch. Less unpredictable branches, but higher I-Cache use.
 |  .define ins_next, ins_NEXT
+|  .define ins_next2, ins_NEXT2
 |  .define ins_next_, ins_NEXT
 |.else
 |  // Common dispatch. Lower I-Cache use, only one (very) unpredictable branch.
@@ -357,6 +370,9 @@
 |  // Around 10%-30% slower on Core2, a lot more slower on P4.
 |  .macro ins_next
 |    jmp ->ins_next
+|  .endmacro
+|  .macro ins_next2
+|    jmp ->ins_next2
 |  .endmacro
 |  .macro ins_next_
 |  ->ins_next:
@@ -400,6 +416,12 @@
 |.define PC_RB, byte [PC-1]
 |.define PC_RC, byte [PC-2]
 |.define PC_RD, word [PC-2]
+|
+|.define PC2_OP, byte [PC]
+|.define PC2_RA, byte [PC+1]
+|.define PC2_RB, byte [PC+3]
+|.define PC2_RC, byte [PC+2]
+|.define PC2_RD, word [PC+2]
 |
 |.macro branchPC, reg
 |  lea PC, [PC+reg*4-BCBIAS_J*4]
@@ -5298,7 +5320,102 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  branchPC RD
     |  ins_next
     break;
-
+  case BC_PINFO:
+    |  ins_A
+    |  ins_next
+    break;
+	
+  case BC_PLOAD:
+    |  ins_ABC	// RA = dst, RB = obj, RC = offset
+    |  mov RB, dword [BASE+RB*8] // Load the GC object\lightuserdata
+    |  mov RC, aword [RB+RC] // Load the pointer
+    |  mov dword [BASE+RA*8], RC
+    |  mov dword [BASE+RA*8+4], LJ_TLIGHTUD
+    |  ins_next
+    break;
+  case BC_PLOADT:
+    |  ins_AB_	// RA = dst, RB = obj, RC = objtype
+    |  movsx RC, RCL
+    |  mov RB, dword [BASE+RB*8] // Load the GC object\lightuserdata
+    |  mov dword [BASE+RA*8+4], RC
+    |  movzx RC, PC2_RD
+    |  mov RC, dword [RB+RC] // Load the pointer
+    |  mov dword [BASE+RA*8], RC
+    |  ins_next2
+    break;
+  case BC_PSTORE:
+    |  ins_ABC	// RA = dst, RB = ptr, RC = offset
+    |  mov RA, dword [BASE+RA*8]
+    |  mov RB, dword [BASE+RB*8+4] // Load raw pointer off Lua stack
+    |  mov dword [RA+RC], RB
+    |  ins_next
+    break;
+  case BC_LDI8:
+    |  ins_ABC	// RA = dst, RB = obj, RC = offset
+    |  mov RB, dword [BASE+RB*8] // Load the GC object\lightuserdata
+    |  movsx RC, byte [RB+RC] // Load the 32 bit int
+    |  jmp ->ldset_i32
+    break;
+  case BC_LDU8:
+    |  ins_ABC	// RA = dst, RB = obj, RC = offset
+    |  mov RB, dword [BASE+RB*8] // Load the GC object\lightuserdata
+    |  movzx RC, byte [RB+RC] 
+    |  jmp ->ldset_i32
+    break;
+  case BC_LDI16:
+    |  ins_ABC	// RA = dst, RB = obj, RC = offset
+    |  mov RB, dword [BASE+RB*8] // Load the GC object\lightuserdata
+    |  movsx RC, word [RB+RC]
+    |  jmp ->ldset_i32
+    break;
+  case BC_LDU16:
+    |  ins_ABC	// RA = dst, RB = obj, RC = offset
+    |  mov RB, dword [BASE+RB*8] // Load the GC object\lightuserdata
+    |  movzx RC, word [RB+RC]
+    |  jmp ->ldset_i32
+    break;
+  case BC_LDI32:
+    |  ins_ABC	// RA = dst, RB = obj, RC = offset
+    |  mov RB, dword [BASE+RB*8] // Load the GC object\lightuserdata
+    |  mov RC, aword [RB+RC*4] // Load the 32 bit int
+    |->ldset_i32:
+    |.if DUALNUM
+    |  mov dword [BASE+RA*8+4], LJ_TISNUM
+    |  mov dword [BASE+RA*8], RC
+    |.else
+    |  cvtsi2sd xmm0, RC
+    |  movsd qword [BASE+RA*8], xmm0
+    |.endif
+    |  ins_next
+    break;
+  case BC_LDF32:
+    |  ins_ABC	// RA = dst, RB = obj, RC = offset
+    |  mov RB, dword [BASE+RB*8] // Load the GC object\lightuserdata
+    |  cvtss2sd xmm0, dword [RB+RC]
+    |  movsd qword [BASE+RA*8], xmm0
+    |  ins_next
+    break;
+  case BC_STF32:
+    |  ins_ABC	// RA = dst, RB = slot, RC = offset
+    |  mov RA, dword [BASE+RA*8]
+    |  cvtsd2ss xmm0, qword [RA+RC]
+	|  movss dword [RA+RC], xmm0
+    |  ins_next
+    break;
+  case BC_LDF64:
+    |  ins_ABC	// RA = dst, RB = obj, RC = offset
+    |  mov RB, dword [BASE+RB*8] // Load the GC object\lightuserdata
+    |  movsd xmm0, qword [RB+RC]
+    |  movsd qword [BASE+RA*8], xmm0
+    |  ins_next
+    break;
+  case BC_STF64:
+    |  ins_ABC	// RA = dst, RB = slot, RC = offset
+    |  mov RA, dword [BASE+RA*8]
+    |  movsd xmm0, qword [BASE+RB*8] // Load double of Lua stack
+    |  movsd qword [RA+RC], xmm0
+    |  ins_next
+    break;
   /* -- Function headers -------------------------------------------------- */
 
    /*

@@ -185,6 +185,19 @@
   _(JLOOP,	rbase,	___,	lit,	___) \
   \
   _(JMP,	rbase,	___,	jump,	___) \
+  _(PINFO,	lit,	lit,	lit,	___) \
+  _(PLOAD,	dst,	var,	lit,	___) \
+  _(PSTORE,	var,	var,	lit,	___) \
+  _(PLOADT,	dst,	var,	lit,	___) \
+  _(LDU8,	dst,	var,	lit,	___) \
+  _(LDU16,	dst,	var,	lit,	___) \
+  _(LDI8,	dst,	var,	lit,	___) \
+  _(LDI16,	dst,	var,	lit,	___) \
+  _(LDI32,	dst,	var,	lit,	___) \
+  _(LDF32,	dst,	var,	lit,	___) \
+  _(LDF64,	dst,	var,	lit,	___) \
+  _(STF32,	var,	var,	lit,	___) \
+  _(STF64,	var,	var,	lit,	___) \
   \
   /* Function headers. I/J = interp/JIT, F/V/C = fixarg/vararg/C func. */ \
   _(FUNCF,	rbase,	___,	___,	___) \

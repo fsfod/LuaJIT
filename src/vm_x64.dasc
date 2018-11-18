@@ -210,10 +210,19 @@
 |  jmp aword [DISPATCH+OP*8]
 |.endmacro
 |
+|.macro ins_NEXT2
+|  mov RCd, [PC+4]
+|  movzx RAd, RCH
+|  movzx OP, RCL
+|  add PC, 8
+|  shr RCd, 16
+|  jmp aword [DISPATCH+OP*8]
+|.endmacro
 |// Instruction footer.
 |.if 1
 |  // Replicated dispatch. Less unpredictable branches, but higher I-Cache use.
 |  .define ins_next, ins_NEXT
+|  .define ins_next2, ins_NEXT2
 |  .define ins_next_, ins_NEXT
 |.else
 |  // Common dispatch. Lower I-Cache use, only one (very) unpredictable branch.
@@ -221,6 +230,9 @@
 |  // Around 10%-30% slower on Core2, a lot more slower on P4.
 |  .macro ins_next
 |    jmp ->ins_next
+|  .endmacro
+|  .macro ins_next2
+|    jmp ->ins_next2
 |  .endmacro
 |  .macro ins_next_
 |  ->ins_next:
