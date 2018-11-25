@@ -1,3 +1,4 @@
+local p = premake
 
 local flaglist = {
     --"LUA_USE_ASSERT",
@@ -49,6 +50,32 @@ premake.override(premake.vstudio.sln2005, "projects", function(base, wks)
 	base(wks)
 end)
 
+--p.buildtask = p.api.container("group", p.project)
+
+p.api.register {
+		name = "custombuildcommands",
+		scope = "config",
+		kind = "list:string",
+		tokens = true,
+    pathVars = true,
+}
+
+p.api.register {
+		name = "custombuildinputs",
+		scope = "config",
+		kind = "list:file",
+		tokens = true,
+    pathVars = true,
+}
+
+p.api.register {
+		name = "custombuildoutputs",
+		scope = "config",
+		kind = "list:file",
+		tokens = true,
+    pathVars = true,
+}
+
 newoption {
     trigger = "builddir",
     description = "override the build directory"
@@ -74,13 +101,30 @@ liblist = {
     "lib_ffi.c",
 }
 
+local buildvminputs = {
+    "%{sln.location}src/lib_base.c",
+    "%{sln.location}src/lib_math.c",
+    "%{sln.location}src/lib_bit.c",
+    "%{sln.location}src/lib_string.c", 
+    "%{sln.location}src/lib_table.c",
+    "%{sln.location}src/lib_io.c",
+    "%{sln.location}src/lib_os.c",
+    "%{sln.location}src/lib_package.c",
+    "%{sln.location}src/lib_debug.c",
+    "%{sln.location}src/lib_jit.c",
+    "%{sln.location}src/lib_ffi.c",
+    "%{sln.location}src/lib_ffi.c",
+    "%{sln.location}src/vm_x64.dasc",
+    "%{sln.location}src/vm_x86.dasc",
+}
+
 liblistString = "%{sln.location}src/"..table.concat(liblist, " %{sln.location}src/")
 
 --local libs = os.matchfiles("src/lib_*.c")
 
 function BuildVmCommand(cmd, outputfile, addLibList, outputDir)
     
-    outputDir = outputDir or "$(IntDir)"
+    outputDir = outputDir or "%{cfg.objdir}"
     
     local result = '"obj/buildvm/%{cfg.buildcfg}%{cfg.platform}/buildvm.exe" '..cmd..' -o "'..outputDir..outputfile..'" '
     
@@ -280,7 +324,7 @@ end
       "src/*_ppc*",
     }
 
-    prebuildcommands {
+    custombuildcommands {
       '{MKDIR} %{cfg.targetdir}/jit/',
       '"obj/buildvm/%{cfg.buildcfg}%{cfg.platform}/buildvm.exe" -m peobj -o "$(IntDir)lj_vm.obj"',
       BuildVmCommand("-m bcdef","lj_bcdef.h", true),
@@ -290,7 +334,15 @@ end
       BuildVmCommand("-m folddef", "lj_folddef.h", false).. '"%{sln.location}src/lj_opt_fold.c"',
       BuildVmCommand("-m vmdef", "vmdef.lua", true, '%{cfg.targetdir}/jit/'),
     }
-    prebuildmessage"Running pre build commands"
+    custombuildoutputs {
+      '%{cfg.objdir}lj_bcdef.h',
+      '%{cfg.objdir}lj_ffdef.h',
+      '%{cfg.objdir}lj_libdef.h',
+      '%{cfg.objdir}lj_recdef.h',
+      '%{cfg.objdir}lj_folddef.h',
+      '%{cfg.objdir}lj_vm.obj',
+    }
+    custombuildinputs(buildvminputs)
 
     filter "NOT tags:GC64"
       files { "lua.natvis" }
@@ -369,3 +421,35 @@ local dotvs = os.realpath(path.join(os.realpath(BuildDir), "../.vs"))
 mkdir_and_gitignore(os.realpath(BuildDir))
 mkdir_and_gitignore(bin)
 mkdir_and_gitignore(dotvs)
+
+local function pathlist_tostring(cmds, prj, sep)
+  local steps = os.translateCommandsAndPaths(cmds, prj.basedir, prj.location)
+	return table.implode(steps, "", "", sep) 
+end
+
+p.override(p.vstudio.vc2010, "buildEvents", function(base, cfg)
+  if #cfg.custombuildcommands > 0 then
+    p.push('<CustomBuildStep>')
+      _x(2,'<Command>%s</Command>', pathlist_tostring(cfg.custombuildcommands, cfg.project, "\r\n"))
+      if #cfg.custombuildoutputs > 0 then
+        _x(2,'<Outputs>%s</Outputs>', pathlist_tostring(cfg.custombuildoutputs, cfg.project, ";"))
+      end
+      if #cfg.custombuildinputs > 0 then
+        _x(2,'<Inputs>%s</Inputs>', pathlist_tostring(cfg.custombuildinputs, cfg.project, ";"))
+      end
+    p.pop("</CustomBuildStep>")
+  end
+	base(cfg)
+end)
+
+local function custombuild_settrigger(prj)
+  if #prj.custombuildcommands > 0 then
+    p.x("<CustomBuildAfterTargets>BuildGenerateSources</CustomBuildAfterTargets>")
+  end
+end
+
+p.override(p.vstudio.vc2010.elements, "outputProperties", function(base, cfg)
+	local calls = base(cfg)
+	table.insert(calls, custombuild_settrigger)
+	return calls
+end)
