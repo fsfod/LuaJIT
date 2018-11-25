@@ -351,7 +351,7 @@
       <Expand>
         <IndexListItems>
           <Size>baseslot+maxslot</Size>
-          <ValueNode>(IRType)((base[$i] &gt;&gt; 24) &amp; IRT_TYPE)</ValueNode>
+          <ValueNode>(IRType)((slot[$i] &gt;&gt; 24) &amp; IRT_TYPE)</ValueNode>
         </IndexListItems>
       </Expand>
     </Synthetic>
@@ -361,7 +361,7 @@
       <Expand>
         <ArrayItems>
           <Size>sizetrace</Size>
-          <ValuePointer>*(GCRef*)trace</ValuePointer>
+          <ValuePointer>(GCRef*)trace</ValuePointer>
         </ArrayItems>
       </Expand>
     </Synthetic>
