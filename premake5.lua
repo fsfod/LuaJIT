@@ -324,13 +324,13 @@ end
     filter { "system:windows", "Debug", "tags:FixedAddr" }
       linkoptions { "/FIXED", "/DEBUG", '/BASE:"0x00400000',  "/DYNAMICBASE:NO" }
 
-  
+
 local rootignors = {
-  "*.opensdf"
+  "*.opensdf",
   "*.sdf",
   "*.suo",
   "*.sln",
-}  
+}
 
 local function mkdir_and_gitignore(dir)
   --Create directorys first so writing the .gitignore doesn't fail
@@ -344,7 +344,3 @@ local dotvs = os.realpath(path.join(os.realpath(BuildDir), "../.vs"))
 mkdir_and_gitignore(os.realpath(BuildDir))
 mkdir_and_gitignore(bin)
 mkdir_and_gitignore(dotvs)
-mkdir_and_gitignore(os.realpath(path.join(os.realpath(BuildDir), "../obj")))
-   
-         
-      
