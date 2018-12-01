@@ -164,9 +164,11 @@ static void createargtable(lua_State *L, char **argv, int argc, int argf)
   lua_setglobal(L, "arg");
 }
 
+LUA_API int lua_call_cinterp(lua_State *L, int nargs, int nresults);
+
 static int dofile(lua_State *L, const char *name)
 {
-  int status = luaL_loadfile(L, name) || docall(L, 0, 1);
+  int status = luaL_loadfile(L, name) || lua_call_cinterp(L, 0, 1);
   return report(L, status);
 }
 
@@ -289,7 +291,7 @@ static int handle_script(lua_State *L, char **argx)
     } else {
       lua_pop(L, 1);
     }
-    status = docall(L, narg, 0);
+    status =  lua_call_cinterp(L, narg, 0);//(lua_call(L, narg, 0), 0);
   }
   return report(L, status);
 }
