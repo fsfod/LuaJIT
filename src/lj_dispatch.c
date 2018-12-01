@@ -580,7 +580,6 @@ void LJ_FASTCALL lj_dispatch_profile(lua_State *L, const BCIns *pc)
   _(ISNUM) \
   \
   /* Unary ops. */ \
-  _(MOV) \
   _(NOT) \
   _(UNM) \
   _(LEN) \
@@ -610,8 +609,6 @@ void LJ_FASTCALL lj_dispatch_profile(lua_State *L, const BCIns *pc)
   /* Constant ops. */ \
   _(KCDATA) \
   \
-  /* Upvalue and function ops. */ \
-  _(UCLO) \
   \
   /* Table ops. */ \
   _(GGET) \
@@ -638,8 +635,6 @@ void LJ_FASTCALL lj_dispatch_profile(lua_State *L, const BCIns *pc)
   /* Returns. */ \
   _(RETM) \
   _(RET) \
-  _(RET0) \
-  _(RET1) \
   \
   /* Loops and branches. I/J = interp/JIT, I/C/L = init/call/loop. */ \
   _(FORI) \
@@ -660,7 +655,6 @@ void LJ_FASTCALL lj_dispatch_profile(lua_State *L, const BCIns *pc)
   /* Function headers. I/J = interp/JIT, F/V/C = fixarg/vararg/C func. */ \
   _(IFUNCF) \
   _(JFUNCF) \
-  _(FUNCV) \
   _(IFUNCV) \
   _(JFUNCV) \
   _(FUNCC) \
@@ -683,8 +677,14 @@ static void LJ_NOINLINE lji_dispatch_init(const void** src, const void** dst)
 #define MAKE_NOPBC(name) NOP_BC(name)
 LJI_BCDEF(MAKE_NOPBC)
 
+#if __clang__
 /* Use computed goto for the interpreter loop */
 #define LJI_USE_CGOTO 1
+#else
+#define LJI_USE_CGOTO 0
+#endif
+
+
 
 #if LJI_USE_CGOTO
 
@@ -705,9 +705,17 @@ LJI_BCDEF(MAKE_NOPBC)
 #define DISPATCH_END 
 #else
 
-#define ins_next continue;
+#define ins_next \
+  bc = pc[0]; \
+  bc = bc >> 8; \
+  pc++; \
+  continue;
+
 #define LJI_BC_START(name) case name : {
-#define LJI_BC_END } break;
+#define LJI_BC_END \
+    ins_next \
+  }
+
 #define LJI_BC_ENDNODISP } break;
 #define DISPATCH_BEGIN \
   pc++; \
@@ -753,6 +761,12 @@ LJI_BCDEF(MAKE_NOPBC)
 
 #define lji_curr_func() frame_func(base - 1+LJ_FR2)
 
+#define check_stack(extra) \
+  if (LJ_UNLIKELY((base + (extra))) > mref(L->maxstack, TValue)) { \
+    lj_state_growstack(L, (extra)); \
+    base = L->base; \
+  }
+
 static LJ_AINLINE void lji_BC_KNIL(INTERP_ARGDEF)
 {
   ins_AD; // RA = dst_start, RD = dst_end
@@ -785,6 +799,12 @@ static LJ_AINLINE void lji_BC_KSTR(INTERP_ARGDEF)
   setstrV(L, base + A, strref(kbase[D]));
 }
 
+static LJ_AINLINE void lji_BC_MOV(INTERP_ARGDEF)
+{
+  ins_AD; // RA = dst, RD = src
+  copyTV(L, base + D, base + A);
+}
+
 static LJ_AINLINE TValue *lji_BC_TNEW(INTERP_ARGDEF)
 {
   ins_AD;
@@ -809,6 +829,22 @@ static LJ_AINLINE TValue *lji_BC_TDUP(INTERP_ARGDEF)
   GCtab *t = lj_tab_dup(L, tabref(kbase[D]));
   settabV(L, base + A, t);
   return base;
+}
+
+static LJ_AINLINE void lji_BC_GGET(INTERP_ARGDEF)
+{
+  ins_AND;  /*RA = dst, RD = str const (~) */
+  GCfunc *fn = lji_curr_func();
+  TValue *slot = lj_tab_getstr(tabref(fn->l.env), strref(kbase[D]));
+  if (slot && tvisnil(slot)) {
+    copyTV(L, slot, base + A);
+    return;
+  } else if(tabref(tabref(fn->l.env)->metatable)) {
+    L->base = base;
+    setstrV(L, &G(L)->tmptv, strref(kbase[D]));
+    slot = lj_meta_tget(L, tabref(fn->l.env), &G(L)->tmptv, );
+  }
+  setnilV(base + A);
 }
 
 static LJ_AINLINE void lji_BC_UGET(INTERP_ARGDEF)
@@ -869,6 +905,8 @@ static LJ_AINLINE TValue *lji_BC_FNEW(INTERP_ARGDEF)
   return base;
 }
 
+
+
 static int lji_BC_equal(INTERP_ARGDEF, int idx1, int idx2)
 {
   cTValue *o1 = base + idx1;
@@ -925,19 +963,73 @@ static int lji_BC_lessthan(INTERP_ARGDEF, int idx1, int idx2)
   }
 }
 
+int lua_call_callfunc(lua_State *L, int nargs, int nresults, void** dispatch);
 
-int lj_callfunc(lua_State *L, int nargs, void** dispatch) {
+static void copy_slots(lua_State *L, TValue *src, TValue *dst, int count)
+{
+  TValue *limit = src + count;
+  for (; src < limit; src++, dst++) copyTV(L, src, dst);
+}
+
+static TValue *doreturn(INTERP_ARGDEF, int want)
+{
+  int frametype = frame_type(base - 1);
+  int callbase = 0, results = 0;
+
+  if (frame_typep(base - 1) == FRAME_VARG) {
+    int delta = frame_delta(base - 1);
+    base = base - delta;
+    results += delta;
+    frametype = frame_type(base - 1);
+  }
+
+  if (frametype == FRAME_LUA) {
+    pc = (BCIns *)(frame_ftsz(base - 1) & ~FRAME_TYPEP);
+    callbase = bc_a(pc[0]);
+  } else if(frametype == FRAME_C) {
+    results += 1+LJ_FR2;
+    base -= 1+LJ_FR2;
+  }
+  if (want > 0) {
+    copyTV(L, base + results, base + callbase);
+  }
+  
+  L->top = base + want;
+  return base;
+}
+
+#if LJ_FR2
+static TValue *api_call_base(lua_State *L, int nargs)
+{
+  TValue *o = L->top, *base = o - nargs;
+  L->top = o+1;
+  for (; o > base; o--) copyTV(L, o, o-1);
+  setnilV(o);
+  return o+1;
+}
+#else
+#define api_call_base(L, nargs)	(L->top - (nargs))
+#endif
+
+LUA_API int lua_call_cinterp(lua_State *L, int nargs, int nresults)
+{
+  static void* dispatch[255*2] = {0};
+  return lua_call_callfunc(L, nargs, nresults, dispatch);
+}
+
+int lua_call_callfunc(lua_State *L, int nargs, int nresults, void** dispatch) {
 #if LJI_USE_CGOTO
   static const void* dispatch_addr[] = {BCDEF(MAKE_BCPTRS) &&l_vm_record};
 #endif
-    TValue *base = L->base;
+    TValue *base = api_call_base(L, nargs);
 #if LJI_USE_CGOTO
     if(dispatch[0] == 0) {
       lji_dispatch_init(dispatch_addr, dispatch);
     }
 #endif
+    setframe_ftsz(base-1, ((base - L->base) * sizeof(TValue)) | FRAME_C);
     GCfunc *f = frame_func(base-1);
-    BCIns *pc = proto_bc(funcproto(f));
+    BCIns *pc = mref(f->c.pc, BCIns);
     uint32_t bc = 0;
     GCRef* kbase = NULL;
 
@@ -947,11 +1039,22 @@ int lj_callfunc(lua_State *L, int nargs, void** dispatch) {
         pc += offset;
       LJI_BC_ENDNODISP
 
+      LJI_BC_START(BC_UCLO)
+        ins_AD;/* RA = level, RD = target */
+        pc += D-BCBIAS_J;
+        if (gcref(L->openupval)) {
+          L->base = base;
+          lj_func_closeuv(L, A);
+          base = L->base;
+        }
+      LJI_BC_ENDNODISP
+
       BCDEF_CALLFUNC(BC_KNIL)
       BCDEF_CALLFUNC(BC_KPRI)
       BCDEF_CALLFUNC(BC_KSHORT)
       BCDEF_CALLFUNC(BC_KNUM)
       BCDEF_CALLFUNC(BC_KSTR)
+      BCDEF_CALLFUNC(BC_MOV)
 
       BCDEF_CALLFUNC(BC_UGET)
       BCDEF_CALLFUNC(BC_USETV)
@@ -964,13 +1067,31 @@ int lj_callfunc(lua_State *L, int nargs, void** dispatch) {
       BCDEF_CALLFUNC(BC_TNEW)
       BCDEF_CALLFUNC(BC_TDUP)
 
+      LJI_BC_START(BC_FUNCV)
+        GCproto *pt = (GCproto *)(((char *)(pc - 1)) - sizeof(GCproto));
+        TValue *newbase = base + nargs+1;
+
+        /* Create a Vararg frame on top of the arguments in the stack */
+        setframe_ftsz(newbase - 1, ((nargs+1) * sizeof(TValue)) | FRAME_VARG);
+        setframe_gc(newbase - 1, (GCobj *)frame_func(base-1), LJ_TFUNC);
+
+        check_stack(pt->framesize + nargs+1);
+        newbase = base + nargs+1;
+        kbase = mref(pt->k, GCRef);
+        /* Copy fixed parameters above the varargs on the stack */
+        if (pt->numparams > 0) {
+          copy_slots(L, base - nargs, newbase, pt->numparams);
+        }
+        for (int i = nargs; i < pt->numparams; i++) {
+          setnilV(base + 1);
+        }
+        base = newbase;
+      LJI_BC_END
+
       LJI_BC_START(BC_FUNCF)
         GCproto *pt = (GCproto *)(((char *)(pc - 1)) - sizeof(GCproto));
         kbase = mref(pt->k, GCRef);
-        if (LJ_UNLIKELY((base + pt->framesize) > mref(L->maxstack, TValue))) {
-          lj_state_growstack(L, pt->framesize);
-          base = L->base;
-        }
+        check_stack(pt->framesize);
         /* Set missing arg slots to nil */
         for (int i = nargs; i < pt->numparams; i++) {
           setnilV(base + 1);
@@ -989,6 +1110,13 @@ int lj_callfunc(lua_State *L, int nargs, void** dispatch) {
         } else {
           goto vmeta_call;
         }
+      LJI_BC_END
+
+      LJI_BC_START(BC_RET0)
+        base = doreturn(INTERP_ARGS, 0);
+      LJI_BC_END
+      LJI_BC_START(BC_RET1)
+        base = doreturn(INTERP_ARGS, 1);
       LJI_BC_END
 
       vmeta_call : {
