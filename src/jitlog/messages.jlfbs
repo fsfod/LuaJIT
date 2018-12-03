@@ -48,6 +48,7 @@ message stringmarker{
   jitted : bool
   flags : 16
   label : string
+  stack : luastack (optional)
 }
 
 message idmarker4b (no_vtable){
@@ -145,7 +146,7 @@ message gcstate {
   time : timestamp
   stepstart : uint64
   prevstate : uint8
-  gcinfo : gc_info 
+  gcinfo : gc_info
 }
 
 table gc_info{
@@ -271,6 +272,7 @@ message trace_start{
   rootid : uint16
   startpt : GCRefPtr (argtype : GCproto*)
   startpc : uint32 (argtype : BCPos)
+  callstack : luastack (optional)
 }
 
 message trace{
@@ -355,4 +357,14 @@ message protobl{
   time : timestamp
   proto : GCRefPtr (argtype : GCproto *)
   bcindex : uint32
+}
+
+table luastack{
+  vmstate :  uint8
+  framesonly : bool
+  flags :  uint16
+  base :  int32
+  top :  int32
+  savedpc : MRef
+  slots : [TValue]
 }

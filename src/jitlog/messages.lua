@@ -371,6 +371,19 @@ module.messages = {
       flags : 20
     ]]
   },
+
+  {
+    name = "stacksnapshot",
+    fields = [[
+      vmstate :  u8
+      framesonly : bool
+      flags :  15
+      base :  i32
+      top :  i32
+      slots_length :  u32
+      slots : TValue[slots_length]
+    ]]
+  },
 }
 
 module.structs = {
