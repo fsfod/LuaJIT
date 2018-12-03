@@ -241,6 +241,17 @@ local msgs = {
     "label : string",
     "flags : 20",
   },
+
+  {
+    name = "stacksnapshot",
+    "vmstate :  u8",
+    "framesonly : bool",
+    "flags :  15",
+    "base :  i32",
+    "top :  i32",
+    "slotcount :  u32",
+    "slots : u64[slotcount]",
+  },
 }
 
 local structs = {

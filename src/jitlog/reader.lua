@@ -65,6 +65,21 @@ typedef union IRIns {
   double tv;		/* TValue constant (overlaps entire slot). */
 } IRIns;
 
+typedef union TValue{
+  double num;
+  uint64_t u64;
+  struct{
+    union {
+      uint32_t gcr;	/* GCobj reference (if any). */
+      int32_t i;	/* Integer value. */
+    };
+    union {
+      int32_t it;
+      uint32_t frame;
+    };
+  };
+} TValue;
+
 ]]
 
 local function array_index(self, index)
@@ -146,6 +161,26 @@ typedef struct protobc {
 } protobc;
 ]]
 
+local function bc_op(bc)
+  return (band(bc, 0xff))
+end
+
+local function bc_a(bc)
+  return (band(rshift(bc, 8), 0xff))
+end
+
+local function bc_b(bc)
+  return (rshift(bc, 24))
+end
+
+local function bc_c(bc)
+  return (band(rshift(bc, 16), 0xff))
+end
+
+local function bc_d(bc)
+  return (band(rshift(bc, 16), 0xffff))
+end
+
 local protobc = ffi.metatype("protobc", {
   __new = function(ct, count, src)
     local result = ffi.new(ct, count, count)
@@ -156,12 +191,12 @@ local protobc = ffi.metatype("protobc", {
     -- Returns just the opcode of the bytecode at the specified index
     getop = function(self, index)
       assert(index >= 0 and index < self.length)
-      return band(self.bc[index], 0xff)
+      return bc_op(self.bc[index])
     end,
     
     findop = function(self, op)
       for i = 0, self.length-1 do
-        if band(self.bc[index], 0xff) == op then
+        if bc_op(self.bc[index]) == op then
           return i
         end
         return -1
@@ -172,7 +207,12 @@ local protobc = ffi.metatype("protobc", {
     getbc = function(self, index)
       assert(index >= 0 and index < self.length)
       local bc = self.bc[index]
-      return band(bc, 0xff), band(rshift(bc, 8), 0xff), band(rshift(bc, 24), 0xff), band(rshift(bc, 16), 0xff), band(rshift(bc, 16), 0xffff)
+      return bc_op(bc), bc_a(bc), bc_b(bc), bc_c(bc), bc_d(bc)
+    end,
+    
+    getraw = function(self, index)
+      assert(index >= 0 and index < self.length)
+      return self.bc[index]
     end,
   }
 })
@@ -234,7 +274,7 @@ function gcproto:get_linenumber(bcidx)
   return self.firstline + self.lineinfo:get(bcidx-1)
 end
 
-function gcproto:get_pcline(pcaddr)
+function gcproto:get_bcindex(pcaddr)
   local diff = pcaddr-self.bcaddr
   if diff < 0 or diff > (self.bclen * 4) then
     return nil
@@ -242,7 +282,16 @@ function gcproto:get_pcline(pcaddr)
   if diff ~= 0 then
     diff = diff/4
   end
-  return self:get_linenumber(diff)
+  return diff
+end
+
+function gcproto:get_pcline(pcaddr)
+  local index = self:get_bcindex(pcaddr)
+  if index then
+    return self:get_linenumber(index)
+  else
+    return nil
+  end
 end
 
 function gcproto:dumpbc()
@@ -265,7 +314,7 @@ function gcproto:get_bcop(index)
 end
 
 function gcproto:get_rawbc(index)
-  return (self.bc:getbc(index))
+  return (self.bc:getraw(index))
 end
 
 local proto_mt = {
@@ -409,6 +458,7 @@ function base_actions:gcfunc(msg)
     end
     self:log_msg("gcfunc", "GCFunc(%x): %s Func 0x%d nupvalues %d", address, func.fastfunc, target, 0)
   end
+  setmetatable(func, gcfunc_mt)
   self.func_lookup[address] = func
   tinsert(self.functions, func)
   return func
@@ -696,6 +746,209 @@ function base_actions:gcstate(msg)
   self.peakstrnum = math.max(self.peakstrnum or 0, msg.strnum)
   self:log_msg("gcstate", "GCStateStats: MemTotal = %dMB, StrCount = %d", msg.totalmem/(1024*1024), msg.strnum)
   return self.gcstate, self.enums.gcstate[prevstate]
+end
+
+local stacksnapshot = {}
+
+local frametypes = {
+  [0] = "LUA",
+  "C",
+  "CONT",
+  "VARG",
+  "LUA",
+  "CP",
+  "PCALL",
+  "PCALLH",
+}
+
+function stacksnapshot:get_frametype(slot, gc64)
+  if gc64 then
+    return tonumber(band(self.slots:get(slot).u64, 7))
+  else
+    return band(self.slots:get(slot).it, 7)
+  end
+end
+
+local pcmask = bit.bnot(3)
+local pcmask64 = bit.bnot(3llu)
+
+function stacksnapshot:get_framepc(slot, gc64)
+  if gc64 then
+    return band(self.slots:get(slot).u64, pcmask64)
+  else
+    return band(self.slots:get(slot).frame, pcmask)
+  end
+end
+
+function stacksnapshot:get_framegc(slot, gc64)
+  if gc64 then
+    return addrtonum(self.slots:get(slot-1).u64)
+  else
+    return addrtonum(self.slots:get(slot).gcr)
+  end
+end
+
+function stacksnapshot:get_frameinfo(slot, gc64)
+  if slot < 0 or slot >= self.slots.length then
+    error("Frame index "..slot.." is out of range of "..(self.slots.length-1))
+  end
+
+  local frametype = frametypes[self:get_frametype(slot, gc64)]
+  local pc = self:get_framepc(slot, gc64)
+  local func = self.owner.func_lookup[self:get_framegc(slot, gc64)]
+  local pt, line, bcindex, nextframe
+
+  if not frametype then
+    return nil, nil, func
+  end
+
+  if frametype == "LUA" then
+    -- Find the calling function proto from the bytecode PC address in the this stackframe
+    pt, line = self.owner:pc2proto(pc-4)
+    -- We may not have all the function protos recored in log so this extra info is optional
+    if pt then
+      bcindex = pt:get_bcindex(pc-4)
+      -- Find the parent frame size by getting the call base stack slot inside the BC_CALL bytecode
+      local callbase = bc_a(pt:get_rawbc(bcindex))
+      local bcop = pt:get_bcop(bcindex)
+      if bcop ~= "CALL" then
+        error("PC in stackframe did not point to a CALL bytecode was "..bcop)
+      end
+      nextframe = slot - (callbase + 1)
+      if gc64 then
+        nextframe = nextframe - 1
+      end
+    end
+  else
+    local delta = bit.rshift(pc, 3)
+    assert(delta > 0 or delta > slot, "Bad frame delta")
+    nextframe = tonumber(slot - delta)
+  end
+  
+  return frametype or self:get_frametype(slot), nextframe, func, pt, line, bcindex
+end
+
+function stacksnapshot:visitframes(callback, usrarg, gc64)
+  if self.base == -1 then
+    assert(false, "stack has no base index")
+  end
+  local framesz = gc64 and 2 or 1
+  local limit = framesz
+  local slot = self.base-1
+  if self.framesonly then
+    limit = 0
+  end
+  -- Skip the dummy frame at the base of the stack
+  while(slot >= limit) do
+    local frametype, nextframe, func, pt, line, bcindex = self:get_frameinfo(slot, gc64)
+    
+    if usrarg then
+      callback(usrarg, frametype, slot, nextframe, func, pt, line, bcindex)
+    else
+      callback(frametype, slot, nextframe, func, pt, line, bcindex)
+    end
+
+    if not nextframe then
+      break
+    end
+    if self.framesonly then
+      slot = slot - framesz
+    else
+      slot = nextframe
+    end
+  end
+  
+  return true
+end
+
+function stacksnapshot:get_framelist(gc64)
+  local t = {}
+  self:visitframes(function(frames, kind, slot, nextframe, func, pt, line, bcindex)
+    table.insert(frames, {kind = kind, slot = slot, func = func, nextframe = nextframe, pt = pt, line = line, bcindex = bcindex})
+  end, t, gc64)
+  return t
+end
+
+function stacksnapshot:frame_print(slot, gc64)
+  local frametype, nextframe, func, pt, line, bcindex = self:get_frameinfo(slot, gc64)
+  print(string.format("Frame(%s): slot = %d", frametype or "?", slot))
+
+  if func then
+    print(string.format("  FrameGC: %s", func:tostring()))
+  end
+  if frametype then
+    if frametype == "LUA" then
+      print(string.format("  BC_CALL loc: %s", pt:get_bclocation(bcindex)))
+    else
+      print(string.format("  Delta: %d", nextframe))
+    end
+  end
+
+  return nextframe
+end
+
+function stacksnapshot:printframes(gc64)
+  local slot = self.base-1
+  local framesz = gc64 and 2 or 1
+  local limit = framesz
+  if self.framesonly then
+    limit = 0
+  end
+  while slot and slot >= limit do
+    local nextframe = self:frame_print(slot, gc64)
+    if self.framesonly then
+      slot = slot - framesz
+    else
+      slot = nextframe
+    end
+  end
+end
+
+function stacksnapshot:tostring(gc64)
+  if self.base == -1 then
+    assert(false, "stack has no base index")
+  end
+  local slot = self.base-1
+  local limit = gc64 and 1 or 0
+  local result = ""
+  while(slot and slot > limit) do
+    local frametype, nextframe, func, pt, line, bcindex = self:get_frameinfo(slot)
+    result = string.format("%sFrame(%s): slot = %d\n", result, frametype or "?", slot)
+
+    if func then
+      result = string.format("%s  FrameGC: %s\n", result, func:tostring())
+    end
+    if frametype then
+      if frametype == "LUA" then
+        result = string.format("%s  BC_CALL loc: %s\n", result, pt:get_bclocation(bcindex))
+      else
+        result = string.format("%s  Delta: %d\n", result, nextframe)
+      end
+    else
+      break
+    end
+    slot = nextframe
+  end
+  return result
+end
+
+local stacksnapshot_mt = {__index = stacksnapshot}
+
+function base_actions:stacksnapshot(msg)
+  local stack = {
+    eventid = self.eventid,
+    owner = self,
+    framesonly = msg:get_framesonly(),
+    flags = msg:get_flags(),
+    base = msg.base,
+    top =  msg.top,
+    vmstate = msg:get_vmstate(),
+  }
+  stack.slots = self:read_array("TValue", msg:get_slots(), msg.slotcount)
+  setmetatable(stack, stacksnapshot_mt)
+  self.laststack = stack
+  self:log_msg("stacksnapshot", "StackSnapshot: slots = %d, base = %d",  msg.slotcount, msg.base)
+  return stack
 end
 
 local logreader = {}

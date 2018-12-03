@@ -13,6 +13,7 @@
 #include "luajit.h"
 #include "lauxlib.h"
 #include "lj_target.h"
+#include "lj_frame.h"
 
 #include "lj_jitlog_def.h"
 #include "lj_jitlog_writers.h"
@@ -244,6 +245,121 @@ static void memorize_func(jitlog_State *context, GCfunc *fn)
   context->events_written |= JITLOGEVENT_GCOBJ;
 }
 
+#define fixedfr_listsz (32 >> LJ_FR2)
+
+typedef struct FrameEntry {
+#if LJ_FR2
+  TValue func;
+  TValue pc;
+#else
+  TValue frame;
+#endif
+} FrameEntry;
+
+static FrameEntry *getframes_slow(jitlog_State *context, lua_State *L, int *framecount)
+{
+  TValue *frame = L->base-1;
+  MSize count = 0, capacity = fixedfr_listsz*2;;
+  FrameEntry *frames = lj_mem_newvec(L, fixedfr_listsz*2, FrameEntry);
+
+  for (; frame > (mref(L->stack, TValue)+LJ_FR2);) {
+    int index = capacity - (count+1);
+#if LJ_FR2
+    frames[index].pc = *frame;
+    frames[index].func = frame[-1];
+#else
+    frames[index].frame = *frame;
+#endif
+    if (++count == capacity) {
+      lj_mem_growvec(L, frames, capacity, LJ_MAX_ASIZE, FrameEntry);
+      memcpy(frames+capacity - count, frames, count * sizeof(FrameEntry));
+    }
+    frame = frame_prev(frame);
+  }
+  *framecount = (int)count;
+  return frames;
+}
+
+static int scan_stackfuncs(jitlog_State *context, lua_State *L, FrameEntry *frames)
+{
+  TValue *frame = L->base-1;
+  int count = 0, capacity = fixedfr_listsz;
+
+  for (; frame > (mref(L->stack, TValue)+LJ_FR2); count++) {
+    GCfunc *fn = (GCfunc *)frame_gc(frame);
+    memorize_func(context, fn);
+    if (frames && count < capacity) {
+      int index = capacity - (count+1);
+#if LJ_FR2
+      frames[index].pc = *frame;
+      frames[index].func = frame[-1];
+#else
+      frames[index].frame = *frame;
+#endif
+    }
+    frame = frame_prev(frame);
+  }
+  return count;
+}
+
+void write_rawstack(jitlog_State *context, lua_State *L, int maxslots)
+{
+  int vmstate = G(L)->vmstate < 0 ? ~G(L)->vmstate : LJ_VMST__MAX;
+  log_stacksnapshot(&context->ub, vmstate, 0, 0, -1, -1, (uint64_t *)mref(L->stack, TValue),
+                    maxslots != -1 ? maxslots : L->stacksize);
+  context->events_written |= JITLOGEVENT_STACK;
+}
+
+static void write_stacksnapshot(jitlog_State *context, lua_State *L, int framesonly)
+{
+  int base = (int)(L->base - mref(L->stack, TValue));
+  int top = base+LJ_STACK_EXTRA, size = top;
+  int vmstate = G(L)->vmstate < 0 ? ~G(L)->vmstate : LJ_VMST__MAX;
+  int freeframes = 0;
+  TValue *stack = mref(L->stack, TValue);
+  FrameEntry frames[32];
+  lua_assert(L->base > mref(L->stack, TValue) && base < (int)L->stacksize);
+
+  /* Try to guess the max slot extent of the current frame */
+  if (G(L)->vmstate == ~LJ_VMST_C) {
+    /* L->top should always be set if the VM state is set to C function */
+    lua_assert(L->top > stack && L->top < (stack + L->stacksize));
+    top = (int)(L->top - stack);
+    size = top + LJ_STACK_EXTRA;
+  } else if (frame_islua(L->base-1) || frame_isvarg(L->base-1)) {
+    GCfunc *fn = (GCfunc *)frame_gc(L->base-1);
+    lua_assert(isluafunc(fn));
+    top = base + funcproto(fn)->framesize;
+    size = top + LJ_STACK_EXTRA;
+  } else {
+    top = base + LJ_STACK_EXTRA;
+    size = top;
+  }
+  if (top > size) {
+    top = L->stacksize;
+  }
+  /* TODO: optional memorization */
+  if (framesonly || 1) {
+    int count = scan_stackfuncs(context, L, framesonly ? frames : NULL);
+    /* Number of call frames is larger than our fixed buffer */
+    if (count > fixedfr_listsz) {
+      stack = (TValue *)getframes_slow(context, L, &count);
+      freeframes = 1;
+    }
+    if (framesonly) {
+      stack = (TValue *)(frames + fixedfr_listsz - count);
+      size = count << LJ_FR2;
+      base = size;
+      top = size;
+    }
+  }
+  log_stacksnapshot(&context->ub, vmstate, framesonly, 0, base, top, (uint64_t *)stack, size);
+  context->events_written |= JITLOGEVENT_STACK;
+
+  if (freeframes) {
+    lj_mem_freevec(context->g, stack, size, FrameEntry);
+  }
+}
 #if LJ_HASJIT
 
 static GCproto* getcurlualoc(jitlog_State *context, uint32_t *pc)
@@ -852,6 +968,14 @@ LUA_API void jitlog_writemarker(JITLogUserContext *usrcontext, const char *label
   context->events_written |= JITLOGEVENT_MARKER;
 }
 
+LUA_API void jitlog_writestack(JITLogUserContext *usrcontext, lua_State *L)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+  int framesonly = (L->base+1) <= L->top ? tvistruecond(L->base) : 0;
+  write_stacksnapshot(context, L, framesonly);
+  context->events_written |= JITLOGEVENT_STACK;
+}
+
 LUA_API void jitlog_setresetpoint(JITLogUserContext *usrcontext)
 {
   jitlog_State *context = usr2ctx(usrcontext);
@@ -1066,6 +1190,14 @@ static int jlib_reset_tosavepoint(lua_State *L)
   return 1;
 }
 
+
+static int jlib_write_stacksnapshot(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  jitlog_writestack(ctx2usr(context), L);
+  return 0;
+}
+
 static const luaL_Reg jitlog_lib[] = {
   {"start", jlib_start},
   {"shutdown", jlib_shutdown},
@@ -1080,6 +1212,7 @@ static const luaL_Reg jitlog_lib[] = {
   {"getmode", jlib_getmode},
   {"addmarker", jlib_addmarker},
   {"labelobj", jlib_labelobj},
+  {"write_stacksnapshot", jlib_write_stacksnapshot},
   {NULL, NULL},
 };
 
