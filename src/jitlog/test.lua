@@ -175,8 +175,8 @@ local testmixins = {
   readerlib.mixins.msgstats,
 }
 
-local function parselog(log, verbose)
-  local result = readerlib.makereader(testmixins)
+local function parselog(log, verbose, mixins)
+  local result = readerlib.makereader(mixins or testmixins)
   if verbose then
     result.verbose = true
   end
@@ -763,6 +763,63 @@ it("jitlog reset point", function()
   local result = parselog(log)
   assert(result.gccount == 0)
   assert(result.gcstatecount == 0)
+end)
+
+local stack_mixin = {
+  {
+    init = function(self)
+      self.stacksnaps = {}
+    end,
+    actions = {
+      stacksnapshot = function(self, msg, stack)
+        table.insert(self.stacksnaps, stack)
+      end
+    }
+  }
+}
+
+it("stack snapshot", function()
+  jitlog.start()
+  jitlog.write_stacksnapshot()
+  local function f1(...)
+    jitlog.write_stacksnapshot()
+  end
+  local function f2(...)
+    -- Only capture the slots in the stack containing call frames
+    jitlog.write_stacksnapshot(true)
+  end
+  f1(1, 2, 3, true, false, nil, "test")
+  f2(1, 2, 3, true, false, nil, "test")
+  local result = parselog(jitlog.savetostring(), false, stack_mixin)
+  local framesz = GC64 and 2 or 1
+ -- result.stacksnaps[3]:printframes(GC64)
+  local frames = result.stacksnaps[2]:get_framelist(GC64)
+  assert(#frames == 8, #frames)
+  assert((result.stacksnaps[2].slots.length - #frames*framesz) > 14)
+  -- First frame should be a call to a Lua C function
+  assert(frames[1].kind == "LUA", frames[1].kind)
+  assert(frames[1].func.cfunc)
+  assert(frames[2].kind == "VARG")
+  assert(frames[2].slot == frames[1].slot-framesz)
+  assert(frames[2].func.proto)
+  assert(frames[3].kind == "LUA")
+  assert(frames[3].func.proto)
+  assert(frames[3].func == frames[2].func)
+  assert(frames[4].kind == "PCALL")
+
+  -- Check call frames only stack snapshot works
+  frames = result.stacksnaps[3]:get_framelist(GC64)
+  assert(result.stacksnaps[3].slots.length == #frames*framesz,  #frames)
+  assert(frames[1].kind == "LUA", frames[1].kind)
+  assert(frames[1].func.cfunc)
+  assert(frames[2].kind == "VARG")
+  assert(frames[2].slot == frames[1].slot-framesz)
+  assert(frames[2].func.proto)
+  assert(frames[3].kind == "LUA")
+  assert(frames[3].func.proto)
+  assert(frames[3].func == frames[2].func)
+  assert(frames[4].kind == "PCALL")
+
 end)
 
 local failed = false
