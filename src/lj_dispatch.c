@@ -611,8 +611,6 @@ void LJ_FASTCALL lj_dispatch_profile(lua_State *L, const BCIns *pc)
   \
   \
   /* Table ops. */ \
-  _(GGET) \
-  _(GSET) \
   _(TGETV) \
   _(TGETS) \
   _(TGETB) \
@@ -835,14 +833,39 @@ static LJ_AINLINE void lji_BC_GGET(INTERP_ARGDEF)
 {
   ins_AND;  /*RA = dst, RD = str const (~) */
   GCfunc *fn = lji_curr_func();
-  TValue *slot = lj_tab_getstr(tabref(fn->l.env), strref(kbase[D]));
+  GCtab *env = tabref(fn->l.env);
+  TValue *slot = lj_tab_getstr(env, strref(kbase[D]));
   if (slot && tvisnil(slot)) {
     copyTV(L, slot, base + A);
     return;
-  } else if(tabref(tabref(fn->l.env)->metatable)) {
-    L->base = base;
+  } else if(tabref(env->metatable)) {
+    TValue tab;
+    settabV(L, &tab, env);
     setstrV(L, &G(L)->tmptv, strref(kbase[D]));
-    slot = lj_meta_tget(L, tabref(fn->l.env), &G(L)->tmptv, );
+    L->base = base;
+    slot = lj_meta_tget(L, &tab, &G(L)->tmptv);
+  }
+  setnilV(base + A);
+}
+
+static LJ_AINLINE void lji_BC_GSET(INTERP_ARGDEF)
+{
+  ins_AND;  /* RA = src, RD = str const (~) */
+  GCtab *env = tabref(lji_curr_func()->l.env);
+  TValue *slot;
+  env->nomm = 0;
+  slot = lj_tab_setstr(L, env, strref(kbase[D]));
+
+  if (slot && tvisnil(slot)) {
+    copyTV(L, slot, base + A);
+    return;
+  } else if (tabref(env->metatable)) {
+    TValue tvtab;
+    settabV(L, &tvtab, env);
+    setstrV(L, &G(L)->tmptv, strref(kbase[D]));
+    L->base = base;
+    slot = lj_meta_tset(L, &tvtab, &G(L)->tmptv);
+    copyTV(L, slot, base + A);
   }
   setnilV(base + A);
 }
@@ -976,9 +999,13 @@ static TValue *doreturn(INTERP_ARGDEF, int want)
   int frametype = frame_type(base - 1);
   int callbase = 0, results = 0;
 
+  /* The BC_FUNCV var arg function header bytecode creates a dummy FRAME_VARG frame */
   if (frame_typep(base - 1) == FRAME_VARG) {
     int delta = frame_delta(base - 1);
     base = base - delta;
+    /* Adjust the slot index where our results need to be copied from
+    ** now that our stack base is shifted down.
+    */
     results += delta;
     frametype = frame_type(base - 1);
   }
@@ -987,6 +1014,10 @@ static TValue *doreturn(INTERP_ARGDEF, int want)
     pc = (BCIns *)(frame_ftsz(base - 1) & ~FRAME_TYPEP);
     callbase = bc_a(pc[0]);
   } else if(frametype == FRAME_C) {
+    /* 
+    ** We were called from C through the lua_call api or invoked as metamethod  
+    ** so remove the dummy frame added by it.
+    */
     results += 1+LJ_FR2;
     base -= 1+LJ_FR2;
   }
@@ -1044,7 +1075,7 @@ int lua_call_callfunc(lua_State *L, int nargs, int nresults, void** dispatch) {
         pc += D-BCBIAS_J;
         if (gcref(L->openupval)) {
           L->base = base;
-          lj_func_closeuv(L, A);
+          lj_func_closeuv(L, base + A);
           base = L->base;
         }
       LJI_BC_ENDNODISP
@@ -1066,6 +1097,8 @@ int lua_call_callfunc(lua_State *L, int nargs, int nresults, void** dispatch) {
       BCDEF_CALLFUNC(BC_FNEW)
       BCDEF_CALLFUNC(BC_TNEW)
       BCDEF_CALLFUNC(BC_TDUP)
+      BCDEF_CALLFUNC(BC_GGET)
+      BCDEF_CALLFUNC(BC_GSET)
 
       LJI_BC_START(BC_FUNCV)
         GCproto *pt = (GCproto *)(((char *)(pc - 1)) - sizeof(GCproto));
