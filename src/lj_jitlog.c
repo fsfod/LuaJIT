@@ -1161,6 +1161,11 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
       break;
   }
 
+  JITLogUserContext *usr = ctx2usr(context);
+  if (usr->nextcb) {
+    usr->nextcb(usr->nextcb_data, L, eventid, eventdata);
+  }
+
   /* Only free our context after we've done callbacks */
   if (event == VMEVENT_STATE_CLOSING) {
     free_context(context);
@@ -1503,6 +1508,14 @@ static jitlog_State *jitlog_start_safe(lua_State *L, UserBuf *ub)
   }
 
   write_header(context);
+
+  /* If there is an existing VMEvent hook set save its function away so we can forward events to it */
+  void *usrdata;
+  luaJIT_vmevent_callback callback = luaJIT_vmevent_gethook(L, &usrdata);
+  if (callback && callback != jitlog_callback) {
+    ctx2usr(context)->nextcb = callback;
+    ctx2usr(context)->nextcb_data = usrdata;
+  }
 
   luaJIT_vmevent_sethook(L, jitlog_callback, context);
   update_gcevents(context, 0);

@@ -54,6 +54,9 @@ typedef struct JITLogUserContext {
   luaJIT_vmevent_callback gcevent;
   void *gcevent_ud;
   JITLogFilter logfilter;
+  /* Next vmevent handler to call in our VM Event handler */
+  luaJIT_vmevent_callback nextcb;
+  void *nextcb_data;
 } JITLogUserContext;
 
 typedef enum JITLogMode {
