@@ -360,6 +360,38 @@ static void write_stacksnapshot(jitlog_State *context, lua_State *L, int frameso
     lj_mem_freevec(context->g, stack, size, FrameEntry);
   }
 }
+
+typedef enum MemorizeFilter {
+  MEMORIZE_PROTOS   = 1,
+  MEMORIZE_FASTFUNC = 2,
+  MEMORIZE_FUNC_LUA = 4,
+  MEMORIZE_FUNC_C   = 8,
+  MEMORIZE_ALL      = 0xff,
+} MemorizeFilter;
+
+void memorize_existing(jitlog_State *context, MemorizeFilter filter)
+{
+  GCobj *o = gcref(context->g->gc.root);
+
+  while (o != NULL) {
+    int gct = o->gch.gct;
+    if (gct == ~LJ_TPROTO) {
+      if (filter & MEMORIZE_PROTOS) {
+        memorize_proto(context, (GCproto *)o);
+      }
+    } else if (gct == ~LJ_TFUNC) {
+      GCfunc *fn = (GCfunc *)o;
+      if (fn->c.ffid > FF_C && (filter & MEMORIZE_FASTFUNC)) {
+        memorize_func(context, fn);
+      } else if(isluafunc(fn) && (filter & MEMORIZE_FUNC_LUA)) {
+        memorize_func(context, fn);
+      }
+    }
+
+    o = gcref(o->gch.nextgc);
+  }
+}
+
 #if LJ_HASJIT
 
 static GCproto* getcurlualoc(jitlog_State *context, uint32_t *pc)
@@ -429,13 +461,23 @@ static void write_exitstubs(jitlog_State *context, GCtrace *T)
 static void jitlog_writetrace(jitlog_State *context, GCtrace *T, int abort)
 {
   jit_State *J = G2J(context->g);
-  GCproto *startpt = &gcref(T->startpt)->pt;
+  GCproto *startpt = &gcref(T->startpt)->pt, *stoppt;
   BCPos startpc = proto_bcpos(startpt, mref(T->startpc, const BCIns));
   BCPos stoppc;
-  GCproto *stoppt = getcurlualoc(context, &stoppc);
+
   memorize_proto(context, startpt);
-  memorize_proto(context, stoppt);
-  memorize_func(context, context->lastfunc);
+  lua_assert(context->startfunc != NULL || (context->lastfunc == NULL && context->startfunc == NULL));
+  /* Check if we saw this trace being recorded otherwise we will be lacking some info */
+  if (context->startfunc) {
+    stoppt = getcurlualoc(context, &stoppc);
+    memorize_proto(context, stoppt);
+  } else {
+    stoppt = NULL;
+    stoppc = 0;
+  }
+  if (context->lastfunc) {
+    memorize_func(context, context->lastfunc);
+  }
 
   if (!abort) {
     write_exitstubs(context, T);
@@ -475,6 +517,23 @@ static void jitlog_traceabort(jitlog_State *context, GCtrace *T)
   }
   jitlog_writetrace(context, T, 1);
   context->events_written |= JITLOGEVENT_TRACE_ABORT;
+}
+
+static void write_existingtraces(jitlog_State *context)
+{
+  jit_State *J = G2J(context->g);
+  MSize i = 1;
+
+  context->lastfunc = NULL;
+  context->traced_funcs_count = 0;
+  context->traced_bc_count = 0;
+
+  for (; i < J->sizetrace; i++) {
+    GCtrace *t = traceref(J, i);
+    if (t) {
+      jitlog_writetrace(context, t, 0);
+    }
+  }
 }
 
 static void jitlog_tracebc(jitlog_State *context)
@@ -891,15 +950,20 @@ LUA_API void jitlog_close(JITLogUserContext *usrcontext)
   jitlog_shutdown(context);
 }
 
-LUA_API void jitlog_reset(JITLogUserContext *usrcontext)
+static void reset_memoization(jitlog_State *context)
 {
-  jitlog_State *context = usr2ctx(usrcontext);
   context->strcount = 0;
   context->protocount = 0;
   context->funccount = 0;
   lj_tab_clear(context->strings);
   lj_tab_clear(context->protos);
   lj_tab_clear(context->funcs);
+}
+
+LUA_API void jitlog_reset(JITLogUserContext *usrcontext)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+  reset_memoization(context);
   ubuf_reset(&context->ub);
 
   context->events_written = 0;
@@ -1052,6 +1116,13 @@ static int jlib_reset(lua_State *L)
   return 0;
 }
 
+static int jlib_reset_memorization(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  reset_memoization(context);
+  return 0;
+}
+
 static int jlib_setlogsink(lua_State *L)
 {
   jitlog_State *context = jlib_getstate(L);
@@ -1198,10 +1269,19 @@ static int jlib_write_stacksnapshot(lua_State *L)
   return 0;
 }
 
+static int jlib_memorize_existing(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  memorize_existing(context, MEMORIZE_PROTOS | MEMORIZE_FASTFUNC);
+  write_existingtraces(context);
+  return 0;
+}
+
 static const luaL_Reg jitlog_lib[] = {
   {"start", jlib_start},
   {"shutdown", jlib_shutdown},
   {"reset", jlib_reset},
+  {"reset_memorization", jlib_reset_memorization},
   {"setresetpoint", jlib_setresetpoint},
   {"reset_tosavepoint", jlib_reset_tosavepoint},
   {"save", jlib_save},
@@ -1213,6 +1293,7 @@ static const luaL_Reg jitlog_lib[] = {
   {"addmarker", jlib_addmarker},
   {"labelobj", jlib_labelobj},
   {"write_stacksnapshot", jlib_write_stacksnapshot},
+  {"memorize_existing", jlib_memorize_existing},
   {NULL, NULL},
 };
 
