@@ -186,3 +186,22 @@ UTEST_F(JITLog, setmode) {
   ASSERT_NE(jitlog_getmode(JL, JITLogMode_AutoFlush), 0);
 }
 
+UTEST_F(JITLog, memorize_objs) {
+  int64_t start = (int64_t)jitlog_getsize(JL);
+  
+  ASSERT_NE(jitlog_memorize_objs(JL, MEMORIZE_FASTFUNC), 0);
+  ASSERT_EQ(jitlog_last_msgoffset(JL, MSGTYPE_obj_proto, 0), -1);
+  ASSERT_GT(jitlog_last_msgoffset(JL, MSGTYPE_obj_func, 0), start);
+  
+  start = jitlog_getsize(JL);
+  ASSERT_EQ(jitlog_memorize_objs(JL, MEMORIZE_PROTOS), 1);
+  ASSERT_GT(jitlog_last_msgoffset(JL, MSGTYPE_obj_proto, 0), start);
+
+  start = jitlog_getsize(JL);
+  ASSERT_EQ(jitlog_memorize_objs(JL, MEMORIZE_FUNC_LUA), 1);
+  ASSERT_GT(jitlog_last_msgoffset(JL, MSGTYPE_obj_func, 0), start);
+
+  start = jitlog_getsize(JL);
+  ASSERT_EQ(jitlog_memorize_objs(JL, MEMORIZE_FUNC_C), 1);
+  ASSERT_GT(jitlog_last_msgoffset(JL, MSGTYPE_obj_func, 0), start);
+}

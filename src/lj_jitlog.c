@@ -554,6 +554,59 @@ static luastack_Args capture_stack(jitlog_State *context, lua_State *L, StackCap
   };
   return args;
 }
+
+static void write_existingtraces(jitlog_State *context);
+
+static void memorize_existing(jitlog_State *context, MemorizeFilter filter)
+{
+  GCobj *o = gcref(context->g->gc.root);
+  /* Can't memorize if our Lua tables aren't created yet */
+  lj_assertG_(context->g, context->loadstate == LoadState_Running || (context->mode & JITLogMode_DisableMemorization), "Can't memorize objects before the JITLog is fully started");
+
+  if (filter & MEMORIZE_TRACES) {
+    write_existingtraces(context);
+    if (filter == MEMORIZE_TRACES) {
+      /* Don't waste time walking the object linked list if we don't need any other object types */
+      return;
+    }
+  }
+
+  if (filter & MEMORIZE_STRINGS) {
+    global_State *g = context->g;
+    GCobj *o;
+
+    for (MSize i = 0; i <= g->str.mask; i++) {
+      /* walk all the string hash chains. */
+      o = gcref(g->str.tab[i]);
+
+      while (o != NULL) {
+        memorize_string(context, gco2str(o));
+        o = gcref(o->gch.nextgc);
+      }
+    }
+  }
+
+  for (; o != NULL; o = gcref(o->gch.nextgc)) {
+    int gct = o->gch.gct;
+    /* Don't memorize dead objects unless we want to resurrect them */
+    if (isdead(context->g, o)) {
+      continue;
+    }
+    if (gct == ~LJ_TPROTO) {
+      if (filter & MEMORIZE_PROTOS) {
+        memorize_proto(context, (GCproto *)o);
+      }
+    } else if (gct == ~LJ_TFUNC) {
+      GCfunc *fn = (GCfunc *)o;
+      if ((fn->c.ffid > FF_C && (filter & MEMORIZE_FASTFUNC)) || 
+          (fn->c.ffid == FF_C && (filter & MEMORIZE_FUNC_C)) ||
+          (isluafunc(fn) && (filter & MEMORIZE_FUNC_LUA))) {
+        memorize_func(context, fn);
+      }
+    }
+  }
+}
+
 #if LJ_HASJIT
 
 static int isstitched(jitlog_State *context, GCtrace *T)
@@ -639,18 +692,29 @@ static void write_exitstubs(jitlog_State *context, GCtrace *T)
 typedef enum TraceWriteKind {
   TraceWriteKind_Stop,
   TraceWriteKind_Abort,
+  TraceWriteKind_Existing,
 } TraceWriteKind;
 
 static void jitlog_writetrace(jitlog_State *context, GCtrace *T, TraceWriteKind kind)
 {
   jit_State *J = G2J(context->g);
-  GCproto *startpt = &gcref(T->startpt)->pt;
+  GCproto *startpt = &gcref(T->startpt)->pt, *stoppt;
   BCPos startpc = proto_bcpos(startpt, mref(T->startpc, const BCIns));
   BCPos stoppc;
-  GCproto *stoppt = getcurlualoc(context, &stoppc);
+
   memorize_proto(context, startpt);
-  memorize_proto(context, stoppt);
-  memorize_func(context, context->lastfunc);
+  lua_assert(context->startfunc != NULL || (context->lastfunc == NULL && context->startfunc == NULL));
+  /* Check if we saw this trace being recorded otherwise we will be lacking some info */
+  if (context->startfunc) {
+    stoppt = getcurlualoc(context, &stoppc);
+    memorize_proto(context, stoppt);
+  } else {
+    stoppt = NULL;
+    stoppc = 0;
+  }
+  if (context->lastfunc) {
+    memorize_func(context, context->lastfunc);
+  }
 
   if (kind != TraceWriteKind_Abort) {
     write_exitstubs(context, T);
@@ -737,6 +801,23 @@ static void jitlog_traceabort(jitlog_State *context, GCtrace *T)
   }
   jitlog_writetrace(context, T, TraceWriteKind_Abort);
   context->events_written |= JITLOGEVENT_TRACE_ABORT;
+}
+
+static void write_existingtraces(jitlog_State *context)
+{
+  jit_State *J = G2J(context->g);
+  MSize i = 1;
+
+  context->lastfunc = NULL;
+  context->traced_funcs_count = 0;
+  context->traced_bc_count = 0;
+
+  for (; i < J->sizetrace; i++) {
+    GCtrace *t = traceref(J, i);
+    if (t) {
+      jitlog_writetrace(context, t, TraceWriteKind_Existing, NULL);
+    }
+  }
 }
 
 static void jitlog_tracebc(jitlog_State *context)
@@ -1514,15 +1595,20 @@ LUA_API void jitlog_close(JITLogUserContext *usrcontext)
   jitlog_shutdown(context);
 }
 
-LUA_API void jitlog_reset(JITLogUserContext *usrcontext)
+static void reset_memoization(jitlog_State *context)
 {
-  jitlog_State *context = usr2ctx(usrcontext);
   context->strcount = 0;
   context->protocount = 0;
   context->funccount = 0;
   lj_tab_clear(context->strings);
   lj_tab_clear(context->protos);
   lj_tab_clear(context->funcs);
+}
+
+LUA_API void jitlog_reset(JITLogUserContext *usrcontext)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+  reset_memoization(context);
   ubuf_reset(&context->ub);
 
   context->events_written = 0;
@@ -1773,6 +1859,17 @@ LUA_API int jitlog_getmode(JITLogUserContext* usrcontext, JITLogMode mode)
   return context->mode & mode;
 }
 
+LUA_API int jitlog_memorize_objs(JITLogUserContext *usrcontext, MemorizeFilter filter)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+  if (context->loadstate <= LoadState_SafeStart && !(context->mode & JITLogMode_DisableMemorization)) {
+    /* Memorization tables have to be allocated first */
+    return 0;
+  }
+  memorize_existing(context, filter);
+  return 1;
+}
+
 /* -- Lua module to control the JITLog ------------------------------------ */
 
 static jitlog_State* jlib_getstate(lua_State *L)
@@ -1805,6 +1902,13 @@ static int jlib_reset(lua_State *L)
 {
   jitlog_State *context = jlib_getstate(L);
   jitlog_reset(ctx2usr(context));
+  return 0;
+}
+
+static int jlib_reset_memorization(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  reset_memoization(context);
   return 0;
 }
 
@@ -1969,10 +2073,63 @@ static int jlib_reset_tosavepoint(lua_State *L)
 }
 
 
+typedef struct EnumOption {
+  const char *label;
+  int value;
+} EnumOption;
+
+static int lj_lib_checkenum(lua_State* L, int arg, const EnumOption* options, int numoptions)
+{
+  GCstr* s = lj_lib_checkstr(L, arg);
+
+  for (size_t j = 0; j < numoptions; j++) {
+    if (strcmp(strdata(s), options[j].label) == 0) {
+      return options[j].value;
+    }
+  }
+  luaL_error(L, "Unknown option '%s'", strdata(s));
+  return 0;
+}
+
+static const EnumOption memorize_options[] = {
+  {"all",    MEMORIZE_ALL},
+  {"proto",  MEMORIZE_PROTOS},
+  {"ffunc",  MEMORIZE_FASTFUNC},
+  {"Lfunc",  MEMORIZE_FUNC_LUA},
+  {"Cfunc",  MEMORIZE_FUNC_C},
+  {"traces", MEMORIZE_TRACES},
+};
+
+static int jlib_memorize_existing(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  GCstr *s;
+  uint32_t mode = 0;
+  for (int i = 1; (s = lj_lib_optstr(L, i)); i++) {
+    uint32_t bit = 0;
+    for (size_t j = 0; j < (sizeof(memorize_options)/sizeof(EnumOption)); j++) {
+      if (strcmp(strdata(s), memorize_options[j].label) == 0) {
+        bit = memorize_options[j].value;
+        break;
+      }
+    }
+    if (bit == 0) {
+      luaL_argerror(L, i, "Bad memorize object type");
+    }
+    mode |= bit;
+  }
+  if (mode == 0) {
+    mode = MEMORIZE_PROTOS | MEMORIZE_FASTFUNC | MEMORIZE_TRACES;
+  }
+  memorize_existing(context, mode);
+  return 0;
+}
+
 static const luaL_Reg jitlog_lib[] = {
   {"start", jlib_start},
   {"shutdown", jlib_shutdown},
   {"reset", jlib_reset},
+  {"reset_memorization", jlib_reset_memorization},
   {"setresetpoint", jlib_setresetpoint},
   {"reset_tosavepoint", jlib_reset_tosavepoint},
   {"save", jlib_save},
@@ -1984,7 +2141,7 @@ static const luaL_Reg jitlog_lib[] = {
   {"getmode", jlib_getmode},
   {"labelobj", jlib_labelobj},
   {"labelproto", jlib_labelproto},
-  {"write_stacksnapshot", jlib_write_stacksnapshot},
+  {"memorize_existing", jlib_memorize_existing},
   {NULL, NULL},
 };
 
