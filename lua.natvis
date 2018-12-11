@@ -487,6 +487,47 @@
 
   <Expand>
     <Item Name="CType State">(CTState*)ctype_state.ptr32</Item>
+    <Item Name="GC State">gc</Item>
+  </Expand>
+</Type>
+
+<Type Name="GCState">
+  <DisplayString Condition="state == 0">GCState: Pause</DisplayString>
+  <DisplayString Condition="state == 1">GCState: Propagate</DisplayString>
+  <DisplayString Condition="state == 2">GCState: Atomic</DisplayString>
+  <DisplayString Condition="state == 3">GCState: Sweep Strings</DisplayString>
+  <DisplayString Condition="state == 4">GCState: Sweep</DisplayString>
+  <DisplayString Condition="state == 5">GCState: Finalize</DisplayString>
+  <Expand>
+	<Item Name="Total Memory">total,i</Item>
+	<Item Name="GC Threshold">threshold,i</Item>
+	<Item Name="Heap Size Pause">pause,i</Item>
+	<Item Name="Step Rate Multiplier">stepmul,i</Item>
+	<Item Name="GC Rate Debt">debt,i</Item>
+  
+    <Synthetic Name="GC Objects1">
+      <Expand>
+        <CustomListItems>
+          <Variable Name="orig_head" InitialValue="((GCobj*)root.gcptr32)"/>
+          <Variable Name="iter" InitialValue="((GCobj*)root.gcptr32)"/>
+          <Loop>
+            <Break Condition="iter == 0"/>
+            <Item>*iter</Item>
+            <Exec>iter = (GCobj*)(iter-&gt;gch.nextgc.gcptr32)</Exec>
+          </Loop>
+        </CustomListItems>
+      </Expand>
+    </Synthetic>
+    
+    <Synthetic Name="GC Objects2">
+      <Expand>        
+        <LinkedListItems>
+          <HeadPointer>((GCobj*)root.gcptr32)</HeadPointer>
+          <NextPointer>(GCobj*)gch.nextgc.gcptr32</NextPointer>
+          <ValueNode>this</ValueNode>
+        </LinkedListItems>
+      </Expand>
+    </Synthetic>
   </Expand>
 </Type>
 
