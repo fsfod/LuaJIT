@@ -59,6 +59,8 @@ typedef enum JITLogMode {
   JITLogMode_DisableMemorization = 0x1,
   /* Flush all traces when shutting down the jitlog */
   JITLogMode_FlushOnShutdown     = 0x2,
+  /* Automatically flush the userbuffer after a VM event if it generated any new messages. */
+  JITLogMode_AutoFlush = 0x4,
 } JITLogMode;
 
 LUA_API JITLogUserContext* jitlog_start(lua_State *L);
