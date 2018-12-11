@@ -9,6 +9,7 @@ typedef enum UBufAction {
   UBUF_INIT,
   UBUF_FLUSH,
   UBUF_GROW_OR_FLUSH,
+  UBUF_MSG_COMPLETE,
   UBUF_RESET,
   UBUF_GET_OFFSET,
   UBUF_TRY_SET_OFFSET,
@@ -138,6 +139,14 @@ static LJ_INLINE int ubuf_flush(UserBuf *ub)
 {
   lua_assert(ubufB(ub));
   return ub->bufhandler(ub, UBUF_FLUSH, NULL);
+}
+
+static inline int ubuf_msgcomplete(UserBuf *ub)
+{
+  if (!ub->bufhandler) {
+    return 1;
+  }
+  return ub->bufhandler(ub, UBUF_MSG_COMPLETE, NULL);
 }
 
 static LJ_INLINE int ubuf_free(UserBuf *ub)
