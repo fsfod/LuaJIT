@@ -66,6 +66,20 @@ LUA_API void jitlog_reset(JITLogUserContext *usrcontext);
 LUA_API int jitlog_setmode(JITLogUserContext *usrcontext, JITLogMode mode, int enabled);
 LUA_API int jitlog_getmode(JITLogUserContext* usrcontext, JITLogMode mode);
 
+typedef enum MemorizeFilter {
+  MEMORIZE_PROTOS   = 0x1,  /* The Function prototypes of Lua Functions */
+  MEMORIZE_FASTFUNC = 0x2,  /* C Functions that are built-in library functions */
+  MEMORIZE_FUNC_LUA = 0x4,  /* Lua function closures */
+  MEMORIZE_FUNC_C   = 0x8,  /* C Functions */
+  MEMORIZE_TRACES   = 0x10, /* JIT'ed traces, will implicitly memorize starting and ending functions of the trace */
+  MEMORIZE_ALL      = 0xff,
+} MemorizeFilter;
+
+/* 
+** Write all currently allocated objects that match the filter passed in to the JITLog 
+*/
+LUA_API int jitlog_memorize_objs(JITLogUserContext *usrcontext, MemorizeFilter filter);
+
 /* 
 ** Save the current position in the jitlog as a reset point that we can 
 ** roll back to if no interesting events have happened since it

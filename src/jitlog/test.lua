@@ -822,6 +822,37 @@ it("stack snapshot", function()
 
 end)
 
+it("memorize existing objects", function()
+  jitlog.start()
+  local result = parselog(jitlog.savetostring(), false)
+  assert(#result.protos == 0)
+  assert(#result.functions == 0)
+
+  jitlog.reset_memorization()
+  jitlog.reset()
+  jitlog.memorize_existing()
+  local result = parselog(jitlog.savetostring(), false)
+  assert(#result.protos > 0)
+  assert(#result.functions > 0)
+  assert(#result.traces > 0)
+    
+  jitlog.reset_memorization()
+  jitlog.reset()
+  jitlog.memorize_existing("Cfunc")
+  local result = parselog(jitlog.savetostring(), false)
+  assert(#result.protos == 0)
+  assert(#result.functions > 0)
+  assert(#result.traces == 0)
+  
+  jitlog.reset_memorization()
+  jitlog.reset()
+  jitlog.memorize_existing("Cfunc", "proto")
+  local result = parselog(jitlog.savetostring(), false)
+  assert(#result.protos > 0)
+  assert(#result.functions > 0)
+  assert(#result.traces == 0)
+end)
+
 local failed = false
 
 pcall(jitlog.shutdown)
