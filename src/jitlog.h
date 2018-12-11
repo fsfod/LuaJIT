@@ -60,6 +60,8 @@ typedef enum JITLogMode {
   ** duplicate data to the jitlog.
   */
   JITLogMode_DisableMemorization = 0x02,
+  /* Automatically flush the userbuffer after a VM event if it generated any new messages. */
+  JITLogMode_AutoFlush = 0x4,
 } JITLogMode;
 
 LUA_API JITLogUserContext* jitlog_start(lua_State *L);

@@ -958,6 +958,7 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
 {
   VMEvent2 event = (VMEvent2)eventid;
   jitlog_State *context = contextptr;
+  void *bufpos = ubufP(&context->ub);
 
   if (context->loadstate == 1 && event != VMEVENT_DETACH && event != VMEVENT_STATE_CLOSING && event !=  VMEVENT_GC_STATECHANGE) {
     jitlog_loadstage2(L, context);
@@ -1022,6 +1023,14 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
     free_context(context);
     /* The UserBuf is now destroyed so return early instead of trying to call ubuf_msgcomplete */
     return;
+  }
+
+  /* Check if new messages were written to the buffer */
+  if (ubufP(&context->ub) != bufpos) {
+    ubuf_msgcomplete(&context->ub);
+    if (context->mode & JITLogMode_AutoFlush) {
+      ubuf_flush(&context->ub);
+    }
   }
 }
 
@@ -1587,6 +1596,7 @@ LUA_API int jitlog_setmode(JITLogUserContext *usrcontext, JITLogMode mode, int e
   switch (mode) {
     case JITLogMode_TraceExitRegs:
     case JITLogMode_DisableMemorization:
+    case JITLogMode_AutoFlush:
       break;
     default:
       /* Unknown mode return false */
@@ -1711,6 +1721,7 @@ typedef struct ModeEntry {
 static const ModeEntry jitlog_modes[] = {
   {"texit_regs", JITLogMode_TraceExitRegs},
   {"nomemo", JITLogMode_DisableMemorization},
+  {"autoflush", JITLogMode_AutoFlush},
 };
 
 static int jlib_setmode(lua_State *L)
