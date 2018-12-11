@@ -732,6 +732,10 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
     default:
       break;
   }
+  JITLogUserContext *usr = ctx2usr(context);
+  if (usr->nextcb) {
+    usr->nextcb(usr->nextcb_data, L, eventid, eventdata);
+  }
 }
 
 #if LJ_TARGET_X86ORX64
@@ -875,6 +879,14 @@ static jitlog_State *jitlog_start_safe(lua_State *L)
   /* Default to a memory buffer */
   ubuf_init_mem(&context->ub, 0);
   write_header(context);
+
+  /* If there is an existing VMEvent hook set save its function away so we can forward events to it */
+  void *usrdata;
+  luaJIT_vmevent_callback callback = luaJIT_vmevent_gethook(L, &usrdata);
+  if (callback && callback != jitlog_callback) {
+    ctx2usr(context)->nextcb = callback;
+    ctx2usr(context)->nextcb_data = usrdata;
+  }
 
   luaJIT_vmevent_sethook(L, jitlog_callback, context);
   return context;
