@@ -205,3 +205,40 @@ UTEST_F(JITLog, memorize_objs) {
   ASSERT_EQ(jitlog_memorize_objs(JL, MEMORIZE_FUNC_C), 1);
   ASSERT_GT(jitlog_last_msgoffset(JL, MSGTYPE_obj_func, 0), start);
 }
+
+UTEST_F(JITLog, setmode_autoflush) {
+  UserBuf ub;
+  const char* logname = "test.jlog";
+  ASSERT_GT(ubuf_init_file(&ub, logname), 0);
+  ASSERT_GT(jitlog_setsink(JL, &ub), 0);
+
+  ASSERT_EQ(jitlog_getmode(JL, JITLogMode_AutoFlush), 0);
+
+  uint64_t size = jitlog_getsize(JL);
+  /* Check auto flushing for implicit events */
+  lua_gc(L, LUA_GCCOLLECT, 0);
+
+  jitlog_writemarker(JL, "12345", 0);
+  /* Message will be buffered in the UsrBuf by default file size should be unchanged */
+  ASSERT_FILESIZE(logname, size);
+
+  ASSERT_EQ(jitlog_setmode(JL, JITLogMode_AutoFlush, 1), 1);
+  ASSERT_NE(jitlog_getmode(JL, JITLogMode_AutoFlush), 0);
+
+  /* Trigger some GC state events to be written */
+  lua_gc(L, LUA_GCCOLLECT, 0);
+  /* Check auto flushing for implicit events */
+  size = jitlog_getsize(JL);
+  ASSERT_FILESIZE(logname, size);
+
+  jitlog_writemarker(JL, "12345", 0);
+  size = jitlog_getsize(JL);
+  ASSERT_FILESIZE(logname, size);
+
+  ASSERT_EQ(jitlog_setmode(JL, JITLogMode_AutoFlush, 0), 1);
+
+  /* Check auto flushing is disabled */
+  jitlog_writemarker(JL, "123456", 0);
+  ASSERT_FILESIZE(logname, size);
+}
+

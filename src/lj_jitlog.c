@@ -1104,6 +1104,14 @@ static void jitlog_gcevent(void *contextptr, lua_State *L, int eventid, void *ev
       break;
   }
 
+  /* Check if new messages were written to the buffer */
+  if (ubufP(&context->ub) != bufpos) {
+    ubuf_msgcomplete(&context->ub);
+    if (usr->gcevent_autoflush & (1 << event)) {
+      ubuf_flush(&context->ub);
+    }
+  }
+
   if (usr->gcevent) {
     usr->gcevent(usr->gcevent_ud, L, eventid, eventdata);
   }
@@ -1113,6 +1121,7 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
 {
   VMEvent2 event = (VMEvent2)eventid;
   jitlog_State *context = contextptr;
+  void *bufpos = ubufP(&context->ub);
 
   if (context->loadstate == 1 && event != VMEVENT_DETACH && event != VMEVENT_STATE_CLOSING) {
     jitlog_loadstage2(L, context);
@@ -1171,6 +1180,14 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
     free_context(context);
     /* The UserBuf is now destroyed so return early instead of trying to call ubuf_msgcomplete */
     return;
+  }
+
+  /* Check if new messages were written to the buffer */
+  if (ubufP(&context->ub) != bufpos) {
+    ubuf_msgcomplete(&context->ub);
+    if (usr->vmevent_autoflush & (1ull << eventid)) {
+      ubuf_flush(&context->ub);
+    }
   }
 }
 
