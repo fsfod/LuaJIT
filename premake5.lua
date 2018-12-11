@@ -157,7 +157,7 @@ DebugDir = _OPTIONS["debugdir"] or DebugDir or "tests"
 DebugArgs = _OPTIONS["debugargs"] or DebugArgs or "../tests/runtests.lua"
 
 workspace "LuaJit"
-  configurations { "Debug", "Release" }
+  configurations { "Debug", "Release",  "DebugGC64", "ReleaseGC64"}
   platforms { "x86", "x64" }
   defines {"_CRT_SECURE_NO_DEPRECATE" }
   objdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}"
@@ -180,7 +180,15 @@ workspace "LuaJit"
     defines { 
       "LUAJIT_TARGET=LUAJIT_ARCH_X64" 
     }
-    --tags {"GC64"}  
+
+  filter "Debug"
+    tags {"Debug"}
+  filter "Release"
+    tags {"Release"} 
+  filter "DebugGC64"
+    tags {"GC64", "Debug"}
+  filter "ReleaseGC64"
+    tags {"GC64", "Release"}
 
   filter "system:windows"
     dynasmflags { "WIN" }
@@ -219,11 +227,11 @@ if not HOST_LUA then
       "src/host/minilua.c", 
     }
   
-    filter "Debug"
+    filter "tags:Debug"
       defines { "NDEBUG" }
       optimize "Speed"
   
-    filter "Release"
+    filter "tags:Release"
       defines { "NDEBUG" }
       optimize "Speed" 
 end   
@@ -275,10 +283,10 @@ end
       --'%{table.implode(cfg.dynasmflags, "-D ", "", " ")}'
       
       
-    filter  {"Debug"}
+    filter  {"tags:Debug"}
       optimize "Speed"
  
-    filter {"Release"}
+    filter {"tags:Release"}
       optimize "Speed"
  
   project "lua"
@@ -356,10 +364,10 @@ end
     filter { "system:windows", "Debug", "tags:FixedAddr" }
       linkoptions { "/FIXED", "/DEBUG", '/BASE:"0x00440000', "/DYNAMICBASE:NO" }
     
-    filter "Debug"
+    filter "tags:Debug"
       defines { "DEBUG", "LUA_USE_ASSERT" }
   
-    filter  "Release"
+    filter  "tags:Release"
       optimize "Speed" 
       defines { "NDEBUG"}
       
@@ -391,10 +399,10 @@ end
       "lua"
     } 
         
-    filter "Debug"
+    filter "tags:Debug"
       defines { "DEBUG", "LUA_USE_ASSERT" }
  
-    filter "Release"
+    filter "tags:Release"
       optimize "Speed"
       defines { "NDEBUG"}
 
