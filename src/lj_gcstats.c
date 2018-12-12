@@ -551,3 +551,194 @@ LUA_API void stop_gcstats_tracker(GCAllocationStats *tracker)
 }
 
 
+typedef struct{
+  MSize count;
+  MSize capacity;
+  GCRef* foundholders;
+}resultvec;
+
+void findusescb(ScanContext* context, GCobj* holdingobj, GCRef* field_holding_object)
+{
+  resultvec* result = (resultvec*)context->userstate;
+
+  setgcref(result->foundholders[result->count++], holdingobj);
+
+  if (result->count >= result->capacity) {
+    lj_mem_growvec(context->L, result->foundholders, result->capacity, LJ_MAX_MEM32, GCRef);
+  }
+}
+
+LUA_API int findobjuses(lua_State *L) 
+{
+  GCobj* o = gcref((L->top-1)->gcr);
+  GCobj* foundholders;
+  L->top--;
+
+  return gcobj_finduses(L, o, &foundholders);
+}
+
+int gcobj_finduses(lua_State* L, GCobj* obj, GCobj** foundholders)
+{
+  ScanContext context = { 0 };
+  context.L = L;
+  context.obj = obj;
+  context.callback = &findusescb;
+
+  resultvec result = { 0, 16, 0 };
+  context.userstate = &result;
+  
+  result.foundholders = lj_mem_newvec(L, result.capacity, GCRef);
+
+  gcobj_findusesinlist(gcref(G(L)->gc.root), &context);
+
+  return result.count;
+}
+
+void gcobj_findusesinlist(GCobj *liststart, ScanContext* search)
+{
+  GCobj *o = liststart;
+
+  //Check if an abort was requested by the callback
+  while (o != NULL && !search->abort) {
+    if (search->typefilter != 0 && (search->typefilter & (1<<o->gch.gct)) == 0) {
+      continue;
+    }
+
+    switch (o->gch.gct) {
+      case ~LJ_TCDATA:
+      case ~LJ_TSTR:
+      continue;
+
+      case ~LJ_TTAB: 
+        scan_table(gco2tab(o), search);
+        break;
+
+      case ~LJ_TUDATA: 
+        scan_userdata(gco2ud(o), search);
+        break;
+
+      case ~LJ_TFUNC: 
+        scan_func(gco2func(o), search);
+        break;
+
+      case ~LJ_TPROTO:
+        scan_proto(gco2pt(o), search);
+        break;
+
+      case ~LJ_TTHREAD:
+        scan_thread(gco2th(o), search);
+        break;
+
+      case ~LJ_TTRACE: {
+        scan_trace(gco2trace(o), search);
+        break;
+      }
+    }
+
+    o = gcref(o->gch.nextgc);
+  }
+}
+
+void scan_func(GCfunc *fn, ScanContext* search)
+{
+  GCobj* obj = search->obj;
+
+  if (gcref(fn->l.env) == obj) {
+    search->callback(search, (GCobj*)fn, &fn->l.env);
+  }
+
+  if (isluafunc(fn)) {
+    for (size_t i = 0; i < fn->l.nupvalues; i++) {
+      if (gcref(fn->l.uvptr[i]) == obj) {
+        search->callback(search, (GCobj*)fn, &fn->l.uvptr[i]);
+      }
+    }
+  } else {
+    for (size_t i = 0; i < fn->c.nupvalues; i++) {
+      if (tvisgcv(&fn->c.upvalue[i]) && gcref(fn->c.upvalue[i].gcr) == obj) {
+        search->callback(search, (GCobj*)fn, &fn->l.uvptr[i]);
+      }
+    }
+  }
+}
+
+void scan_proto(GCproto *pt, ScanContext* search)
+{
+  GCobj* obj = search->obj;
+  for (size_t i = -(ptrdiff_t)pt->sizekgc; i < 0; i++) {
+    if (proto_kgc(pt, i) == obj) {
+      search->callback(search, (GCobj*)pt, &mref((pt)->k, GCRef)[i]);
+    }
+  }
+}
+
+void scan_table(GCtab *t, ScanContext* search)
+{
+  GCobj* obj = search->obj;
+  TValue* array = tvref(t->array);
+  Node *node = noderef(t->node);
+
+  if (gcref(t->metatable) == obj) {
+    search->callback(search, (GCobj*)t, &t->metatable);
+  }
+
+  for (size_t i = 0; i < t->asize; i++) {
+    if (gcref(array[i].gcr) == obj && tvisgcv(&array[i])) {
+      search->callback(search, (GCobj*)t, &array[i].gcr);
+    }
+  }
+
+  for (uint32_t i = 0; i < t->hmask+1; i++) {
+    if (gcref(node[i].key.gcr) == obj && tvisgcv(&node[i].key)) {
+      search->callback(search, (GCobj*)t, &node[i].key.gcr);
+    }
+
+    if (gcref(node[i].val.gcr) == obj && tvisgcv(&node[i].val)) {
+      search->callback(search, (GCobj*)t, &node[i].val.gcr);
+    }
+  }
+}
+
+void scan_thread(lua_State *th, ScanContext* search)
+{
+  TValue *o, *top = th->top;
+  GCobj* obj = search->obj;
+
+  if (gcref(th->env) == obj) {
+    search->callback(search, (GCobj*)th, &th->env);
+  }
+
+  //this could be a yielded coroutine so the stack could keep hold of the object
+  for (o = tvref(th->stack) + 1 + LJ_FR2; o < top; o++) {
+    if (gcref(o->gcr) == obj && tvisgcv(o)) {
+      search->callback(search, (GCobj*)th, &o->gcr);
+    }
+  }
+}
+
+void scan_trace(GCtrace *T, ScanContext* search)
+{
+  IRRef ref;
+  //if (T->traceno == 0) return;
+  GCobj* obj = search->obj;
+
+  for (ref = T->nk; ref < REF_TRUE; ref++) {
+    IRIns *ir = &T->ir[ref];
+    if (ir->o == IR_KGC && ir_kgc(ir) == obj) {
+      search->callback(search, (GCobj*)T, &ir->gcr);
+    }
+  }
+}
+
+void scan_userdata(GCudata *ud, ScanContext* search)
+{
+  GCobj* obj = search->obj;
+
+  if (gcref(ud->metatable) == obj) {
+    search->callback(search, (GCobj*)ud, &ud->metatable);
+  }
+
+  if (gcref(ud->env) == obj) {
+    search->callback(search, (GCobj*)ud, &ud->env);
+  }
+}
