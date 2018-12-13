@@ -872,7 +872,10 @@ int LJ_FASTCALL lj_trace_exit(jit_State *J, void *exptr)
   pc = exd.pc;
   cf = cframe_raw(L->cframe);
   setcframe_pc(cf, pc);
-  if (LJ_HASPROFILE && (G(L)->hookmask & HOOK_PROFILE)) {
+  /* Check if traced exited because one of its object barriers used the last slot in the SSB buffer */
+  if (G(L)->gc.ssbsize == LJ_GC_SSB_CAPACITY) {
+    lj_gc_drain_ssb(G(L));
+  } else if (LJ_HASPROFILE && (G(L)->hookmask & HOOK_PROFILE)) {
     /* Just exit to interpreter. */
   } else if ((G(L)->gc.state & GCS_nojit)) {
     if (!(G(L)->hookmask & HOOK_GC))

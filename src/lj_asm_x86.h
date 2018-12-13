@@ -1857,20 +1857,14 @@ static void asm_cnew(ASMState *as, IRIns *ir)
 
 static void asm_tbar(ASMState *as, IRIns *ir)
 {
-  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_gc_drain_ssb];
-  IRRef args[1];
   Reg tab, tmp;
   MCLabel l_end;
   MCode *p;
   LJ_STATIC_ASSERT(LJ_GC_SSB_CAPACITY == 128);
-  ra_evictset(as, RSET_SCRATCH);
-  l_end = emit_label(as);
-  args[0] = ASMREF_TMP1;  /* global_State *g */
-  asm_gencall(as, ci, args);
-  tmp = ra_releasetmp(as, ASMREF_TMP1);
+  tmp = ra_scratch(as, RSET_GPR);
   tab = ra_alloc1(as, ir->op1, rset_exclude(RSET_GPR, tmp));
-  emit_loada(as, tmp, J2G(as->J));
-  emit_sjcc(as, CC_NS, l_end);
+  l_end = emit_label(as);
+  asm_guardcc(as, CC_S);
 #if LJ_GC64
   UNUSED(p);
   emit_rmrxo(as, XO_MOVto, tab, RID_DISPATCH, tmp, XM_SCALE8,
