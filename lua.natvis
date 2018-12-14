@@ -254,7 +254,8 @@
     <Item Name="Root Trace" Condition="root != 0">root,i</Item>
     <Item Name="Starting Function">startpt</Item>
     <Item Name="Start Bytecode">(BCOp)(startins&amp;0xff)</Item>
-    <Item Name="Link Type">(TraceLink)linktype</Item>     
+    <Item Name="Link Type">(TraceLink)linktype</Item>
+    <Item Name="MCode">mcode</Item>
     
     <Synthetic Name="IR Byte Code">
       <DisplayString>[size] = {nins-0x8000,i}</DisplayString>
@@ -430,6 +431,7 @@
   <DisplayString Condition="(ftsz &amp; 7) == 7">Lua PCALL in hook</DisplayString>
   <Expand>
       <Item Name="PC Address" Condition="pcr.ptr32 &gt; 65000">pcr.ptr32&amp;~3</Item>
+      <Item Name="Call Base" Condition="pcr.ptr32 &gt; 65000">(uint8_t)(((BCIns*)(pcr.ptr32&amp;~3))[-1]&gt;&gt; 8)</Item>
       <Item Name="Stack offset" Condition="pcr.ptr32 &lt; 65000">pcr.ptr32&gt;&gt;3</Item>
   </Expand>
 </Type>  
