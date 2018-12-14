@@ -156,7 +156,14 @@ DEBUG_LUA_PATH = _OPTIONS["DEBUG_LUA_PATH"] or ""
 DebugDir = _OPTIONS["debugdir"] or DebugDir or "tests"
 DebugArgs = _OPTIONS["debugargs"] or DebugArgs or "../tests/runtests.lua"
 
+if not SlnFileName then
+  SlnFileName = "LuaJit"
+else
+  SlnFileName = "LuaJit_"..SlnFileName
+end
+
 workspace "LuaJit"
+  filename(SlnFileName)
   configurations { "Debug", "Release",  "DebugGC64", "ReleaseGC64"}
   platforms { "x86", "x64" }
   defines {"_CRT_SECURE_NO_DEPRECATE" }
