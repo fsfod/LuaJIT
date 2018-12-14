@@ -1671,7 +1671,7 @@ static void check_call_unroll(jit_State *J, TraceNo lnk)
         lua_assert(bc_op(*J->pc) == BC_JFUNCF);
 	lj_trace_flush(J, lnk);  /* Flush trace that only returns. */
 	/* Set a small, pseudo-random hotcount for a quick retry of JFUNC*. */
-        hotcount_set_pt(J2GG(J), pt, J->pc, LJ_PRNG_BITS(J, 4));
+	hotcount_set_pt(J2GG(J), pt, J->pc, LJ_PRNG_BITS(J, 4));
       }
       lj_trace_err(J, LJ_TRERR_CUNROLL);
     }
