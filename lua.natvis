@@ -30,6 +30,25 @@
     <Item Name="end">(char*)e.ptr32</Item>
   </Expand>
 </Type>
+  
+<Type Name="BCTrace">
+  <DisplayString>start: {pt}:{pt->firstline} }</DisplayString>
+  <Expand>
+    <Item Name="size">bcsz</Item>
+    <ArrayItems>
+      <Size>bcsz</Size>
+      <ValuePointer>bc</ValuePointer>
+    </ArrayItems>
+  </Expand>
+</Type>
+
+<Type Name="TracedBC">
+  <DisplayString Condition="op &lt; BC_FUNCF">op: {op} pc: {pc}</DisplayString>
+  <DisplayString Condition="op &gt;= BC_FUNCF">op: {op} func: {func}</DisplayString>
+  <Expand>
+    <Item Name="func" Condition="op &gt;= BC_FUNCF">func</Item>
+  </Expand>
+</Type>
 
 <Type Name="GCobj">
   <DisplayString Condition="gch.gct == 4">{str}</DisplayString>
@@ -322,6 +341,10 @@
     <Item Name="Root Trace">((GCtrace**)trace)[cur.root]</Item>
     <Item Name="Exit or Parent Trace">((GCtrace**)trace)[parent]</Item>
     <Item Name="Exit Number">exitno,i</Item>
+    <Item Name="Start Trace" Optional="true">((GCRef*)trace)[starttrace]</Item>
+    <Item Name="Last Exit" Optional="true">((GCRef*)trace)[lastexit &gt;&gt; 16]</Item>
+    <Item Name="Last Exit ID" Optional="true">(lastexit &amp; 0xffff)</Item>
+    <Item Name="Last Trace" Optional="true">((GCRef*)trace)[lasttrace]</Item>
     <Item Name="Start Instruction">(BCOp)(cur.startins&amp;0xff)</Item>
     <Item Name="Lua State">L</Item>
     <Item Name="Fold Ins">fold.ins</Item>
