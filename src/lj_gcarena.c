@@ -12,7 +12,6 @@
 
 #include <immintrin.h>
 #include "malloc.h"
-#include "lj_timer.h"
 
 #define idx2bit(i)		((uint32_t)(1) << (i))
 #define bitset_range(lo, hi)	((idx2bit((hi)-(lo))-1) << (lo))
@@ -99,8 +98,6 @@ GCArena* arena_create(lua_State *L, uint32_t flags)
     arena_creategreystack(L, arena);
   }
 
-  perflog_setup(L);
-
   return arena;
 }
 
@@ -173,7 +170,6 @@ void arena_destroyGG(global_State *g, GCArena* arena)
   void* allocud = arena_extrainfo(arena)->allocud;
   lua_assert((((uintptr_t)arena) & (ArenaCellMask)) == 0);
   setmref(arena->freelist, NULL);
-  perflog_shutdown(g);
   arena_freemem(g, arena);
   //lua_assert(g->gc.total == sizeof(GG_State));
   lj_freepages(allocud, arena, ArenaSize);

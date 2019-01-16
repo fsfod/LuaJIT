@@ -14,7 +14,7 @@
 #endif
 #include "lj_dispatch.h"
 #include "lj_alloc.h"
-#include "lj_timer.h"
+#include "lj_vmperf.h"
 
 #include <stdio.h>
 

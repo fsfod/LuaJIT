@@ -28,7 +28,7 @@
 #include "lj_vm.h"
 #include "lj_dispatch.h"
 #include "lj_alloc.h"
-#include "lj_timer.h"
+#include "lj_vmperf.h"
 
 #define GCSTEPSIZE	1024u
 #define GCSWEEPMAX	40
@@ -88,11 +88,11 @@ void gc_mark(global_State *g, GCobj *o, int gct)
 {
   lua_assert(!isdead(g, o));
   lua_assert(gc_ishugeblock(o) || iswhite(g, o));
-  PerfCounter(gc_mark);
+  PERF_COUNTER(gc_mark);
 
   /* Huge objects are always unconditionally sent to us to make white checks simple */
   if (LJ_UNLIKELY(gc_ishugeblock(o))) {
-    PerfCounter(gc_markhuge);
+    PERF_COUNTER(gc_markhuge);
     hugeblock_mark(g, o);
 
     /* No further processing */
@@ -189,7 +189,7 @@ size_t lj_gc_separateudata(global_State *g, int all)
   CellIdChunk *list = idlist_new(L);
   list->count = 0;
   list->next = NULL;
-  TimerStart(gc_separateudata);
+  TIMER_START(gc_separateudata);
   for (MSize i = 0; i < g->gc.arenastop; i++) {
     GCArena *arena = lj_gc_arenaref(g, i);
 
@@ -201,7 +201,7 @@ size_t lj_gc_separateudata(global_State *g, int all)
       }
     }
   }
-  TimerEnd(gc_separateudata);
+  TIMER_END(gc_separateudata);
   m += hugeblock_checkfinalizers(g);
   return m;
 }
@@ -214,7 +214,7 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
   int weak = 0;
   cTValue *mode;
   GCtab *mt = tabref(t->metatable);
-  PerfCounter(gc_traverse_tab);
+  PERF_COUNTER(gc_traverse_tab);
   if (mt)
     gc_mark_tab(g, mt);
   mode = lj_meta_fastg(g, mt, MM_mode);
@@ -250,7 +250,7 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
       if (tvisgcv(tv) && (gc_ishugeblock(gcV(tv)) || arenaobj_iswhite(gcV(tv)))) {
         if (!gc_ishugeblock(gcV(tv)) && (itype(tv) == LJ_TSTR || itype(tv) == LJ_TCDATA ||
                                          itype(tv) == LJ_TFUNC || itype(tv) == LJ_TTAB)) {
-          PerfCounter(gc_mark);
+          PERF_COUNTER(gc_mark);
           arenaobj_markgct(g, gcV(tv), ~itype(tv));
         } else {
           gc_mark(g, gcV(tv), ~itype(tv));
@@ -282,7 +282,7 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
 /* Traverse a function. */
 static void gc_traverse_func(global_State *g, GCfunc *fn)
 {
-  PerfCounter(gc_traverse_func);
+  PERF_COUNTER(gc_traverse_func);
   cleargray((GCobj *)fn);
   gc_mark_tab(g, tabref(fn->c.env));
   if (isluafunc(fn)) {
@@ -312,7 +312,7 @@ static void gc_traverse_trace(global_State *g, GCtrace *T)
 {
   IRRef ref;
   if (T->traceno == 0) return;
-  PerfCounter(gc_traverse_trace);
+  PERF_COUNTER(gc_traverse_trace);
   for (ref = T->nk; ref < REF_TRUE; ref++) {
     IRIns *ir = &T->ir[ref];
     if (ir->o == IR_KGC)
@@ -336,7 +336,7 @@ static void gc_traverse_trace(global_State *g, GCtrace *T)
 static void gc_traverse_proto(global_State *g, GCproto *pt)
 {
   ptrdiff_t i;
-  PerfCounter(gc_traverse_proto);
+  PERF_COUNTER(gc_traverse_proto);
   gc_mark_str(g, proto_chunkname(pt));
   for (i = -(ptrdiff_t)pt->sizekgc; i < 0; i++)  /* Mark collectable consts. */
     gc_markobj(g, proto_kgc(pt, i));
@@ -366,7 +366,7 @@ static MSize gc_traverse_frames(global_State *g, lua_State *th)
 static void gc_traverse_thread(global_State *g, lua_State *th)
 {
   TValue *o, *top = th->top;
-  PerfCounter(gc_traverse_thread);
+  PERF_COUNTER(gc_traverse_thread);
   for (o = tvref(th->stack)+1+LJ_FR2; o < top; o++)
     gc_marktv(g, o);
   if (g->gc.state == GCSatomic) {
@@ -383,12 +383,12 @@ GCSize gc_traverse(global_State *g, GCobj *o)
   int gct = o->gch.gct;
   if (LJ_LIKELY(gct == ~LJ_TTAB)) {
     GCtab *t = gco2tab(o);
-    //TimerStart(gc_traverse_tab);
+    //TIMER_START(gc_traverse_tab);
     if (gc_traverse_tab(g, t) > 0) {
      // lua_assert(0);
       //black2gray(o);  /* Keep weak tables gray. */
     }
-   // TimerEnd(gc_traverse_tab);
+   // TIMER_END(gc_traverse_tab);
     return sizeof(GCtab) + sizeof(TValue) * t->asize +
 			   (t->hmask ? sizeof(Node) * (t->hmask + 1) : 0);
   } else if (LJ_LIKELY(gct == ~LJ_TFUNC)) {
@@ -553,7 +553,7 @@ static GCSize propagate_arenagrays(global_State *g, GCArena *arena, int limit, M
   if (mref(arena->greytop, GCCellID1) == NULL) {
     return 0;
   }
-  PerfCounter(propagate_queues);
+  PERF_COUNTER(propagate_queues);
 
   for (; *mref(arena->greytop, GCCellID1) != 0;) {
     GCCellID1 *top = mref(arena->greytop, GCCellID1);
@@ -589,7 +589,7 @@ static GCSize gc_propagate_gray(global_State *g)
   GCSize total = 0;
   GCArena *maxarena = NULL;
   PQueue *greyqueu = &g->gc.greypq;
-  Section_Start(propagate_gray);
+  SECTION_START(propagate_gray);
 
   if (greyqueu->size == 0) {
     pqueue_init(mainthread(g), greyqueu);
@@ -625,7 +625,7 @@ static GCSize gc_propagate_gray(global_State *g)
 
     // printf("propagated %d objects in arena(%d), with a size of %d\n", count, arena_extrainfo(maxarena)->id, omem);
   }
-  Section_End(propagate_gray);
+  SECTION_END(propagate_gray);
 
   return total;
 }
@@ -641,7 +641,7 @@ static int gc_sweepstring(global_State *g)
     GCstr *s = strref(str);
     str = s->nextgc;
     if (iswhite(g, s)) {
-      PerfCounter(sweptstring);
+      PERF_COUNTER(sweptstring);
       g->strnum--;
       *(prev ? &prev->nextgc : &g->strhash[g->gc.sweepstr]) = s->nextgc;
     } else {
@@ -909,7 +909,9 @@ GCArena* lj_gc_newarena(lua_State *L, uint32_t flags)
   if ((flags & ArenaFlag_TravObjs) && (g->gc.state & 1)) {
     pqueue_insert(L, &g->gc.greypq, arena);
   }
+#ifdef LJ_ENABLESTATS
   log_arenacreated(id, arena,  g->gc.total, flags);
+#endif
   GCDEBUG("Arena %d created\n", id);
   return arena;
 }
@@ -993,8 +995,9 @@ GCArena *lj_gc_setactive_arena(lua_State *L, GCArena *arena, int travobjs)
   MSize id = arena->extra.id;
   MSize flags = lj_gc_arenaflags(g, id);
   lua_assert(lj_gc_getarenaid(g, arena) != -1);
-
+#ifdef LJ_ENABLESTATS
   log_arenaactive(id, arena_topcellid(arena), flags);
+#endif
 
   if ((g->gc.state == GCSsweep || g->gc.state == GCSsweepstring)) {
     lj_gc_setarenaflag(g, id, ArenaFlag_SweepNew);
@@ -1065,7 +1068,7 @@ static size_t gc_mark_threads(global_State *g)
 static void atomic(global_State *g, lua_State *L)
 {
   size_t udsize;
-  Section_Start(gc_atomic);
+  SECTION_START(gc_atomic);
   lj_gc_emptygrayssb(g); /* Mark anything left in the gray SSB buffer */
   gc_mark_uv(g);  /* Need to remark open upvalues (the thread may be dead). */
   gc_propagate_gray(g);  /* Propagate any left-overs. */
@@ -1093,7 +1096,7 @@ static void atomic(global_State *g, lua_State *L)
   gc_sweep_uv(g);
   /* Prepare for sweep phase. */
   g->gc.estimate = g->gc.total - (GCSize)udsize;  /* Initial estimate. */
-  Section_End(gc_atomic);
+  SECTION_END(gc_atomic);
 }
 
 #define PreSweepArena(g, arena, i)  sweepcallback(g, arena, i, -1)
@@ -1328,7 +1331,7 @@ int LJ_FASTCALL lj_gc_step(lua_State *L)
   GCSize lim;
   int32_t ostate = g->vmstate;
   int ret = 0;
-  Section_Start(gc_step);
+  SECTION_START(gc_step);
   setvmstate(g, GC);
   lim = (GCSTEPSIZE/100) * g->gc.stepmul;
   if (lim == 0)
@@ -1340,7 +1343,7 @@ int LJ_FASTCALL lj_gc_step(lua_State *L)
     if (g->gc.state == GCSpause) {
       g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
       g->vmstate = ostate;
-      Section_End(gc_step);
+      SECTION_END(gc_step);
       return 1;  /* Finished a GC cycle. */
     }
   } while (sizeof(lim) == 8 ? ((int64_t)lim > 0) : ((int32_t)lim > 0));
@@ -1354,7 +1357,7 @@ int LJ_FASTCALL lj_gc_step(lua_State *L)
     g->vmstate = ostate;
     ret = 0;
   }
-  Section_End(gc_step);
+  SECTION_END(gc_step);
   return ret;
 }
 
@@ -1385,7 +1388,7 @@ void lj_gc_fullgc(lua_State *L)
   global_State *g = G(L);
   int32_t ostate = g->vmstate;
   setvmstate(g, GC);
-  Section_Start(gc_fullgc);
+  SECTION_START(gc_fullgc);
   if (g->gc.state != GCSpause) {
     /*FIXME: redesign assumption that we have 2 whites is no longer true  */
     if (g->gc.state == GCSatomic) {  /* Caught somewhere in the middle. */
@@ -1420,7 +1423,7 @@ void lj_gc_fullgc(lua_State *L)
   do { gc_onestep(L); } while (g->gc.state != GCSpause);
   g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
   g->vmstate = ostate;
-  Section_End(gc_fullgc);
+  SECTION_END(gc_fullgc);
 }
 
 /* -- Write barriers ------------------------------------------------------ */
@@ -1431,7 +1434,7 @@ void lj_gc_barrierf(global_State *g, GCobj *o, GCobj *v)
   lua_assert(!isdead(g, v) && !isdead(g, o));
   lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);
   lua_assert(o->gch.gct != ~LJ_TTAB);
-  PerfCounter(gc_barrierf);
+  PERF_COUNTER(gc_barrierf);
   /* Preserve invariant during propagation. Otherwise it doesn't matter. */
   if (g->gc.statebits & GCSneedsbarrier) {
     /* Move frontier forward. */
@@ -1450,7 +1453,7 @@ void lj_gc_barrierf(global_State *g, GCobj *o, GCobj *v)
 void LJ_FASTCALL lj_gc_barrieruv(global_State *g, TValue *tv)
 {
   lua_assert(tvisgcv(tv));
-  PerfCounter(gc_barrieruv);
+  PERF_COUNTER(gc_barrieruv);
 /* Adjust the TValue pointer to upvalue its contained in */
 #define TV2MARKED(x) \
   ((GCupval *)(((char*)x)-offsetof(GCupval, tv)))
@@ -1547,7 +1550,7 @@ void LJ_FASTCALL lj_gc_emptygrayssb(global_State *g)
     return;
   }
 
-  TimerStart(gc_emptygrayssb);
+  TIMER_START(gc_emptygrayssb);
   /* Skip first dummy value */
   for (i = 1; i < limit; i++) {
     GCobj *o = gcref(list[i]);
@@ -1563,7 +1566,7 @@ void LJ_FASTCALL lj_gc_emptygrayssb(global_State *g)
       hugeblock_mark(g, o);
     }
   }
-  TimerEnd(gc_emptygrayssb);
+  TIMER_END(gc_emptygrayssb);
   lj_gc_resetgrayssb(g);
 }
 
