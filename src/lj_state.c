@@ -1,6 +1,6 @@
 /*
 ** State and stack handling.
-** Copyright (C) 2005-2016 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
 **
 ** Portions taken verbatim or adapted from the Lua interpreter.
 ** Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
@@ -178,7 +178,7 @@ static void close_state(lua_State *L)
   arena_destroyGG(g, GGarena);
 }
 
-#if LJ_64 && !(defined(LUAJIT_USE_VALGRIND) && defined(LUAJIT_USE_SYSMALLOC))
+#if LJ_64 && !LJ_GC64 && !(defined(LUAJIT_USE_VALGRIND) && defined(LUAJIT_USE_SYSMALLOC))
 lua_State *lj_state_newstate(lua_Alloc f, void *ud)
 #else
 LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
@@ -219,7 +219,7 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
     close_state(L);
     return NULL;
   }
-  L->status = 0;
+  L->status = LUA_OK;
   return L;
 }
 
@@ -251,10 +251,10 @@ LUA_API void lua_close(lua_State *L)
 #endif
   for (i = 0;;) {
     hook_enter(g);
-    L->status = 0;
+    L->status = LUA_OK;
     L->base = L->top = tvref(L->stack) + 1 + LJ_FR2;
     L->cframe = NULL;
-    if (lj_vm_cpcall(L, NULL, NULL, cpfinalize) == 0) {
+    if (lj_vm_cpcall(L, NULL, NULL, cpfinalize) == LUA_OK) {
       if (++i >= 10) break;
       lj_gc_separateudata(g, 1);  /* Separate udata again. */
       if (gcref(g->gc.mmudata) == NULL)  /* Until nothing is left to do. */
@@ -269,7 +269,7 @@ lua_State *lj_state_new(lua_State *L)
   lua_State *L1 = lj_mem_newobj(L, lua_State);
   L1->gct = ~LJ_TTHREAD;
   L1->dummy_ffid = FF_C;
-  L1->status = 0;
+  L1->status = LUA_OK;
   L1->stacksize = 0;
   setmref(L1->stack, NULL);
   L1->cframe = NULL;
