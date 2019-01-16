@@ -225,7 +225,7 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
       if (c == 'k') weak |= LJ_GC_WEAKKEY;
       else if (c == 'v') weak |= LJ_GC_WEAKVAL;
     }
-    if (weak) {  /* Weak tables are cleared in the atomic phase. */
+    if (weak > 0) {  /* Weak tables are cleared in the atomic phase. */
 #if LJ_HASFFI
       CTState *cts = ctype_ctsG(g);
       if (cts && cts->finalizer == t) {
@@ -234,8 +234,6 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
 #endif
       {
 	t->marked = (uint8_t)((t->marked & ~LJ_GC_WEAK) | weak);
-	setgcrefr(t->gclist, g->gc.weak);
-	setgcref(g->gc.weak, obj2gco(t));
       }
     }
   }
