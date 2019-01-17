@@ -323,14 +323,27 @@ void print_deadobjs(global_State *g, TypeFilter filter)
 void check_arenamemused(global_State *g)
 {
   GCSize atotal = 0;
+  gc_assert(g->gc.hugemem < g->gc.total);
 
   for (MSize i = 0; i < g->gc.arenastop; i++) {
     GCArena *arena = lj_gc_arenaref(g, i);
     ArenaFlags flags = lj_gc_arenaflags(g, i);
 
     if (!(flags & ArenaFlag_Empty)) {
+      ArenaFreeList *freelist = arena_freelist(arena);
+      MSize freetotal = 0;
+      for (size_t j = 0; j < freelist->top; j++) {
+        GCCellID start = freelist->oversized[j] & 0xffff;
+        GCCellID end = start + (freelist->oversized[j] >> 16);
+        freetotal += end - start;
+        lua_assert(!(start >= arena->celltopid && start <= arena->celltopmax));
+        lua_assert(!(end >= arena->celltopid && end <= arena->celltopmax));
+      }
+
       GCSize arenamem = arena_totalobjmem(arena);
-      lua_assert(arenamem < (1024*1024));
+      gc_assert(arenamem < ArenaMaxObjMem);
+      
+      gc_assert((atotal + arenamem) < (g->gc.total - g->gc.hugemem));
       atotal += arenamem;
     }
   }
