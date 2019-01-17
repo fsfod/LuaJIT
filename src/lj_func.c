@@ -76,7 +76,7 @@ void LJ_FASTCALL lj_func_closeuv(lua_State *L, TValue *level)
   while (gcref(L->openupval) != NULL &&
 	 uvval((uv = gco2uv(gcref(L->openupval)))) >= level) {
     GCobj *o = obj2gco(uv);
-    lua_assert(!isblack(g, o) && !uv->closed && uvval(uv) != &uv->tv);
+    lua_assert(!uv->closed && uvval(uv) != &uv->tv);
     setgcrefr(L->openupval, uv->nextgc);  /* No longer in open list. */
     if (isdead(g, o)) {
       lj_func_freeuv(g, uv);

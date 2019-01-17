@@ -280,7 +280,7 @@ static LJ_AINLINE int arena_cellisallocated(GCArena *arena, GCCellID cell)
   return arena->block[arena_blockidx(cell)] & arena_blockbit(cell);
 }
 
-#define arena_freespace(arena) (((arena)->celltopmax - arena_topcellid(arena)) * CellSize)
+#define arena_bumpleft(arena) ((arena)->celltopmax - (arena)->celltopid)
 
 static GCArena *ptr2arena(void* ptr);
 
@@ -578,6 +578,21 @@ static inline int idlist_remove(CellIdChunk *chunk, MSize idx, int updatemark)
   }
   chunk->count--;
   return idlist_count(chunk) == 0;
+}
+
+static inline CellIdChunk *idlist_findspace(CellIdChunk *chunk, int *chunki)
+{
+  MSize i = idlist_count(chunk);
+
+  do {
+    if (idlist_count(chunk) != idlist_maxcells) {
+      return chunk;
+    }
+    chunk = idlist_next(chunk);
+    chunki[0]++;
+  } while (chunk);
+
+  return NULL;
 }
 
 #define idlist_freechunk(g, chunk) lj_mem_free(g, chunk, sizeof(CellIdChunk))

@@ -1294,6 +1294,9 @@ static void atomic_clear_weak(global_State *g)
     GCtab *t = gco2tab(gcref(weak[wi]));
     lua_assert((t->marked & LJ_GCFLAG_WEAK));
     //lua_assert((t->marked & LJ_GCFLAG_GREY));
+    if (g->gc.isminor) {
+     // cleargray(t);
+    }
     if ((t->marked & LJ_GCFLAG_WEAKVAL)) {
       MSize i = t->asize;
       while (i) {
@@ -1375,7 +1378,7 @@ static void atomic(global_State *g, lua_State *L)
   gc_sweep_uv(g);
   gc_deferred_sweep(g);
 
-  if (g->gc.stateflags & GCSFLAG_TOMINOR) {
+  if ((g->gc.stateflags & GCSFLAG_TOMINOR) && 0) {
     lua_assert(!g->gc.isminor);
     g->gc.stateflags &= ~GCSFLAG_TOMINOR;
     g->gc.isminor = 15;
@@ -1588,7 +1591,7 @@ static int gc_sweepend(lua_State *L)
 }
 
 #define ATOMIC_SWEEP 1
-#define ATOMIC_PROPAGATE 0
+#define ATOMIC_PROPAGATE 1
 
 /* Perform both sweepstring and sweep in single atomic call instead of 
 ** incrementally to help track down GC phase bugs. 
@@ -1647,9 +1650,8 @@ static void gc_finish(lua_State *L)
   if (emptycount && (g->gc.arenastop - emptycount) > 6) {
     for (MSize i = 0; i < g->gc.arenastop; ) {
       MSize flags = lj_gc_arenaflags(g, i) & (ArenaFlag_Empty | ArenaFlag_Explicit);
-      if (flags == ArenaFlag_Empty) {
-        //lj_gc_freearena(g, lj_gc_arenaref(g, i));
-        i++;
+      if (flags == ArenaFlag_Empty && 0) {
+        lj_gc_freearena(g, lj_gc_arenaref(g, i));
       } else {
         i++;
       }
@@ -1884,7 +1886,7 @@ void lj_gc_fullgc(lua_State *L)
 void lj_gc_barrierf(global_State *g, GCobj *o, GCobj *v)
 {
   lua_assert(!isdead(g, v) && !isdead(g, o));
-  lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);
+  //lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);
   lua_assert(o->gch.gct != ~LJ_TTAB);
   PERF_COUNTER(gc_barrierf);
   /* Preserve invariant during propagation. Otherwise it doesn't matter. */
@@ -2075,6 +2077,30 @@ int lj_mem_tryreclaim(lua_State *L)
   return 0;
 }
 
+/* Find the largest free range to use as the new bump allocation space */
+static int find_newbump(GCArena *arena)
+{
+  ArenaFreeList *freelist = arena_freelist(arena);
+  uint32_t largest = 0, rangesz;
+  int index = -1;
+  for (MSize i = 0; i < freelist->top; i++) {
+    if (freelist->oversized[i] > largest) {
+      largest = freelist->oversized[i];
+      index = i;
+    }
+  }
+  if (index == -1) {
+    return 0;
+  }
+  rangesz = largest >> 16;
+  freelist->top--;
+  freelist->oversized[index] = freelist->oversized[freelist->top];
+  arena->celltopid = largest &  0xffff;
+  arena->celltopandmax = arena->celltopid + rangesz;
+  return rangesz;
+
+}
+
 GCobj *findarenaspace(lua_State *L, GCSize osize, int flags)
 {
   global_State *g = G(L);
@@ -2082,22 +2108,15 @@ GCobj *findarenaspace(lua_State *L, GCSize osize, int flags)
   MSize cellnum = arena_roundcells(osize);
 
   if (!arena_canbump(curarena, cellnum)) {
+    uint32_t left = arena_bumpleft(curarena);
+    if (left > 64) {
+
+    }
     ArenaFreeList *freelist = arena_freelist(curarena);
     if (freelist->top) {
-      uint32_t largest = 0;
-      int index = -1;
-      for (MSize i = 0; i < freelist->top; i++) {
-        if (freelist->oversized[i] > largest) {
-          largest = freelist->oversized[i];
-          index = i;
-        }
-      }
-      if (index != -1) {
-        uint32_t rangesz = largest >> 16;
-        freelist->top--;
-        freelist->oversized[index] = freelist->oversized[freelist->top];
-        curarena->celltopid = largest &  0xffff;
-        curarena->celltopandmax = arena->celltopid + rangesz;
+      uint32_t newbump = find_newbump(curarena);
+
+      if (newbump) {
         return (GCobj *)arena_alloc(curarena, osize);
       }
     } else {
