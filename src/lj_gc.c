@@ -1338,8 +1338,10 @@ static void atomic_mark_misc(global_State *g)
 static void atomic(global_State *g, lua_State *L)
 {
   size_t udsize;
+  VERIFYGC(g);
   SECTION_START(gc_atomic);
   lj_gc_drain_ssb(g); /* Mark anything left in the gray SSB buffer */
+  VERIFYGC(g);
   gc_mark_uv(g);  /* Need to remark open upvalues (the thread may be dead). */
   gc_propagate_gray(g);  /* Propagate any left-overs. */
 
@@ -1352,16 +1354,17 @@ static void atomic(global_State *g, lua_State *L)
   gc_propagate_gray(g);  /* Propagate all of the above. */
 
   gc_deferred_marking(g);
-
   /* Empty the 2nd chance list. */
   gc_mark_threads(g);
   gc_propagate_gray(g);
 
   atomic_check_still_weak(g);
-
+  
   atomic_enqueue_finalizers(L);
+  VERIFYGC(g);
   /* Flag white objects in the arena finalizer list. */
   udsize = lj_gc_scan_finalizers(g, 0);
+  VERIFYGC(g);
   udsize += gc_propagate_gray(g);  /* And propagate the marks. */
   
   atomic_clear_weak(g);/* Clear dead and finalized entries from weak tables*/
@@ -1383,6 +1386,7 @@ static void atomic(global_State *g, lua_State *L)
   g->gc.estimate = g->gc.total - (GCSize)udsize;  /* Initial estimate. */
   assert_greyempty(g);
   SECTION_END(gc_atomic);
+  VERIFYGC(g);
 }
 
 #if DEBUG
@@ -2122,7 +2126,6 @@ GCobj *lj_mem_newgco_t(lua_State *L, GCSize osize, uint32_t gct)
 {
   global_State *g = G(L);
   GCobj *o ;
-  VERIFYGC(g);
 
   if (osize < ArenaOversized) {
     MSize realsz = lj_round(osize, 16);
