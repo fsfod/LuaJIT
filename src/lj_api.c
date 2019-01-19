@@ -25,6 +25,7 @@
 #include "lj_vm.h"
 #include "lj_strscan.h"
 #include "lj_ctype.h"
+#include "lj_cdata.h"
 
 /* -- Common helper functions --------------------------------------------- */
 
@@ -602,6 +603,14 @@ LUA_API void lua_pushnumber(lua_State *L, lua_Number n)
 LUA_API void lua_pushinteger(lua_State *L, lua_Integer n)
 {
   setintptrV(L->top, n);
+  incr_top(L);
+}
+
+LUA_API void lua_pushinteger64(lua_State *L, long long n)
+{
+  CTState* cts = ctype_cts(L);
+  lj_gc_check(L);
+  setcdataV(L, L->top, lj_cdata_new(cts, CTID_INT64, 8));
   incr_top(L);
 }
 
