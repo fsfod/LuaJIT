@@ -33,6 +33,8 @@
 #define GCSWEEPCOST	10
 #define GCFINALIZECOST	100
 
+#define lj_vmevent_atomicstage(g, substate) lj_vmevent_callback(mainthread(g), VMEVENT_GC_ATOMICSTAGE, (void*)(uintptr_t)(substate))
+
 static void gc_setstate(global_State *g, int newstate)
 {
   lj_vmevent_callback(mainthread(g), VMEVENT_GC_STATECHANGE, (void*)(uintptr_t)newstate);
@@ -579,9 +581,11 @@ static void atomic(global_State *g, lua_State *L)
 {
   size_t udsize;
 
+  lj_vmevent_atomicstage(g, GCATOMIC_MARK_UPVALUES);
   gc_mark_uv(g);  /* Need to remark open upvalues (the thread may be dead). */
   gc_propagate_gray(g);  /* Propagate any left-overs. */
 
+  lj_vmevent_atomicstage(g, GCATOMIC_MARK_ROOTS);
   setgcrefr(g->gc.gray, g->gc.weak);  /* Empty the list of weak tables. */
   setgcrefnull(g->gc.weak);
   lua_assert(!iswhite(obj2gco(mainthread(g))));
@@ -590,17 +594,23 @@ static void atomic(global_State *g, lua_State *L)
   gc_mark_gcroot(g);  /* Mark GC roots (again). */
   gc_propagate_gray(g);  /* Propagate all of the above. */
 
+  lj_vmevent_atomicstage(g, GCATOMIC_MARK_GRAYAGAIN);
   setgcrefr(g->gc.gray, g->gc.grayagain);  /* Empty the 2nd chance list. */
   setgcrefnull(g->gc.grayagain);
   gc_propagate_gray(g);  /* Propagate it. */
 
+  lj_vmevent_atomicstage(g, GCATOMIC_SEPARATE_UDATA);
   udsize = lj_gc_separateudata(g, 0);  /* Separate userdata to be finalized. */
+
+  lj_vmevent_atomicstage(g, GCATOMIC_MARK_UDATA);
   gc_mark_mmudata(g);  /* Mark them. */
   udsize += gc_propagate_gray(g);  /* And propagate the marks. */
 
+  lj_vmevent_atomicstage(g, GCATOMIC_CLEARWEAK);
   /* All marking done, clear weak tables. */
   gc_clearweak(gcref(g->gc.weak));
 
+  lj_vmevent_atomicstage(g, GCATOMIC_STAGE_END);
   lj_buf_shrink(L, &g->tmpbuf);  /* Shrink temp buffer. */
 
   /* Prepare for sweep phase. */
