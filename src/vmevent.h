@@ -22,7 +22,7 @@ typedef enum VMEvent2 {
   VMEVENT_RECORD,
   VMEVENT_PROTO_BLACKLISTED,
   VMEVENT_GC_STATECHANGE,
-  VMEVENT_GC_SUBSTATE,
+  VMEVENT_GC_ATOMICSTAGE,
   VMEVENT__MAX
 } VMEvent2;
 
@@ -36,6 +36,18 @@ typedef enum FlushReason {
   FLUSHREASON_SET_IMMUTABLEUV,
   FLUSHREASON__MAX
 } FlushReason;
+
+/* The stages of the atomic GC phase that all happen in one GC step */
+typedef enum GCAtomicStage {
+  GCATOMIC_STAGE_END,
+  GCATOMIC_MARK_UPVALUES,
+  GCATOMIC_MARK_ROOTS,
+  GCATOMIC_MARK_GRAYAGAIN,
+  GCATOMIC_SEPARATE_UDATA,
+  GCATOMIC_MARK_UDATA,
+  GCATOMIC_CLEARWEAK,
+  GCATOMIC__MAX
+} GCAtomicStage;
 
 typedef struct VMEventData_TExit {
   int gprs_size;
