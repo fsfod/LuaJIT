@@ -333,6 +333,13 @@ end
       '%{cfg.objdir}/lj_recdef.h',
       '%{cfg.objdir}/lj_folddef.h',
     }
+
+    filter "tags:AMALG"
+      files { "src/ljamalg.c" }
+    filter {'files:src/lj_*.c or files:src/lib_*.c', 'tags:AMALG'}
+      flags {"ExcludeFromBuild"}
+    filter {}
+
     excludes {
       "src/*_arm*",
       "src/*_mips*",
