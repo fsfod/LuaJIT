@@ -325,7 +325,6 @@ end
       "src/lj_*.c",
       "src/lib_*.h",
       "src/lib_*.c",
-      --'$(IntDir)lj_vm.obj',--obj/lua/%{cfg.buildcfg}/%{cfg.platform}/
       
       '%{cfg.objdir}/lj_bcdef.h',
       '%{cfg.objdir}/lj_ffdef.h',
@@ -340,10 +339,11 @@ end
       flags {"ExcludeFromBuild"}
     filter {}
 
-    excludes {
-      "src/*_arm*",
-      "src/*_mips*",
-      "src/*_ppc*",
+    removefiles {
+      "src/*_arm.h",
+      "src/*_arm64.h",
+      "src/*_mips.h",
+      "src/*_ppc.h",
     }
 
     custombuildcommands {
