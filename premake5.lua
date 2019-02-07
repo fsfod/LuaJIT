@@ -164,6 +164,7 @@ end
 
 workspace "LuaJit"
   filename(SlnFileName)
+  editorintegration "On"
   configurations { "Debug", "Release",  "DebugGC64", "ReleaseGC64"}
   platforms { "x86", "x64" }
   defines {"_CRT_SECURE_NO_DEPRECATE" }
