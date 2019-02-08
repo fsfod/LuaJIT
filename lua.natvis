@@ -522,6 +522,18 @@
   <Expand>
     <Item Name="CType State">(CTState*)ctype_state.ptr32</Item>
     <Item Name="GC State">gc</Item>
+    <Item Name="Registry">registrytv</Item>
+    <Synthetic Name="Open Upvalues">
+      <Expand>
+        <LinkedListItems>
+          <HeadPointer>&amp;uvhead</HeadPointer>
+          <NextPointer>(GCupval*)next.gcptr32</NextPointer>
+          <ValueNode>this</ValueNode>
+        </LinkedListItems>
+      </Expand>
+    </Synthetic>
+    <Item Name="Hook function">hookf</Item>
+    <Item Name="Hook mask">hookmask</Item>
   </Expand>
 </Type>
 
