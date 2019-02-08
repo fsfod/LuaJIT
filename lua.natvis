@@ -150,6 +150,15 @@
         </IndexListItems>
       </Expand>
     </Synthetic>
+    <Synthetic Name="Hash" Condition="hmask != 0">
+      <DisplayString>{hmask+1}</DisplayString>
+      <Expand>
+        <ArrayItems>
+          <Size>hmask+1</Size>
+          <ValuePointer>(Node*)(node.ptr32)</ValuePointer>
+        </ArrayItems>
+      </Expand>
+    </Synthetic>
   </Expand>
 </Type>
 
