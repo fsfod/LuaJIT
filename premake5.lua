@@ -29,6 +29,12 @@ premake.api.register {
   kind = "list:string",
 }
 
+premake.api.register {
+  name = "bindir",
+  scope = "config",
+  kind = "path",
+}
+
 require('vstudio')
 
 premake.api.register {
@@ -170,6 +176,7 @@ workspace "LuaJit"
   defines {"_CRT_SECURE_NO_DEPRECATE" }
   objdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}"
   targetdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}"
+  bindir "%{wks.location}/bin/%{cfg.buildcfg}/%{cfg.platform}"
   startproject "luajit"
   dynasmflags {"FFI"}
   workspace_files {
@@ -300,7 +307,7 @@ end
   project "lua"
     uuid "C78D880B-3397-887C-BC12-9F7C281B947C"
     kind "SharedLib"
-    targetdir "bin/%{cfg.buildcfg}/%{cfg.platform}"
+    targetdir "%{cfg.bindir}"
     location(BuildDir)
     buildoptions "/c"
     symbols "On"
@@ -391,7 +398,7 @@ end
     uuid "4E5D480C-3AFF-72E2-23BA-86360FFBF932"
     kind "ConsoleApp"
     location(BuildDir)
-    targetdir "bin/%{cfg.buildcfg}/%{cfg.platform}"
+    targetdir "%{cfg.bindir}"
     vectorextensions "SSE2"
     symbols "On"
     language "C++"
@@ -400,7 +407,7 @@ end
     vpaths { ["libs"] = "src/lib_*.h" }
     vpaths { ["libs"] = "src/lib_*.c" }
     debugenvs {
-      "LUA_PATH=%{sln.location}src/?.lua;%{sln.location}bin/%{cfg.buildcfg}/%{cfg.platform}/?.lua;%{sln.location}tests/?.lua"..DEBUG_LUA_PATH..";%LUA_PATH%",
+      "LUA_PATH=%{cfg.bindir}/?.lua;%{sln.location}src/?.lua;%{sln.location}tests/?.lua"..DEBUG_LUA_PATH..";%LUA_PATH%",
     }
 
     debugdir(DebugDir)
@@ -424,6 +431,71 @@ end
     filter { "system:windows", "Debug", "tags:FixedAddr" }
       linkoptions { "/FIXED", "/DEBUG", '/BASE:"0x00400000',  "/DYNAMICBASE:NO" }
 
+project "CreateRelease"
+    kind "Utility"
+    location "build"
+    targetdir "output"
+    dependson "luajit"
+
+    files {
+      "src/lauxlib.h",
+      "src/lua.h",
+      "src/lua.hpp",
+      "src/luaconf.h",
+      "src/luajit.h",
+      "src/lualib.h",
+      "src/jit/*.lua",
+      "%{cfg.bindir}/jit/vmdef.lua",
+    }
+    
+    filter { "system:windows" }
+      files {
+        "%{cfg.bindir}/luajit.exe",
+        "%{cfg.bindir}/luajit.pdb",
+        "%{cfg.bindir}/lua51.dll",
+        "%{cfg.bindir}/lua51.pdb",
+        "%{cfg.bindir}/lua51.lib",
+      }
+    filter { "system:linux" }
+      files {
+        "%{cfg.bindir}/luajit",
+        "%{cfg.bindir}/libluajit.so",
+        "%{cfg.bindir}/lua51.lib",
+      }
+    
+    filter {'files:**.h*'}
+      buildcommands {
+        '{COPY} %[%{file.relpath}] %{cfg.targetdir}/include/',
+      }
+      buildoutputs { 
+        "%{cfg.targetdir}/include/%{file.name}",
+      }
+      buildmessage ""
+      
+    filter {'files:**.exe or files:**.pdb or files:**.dll or files:**.lib'}
+      buildcommands {
+        '{COPY} %[%{file.relpath}] %{cfg.targetdir}/',
+      }
+      buildoutputs { 
+        "%{cfg.targetdir}/%{file.name}",
+      }
+      buildmessage "Copying %{file.path}"
+    
+    filter {'files:**/jit/*.lua'}
+      buildcommands {
+        '{COPY} %[%{file.relpath}] %{cfg.targetdir}/jit/',
+      }
+      buildoutputs { 
+        "%{cfg.targetdir}/jit/%{file.name}",
+      }
+      buildmessage ""
+    
+    prebuildmessage "Copying files"
+    prebuildcommands {
+      "{MKDIR} %{cfg.targetdir}/",
+      "{MKDIR} %{cfg.targetdir}/include",
+      "{MKDIR} %{cfg.targetdir}/jit",
+    }
 
 local rootignors = {
   "*.opensdf",
