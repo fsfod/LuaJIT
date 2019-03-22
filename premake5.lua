@@ -263,20 +263,18 @@ end
     
     files {
       "src/host/buildvm*.c",
-      "src/vm_x64.dasc",
-      "src/vm_x86.dasc",
       '%{cfg.objdir}/buildvm_arch.h'
     }
     includedirs{
       "%{cfg.objdir}",
       "src"
     }
+    filter { "platforms:x64 or platforms:x86", "NOT tags:GC64" }
+      files {
+        "src/vm_x86.dasc"
+      }
     filter { "platforms:x64", "tags:GC64" }
-      removefiles {
-        "src/vm_x86.dasc" 
-      }  
-    filter "platforms:x86"
-      removefiles  { 
+      files  {
         "src/vm_x64.dasc"
       }
 
