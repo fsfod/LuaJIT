@@ -205,7 +205,7 @@ workspace "LuaJit"
     tags {"GC64", "Release"}
 
   filter { "system:windows", "Release" }
-      linkoptions { "/Zo" }
+    buildoptions { "/Zo" } -- Ask MSVC for improved debug info for optimized code
 
   filter { "tags:NOJIT" }
     defines {  "LUAJIT_DISABLE_JIT" }
