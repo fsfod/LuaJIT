@@ -3,7 +3,6 @@ local p = premake
 local flaglist = {
     --"LUA_USE_ASSERT",
     --"LUA_USE_APICHECK",
-    "LUA_BUILD_AS_DLL",
     --"LUAJIT_NUMMODE", --1 all number are stored doubles, 2 dual number mode
     --"LUAJIT_ENABLE_LUA52COMPAT",
     --"LUAJIT_ENABLE_CHECKHOOK", -- check if any Lua hook is set while in jitted code
@@ -169,7 +168,7 @@ end
 workspace "LuaJit"
   filename(SlnFileName)
   editorintegration "On"
-  configurations { "Debug", "Release",  "DebugGC64", "ReleaseGC64"}
+  configurations { "Debug", "Release",  "DebugGC64", "ReleaseGC64", "DebugStatic", "ReleaseStatic"}
   platforms { "x86", "x64" }
   defines {"_CRT_SECURE_NO_DEPRECATE" }
   objdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}"
@@ -198,6 +197,9 @@ workspace "LuaJit"
 
   filter { "system:windows", "Release*" }
     buildoptions { "/Zo" } -- Ask MSVC for improved debug info for optimized code
+
+  filter { "system:windows", "NOT *Static" }
+    defines {  "LUA_BUILD_AS_DLL" }
 
   filter { "tags:NOJIT" }
     defines {  "LUAJIT_DISABLE_JIT" }
@@ -293,7 +295,12 @@ end
       optimize "Speed"
 
   project "lua"
-    kind "SharedLib"
+    filter { "*Static" }
+      kind "StaticLib"
+    filter { "NOT *Static" }
+      kind "SharedLib"
+    filter {}
+
     targetdir "%{cfg.bindir}"
     location(BuildDir)
     buildoptions "/c"
