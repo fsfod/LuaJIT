@@ -7,16 +7,16 @@ local flaglist = {
     --"LUAJIT_NUMMODE", --1 all number are stored doubles, 2 dual number mode
     --"LUAJIT_ENABLE_LUA52COMPAT",
     --"LUAJIT_ENABLE_CHECKHOOK", -- check if any Lua hook is set while in jitted code
-    --"LUAJIT_USE_SYSMALLOC", 
-    
+    --"LUAJIT_USE_SYSMALLOC",
+
     --"LUAJIT_ENABLE_TABLE_BUMP",
     --"LUAJIT_TRACE_STITCHING",
-    
+
     --"LUAJIT_DISABLE_JIT",
     --"LUAJIT_DISABLE_FFI",
     --"LUAJIT_DISABLE_VMEVENT",
     --"LUAJIT_DISABLE_DEBUGINFO",
-    
+
     --"LUAJIT_DEBUG_RA",
     --"LUAJIT_CTYPE_CHECK_ANCHOR",
     --"LUAJIT_USE_GDBJIT",
@@ -53,32 +53,30 @@ premake.override(premake.vstudio.sln2005, "projects", function(base, wks)
     premake.pop("EndProjectSection")
     premake.pop("EndProject")
   end
-	base(wks)
+  base(wks)
 end)
 
---p.buildtask = p.api.container("group", p.project)
-
 p.api.register {
-		name = "custombuildcommands",
-		scope = "config",
-		kind = "list:string",
-		tokens = true,
+    name = "custombuildcommands",
+    scope = "config",
+    kind = "list:string",
+    tokens = true,
     pathVars = true,
 }
 
 p.api.register {
-		name = "custombuildinputs",
-		scope = "config",
-		kind = "list:file",
-		tokens = true,
+    name = "custombuildinputs",
+    scope = "config",
+    kind = "list:file",
+    tokens = true,
     pathVars = true,
 }
 
 p.api.register {
-		name = "custombuildoutputs",
-		scope = "config",
-		kind = "list:file",
-		tokens = true,
+    name = "custombuildoutputs",
+    scope = "config",
+    kind = "list:file",
+    tokens = true,
     pathVars = true,
 }
 
@@ -97,7 +95,7 @@ liblist = {
     "lib_base.c",
     "lib_math.c",
     "lib_bit.c",
-    "lib_string.c", 
+    "lib_string.c",
     "lib_table.c",
     "lib_io.c",
     "lib_os.c",
@@ -111,7 +109,7 @@ local buildvminputs = {
     "%{sln.location}src/lib_base.c",
     "%{sln.location}src/lib_math.c",
     "%{sln.location}src/lib_bit.c",
-    "%{sln.location}src/lib_string.c", 
+    "%{sln.location}src/lib_string.c",
     "%{sln.location}src/lib_table.c",
     "%{sln.location}src/lib_io.c",
     "%{sln.location}src/lib_os.c",
@@ -129,15 +127,15 @@ liblistString = "%{sln.location}src/"..table.concat(liblist, " %{sln.location}sr
 --local libs = os.matchfiles("src/lib_*.c")
 
 function BuildVmCommand(cmd, outputfile, addLibList, outputDir)
-    
+
     outputDir = outputDir or "%{cfg.objdir}"
-    
+
     local result = '"obj/buildvm/%{cfg.buildcfg}%{cfg.platform}/buildvm.exe" '..cmd..' -o "'..outputDir..outputfile..'" '
-    
+
     if addLibList then
         result = result..liblistString
     end
-    
+
     return result
 end
 
@@ -150,13 +148,13 @@ if not HOST_LUA then
   elseif os.isfile("minilua.exe") then
     HOST_LUA = "minilua.exe"
   end
-  
+
   if HOST_LUA then
     HOST_LUA = '"'..os.realpath(HOST_LUA)..'"'
   end
 end
 
-minilua = HOST_LUA or'"obj/minilua/%{cfg.buildcfg}%{cfg.platform}/minilua.exe"'
+minilua = HOST_LUA or '"obj/minilua/%{cfg.buildcfg}%{cfg.platform}/minilua.exe"'
 
 DEBUG_LUA_PATH = _OPTIONS["DEBUG_LUA_PATH"] or ""
 DebugDir = _OPTIONS["debugdir"] or DebugDir or "tests"
@@ -182,23 +180,23 @@ workspace "LuaJit"
     "lua.natvis",
     ".editorconfig",
   }
-  
+
   filter "platforms:x86"
     architecture "x86"
-    defines { 
-      "LUAJIT_TARGET=LUAJIT_ARCH_X86" 
+    defines {
+      "LUAJIT_TARGET=LUAJIT_ARCH_X86"
     }
-    
+
   filter "platforms:x64"
     architecture "x86_64"
-    defines { 
-      "LUAJIT_TARGET=LUAJIT_ARCH_X64" 
+    defines {
+      "LUAJIT_TARGET=LUAJIT_ARCH_X64"
     }
 
   filter "Debug"
     tags {"Debug"}
   filter "Release"
-    tags {"Release"} 
+    tags {"Release"}
   filter "DebugGC64"
     tags {"GC64", "Debug"}
   filter "ReleaseGC64"
@@ -218,8 +216,8 @@ workspace "LuaJit"
 
   filter "tags:DUALNUM"
     defines {"LUAJIT_NUMMODE=2"}
- 
-if not HOST_LUA then  
+
+if not HOST_LUA then
   project "minilua"
     kind "ConsoleApp"
     location(BuildDir)
@@ -227,27 +225,27 @@ if not HOST_LUA then
     language "C"
     vpaths { ["Sources"] = "src/host" }
     files {
-      "src/host/minilua.c", 
+      "src/host/minilua.c",
     }
-  
+
     filter "tags:Debug"
       defines { "NDEBUG" }
       optimize "Speed"
-  
+
     filter "tags:Release"
       defines { "NDEBUG" }
-      optimize "Speed" 
-end   
+      optimize "Speed"
+end
 
   project "buildvm"
     kind "ConsoleApp"
 if not HOST_LUA then
-    dependson { "minilua" } 
+    dependson { "minilua" }
 end
     vectorextensions "SSE2"
     location(BuildDir)
     language "C"
-    
+
     files {
       "src/host/buildvm*.c",
       '%{cfg.objdir}/buildvm_arch.h'
@@ -286,7 +284,7 @@ end
         minilua..' %{sln.location}dynasm/dynasm.lua -LN %{table.implode(cfg.dynasmflags, "-D ", "", " ")} -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
       }
       buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
-      
+
     filter {'files:src/vm_x86.dasc'}
       buildmessage 'Compiling %{file.relpath}'
       buildcommands {
@@ -296,10 +294,10 @@ end
 
     filter  {"tags:Debug"}
       optimize "Speed"
- 
+
     filter {"tags:Release"}
       optimize "Speed"
- 
+
   project "lua"
     kind "SharedLib"
     targetdir "%{cfg.bindir}"
@@ -309,26 +307,26 @@ end
     targetname "lua51"
     vectorextensions "SSE2"
     language "C++"
-    
+
     defines(flaglist)
-    dependson "buildvm"  
+    dependson "buildvm"
     vpaths { ["libs"] = "src/lib_*.h" }
     vpaths { ["libs"] = "src/lib_*.c" }
     vpaths { ["headers"] = "src/lj_*.h" }
     vpaths { [""] = "lua.natvis" }
     vpaths { [""] = "lua64.natvis" }
-    
+
     includedirs {
       "%{cfg.objdir}",
       "src"
     }
-    
+
     files {
       "src/lj_*.h",
       "src/lj_*.c",
       "src/lib_*.h",
       "src/lib_*.c",
-      
+
       '%{cfg.objdir}/lj_bcdef.h',
       '%{cfg.objdir}/lj_ffdef.h',
       '%{cfg.objdir}/lj_libdef.h',
@@ -373,22 +371,22 @@ end
       files { "lua.natvis" }
 
     filter "tags:GC64"
-      files { "lua64.natvis" } 
+      files { "lua64.natvis" }
 
     filter "system:windows"
       linkoptions {'"$(IntDir)lj_vm.obj"'}
 
     filter { "system:windows", "Debug", "tags:FixedAddr" }
       linkoptions { "/FIXED", "/DEBUG", '/BASE:"0x00440000', "/DYNAMICBASE:NO" }
-    
+
     filter "tags:Debug"
       defines { "DEBUG", "LUA_USE_ASSERT" }
-  
+
     filter  "tags:Release"
-      optimize "Speed" 
+      optimize "Speed"
       defines { "NDEBUG"}
-      
-  
+
+
   project "luajit"
     kind "ConsoleApp"
     location(BuildDir)
@@ -396,7 +394,7 @@ end
     vectorextensions "SSE2"
     symbols "On"
     language "C++"
-    
+
     defines(flaglist)
     vpaths { ["libs"] = "src/lib_*.h" }
     vpaths { ["libs"] = "src/lib_*.c" }
@@ -410,14 +408,14 @@ end
     files {
       "src/luajit.c"
     }
-    
-    links { 
+
+    links {
       "lua"
-    } 
-        
+    }
+
     filter "tags:Debug"
       defines { "DEBUG", "LUA_USE_ASSERT" }
- 
+
     filter "tags:Release"
       optimize "Speed"
       defines { "NDEBUG"}
@@ -513,7 +511,7 @@ mkdir_and_gitignore(dotvs)
 
 local function pathlist_tostring(cmds, prj, sep)
   local steps = os.translateCommandsAndPaths(cmds, prj.basedir, prj.location)
-	return table.implode(steps, "", "", sep) 
+  return table.implode(steps, "", "", sep)
 end
 
 p.override(p.vstudio.vc2010, "buildEvents", function(base, cfg)
@@ -528,7 +526,7 @@ p.override(p.vstudio.vc2010, "buildEvents", function(base, cfg)
       end
     p.pop("</CustomBuildStep>")
   end
-	base(cfg)
+  base(cfg)
 end)
 
 local function custombuild_settrigger(prj)
@@ -538,7 +536,7 @@ local function custombuild_settrigger(prj)
 end
 
 p.override(p.vstudio.vc2010.elements, "outputProperties", function(base, cfg)
-	local calls = base(cfg)
-	table.insert(calls, custombuild_settrigger)
-	return calls
+  local calls = base(cfg)
+  table.insert(calls, custombuild_settrigger)
+  return calls
 end)
