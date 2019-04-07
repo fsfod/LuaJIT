@@ -221,7 +221,6 @@ workspace "LuaJit"
  
 if not HOST_LUA then  
   project "minilua"
-    uuid "74FBF227-E0DA-71C3-E9F2-FC995551D824"
     kind "ConsoleApp"
     location(BuildDir)
     configurations { "Release" }
@@ -241,7 +240,6 @@ if not HOST_LUA then
 end   
 
   project "buildvm"
-    uuid "B86F1F94-244F-9E2F-2D67-290699C50491"
     kind "ConsoleApp"
 if not HOST_LUA then
     dependson { "minilua" } 
@@ -303,7 +301,6 @@ end
       optimize "Speed"
  
   project "lua"
-    uuid "C78D880B-3397-887C-BC12-9F7C281B947C"
     kind "SharedLib"
     targetdir "%{cfg.bindir}"
     location(BuildDir)
@@ -393,7 +390,6 @@ end
       
   
   project "luajit"
-    uuid "4E5D480C-3AFF-72E2-23BA-86360FFBF932"
     kind "ConsoleApp"
     location(BuildDir)
     targetdir "%{cfg.bindir}"
