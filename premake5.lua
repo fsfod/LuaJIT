@@ -178,7 +178,6 @@ workspace "LuaJit"
   targetdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}"
   bindir "%{wks.location}/bin/%{cfg.buildcfg}/%{cfg.platform}"
   startproject "luajit"
-  dynasmflags {"FFI"}
   workspace_files {
     "lua.natvis",
     ".editorconfig",
@@ -205,30 +204,20 @@ workspace "LuaJit"
   filter "ReleaseGC64"
     tags {"GC64", "Release"}
 
-  filter "system:windows"
-    dynasmflags { "WIN" }
-    
   filter { "system:windows", "Release" }
       linkoptions { "/Zo" }
- 
+
   filter { "tags:NOJIT" }
     defines {  "LUAJIT_DISABLE_JIT" }
-    
-  filter {"NOT tags:NOJIT" }
-    dynasmflags { "JIT" }
 
-  filter {"NOT tags:GC64", "platforms:x64" }
-    dynasmflags { "P64" }
-    
   filter "tags:LUA52COMPAT"
     defines { "LUAJIT_ENABLE_LUA52COMPAT" }
-    
+
   filter "tags:GC64"
     defines { "LUAJIT_ENABLE_GC64" }
-    
+
   filter "tags:DUALNUM"
     defines {"LUAJIT_NUMMODE=2"}
-    dynasmflags { "DUALNUM" }
  
 if not HOST_LUA then  
   project "minilua"
@@ -278,6 +267,21 @@ end
         "src/vm_x64.dasc"
       }
 
+    filter { "system:windows" }
+      dynasmflags { "WIN" }
+
+    filter { "NOT tags:GC64", "platforms:x64" }
+      dynasmflags { "P64" }
+
+    filter { "tags:DUALNUM" }
+      dynasmflags { "DUALNUM" }
+
+    filter { "NOT tags:NOFFI" }
+      dynasmflags { "FFI" }
+
+    filter { "NOT tags:NOJIT" }
+      dynasmflags { "JIT" }
+
     filter {'files:src/vm_x64.dasc'}
       buildmessage 'Compiling %{file.relpath}'
       buildcommands {
@@ -292,10 +296,6 @@ end
       }
       buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
 
-    filter {}
-      --'%{table.implode(cfg.dynasmflags, "-D ", "", " ")}'
-      
-      
     filter  {"tags:Debug"}
       optimize "Speed"
  
