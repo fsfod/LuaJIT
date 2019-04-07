@@ -281,14 +281,14 @@ end
     filter {'files:src/vm_x64.dasc'}
       buildmessage 'Compiling %{file.relpath}'
       buildcommands {
-        minilua..' %{sln.location}dynasm/dynasm.lua -LN %{table.implode(cfg.dynasmflags, "-D ", "", " ")} -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+        minilua..' %[dynasm/dynasm.lua] -LN %{table.implode(cfg.dynasmflags, "-D ", "", " ")} -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
       }
       buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
 
     filter {'files:src/vm_x86.dasc'}
       buildmessage 'Compiling %{file.relpath}'
       buildcommands {
-        minilua..' %{sln.location}dynasm/dynasm.lua -LN %{table.implode(cfg.dynasmflags, "-D ", "", " ")} -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+        minilua..' %[dynasm/dynasm.lua] -LN %{table.implode(cfg.dynasmflags, "-D ", "", " ")} -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
       }
       buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
 
@@ -349,12 +349,12 @@ end
 
     custombuildcommands {
       '{MKDIR} %{cfg.targetdir}/jit/',
-      '"obj/buildvm/%{cfg.buildcfg}%{cfg.platform}/buildvm.exe" -m peobj -o "$(IntDir)lj_vm.obj"',
+      '"obj/buildvm/%{cfg.buildcfg}%{cfg.platform}/buildvm.exe" -m peobj -o %{cfg.objdir}lj_vm.obj',
       BuildVmCommand("-m bcdef","lj_bcdef.h", true),
       BuildVmCommand("-m ffdef", "lj_ffdef.h", true),
       BuildVmCommand("-m libdef", "lj_libdef.h", true),
       BuildVmCommand("-m recdef", "lj_recdef.h", true),
-      BuildVmCommand("-m folddef", "lj_folddef.h", false).. '"%{sln.location}src/lj_opt_fold.c"',
+      BuildVmCommand("-m folddef", "lj_folddef.h", false).. '%[src/lj_opt_fold.c]',
       BuildVmCommand("-m vmdef", "vmdef.lua", true, '%{cfg.targetdir}/jit/'),
     }
     custombuildoutputs {
@@ -374,7 +374,7 @@ end
       files { "lua64.natvis" }
 
     filter "system:windows"
-      linkoptions {'"$(IntDir)lj_vm.obj"'}
+      linkoptions {'%{cfg.objdir}/lj_vm.obj'}
 
     filter { "system:windows", "Debug", "tags:FixedAddr" }
       linkoptions { "/FIXED", "/DEBUG", '/BASE:"0x00440000', "/DYNAMICBASE:NO" }
