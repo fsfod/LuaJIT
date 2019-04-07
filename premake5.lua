@@ -193,16 +193,10 @@ workspace "LuaJit"
       "LUAJIT_TARGET=LUAJIT_ARCH_X64"
     }
 
-  filter "Debug"
-    tags {"Debug"}
-  filter "Release"
-    tags {"Release"}
-  filter "DebugGC64"
-    tags {"GC64", "Debug"}
-  filter "ReleaseGC64"
-    tags {"GC64", "Release"}
+  filter "*GC64*"
+    tags { "GC64" }
 
-  filter { "system:windows", "Release" }
+  filter { "system:windows", "Release*" }
     buildoptions { "/Zo" } -- Ask MSVC for improved debug info for optimized code
 
   filter { "tags:NOJIT" }
@@ -228,11 +222,11 @@ if not HOST_LUA then
       "src/host/minilua.c",
     }
 
-    filter "tags:Debug"
+    filter "Debug*"
       defines { "NDEBUG" }
       optimize "Speed"
 
-    filter "tags:Release"
+    filter "Release*"
       defines { "NDEBUG" }
       optimize "Speed"
 end
@@ -292,10 +286,10 @@ end
       }
       buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
 
-    filter  {"tags:Debug"}
+    filter  {"Debug*"}
       optimize "Speed"
 
-    filter {"tags:Release"}
+    filter {"Release*"}
       optimize "Speed"
 
   project "lua"
@@ -376,13 +370,13 @@ end
     filter "system:windows"
       linkoptions {'%{cfg.objdir}/lj_vm.obj'}
 
-    filter { "system:windows", "Debug", "tags:FixedAddr" }
+    filter { "system:windows", "Debug*", "tags:FixedAddr" }
       linkoptions { "/FIXED", "/DEBUG", '/BASE:"0x00440000', "/DYNAMICBASE:NO" }
 
-    filter "tags:Debug"
+    filter "Debug*"
       defines { "DEBUG", "LUA_USE_ASSERT" }
 
-    filter  "tags:Release"
+    filter  "Release*"
       optimize "Speed"
       defines { "NDEBUG"}
 
@@ -413,14 +407,14 @@ end
       "lua"
     }
 
-    filter "tags:Debug"
+    filter "Debug*"
       defines { "DEBUG", "LUA_USE_ASSERT" }
 
-    filter "tags:Release"
+    filter "Release*"
       optimize "Speed"
       defines { "NDEBUG"}
 
-    filter { "system:windows", "Debug", "tags:FixedAddr" }
+    filter { "system:windows", "Debug*", "tags:FixedAddr" }
       linkoptions { "/FIXED", "/DEBUG", '/BASE:"0x00400000',  "/DYNAMICBASE:NO" }
 
 project "CreateRelease"
