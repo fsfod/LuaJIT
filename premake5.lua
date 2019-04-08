@@ -84,11 +84,25 @@ newoption {
     description = "override the build directory"
 }
 
+newoption {
+   trigger     = "host_lua",
+   value       = "path",
+   description = "Specify the hosts Lua executable to run dynasm during the build instead of building minilua"
+}
 if os.isfile("user.lua") then
   dofile("user.lua")
 end
 
 BuildDir = _OPTIONS["builddir"] or "build"
+DEBUG_LUA_PATH = _OPTIONS["DEBUG_LUA_PATH"] or ""
+DebugDir = _OPTIONS["debugdir"] or DebugDir or "tests"
+DebugArgs = _OPTIONS["debugargs"] or DebugArgs or "../tests/runtests.lua"
+
+local HostExt = ""
+
+if os.host() == "windows" then
+  HostExt = ".exe"
+end
 
 liblist = {
     "lib_base.c",
@@ -121,15 +135,15 @@ local buildvminputs = {
     "%{sln.location}src/vm_x86.dasc",
 }
 
-liblistString = "%{sln.location}src/"..table.concat(liblist, " %{sln.location}src/")
+liblistString = "%{sln.location}/src/"..table.concat(liblist, " %{sln.location}/src/")
 
 --local libs = os.matchfiles("src/lib_*.c")
 
 function BuildVmCommand(cmd, outputfile, addLibList, outputDir)
 
-    outputDir = outputDir or "%{cfg.objdir}"
-
-    local result = '"obj/buildvm/%{cfg.buildcfg}%{cfg.platform}/buildvm.exe" '..cmd..' -o "'..outputDir..outputfile..'" '
+    outputDir = outputDir or "%{cfg.objdir}/"
+    
+    local result = '"obj/buildvm/%{cfg.buildcfg}%{cfg.platform}/buildvm%{cfg.system == "windows" and ".exe" or ""}" '..cmd..' -o "'..outputDir..outputfile..'" '
 
     if addLibList then
         result = result..liblistString
@@ -140,24 +154,32 @@ end
 
 HOST_LUA = _OPTIONS["HOST_LUA"]
 
-if not HOST_LUA then
-
-  if os.isfile(path.join(BuildDir, "minilua.exe")) then
-    HOST_LUA = path.join(BuildDir, "minilua.exe")
-  elseif os.isfile("minilua.exe") then
-    HOST_LUA = "minilua.exe"
-  end
-
-  if HOST_LUA then
-    HOST_LUA = '"'..os.realpath(HOST_LUA)..'"'
-  end
+if HOST_LUA and not os.isfile(HOST_LUA) then
+  error("host Lua executable does not exist")
 end
 
-minilua = HOST_LUA or '"obj/minilua/%{cfg.buildcfg}%{cfg.platform}/minilua.exe"'
+if not HOST_LUA then
+  local function find_luaexe(exename)
+    if os.isfile(path.join(BuildDir, exename)) then
+      return path.join(BuildDir, exename)
+    elseif os.isfile(exename) then
+      return exename
+    end
+  end
+  
+  HOST_LUA = find_luaexe("luajit"..HostExt) or find_luaexe("minilua"..HostExt)
+end
 
-DEBUG_LUA_PATH = _OPTIONS["DEBUG_LUA_PATH"] or ""
-DebugDir = _OPTIONS["debugdir"] or DebugDir or "tests"
-DebugArgs = _OPTIONS["debugargs"] or DebugArgs or "../tests/runtests.lua"
+if HOST_LUA then
+  print("Using found Lua executable "..HOST_LUA.." in-place of building minilua")
+  HOST_LUA = path.getrelative(BuildDir, HOST_LUA)
+end
+
+if not HOST_LUA then
+  minilua = '"obj/%{cfg.buildcfg}%{cfg.platform}/minilua/minilua%{cfg.system == "windows" and ".exe" or ""}"'
+else
+  minilua = HOST_LUA
+end
 
 if not SlnFileName then
   SlnFileName = "LuaJit"
@@ -169,17 +191,15 @@ workspace "LuaJit"
   filename(SlnFileName)
   editorintegration "On"
   configurations { "Debug", "Release",  "DebugGC64", "ReleaseGC64", "DebugStatic", "ReleaseStatic"}
-  platforms { "x86", "x64" }
-  defines {"_CRT_SECURE_NO_DEPRECATE" }
-  objdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}"
-  targetdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}"
+  platforms { "x64", "x86" }
+  objdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}/"
+  targetdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}/"
   bindir "%{wks.location}/bin/%{cfg.buildcfg}/%{cfg.platform}"
   startproject "luajit"
   workspace_files {
     "lua.natvis",
     ".editorconfig",
   }
-
   filter "platforms:x86"
     architecture "x86"
     defines {
@@ -190,6 +210,21 @@ workspace "LuaJit"
     architecture "x86_64"
     defines {
       "LUAJIT_TARGET=LUAJIT_ARCH_X64"
+  }
+
+  filter { "system:windows" }
+    defines { 
+      "LUAJIT_OS=LUAJIT_OS_WINDOWS", 
+      "_CRT_SECURE_NO_DEPRECATE",
+    }
+
+  filter { "system:linux" }
+    defines { 
+      "LUAJIT_OS=LUAJIT_OS_LINUX",
+    }
+    buildoptions {
+      "-fomit-frame-pointer",
+      "-fno-stack-protector",
     }
 
   filter "*GC64*"
@@ -223,6 +258,10 @@ if not HOST_LUA then
     files {
       "src/host/minilua.c",
     }
+    filter { "system:linux" }
+      links {
+        "m",
+      }
 
     filter "Debug*"
       defines { "NDEBUG" }
@@ -277,14 +316,14 @@ end
     filter {'files:src/vm_x64.dasc'}
       buildmessage 'Compiling %{file.relpath}'
       buildcommands {
-        minilua..' %[dynasm/dynasm.lua] -LN %{table.implode(cfg.dynasmflags, "-D ", "", " ")} -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+        minilua..' %[dynasm/dynasm.lua] -LN %{table.implode(cfg.dynasmflags, "-D ", "", " ")} -o %{cfg.objdir}/buildvm_arch.h %{file.relpath}'
       }
       buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
 
     filter {'files:src/vm_x86.dasc'}
       buildmessage 'Compiling %{file.relpath}'
       buildcommands {
-        minilua..' %[dynasm/dynasm.lua] -LN %{table.implode(cfg.dynasmflags, "-D ", "", " ")} -o %{cfg.objdir}buildvm_arch.h %{file.relpath}'
+        minilua..' %[dynasm/dynasm.lua] -LN %{table.implode(cfg.dynasmflags, "-D ", "", " ")} -o %{cfg.objdir}/buildvm_arch.h %{file.relpath}'
       }
       buildoutputs { '%{cfg.objdir}/buildvm_arch.h' }
 
@@ -303,11 +342,10 @@ end
 
     targetdir "%{cfg.bindir}"
     location(BuildDir)
-    buildoptions "/c"
     symbols "On"
     targetname "lua51"
     vectorextensions "SSE2"
-    language "C++"
+    language "c"
 
     defines(flaglist)
     dependson "buildvm"
@@ -348,25 +386,38 @@ end
       "src/*_ppc.h",
     }
 
-    custombuildcommands {
-      '{MKDIR} %{cfg.targetdir}/jit/',
-      '"obj/buildvm/%{cfg.buildcfg}%{cfg.platform}/buildvm.exe" -m peobj -o %{cfg.objdir}lj_vm.obj',
-      BuildVmCommand("-m bcdef","lj_bcdef.h", true),
-      BuildVmCommand("-m ffdef", "lj_ffdef.h", true),
-      BuildVmCommand("-m libdef", "lj_libdef.h", true),
-      BuildVmCommand("-m recdef", "lj_recdef.h", true),
-      BuildVmCommand("-m folddef", "lj_folddef.h", false).. '%[src/lj_opt_fold.c]',
-      BuildVmCommand("-m vmdef", "vmdef.lua", true, '%{cfg.targetdir}/jit/'),
-    }
-    custombuildoutputs {
-      '%{cfg.objdir}lj_bcdef.h',
-      '%{cfg.objdir}lj_ffdef.h',
-      '%{cfg.objdir}lj_libdef.h',
-      '%{cfg.objdir}lj_recdef.h',
-      '%{cfg.objdir}lj_folddef.h',
-      '%{cfg.objdir}lj_vm.obj',
-    }
-    custombuildinputs(buildvminputs)
+    filter { "system:windows" }
+      custombuildcommands {
+        '{MKDIR} %{cfg.targetdir}/jit/',
+        '"obj/buildvm/%{cfg.buildcfg}%{cfg.platform}/buildvm.exe" -m peobj -o %{cfg.objdir}lj_vm.obj',
+        BuildVmCommand("-m bcdef","lj_bcdef.h", true),
+        BuildVmCommand("-m ffdef", "lj_ffdef.h", true),
+        BuildVmCommand("-m libdef", "lj_libdef.h", true),
+        BuildVmCommand("-m recdef", "lj_recdef.h", true),
+        BuildVmCommand("-m folddef", "lj_folddef.h", false).. '%[src/lj_opt_fold.c]',
+        BuildVmCommand("-m vmdef", "vmdef.lua", true, '%{cfg.targetdir}/jit/'),
+      }
+      custombuildoutputs {
+        '%{cfg.objdir}lj_bcdef.h',
+        '%{cfg.objdir}lj_ffdef.h',
+        '%{cfg.objdir}lj_libdef.h',
+        '%{cfg.objdir}lj_recdef.h',
+        '%{cfg.objdir}lj_folddef.h',
+        '%{cfg.objdir}lj_vm.obj',
+      }
+      custombuildinputs(buildvminputs)
+
+    filter { "system:linux" }
+      prebuildcommands {
+        '{MKDIR} %{cfg.targetdir}/jit/',
+        '"obj/buildvm/%{cfg.buildcfg}%{cfg.platform}/buildvm" -m elfasm -o %{cfg.objdir}/lj_vm.S',
+        BuildVmCommand("-m bcdef","lj_bcdef.h", true),
+        BuildVmCommand("-m ffdef", "lj_ffdef.h", true),
+        BuildVmCommand("-m libdef", "lj_libdef.h", true),
+        BuildVmCommand("-m recdef", "lj_recdef.h", true),
+        BuildVmCommand("-m folddef", "lj_folddef.h", false).. '%[src/lj_opt_fold.c]',
+        BuildVmCommand("-m vmdef", "vmdef.lua", true, '%{cfg.targetdir}/jit/'),
+      }
 
     filter "NOT tags:GC64"
       files { "lua.natvis" }
@@ -376,6 +427,12 @@ end
 
     filter "system:windows"
       linkoptions {'%{cfg.objdir}/lj_vm.obj'}
+      
+    filter "system:linux"
+      links {
+        "dl",
+      }
+      linkoptions {'%{cfg.objdir}/lj_vm.S'}
 
     filter { "system:windows", "Debug*", "tags:FixedAddr" }
       linkoptions { "/FIXED", "/DEBUG", '/BASE:"0x00440000', "/DYNAMICBASE:NO" }
