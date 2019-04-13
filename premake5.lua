@@ -275,7 +275,8 @@ if not HOST_LUA then
   project "minilua"
     kind "ConsoleApp"
     location(BuildDir)
-    configurations { "Release" }
+    defines { "NDEBUG" }
+    optimize "Speed"
     language "C"
     vpaths { ["Sources"] = "src/host" }
     files {
@@ -285,14 +286,6 @@ if not HOST_LUA then
       links {
         "m",
       }
-
-    filter "Debug*"
-      defines { "NDEBUG" }
-      optimize "Speed"
-
-    filter "Release*"
-      defines { "NDEBUG" }
-      optimize "Speed"
 end
 
   project "buildvm"
