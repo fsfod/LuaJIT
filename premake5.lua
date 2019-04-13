@@ -111,6 +111,10 @@ if _OPTIONS.dualnum then
   table.insert(TagList, "DUALNUM") 
 end
 
+if os.isfile("src/jitlog/build.lua") and os.isfile("src/jitlog/messages.lua") then
+  table.insert(TagList, "JITLOG")
+end
+
 if os.isfile("user.lua") then
   dofile("user.lua")
 end
@@ -401,6 +405,40 @@ end
       "src/*_mips.h",
       "src/*_ppc.h",
     }
+    
+    filter "tags:JITLOG"
+      includedirs { 
+        "%{cfg.bindir}/jitlog",
+      }
+      files {
+        "src/jitlog/messages.lua",
+        "%{cfg.bindir}/jitlog/lj_jitlog_def.h",
+        "%{cfg.bindir}/jitlog/lj_jitlog_decl.h", 
+        "%{cfg.objdir}/lj_jitlog_writers.h",
+      }
+    
+    filter {'files:src/jitlog/messages.lua'}
+      buildmessage 'Generating JITLog definitions'
+      buildinputs {
+         "src/jitlog/build.lua",
+         "src/jitlog/messages.lua",
+         "src/jitlog/generator.lua",
+         "src/jitlog/c_generator.lua",
+         "src/jitlog/lua_generator.lua",
+         "src/jitlog/cs_generator.lua",
+      }
+      buildcommands {
+        '{MKDIR} %{cfg.targetdir}/jitlog/',
+        minilua..' %[src/jitlog/build.lua] %{cfg.tags["GC64"] and "--gc64" or ""} %{file.relpath} writers %{cfg.objdir}/',
+        minilua..' %[src/jitlog/build.lua] %{cfg.tags["GC64"] and "--gc64" or ""} %{file.relpath} defs %{cfg.targetdir}/jitlog/',
+        minilua..' %[src/jitlog/build.lua] %{cfg.tags["GC64"] and "--gc64" or ""} %{file.relpath} lua %{cfg.targetdir}/jitlog/',
+        minilua..' %[src/jitlog/build.lua] %{cfg.tags["GC64"] and "--gc64" or ""} %{file.relpath} csharp %{cfg.targetdir}/jitlog/',
+      }
+      buildoutputs { 
+        "%{cfg.bindir}/jitlog/lj_jitlog_def.h",
+        "%{cfg.bindir}/jitlog/lj_jitlog_decl.h", 
+        "%{cfg.objdir}/lj_jitlog_writers.h",
+      }
 
     filter { "system:windows" }
       custombuildcommands {
@@ -556,12 +594,35 @@ project "CreateRelease"
       }
       buildmessage ""
     
+    filter {'files:**/jitlog/*.lua'}
+      buildcommands {
+        '{COPY} %[%{file.relpath}] %{cfg.targetdir}/jitlog/',
+      }
+      buildoutputs { 
+        "%{cfg.targetdir}/jitlog/%{file.name}",
+      }
+      buildmessage ""
+    
     prebuildmessage "Copying files"
     prebuildcommands {
       "{MKDIR} %{cfg.targetdir}/",
       "{MKDIR} %{cfg.targetdir}/include",
       "{MKDIR} %{cfg.targetdir}/jit",
     }
+
+    filter { "tags:JITLOG" }
+      files {
+        "src/jitlog.h",
+        "src/vmevent.h",
+        "src/lj_usrbuf.h",
+        "src/jitlog/**.lua",
+        "%{cfg.bindir}/jitlog/lj_jitlog_def.h",
+        "%{cfg.bindir}/jitlog/lj_jitlog_decl.h", 
+        "%{cfg.bindir}/jitlog/reader_def.lua",
+      }
+      prebuildcommands {
+        "{MKDIR} %{cfg.targetdir}/jitlog",
+      }
 
 local rootignors = {
   "*.opensdf",
