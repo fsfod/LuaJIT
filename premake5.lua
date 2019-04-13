@@ -89,6 +89,28 @@ newoption {
    value       = "path",
    description = "Specify the hosts Lua executable to run dynasm during the build instead of building minilua"
 }
+
+newoption {
+   trigger     = "amalg",
+   description = "Build Luajit using a amalg\\unity based build compiling all the sources file as one file",
+}
+
+newoption {
+   trigger     = "dualnum",
+   description = "Build LuaJIT with both a integer and floating point number type"
+}
+
+TagList = {}
+
+if _OPTIONS.amalg then
+  print("Generating amalgamated\\unity based build")
+  table.insert(TagList, "AMALG") 
+end
+
+if _OPTIONS.dualnum then
+  table.insert(TagList, "DUALNUM") 
+end
+
 if os.isfile("user.lua") then
   dofile("user.lua")
 end
@@ -200,6 +222,7 @@ workspace "LuaJit"
     "lua.natvis",
     ".editorconfig",
   }
+  tags(TagList)
   filter "platforms:x86"
     architecture "x86"
     defines {
