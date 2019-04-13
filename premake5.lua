@@ -143,7 +143,7 @@ function BuildVmCommand(cmd, outputfile, addLibList, outputDir)
 
     outputDir = outputDir or "%{cfg.objdir}/"
     
-    local result = '"obj/buildvm/%{cfg.buildcfg}%{cfg.platform}/buildvm%{cfg.system == "windows" and ".exe" or ""}" '..cmd..' -o "'..outputDir..outputfile..'" '
+    local result = '"obj/%{cfg.buildcfg}%{cfg.platform}/buildvm/buildvm%{cfg.system == "windows" and ".exe" or ""}" '..cmd..' -o "'..outputDir..outputfile..'" '
 
     if addLibList then
         result = result..liblistString
@@ -192,8 +192,8 @@ workspace "LuaJit"
   editorintegration "On"
   configurations { "Debug", "Release",  "DebugGC64", "ReleaseGC64", "DebugStatic", "ReleaseStatic"}
   platforms { "x64", "x86" }
-  objdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}/"
-  targetdir "%{sln.location}/%{BuildDir}/obj/%{prj.name}/%{cfg.buildcfg}%{cfg.platform}/"
+  objdir "%{wks.location}/%{BuildDir}/obj/%{cfg.buildcfg}%{cfg.platform}/%{prj.name}"
+  targetdir "%{cfg.objdir}/"
   bindir "%{wks.location}/bin/%{cfg.buildcfg}/%{cfg.platform}"
   startproject "luajit"
   workspace_files {
@@ -389,7 +389,7 @@ end
     filter { "system:windows" }
       custombuildcommands {
         '{MKDIR} %{cfg.targetdir}/jit/',
-        '"obj/buildvm/%{cfg.buildcfg}%{cfg.platform}/buildvm.exe" -m peobj -o %{cfg.objdir}lj_vm.obj',
+        '"obj/%{cfg.buildcfg}%{cfg.platform}/buildvm/buildvm.exe" -m peobj -o %{cfg.objdir}lj_vm.obj',
         BuildVmCommand("-m bcdef","lj_bcdef.h", true),
         BuildVmCommand("-m ffdef", "lj_ffdef.h", true),
         BuildVmCommand("-m libdef", "lj_libdef.h", true),
@@ -410,7 +410,7 @@ end
     filter { "system:linux" }
       prebuildcommands {
         '{MKDIR} %{cfg.targetdir}/jit/',
-        '"obj/buildvm/%{cfg.buildcfg}%{cfg.platform}/buildvm" -m elfasm -o %{cfg.objdir}/lj_vm.S',
+        '"obj/%{cfg.buildcfg}%{cfg.platform}/buildvm/buildvm" -m elfasm -o %{cfg.objdir}/lj_vm.S',
         BuildVmCommand("-m bcdef","lj_bcdef.h", true),
         BuildVmCommand("-m ffdef", "lj_ffdef.h", true),
         BuildVmCommand("-m libdef", "lj_libdef.h", true),
