@@ -144,24 +144,11 @@ liblist = {
     "lib_ffi.c",
 }
 
-local buildvminputs = {
-    "%{sln.location}src/lib_base.c",
-    "%{sln.location}src/lib_math.c",
-    "%{sln.location}src/lib_bit.c",
-    "%{sln.location}src/lib_string.c",
-    "%{sln.location}src/lib_table.c",
-    "%{sln.location}src/lib_io.c",
-    "%{sln.location}src/lib_os.c",
-    "%{sln.location}src/lib_package.c",
-    "%{sln.location}src/lib_debug.c",
-    "%{sln.location}src/lib_jit.c",
-    "%{sln.location}src/lib_ffi.c",
-    "%{sln.location}src/lib_ffi.c",
-    "%{sln.location}src/vm_x64.dasc",
-    "%{sln.location}src/vm_x86.dasc",
-}
+liblistString = ""
 
-liblistString = "%{sln.location}/src/"..table.concat(liblist, " %{sln.location}/src/")
+for i, name in ipairs(liblist) do
+  liblistString = string.format('%s %%[src/%s]', liblistString, name)
+end
 
 --local libs = os.matchfiles("src/lib_*.c")
 
@@ -372,6 +359,7 @@ end
     vpaths { ["libs"] = "src/lib_*.h" }
     vpaths { ["libs"] = "src/lib_*.c" }
     vpaths { ["headers"] = "src/lj_*.h" }
+    vpaths { ["src"] = "src/lj_*.c" }
     vpaths { [""] = "lua.natvis" }
     vpaths { [""] = "lua64.natvis" }
 
@@ -405,6 +393,19 @@ end
       "src/*_mips.h",
       "src/*_ppc.h",
     }
+    
+    filter "system:windows"
+      files {
+        "%{wks.location}/build/obj/%{cfg.buildcfg}%{cfg.platform}/buildvm/buildvm.exe"
+      }
+      
+    filter "system:linux"
+      files {
+        "%{wks.location}/build/obj/%{cfg.buildcfg}%{cfg.platform}/buildvm/buildvm"
+      }
+      links {
+        "dl",
+      }
     
     filter "tags:JITLOG"
       includedirs { 
@@ -440,37 +441,54 @@ end
         "%{cfg.objdir}/lj_jitlog_writers.h",
       }
 
-    filter { "system:windows" }
-      custombuildcommands {
+    filter { "files:**/buildvm/buildvm OR files:**/buildvm/buildvm.exe" }
+      buildcommands {
         '{MKDIR} %{cfg.targetdir}/jit/',
-        '"obj/%{cfg.buildcfg}%{cfg.platform}/buildvm/buildvm.exe" -m peobj -o %{cfg.objdir}lj_vm.obj',
-        BuildVmCommand("-m bcdef","lj_bcdef.h", true),
-        BuildVmCommand("-m ffdef", "lj_ffdef.h", true),
-        BuildVmCommand("-m libdef", "lj_libdef.h", true),
-        BuildVmCommand("-m recdef", "lj_recdef.h", true),
+        BuildVmCommand("-m bcdef",   "lj_bcdef.h",   true),
+        BuildVmCommand("-m ffdef",   "lj_ffdef.h",   true),
+        BuildVmCommand("-m libdef",  "lj_libdef.h",  true),
+        BuildVmCommand("-m recdef",  "lj_recdef.h",  true),
         BuildVmCommand("-m folddef", "lj_folddef.h", false).. '%[src/lj_opt_fold.c]',
-        BuildVmCommand("-m vmdef", "vmdef.lua", true, '%{cfg.targetdir}/jit/'),
+        BuildVmCommand("-m vmdef",   "vmdef.lua",    true, '%{cfg.targetdir}/jit/'),
       }
-      custombuildoutputs {
-        '%{cfg.objdir}lj_bcdef.h',
-        '%{cfg.objdir}lj_ffdef.h',
-        '%{cfg.objdir}lj_libdef.h',
-        '%{cfg.objdir}lj_recdef.h',
-        '%{cfg.objdir}lj_folddef.h',
-        '%{cfg.objdir}lj_vm.obj',
+      buildoutputs {
+        '%{cfg.objdir}/lj_bcdef.h',
+        '%{cfg.objdir}/lj_ffdef.h',
+        '%{cfg.objdir}/lj_libdef.h',
+        '%{cfg.objdir}/lj_recdef.h',
+        '%{cfg.objdir}/lj_folddef.h',
       }
-      custombuildinputs(buildvminputs)
-
-    filter { "system:linux" }
-      prebuildcommands {
-        '{MKDIR} %{cfg.targetdir}/jit/',
-        '"obj/%{cfg.buildcfg}%{cfg.platform}/buildvm/buildvm" -m elfasm -o %{cfg.objdir}/lj_vm.S',
-        BuildVmCommand("-m bcdef","lj_bcdef.h", true),
-        BuildVmCommand("-m ffdef", "lj_ffdef.h", true),
-        BuildVmCommand("-m libdef", "lj_libdef.h", true),
-        BuildVmCommand("-m recdef", "lj_recdef.h", true),
-        BuildVmCommand("-m folddef", "lj_folddef.h", false).. '%[src/lj_opt_fold.c]',
-        BuildVmCommand("-m vmdef", "vmdef.lua", true, '%{cfg.targetdir}/jit/'),
+      buildinputs {
+        "src/lib_base.c",
+        "src/lib_math.c",
+        "src/lib_bit.c",
+        "src/lib_string.c",
+        "src/lib_table.c",
+        "src/lib_io.c",
+        "src/lib_os.c",
+        "src/lib_package.c",
+        "src/lib_debug.c",
+        "src/lib_jit.c",
+        "src/lib_ffi.c",
+        "src/lib_ffi.c",
+        "src/vm_x64.dasc",
+        "src/vm_x86.dasc",
+      }
+      
+    filter { "files:**/buildvm/buildvm.exe",  "system:windows" }
+      buildcommands {
+        '"obj/%{cfg.buildcfg}%{cfg.platform}/buildvm/buildvm.exe" -m peobj -o %{cfg.objdir}lj_vm.obj'
+      }
+      buildoutputs {
+        "%{cfg.objdir}/lj_vm.obj",
+      }
+    
+    filter { "files:**/buildvm/buildvm",  "system:linux" }
+      buildcommands {
+        '"obj/%{cfg.buildcfg}%{cfg.platform}/buildvm/buildvm" -m elfasm -o %{cfg.objdir}/lj_vm.S'
+      }
+      buildoutputs {
+        "%{cfg.objdir}/lj_vm.S",
       }
 
     filter "NOT tags:GC64"
@@ -478,15 +496,6 @@ end
 
     filter "tags:GC64"
       files { "lua64.natvis" }
-
-    filter "system:windows"
-      linkoptions {'%{cfg.objdir}/lj_vm.obj'}
-      
-    filter "system:linux"
-      links {
-        "dl",
-      }
-      linkoptions {'%{cfg.objdir}/lj_vm.S'}
 
     filter { "system:windows", "Debug*", "tags:FixedAddr" }
       linkoptions { "/FIXED", "/DEBUG", '/BASE:"0x00440000', "/DYNAMICBASE:NO" }
@@ -643,35 +652,3 @@ local dotvs = os.realpath(path.join(os.realpath(BuildDir), "../.vs"))
 mkdir_and_gitignore(os.realpath(BuildDir))
 mkdir_and_gitignore(bin)
 mkdir_and_gitignore(dotvs)
-
-local function pathlist_tostring(cmds, prj, sep)
-  local steps = os.translateCommandsAndPaths(cmds, prj.basedir, prj.location)
-  return table.implode(steps, "", "", sep)
-end
-
-p.override(p.vstudio.vc2010, "buildEvents", function(base, cfg)
-  if #cfg.custombuildcommands > 0 then
-    p.push('<CustomBuildStep>')
-      _x(2,'<Command>%s</Command>', pathlist_tostring(cfg.custombuildcommands, cfg.project, "\r\n"))
-      if #cfg.custombuildoutputs > 0 then
-        _x(2,'<Outputs>%s</Outputs>', pathlist_tostring(cfg.custombuildoutputs, cfg.project, ";"))
-      end
-      if #cfg.custombuildinputs > 0 then
-        _x(2,'<Inputs>%s</Inputs>', pathlist_tostring(cfg.custombuildinputs, cfg.project, ";"))
-      end
-    p.pop("</CustomBuildStep>")
-  end
-  base(cfg)
-end)
-
-local function custombuild_settrigger(prj)
-  if #prj.custombuildcommands > 0 then
-    p.x("<CustomBuildAfterTargets>BuildGenerateSources</CustomBuildAfterTargets>")
-  end
-end
-
-p.override(p.vstudio.vc2010.elements, "outputProperties", function(base, cfg)
-  local calls = base(cfg)
-  table.insert(calls, custombuild_settrigger)
-  return calls
-end)
