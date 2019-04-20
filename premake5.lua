@@ -115,14 +115,23 @@ if os.isfile("src/jitlog/build.lua") and os.isfile("src/jitlog/messages.lua") th
   table.insert(TagList, "JITLOG")
 end
 
-if os.isfile("user.lua") then
-  dofile("user.lua")
+DebugDir = ""
+DebugArgs = ""
+
+-- Default to running LuaJIT's unit tests if there folder exists
+if os.isfile("test/test.lua") then
+  DebugDir = "test"
+  DebugArgs = "test.lua"
 end
 
 BuildDir = _OPTIONS["builddir"] or "build"
 DEBUG_LUA_PATH = _OPTIONS["DEBUG_LUA_PATH"] or ""
-DebugDir = _OPTIONS["debugdir"] or DebugDir or "tests"
-DebugArgs = _OPTIONS["debugargs"] or DebugArgs or "../tests/runtests.lua"
+DebugDir = _OPTIONS["debugdir"] or DebugDir
+DebugArgs = _OPTIONS["debugargs"] or DebugArgs
+
+if os.isfile("user.lua") then
+  dofile("user.lua")
+end
 
 local HostExt = ""
 
@@ -520,7 +529,7 @@ end
     vpaths { ["libs"] = "src/lib_*.h" }
     vpaths { ["libs"] = "src/lib_*.c" }
     debugenvs {
-      "LUA_PATH=%{cfg.bindir}/?.lua;%{sln.location}src/?.lua;%{sln.location}tests/?.lua"..DEBUG_LUA_PATH..";%LUA_PATH%",
+      "LUA_PATH=%{cfg.bindir}/?.lua;%{sln.location}src/?.lua;%{sln.location}tests/?.lua"..DEBUG_LUA_PATH..";%LUA_PATH%;./?.lua",
     }
 
     debugdir(DebugDir)
