@@ -513,7 +513,7 @@ LJVMCORE_DYNO= $(LJVMCORE_O:.o=_dyn.o)
 LIB_VMDEF= jit/vmdef.lua
 LIB_VMDEFP= $(LIB_VMDEF)
 
-JITLOG_DEF= jitlog/reader_def.lua
+JITLOG_DEF= jitlog/reader_def.lua jitlog/JitLog.cs
 
 LUAJIT_O= luajit.o
 LUAJIT_A= libluajit.a
@@ -661,6 +661,9 @@ lj_jitlog_def.h: $(DASM_DEP) jitlog/build.lua jitlog/messages.jlfbs jitlog/gener
 
 jitlog/reader_def.lua: $(DASM_DEP) jitlog/build.lua jitlog/messages.jlfbs jitlog/generator.lua jitlog/c_generator.lua
 	$(HOST_LUA) jitlog/build.lua $(JITLOG_FLAGS) jitlog/messages.jlfbs lua jitlog/
+
+jitlog/JitLog.cs: $(DASM_DEP) jitlog/build.lua jitlog/messages.jlfbs jitlog/generator.lua jitlog/cs_generator.lua 
+	$(HOST_LUA) jitlog/build.lua $(JITLOG_FLAGS) jitlog/messages.jlfbs csharp jitlog/
 
 host/buildvm.o: $(DASM_DIR)/dasm_*.h
 

@@ -100,6 +100,7 @@ local actions =  {
   defs = function() apigen.write_c(data, {outdir = outpath, mode = "defs"}) end,
   writers = function() apigen.write_c(data, {outdir = outpath, mode = "writers"})  end,
   lua = function() apigen.writelang("lua", data, {outdir = outpath})  end,
+  csharp = function() apigen.writelang("cs", data, {outdir = outpath})  end,
 }
 
 actions.all = function()
