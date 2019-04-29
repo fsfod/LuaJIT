@@ -428,7 +428,10 @@ function parser:complete()
   return data
 end
 
-local generator = {}
+local generator = {
+  -- Add a empty lookup table that can overriden in derived generators
+  typerename = {},
+}
 
 function generator:write(s)
   self.outputfile:write(s)
@@ -455,20 +458,29 @@ function generator:writetemplate(name, ...)
   self:write(result)
 end
 
+-- Allow the generators to rename or escape field names that are keywords
+function generator:fixname(name)
+  return name
+end
+
 function generator:mkfield(f)
   local ret
-
+  
+  if self.inline_fieldaccess and (f.bitstorage or f.vlen) then
+    return ""
+  end
+  
   local comment_line = self.templates.struct_comment or self.templates.comment_line
-  local name = f.name
+  local name = self:fixname(f.name)
 
   if f.type == "bitfield" then
     ret = format("/*  %s: %d;*/\n", name, f.bitsize)
   else
     local type = self.types[f.type]
-    local langtype = type.c or f.type
+    local langtype = self.typerename[f.type] or type.c or f.type
 
     if f.vlen then
-      langtype = type.element_type or langtype
+      langtype = self.typerename[type.element_type] or type.element_type or langtype
       -- Write a comment for fields that have to be fetched with a getter to still show there part of the struct
       ret = "  "..format(comment_line, format("%s %s[%s];", langtype, name, f.buflen)).."\n"
     elseif f.bitstorage then
