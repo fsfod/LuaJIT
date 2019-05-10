@@ -227,6 +227,27 @@ function generator:write_flatbuffer_vtable()
   self:write("\n};\n")
 end
 
+local defentry = [[
+const char msgdefstr[] = {
+{{lines:"%s\\n"
+}}"};\n\n"
+]]
+
+-- Embed the raw field definition strings as a kind of c struct syntax that is concat'ed together in
+-- one giant string that can be embedded in the JITLog.
+function generator:write_msginfo()
+  self:write("\n")
+
+  local schema = util.readfile(self.schema.path):gsub('"', '\\"')
+
+
+  local template_args = {
+    lines = util.splitlines(schema),
+  }
+  self:write(util.buildtemplate(defentry, template_args))
+  self:write("\n};\n")
+end
+
 function generator:write_headers_def(options)
   options = options or {}
   local outdir = options.outdir or ""
@@ -249,6 +270,7 @@ LUA_API const int32_t jitlog_msgsizes[];
   self:write_msgsizes()
   self:write_msgsizes(true)
   self:write_flatbuffer_vtable()
+  self:write_msginfo()
 
   self:write("#endif\n")
   self.outputfile:close()

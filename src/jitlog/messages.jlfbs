@@ -58,3 +58,11 @@ message idmarker (no_vtable, mapto : idmarker4b){
   flags : 7
   id : 16
 }
+
+message note{
+  time : timestamp
+  isbinary : bool
+  isinternal : bool
+  label : string
+  data : [uint8] (argtype : const void*)
+}

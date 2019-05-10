@@ -97,6 +97,31 @@ static int getcpumodel(char *model)
 
 #endif
 
+/* Write a system note */
+static void write_note(UserBuf *ub, const char *label, const char *data)
+{
+  note_Args args = {
+    .label = label,
+    .isinternal = 1,
+    .isbinary = 0,
+    .data = (uint8_t *)data,
+    .data_length = (uint32_t)strlen(data),
+  };
+  log_note(ub, &args);
+}
+
+/* Write a system note with binary data */
+static void write_bnote(UserBuf *ub, const char *label, const void *data, size_t datasz)
+{
+  note_Args args = {
+    .label = label,
+    .isinternal = 1,
+    .isbinary = 1,
+    .data = (uint8_t *)data,
+    .data_length = (uint32_t)datasz,
+  };
+  log_note(ub, &args);
+}
 
 static void write_header(jitlog_State *context)
 {
@@ -131,6 +156,8 @@ static void write_header(jitlog_State *context)
   // It is always the first vtable in the shared pre-generated vtable list(fb_vtables).
   ptrdiff_t diff = offsetof(MSG_header, vtables_offset) - offsetof(MSG_header, vtable);
   header->vtable = (int32_t)-(header->vtables_offset + diff + 4);
+
+  write_note(&context->ub, "msgdefs", msgdefstr);
 }
 
 const uint32_t smallidsz = 20;
