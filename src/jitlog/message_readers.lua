@@ -64,10 +64,43 @@ function readers:idmarker(msg)
   return id, flags, msg.time, marker
 end
 
+function readers:note(msg)  
+  local dataptr, size = msg:get_data()
+  if msg.isbinary then
+    data = self:read_array("uint8_t", dataptr, size)
+  else
+    data = ffi.string(dataptr, size)
+  end
+
+  local label = msg.label
+  if msg.isinternal then
+    if label == "msgdefs" then
+      assert(type(data) == "string")
+      self.msgdefs = data
+    end
+  end
+
+  local note = {
+    eventid = self.eventid,
+    time = msg.time,
+    label = label,
+    isbinary = msg.isbinary,
+    isinternal = msg.isinternal,
+    size = size,
+    data = data,
+  }
+  self.notes[#self.notes + 1] = note 
+  self:log_msg("note", "Note: label = '%s', isbinary = %s, datasize = %d", label, note.isbinary and "true" or "false", msg.data_size)
+  
+  return note
+end
+
 local function init(self)
   self.markers = {}
   -- Record id marker messages in to table 
   self.track_idmarkers = true
+  self.notes = {}
+
   return t
 end
 

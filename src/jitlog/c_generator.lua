@@ -128,6 +128,32 @@ function generator:write_header_logwriters(options)
   self.outputfile:close()
 end
 
+local defentry = [[
+"{{kind}} {{name}} {\n"
+{{fields:"  %s\\n"\n}}"}\n\n"
+]]
+
+-- Embed the raw field definition strings as a kind of c struct syntax that is concat'ed together in
+-- one giant string that can be embedded in the JITLog.
+function generator:write_msginfo()
+  self:write("const char msgdefstr[] = {\n")
+  
+  for _, msgdef in ipairs(self.msglist) do
+    local fields = util.splitlines(msgdef.fielddefstr, true)
+    -- Remove the trailing empty line
+    if fields[#fields] == "" then
+      fields[#fields] = nil
+    end
+    local template_args = {
+      kind = "message",
+      name = msgdef.name,
+      fields = fields,
+    }
+    self:write(util.buildtemplate(defentry, template_args))
+  end
+  self:write("\n};\n")
+end
+
 function generator:write_headers_def(options)
   options = options or {}
   local outdir = options.outdir or ""
@@ -149,6 +175,7 @@ LUA_API const int32_t jitlog_msgsizes[];
   self:write_namelist("jitlog_msgnames", self.sorted_msgnames)
   self:write_msgsizes()
   self:write_msgsizes(true)
+  self:write_msginfo()
 
   self:write("#endif\n")
   self.outputfile:close()

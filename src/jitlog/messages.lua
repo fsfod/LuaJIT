@@ -48,6 +48,18 @@ module.messages = {
   },
 
   {
+    name = "note",
+    fields = [[
+      time : timestamp
+      isbinary : bool
+      isinternal : bool
+      label : string   
+      data_size : u32
+      data : u8[data_size] @argtype(const void*)
+    ]]
+  },
+
+  {
     name = "stringmarker",
     fields = [[
       time : timestamp
