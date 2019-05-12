@@ -488,6 +488,91 @@ function parser:parse_structlist(structs)
   end
 end
 
+local filecache = {}
+
+local function readfile(path)
+  if filecache[path] then
+    return filecache[path]
+  end
+  local f = io.open(path, "rb")
+  assert(f, "failed to open "..path)
+  local content = f:read("*all")
+  f:close()
+  filecache[path] = content
+  return content
+end
+
+local function file_collectmatches(path, patten, action)
+  local file = readfile(path)
+  local count = 0
+  for match in string.gmatch(file, patten) do
+    action(match)
+    count = count + 1
+  end
+  return count
+end
+
+local function collectmatches(paths, patten, searchdirs, action)
+  if not searchdirs then
+    searchdirs = {"./"}
+  end
+
+  for _, path in ipairs(paths) do
+    local filedir
+    for _, dir in ipairs(searchdirs) do
+      --print("checking", dir..path)
+      local f, msg = io.open(dir..path, "rb")
+      if f then
+        f:close()
+        filedir = dir
+        break
+      elseif not msg:find("openn") then
+        error(msg)
+      end
+    end
+    if not filedir then
+      error("Could not find namescan file: "..path)
+    end
+    file_collectmatches(filedir..path, patten, action)
+  end
+end
+
+function parser:scan_instrumented_files()
+  --print(#self.srcdir, self.srcdir)
+  local search_dirs = {}
+  if self.srcdir ~= "" then
+    table.insert(search_dirs, self.srcdir)
+  else
+    table.insert(search_dirs, "./")
+  end
+  
+  for name, def in pairs(self.namescans) do
+    if def.enumname then
+      local enum = self:add_enum(def.enumname)
+      enum.namescan = name
+      enum.prefix = def.enumprefix
+    end
+  end
+  
+  for name, def in pairs(self.namescans) do
+    local enum = self.enums[def.enumname]
+
+    local matcher
+    if def.match_action then
+       matcher = function(match) 
+        def.match_action(self, match) 
+      end
+    else
+      matcher = function(match)
+        if not enum.lookup[match] then
+          enum:add_entry(match)
+        end
+      end
+    end
+    collectmatches(self.files_to_scan, def.patten, search_dirs, matcher)
+  end
+end
+
 local enum_mt = {
   __index = {
     add_entry = function(self, name, value)
@@ -556,6 +641,7 @@ local copyfields = {
   "msglookup",
   "sorted_msgnames",
   "types",
+  "namescans",
 }
 
 function parser:complete()

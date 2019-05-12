@@ -233,6 +233,7 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
 #if !LJ_GC64
   setmref(g->nilnode.freetop, &g->nilnode);
 #endif
+  lj_perf_init(L);
   check_initjitlog(L);
   lj_buf_init(NULL, &g->tmpbuf);
   g->gc.state = GCSpause;

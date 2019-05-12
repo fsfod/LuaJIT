@@ -88,6 +88,26 @@ local parser = apigen.create_parser()
 parser:parse_structlist(msgdef.structs)
 parser:parse_msglist(msgdef.messages)
 
+parser.srcdir = modulepath
+parser.namescans = {
+  timer = {
+    patten = "TIMER_START%(([^%,)]+)",
+    enumname = "TimerId",
+    enumprefix = "Timer",
+  },
+
+  counter = {
+    patten = "PERF_COUNTER%(([^%,)]+)",
+    enumname = "CounterId",
+    enumprefix = "Counter",
+  },
+}
+
+parser.files_to_scan = {
+}
+
+parser:scan_instrumented_files()
+
 local data = parser:complete()
 if gentype == "defs" then
   apigen.write_c(data, {outdir = outpath, mode = "defs"})

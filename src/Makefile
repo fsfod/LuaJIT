@@ -500,7 +500,7 @@ LJCORE_O= lj_gc.o lj_err.o lj_char.o lj_bc.o lj_obj.o lj_buf.o \
 	  lj_ctype.o lj_cdata.o lj_cconv.o lj_ccall.o lj_ccallback.o \
 	  lj_carith.o lj_clib.o lj_cparse.o \
 	  lj_lib.o lj_alloc.o lib_aux.o \
-	  lj_usrbuf.o lj_jitlog.o $(LJLIB_O) lib_init.o
+	  lj_usrbuf.o lj_jitlog.o lj_vmperf.o $(LJLIB_O) lib_init.o
 
 LJVMCORE_O= $(LJVM_O) $(LJCORE_O)
 LJVMCORE_DYNO= $(LJVMCORE_O:.o=_dyn.o)
@@ -719,6 +719,7 @@ $(HOST_O): %.o: %.c
 include Makefile.dep
 
 lj_jitlog.o: $(ALL_HDRGEN)
+lj_vmperf.o: $(ALL_HDRGEN)
 
 ##############################################################################
 # Target file rules.
