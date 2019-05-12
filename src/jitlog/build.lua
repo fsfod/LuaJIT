@@ -94,6 +94,26 @@ local apigen = require"jitlog.generator"
 local parser = apigen.create_parser(GC64)
 parser:process_schema(schema)
 
+parser.srcdir = modulepath
+parser.namescans = {
+  timer = {
+    pattens = {"TIMER_START%(([^%,)]+)", "TIMER_ADD%(([^%,)]+)"},
+    enumname = "TimerId",
+    enumprefix = "Timer",
+  },
+
+  counter = {
+    pattens = {"PERF_COUNTER%(([^%,)]+)", "PERF_COUNTER_ADD%(([^%,)]+)"},
+    enumname = "CounterId",
+    enumprefix = "Counter",
+  },
+}
+
+parser.files_to_scan = {
+}
+
+parser:scan_instrumented_files()
+
 local data = parser:complete()
 
 local actions =  {

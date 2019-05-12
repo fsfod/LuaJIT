@@ -1,8 +1,14 @@
 #ifndef _LJ_VMPERF_H
 #define _LJ_VMPERF_H
 
+#define LJ_ENABLESTATS
+
+#include "lj_buf.h"
 #include "lj_arch.h"
-#include "lj_def.h"
+
+#ifdef LJ_ENABLESTATS
+#include "lj_jitlog_def.h"
+#endif
 
 #if LJ_TARGET_X86ORX64 && defined(__GNUC__)
 #include <x86intrin.h>
@@ -123,5 +129,78 @@ LJ_AINLINE uint64_t stop_getticks_b()
 void lj_perf_init(lua_State *L);
 extern uint64_t lj_perf_ticksfreq;
 
+#ifdef LJ_ENABLESTATS
+
+extern uint64_t lj_perf_overhead;
+void lj_perf_resetcounters(lua_State *L);
+void lj_perf_resettimers(lua_State *L);
+void lj_perf_printtimers(lua_State *L);
+
+#define TicksStart() uint64_t ticks_start = start_getticks()
+#define TicksEnd() (stop_getticks()-ticks_start)
+
+#if !defined(VMPERF_MODE)
+#define VMPERF_MODE 1
+#endif
+
+typedef struct VMPerfTimer{
+  uint64_t time;
+  uint32_t count;
+  uint32_t maxticks;
+} VMPerfTimer;
+
+typedef struct VMPerfData {
+  uint32_t counters[Counter_MAX + 1];
+  VMPerfTimer timers[Timer_MAX + 1];
+} VMPerfData;
+
+#if VMPERF_MODE == 0
+  #define TIMER_START(name)
+  #define TIMER_END(name)
+  #define PERF_COUNTER(name)
+  /* Just provide some empty data */
+  extern VMPerfData lj_perfdata;
+  #define COUNTERS_POINTER(L) (UNUSED(L), lj_perfdata.counters)
+  #define TIMERS_POINTER(L) (UNUSED(L), lj_perfdata.timers)
+#else
+  extern VMPerfData lj_perfdata;
+  #define TIMER_START(name) \
+    uint64_t name##_start = start_getticks()
+#endif
+
+#define TIMERUPDATE(timer, ticks) \
+  timer->time += (ticks); \
+  timer->count++; \
+  timer->maxticks = (uint32_t)(ticks > timer->maxticks ? ticks : timer->maxticks)
+
+  #define COUNTERS_POINTER(L) (UNUSED(L), lj_perfdata.counters)
+  #define PERF_COUNTER(name) lj_perfdata.counters[Counter_##name]++
+
+  #define TIMERS_POINTER(L) (UNUSED(L), lj_perfdata.timers)
+  #define TIMER_END(evtname) \
+  { \
+    uint64_t stopticks = stop_getticks(); \
+    VMPerfTimer *timer = &lj_perfdata.timers[Timer_##evtname]; \
+    TIMERUPDATE(timer, stopticks-evtname##_start); \
+  }
+  #define TIMER_ADD(evtname, ticks) \
+  { \
+    VMPerfTimer *timer = &lj_perfdata.timers[Timer_##evtname]; \
+    TIMERUPDATE(timer, ticks); \
+  }
+
+void lj_perf_printcounters(lua_State *L);
+void lj_perf_printtimers(lua_State *L);
+
+#else
+
+#define TicksStart()
+#define TicksEnd()
+
+#define TIMER_START(name)
+#define TIMER_END(name)
+#define PERF_COUNTER(name)
+
+#endif
 
 #endif
