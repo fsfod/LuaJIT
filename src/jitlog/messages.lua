@@ -403,6 +403,18 @@ module.messages = {
       ids : u16[ids_length]
     ]]
   },
+
+  {
+    name = "perf_section",
+    fields = [[
+      time : timestamp
+      jitted : bool
+      istrace : bool
+      isstart : bool
+      id : 21
+    ]],
+    enumlist = "section",
+  },
 }
 
 module.structs = {

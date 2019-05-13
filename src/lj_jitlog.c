@@ -1042,6 +1042,18 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
   TIMER_END(jitlog_vmevent);
 }
 
+void write_section(lua_State *L, int id, int isstart)
+{
+  global_State *g = G(L);
+  jitlog_State *context = g->vmevent_data;
+  int jited = g->vmstate > 0;
+  if (!context) {
+    return;
+  }
+
+  log_perf_section(&context->ub, jited, 0, isstart, id);
+}
+
 #if LJ_TARGET_X86ORX64
 
 static int getcpumodel(char *model)
@@ -1972,6 +1984,22 @@ static int jlib_reset_perftimers(lua_State *L)
   return 0;
 }
 
+static int jlib_section_start(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  int id = (int)luaL_checkinteger(L, 1);
+  log_perf_section(&context->ub, G(L)->vmstate > 0, 0, 1, id + Section_MAX);
+  return 0;
+}
+
+static int jlib_section_end(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  int id = (int)luaL_checkinteger(L, 1);
+  log_perf_section(&context->ub, G(L)->vmstate > 0, 0, 0, id + Section_MAX);
+  return 0;
+}
+
 static const luaL_Reg jitlog_lib[] = {
   {"start", jlib_start},
   {"shutdown", jlib_shutdown},
@@ -1993,6 +2021,8 @@ static const luaL_Reg jitlog_lib[] = {
   {"write_perfcounts", jlib_write_perfcounts},
   {"write_perftimers", jlib_write_perftimers},
   {"reset_perftimers", jlib_reset_perftimers},
+  {"section_start", jlib_section_start},
+  {"section_end", jlib_section_end},
   {NULL, NULL},
 };
 

@@ -613,6 +613,7 @@ parser.builtin_msgorder = {
   enumdef = 1,
   idmarker4b = 2,
   idmarker = 3,
+  perf_section = 4,
 }
 
 local function sortmsglist(msglist, msgorder)

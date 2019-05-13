@@ -286,6 +286,37 @@ it("jitlog mode", function()
   local result = parselog(jitlog.savetostring())  
 end)
 
+it("perf_section", function()
+  jitlog.start()
+  local a = 0
+  local section_start, section_end = jitlog.section_start, jitlog.section_end
+  section_start(0)
+  for i = 1, 300 do
+    section_start(1)
+    if i > 100 then
+      section_start(2)
+      if i <= 200 then
+        a = a + 1
+      else
+        a = a + 2
+      end
+      section_end(2)
+    end
+    section_end(1)
+  end
+  section_end(0)
+
+  local result = parselog(jitlog.savetostring())
+  local section_time, section_counts = result.section_time, result.section_counts
+  assert(#util.keys(section_time) == 3, #util.keys(section_time))
+  assert(section_counts[0] == 1)
+  assert(section_counts[1] == 300)
+  assert(section_counts[2] == 200)
+  -- Check accumulated time matches the scope nesting
+  assert(section_time[0] > section_time[1])
+  assert(section_time[1] > section_time[2])
+end)
+
 if hasjit then
 
 it("trace exits", function()

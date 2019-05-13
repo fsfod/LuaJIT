@@ -220,7 +220,12 @@ end
 function readers:enumdef(msg)
   local name = msg.name
   local names = msg.valuenames
-  self.enums[name] = util.make_enum(names)
+  local enum = util.make_enum(names)
+  self.enums[name] = enum
+  if name == "SectionId" then
+    self.maxsection = #names
+    self.section_names = enum
+  end
   self:log_msg("enumdef", "Enum(%s): %s", name, table.concat(names,","))
   return name, names
 end
@@ -1314,6 +1319,36 @@ function readers:perf_timers(msg)
   self:log_msg("perf_timers", "PerfTimers: timers = %d, ids = %d", length, msg.ids_length)
 end
 
+function readers:perf_section(msg)
+  local id = msg.id
+  local isstart = msg.isstart
+  local length
+
+  local label = id
+  if id < self.maxsection then
+    label = self.section_names[id]
+  else
+    label = tostring(id)
+   -- self:log_msg("section", "No label found for section %d", id)
+  end
+  if isstart then
+    self.section_starts[id] = msg.time
+    self.section_counts[id] = (self.section_counts[id] or 0) + 1
+  else
+    local start = self.section_starts[id]
+    if start then
+      length = tonumber(msg.time - start)
+      self.section_starts[id] = false
+      self.section_time[id] = (self.section_time[id] or 0ull) + length
+    else
+      self:log_msg("section", "Section(%s): found end without a section start at %d", label, self.eventid)
+    end
+  end
+  self:log_msg("section", "Section(%s): start = %s, jitted = %s", label, isstart, msg.jitted)
+
+  return id, isstart, length
+end
+
 local function init(self)
   self.strings = {}
   self.protos = {}
@@ -1342,6 +1377,9 @@ local function init(self)
   -- VMPerf system's current values
   self.counters = {}
   self.timers = {}
+  self.section_starts = {}
+  self.section_counts = {}
+  self.section_time = {}
 
   return t
 end
