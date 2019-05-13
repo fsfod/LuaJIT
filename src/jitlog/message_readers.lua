@@ -1276,6 +1276,44 @@ function readers:stacksnapshot(msg)
   return stack
 end
 
+function readers:perf_counters(msg)
+  local counterdef = self.enums.CounterId
+  local counts, length = msg:get_counts()
+  local ids = msg.ids_length ~= 0 and msg.ids
+  assert(length <= #counterdef.names)
+  assert(msg.ids_length == 0 or msg.ids_length == length)
+  
+  for i=0, length-1 do
+    local key
+    if ids then
+      key = counterdef[ids[i]]
+    else
+      key = counterdef[i]
+    end
+    self.counters[key] = counts[i]
+  end
+end
+
+function readers:perf_timers(msg)
+  local timerdef = self.enums.TimerId
+  local timers, length = msg:get_timers()
+  local ids = msg.ids_length ~= 0 and msg.ids
+  assert(length <= #timerdef.names)
+  assert(msg.ids_length == 0 or idcount == length)
+  
+  for i = 0, length-1 do
+    local key
+    if ids then
+      key = timerdef[ids[i]]
+    else
+      key = timerdef[i]
+    end
+    self.timers[key] = timers[i].time
+    self.counters[key] = timers[i].count
+  end
+  self:log_msg("perf_timers", "PerfTimers: timers = %d, ids = %d", length, msg.ids_length)
+end
+
 local function init(self)
   self.strings = {}
   self.protos = {}
@@ -1300,6 +1338,10 @@ local function init(self)
   self.objlabel_lookup = {}
   self.loaded_scripts = {}
   self.proto_blacklist = {}
+
+  -- VMPerf system's current values
+  self.counters = {}
+  self.timers = {}
 
   return t
 end

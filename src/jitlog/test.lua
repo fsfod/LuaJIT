@@ -1,4 +1,5 @@
 local ffi = require("ffi")
+local util = require("jitlog.util")
 local hasjit = pcall(require, "jit.opt")
 local format = string.format
 local reader_def = require("jitlog.reader_def")
@@ -851,6 +852,69 @@ it("memorize existing objects", function()
   assert(#result.protos > 0)
   assert(#result.functions > 0)
   assert(#result.traces == 0)
+end)
+
+local perf_mixin = {
+  {
+    init = function(self)
+      self.perf_sets = {}
+    end,
+    actions = {
+      perf_timers = function(self, msg)        
+        local tab = {
+          eventid = self.eventid,
+          counters = util.clone(self.counters),
+          timers = util.clone(self.timers),
+        }     
+        table.insert(self.perf_sets, tab)
+      end,
+      perf_counters = function(self, msg)        
+        local tab = {
+          eventid = self.eventid,
+          counters = util.clone(self.counters),
+          timers = util.clone(self.timers),
+        }     
+        table.insert(self.perf_sets, tab)
+      end
+    }
+  }
+}
+
+it("perf_counters", function()
+  jitlog.start()
+  jitlog.write_perfcounts()
+  loadstring[[
+    local function f1() end
+    local function f2() end
+    return f1,
+  ]]
+  jitlog.write_perfcounts()
+
+  local result = parselog(jitlog.savetostring(), false, perf_mixin)
+  local CounterId = result.enums.CounterId
+  assert(CounterId and #CounterId)
+  local perf_sets = result.perf_sets
+  assert(#perf_sets == 2)
+end)
+
+it("perf_timers", function()
+  jitlog.reset_perftimers()
+  jitlog.start()
+  jitlog.write_perftimers()
+  loadstring[[
+    local function f1() end
+    local function f2() end
+    return f1,
+  ]]
+  jitlog.write_perftimers()
+
+  local result = parselog(jitlog.savetostring(), false, perf_mixin)
+  local perf_sets = result.perf_sets
+  assert(#perf_sets == 2)
+  assert(perf_sets[1].counters.jitlog_vmevent == 0)
+  assert(perf_sets[2].counters.jitlog_vmevent >= 4)
+  assert(perf_sets[1].timers.jitlog_vmevent == 0)
+  assert(perf_sets[2].timers.jitlog_vmevent > 0)
 end)
 
 local failed = false

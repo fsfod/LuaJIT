@@ -18,6 +18,7 @@
 #include "lj_jitlog_def.h"
 #include "lj_jitlog_writers.h"
 #include "lj_jitlog_decl.h"
+#include "lj_vmperf.h"
 #include "jitlog.h"
 
 #define JITLOG_FILE_VERSION 2
@@ -964,6 +965,8 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
   jitlog_State *context = contextptr;
   void *bufpos = ubufP(&context->ub);
 
+  TIMER_START(jitlog_vmevent);
+
   if (context->loadstate == 1 && event != VMEVENT_DETACH && event != VMEVENT_STATE_CLOSING && event !=  VMEVENT_GC_STATECHANGE) {
     jitlog_loadstage2(L, context);
   }
@@ -1036,6 +1039,7 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
       ubuf_flush(&context->ub);
     }
   }
+  TIMER_END(jitlog_vmevent);
 }
 
 #if LJ_TARGET_X86ORX64
@@ -1632,6 +1636,59 @@ LUA_API int jitlog_memorize_objs(JITLogUserContext *usrcontext, MemorizeFilter f
   return 1;
 }
 
+#ifdef LJ_ENABLESTATS
+
+LUA_API void jitlog_saveperfcounts(JITLogUserContext *usrcontext, uint16_t *ids, int idcount)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+  lua_State *L = mainthread(context->g);
+  uint32_t *counters = COUNTERS_POINTER(L);
+  int numcounters = idcount != 0 ? idcount : Counter_MAX;
+
+  if (idcount != 0) {
+    /* Copy only counters requested */
+    counters = (uint32_t *)malloc(idcount * 4);
+    for (size_t i = 0; i < idcount; i++) {
+      counters[i] = COUNTERS_POINTER(L)[ids[i]];
+    }
+  }
+  log_perf_counters(&context->ub, counters, numcounters, ids, idcount);
+  if (idcount != 0) {
+    free(counters);
+  }
+  context->events_written |= JITLOGEVENT_PERFINFO;
+}
+
+LUA_API void jitlog_saveperftimers(JITLogUserContext *usrcontext, uint16_t *ids, int idcount)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+  lua_State *L = mainthread(context->g);
+  VMPerfTimer timers[Timer_MAX];
+  int numtimers = idcount != 0 ? idcount : Timer_MAX;
+
+  if (idcount != 0) {
+    /* Copy only timers requested */
+    for (size_t i = 0; i < idcount; i++) {
+      timers[i] = TIMERS_POINTER(L)[ids[i]];
+    }
+  } else{
+    memcpy(timers, TIMERS_POINTER(L), sizeof(timers));
+  }
+  for (int i = 0; i < numtimers; i++) {
+    timers[i].time -= timers[i].count*lj_perf_overhead;
+  }
+  perf_timers_Args args = {
+    .timers = (TimerEntry *)timers,
+    .timers_length = numtimers,
+    .ids = ids,
+    .ids_length = idcount,
+  };
+  log_perf_timers(&context->ub, &args);
+  context->events_written |= JITLOGEVENT_PERFINFO;
+}
+
+#endif
+
 /* -- Lua module to control the JITLog ------------------------------------ */
 
 static jitlog_State* jlib_getstate(lua_State *L)
@@ -1882,6 +1939,38 @@ static int jlib_memorize_existing(lua_State *L)
   return 0;
 }
 
+static int jlib_write_perfcounts(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+#ifdef LJ_ENABLESTATS
+  jitlog_saveperfcounts(ctx2usr(context), NULL, 0);
+#else
+  luaL_error(L, "VM perf stats system disabled");
+#endif
+  return 0;
+}
+
+static int jlib_write_perftimers(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+#ifdef LJ_ENABLESTATS
+  jitlog_saveperftimers(ctx2usr(context), NULL, 0);
+#else
+  luaL_error(L, "VM perf stats system disabled");
+#endif
+  return 0;
+}
+
+static int jlib_reset_perftimers(lua_State *L)
+{
+#ifdef LJ_ENABLESTATS
+  lj_perf_resettimers(L);
+#else
+  luaL_error(L, "VM perf stats system disabled");
+#endif
+  return 0;
+}
+
 static const luaL_Reg jitlog_lib[] = {
   {"start", jlib_start},
   {"shutdown", jlib_shutdown},
@@ -1900,6 +1989,9 @@ static const luaL_Reg jitlog_lib[] = {
   {"labelproto", jlib_labelproto},
   {"write_stacksnapshot", jlib_write_stacksnapshot},
   {"memorize_existing", jlib_memorize_existing},
+  {"write_perfcounts", jlib_write_perfcounts},
+  {"write_perftimers", jlib_write_perftimers},
+  {"reset_perftimers", jlib_reset_perftimers},
   {NULL, NULL},
 };
 

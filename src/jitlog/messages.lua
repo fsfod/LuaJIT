@@ -381,6 +381,27 @@ module.messages = {
       slots : TValue[slotcount]
     ]]
   },
+
+  {
+    name = "perf_counters",
+    fields = [[
+      counts_length :  u16
+      ids_length :  u16
+      counts : u32[counts_length]
+      ids : u16[ids_length]
+    ]]
+  },
+
+  {
+    name = "perf_timers",
+    fields = [[
+      flags : 8
+      timers_length :  u16
+      ids_length :  u16
+      timers : TimerEntry[timers_length]
+      ids : u16[ids_length]
+    ]]
+  },
 }
 
 module.structs = {
@@ -406,6 +427,15 @@ module.structs = {
     fields = [[
       pc : i32
       irtop : u16
+    ]]
+  },
+
+  {
+    name = "TimerEntry",
+    fields = [[
+      time : u64
+      count : u32
+      max : u32
     ]]
   },
 }
