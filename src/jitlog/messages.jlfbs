@@ -391,3 +391,11 @@ struct TimerEntry{
   count : uint32
   max : uint32
 }
+
+message perf_section (no_vtable, enumlist : section) {
+  time : timestamp
+  jitted : bool
+  istrace : bool
+  isstart : bool
+  id : 21
+}

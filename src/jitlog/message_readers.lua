@@ -1480,6 +1480,36 @@ function api:update_perftimers(msg)
   self:log_msg("perf_timers", "PerfTimers: timers = %d, ids = %d", length, idcount)
 end
 
+function readers:perf_section(msg)
+  local id = msg.id
+  local isstart = msg.isstart
+  local length
+
+  local label = id
+  if id < self.maxsection then
+    label = self.section_names[id]
+  else
+    label = tostring(id)
+   -- self:log_msg("section", "No label found for section %d", id)
+  end
+  if isstart then
+    self.section_starts[id] = msg.time
+    self.section_counts[id] = (self.section_counts[id] or 0) + 1
+  else
+    local start = self.section_starts[id]
+    if start then
+      length = tonumber(msg.time - start)
+      self.section_starts[id] = false
+      self.section_time[id] = (self.section_time[id] or 0ull) + length
+    else
+      self:log_msg("section", "Section(%s): found end without a section start at %d", label, self.eventid)
+    end
+  end
+  self:log_msg("section", "Section(%s): start = %s, jitted = %s", label, isstart, msg.jitted)
+
+  return id, isstart, length
+end
+
 local function init(self)
   self.strings = {}
   self.protos = {}
@@ -1516,6 +1546,9 @@ local function init(self)
   -- VMPerf system's current values
   self.counters = {}
   self.timers = {}
+  self.section_starts = {}
+  self.section_counts = {}
+  self.section_time = {}
 
   return t
 end
@@ -1546,6 +1579,14 @@ function api:parseheader(header)
   if vmsettings then
     local reader = self:create_fbreader("VMSettings", vmsettings, limit)
     self.vmsettings = self:readfb("VMSettings", reader)
+  end
+
+  if self.enums.SectionId then
+    self.maxsection = #self.enums.SectionId.names
+    self.section_names = self.enums.SectionId.names
+  else
+    self.maxsection = 0
+    self.section_names = {}
   end
 end
 
