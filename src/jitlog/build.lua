@@ -110,6 +110,7 @@ parser.namescans = {
 }
 
 parser.files_to_scan = {
+  "lj_jitlog.c",
 }
 
 parser:scan_instrumented_files()

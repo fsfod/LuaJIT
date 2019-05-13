@@ -41,6 +41,7 @@ typedef enum JITLogEventTypes {
   JITLOGEVENT_OBJLABEL          = 0x200,
   JITLOGEVENT_GCOBJ             = 0x400,
   JITLOGEVENT_GCSTATE           = 0x800,
+  JITLOGEVENT_PERF_SNAPSHOT     = 0x2000,
 
   JITLOGEVENT_SHOULDRESET = JITLOGEVENT_TRACE_EXITS | JITLOGEVENT_GCSTATE | JITLOGEVENT_TRACE_ABORT,
 
@@ -100,6 +101,12 @@ typedef enum MemorizeFilter {
 ** Write all currently allocated objects that match the filter passed in to the JITLog 
 */
 LUA_API int jitlog_memorize_objs(JITLogUserContext *usrcontext, MemorizeFilter filter);
+
+/* 
+** Supports and optional list of counter\timer ids and can be just passed NULL otherwise 
+*/
+LUA_API void jitlog_write_perfsnapshot(JITLogUserContext *usrcontext);
+LUA_API void jitlog_saveperfvalues(JITLogUserContext *usrcontext, uint16_t *cids, int cidcount);
 
 /* 
 ** Save the current position in the jitlog as a reset point that we can 

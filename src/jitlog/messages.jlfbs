@@ -368,3 +368,26 @@ table luastack{
   savedpc : MRef
   slots : [TValue]
 }
+
+message perf_snapshot{
+  time : timestamp
+  counters: perf_counters (optional)
+  timers : perf_timers (optional)
+}
+
+table perf_counters{
+  counts : [uint32]
+  ids : [uint16]
+}
+
+table perf_timers{
+  flags : uint8
+  timers : [TimerEntry]
+  ids : [uint16]
+}
+
+struct TimerEntry{
+  time : uint64
+  count : uint32
+  max : uint32
+}

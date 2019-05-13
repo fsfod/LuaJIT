@@ -1427,6 +1427,59 @@ function fbreaders:stacksnapshot(fbtbl)
   return stack
 end
 
+function readers:perf_snapshot(msg)
+  local counters = msg.counters
+  if counters then
+    self:update_perfcounters(counters)
+  end
+
+  local timers = msg.timers
+  if timers then
+    self:update_perftimers(timers)
+  end
+  return counters, timers
+end
+
+function api:update_perfcounters(msg)
+  local counterdef = self.enums.CounterId
+  local counts, length = msg:get_counts()
+  local ids, idcount = msg:get_ids()
+  assert(length <= #counterdef.names)
+  assert(idcount == 0 or idcount == length)
+  
+  for i=0, length-1 do
+    local key
+    if ids then
+      key = counterdef[ids[i]]
+    else
+      key = counterdef[i]
+    end
+    self.counters[key] = counts[i]
+  end
+end
+
+function api:update_perftimers(msg)
+  local timerdef = self.enums.TimerId
+  local timers, length = msg:get_timers()
+  local ids, idcount = msg:get_ids()
+  assert(length <= #timerdef.names)
+  assert(idcount == 0 or idcount == length)
+  
+  for i = 0, length-1 do
+    local key
+    if idcount ~= 0 then
+      local id = ids[i]
+      assert(id < length, id)
+      key = timerdef[id]
+    else
+      key = timerdef[i]
+    end
+    self.timers[key] = timers[i].time
+    self.counters[key] = timers[i].count
+  end
+  self:log_msg("perf_timers", "PerfTimers: timers = %d, ids = %d", length, idcount)
+end
+
 local function init(self)
   self.strings = {}
   self.protos = {}
@@ -1459,6 +1512,10 @@ local function init(self)
   else
     self.IRIns = IRIns32
   end
+
+  -- VMPerf system's current values
+  self.counters = {}
+  self.timers = {}
 
   return t
 end
