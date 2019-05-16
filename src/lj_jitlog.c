@@ -14,6 +14,7 @@
 #include "lauxlib.h"
 #include "lj_target.h"
 #include "lj_frame.h"
+#include "lj_ctype.h"
 
 #include "lj_jitlog_def.h"
 #include "lj_jitlog_decl.h"
@@ -1296,6 +1297,86 @@ static void write_bnote(UserBuf *ub, const char *label, const void *data, size_t
   log_note(ub, &args);
 }
 
+#define SIZEDEF(_) \
+  _(TValue,   sizeof(TValue)) \
+  _(string,   sizeof(GCstr)) \
+  _(upvalue,  sizeof(GCupval)) \
+  _(thread,   sizeof(lua_State)) \
+  _(proto,    sizeof(GCproto)) \
+  _(function, sizeof(GCfunc)) \
+  _(trace,    sizeof(GCtrace)) \
+  _(cdata,    sizeof(GCcdata)) \
+  _(table,    sizeof(GCtab)) \
+  _(userdata, sizeof(GCudata)) \
+  _(GCfuncC,  sizeof(GCfuncC)) \
+  _(GCfuncL,  sizeof(GCfuncL)) \
+  _(GChead,   offsetof(GChead, unused1)) \
+  _(table_node,   sizeof(Node)) \
+  _(GG_State,     sizeof(GG_State)) \
+  _(global_State, sizeof(global_State)) \
+  _(GCState,      sizeof(GCState)) \
+  _(CTState,      sizeof(CTState)) \
+  _(jit_State,    sizeof(jit_State)) \
+
+#define SIZENUM(name, sz) sz,
+#define SIZENAME(name, sz) #name,
+
+static const MSize reflect_typesizes[] = {
+  SIZEDEF(SIZENUM)
+};
+
+static const char *reflect_typenames[] = {
+  SIZEDEF(SIZENAME)
+  NULL,
+};
+
+#define REFLECT_FLDEF(_) \
+  _(str_len,	offsetof(GCstr, len)) \
+  _(str_hash,	offsetof(GCstr, hash)) \
+  _(func_env,	offsetof(GCfunc, l.env)) \
+  _(func_pc,	offsetof(GCfunc, l.pc)) \
+  _(func_ffid,	offsetof(GCfunc, l.ffid)) \
+  _(thread_env,	offsetof(lua_State, env)) \
+  _(tab_colo,	offsetof(GCtab, colo)) \
+  _(tab_meta,	offsetof(GCtab, metatable)) \
+  _(tab_array,	offsetof(GCtab, array)) \
+  _(tab_node,	offsetof(GCtab, node)) \
+  _(tab_asize,	offsetof(GCtab, asize)) \
+  _(tab_hmask,	offsetof(GCtab, hmask)) \
+  _(node_key,	offsetof(Node, key)) \
+  _(node_val,	offsetof(Node, val)) \
+  _(node_next,	offsetof(Node, next)) \
+  _(udata_meta,	offsetof(GCudata, metatable)) \
+  _(udata_env,	offsetof(GCudata, env)) \
+  _(udata_udtype, offsetof(GCudata, udtype)) \
+  _(cdata_ctypeid, offsetof(GCcdata, ctypeid)) \
+  _(gchead_gct, offsetof(GChead, gct)) \
+  _(gchead_marked, offsetof(GChead, marked))
+
+
+#define FLDSIZENUM(name, sz) sz,
+#define FLDSIZENAME(name, sz) #name,
+
+static const MSize reflect_offsets[] = {
+  REFLECT_FLDEF(SIZENUM)
+};
+
+static const char *reflect_fieldnames[] = {
+  REFLECT_FLDEF(SIZENAME)
+  NULL,
+};
+
+ReflectInfo_Args reflect_info = {
+  .typenames = reflect_typenames,
+  .typenames_length = sizeof(reflect_typenames) / sizeof(char*) - 1,
+  .typesizes = reflect_typesizes,
+  .typesizes_length = sizeof(reflect_typesizes) / sizeof(MSize),
+  .fieldnames = reflect_fieldnames,
+  .fieldnames_length = sizeof(reflect_fieldnames) / sizeof(char*) - 1,
+  .fieldoffsets = reflect_offsets,
+  .fieldoffsets_length = sizeof(reflect_offsets) / sizeof(MSize),
+};
+
 static const char *const flushreason[] = {
   "other",
   "user_requested",
@@ -1472,6 +1553,7 @@ static void write_header(jitlog_State *context)
     .vmsettings = &vmsettings,
     .vmdef = &vmdef,
     .gcinfo = &gcinfo,
+    .reflect = &reflect_info,
   };
   log_header(&context->ub, &args);
 

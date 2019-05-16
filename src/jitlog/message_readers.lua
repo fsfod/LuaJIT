@@ -1510,6 +1510,30 @@ function readers:perf_section(msg)
   return id, isstart, length
 end
 
+function fbreaders:ReflectInfo(msg)
+  local typesizes = self:read_array("uint32_t", msg:get_typesizes())
+  local typenames = msg:get_typenames()
+  assert(typesizes.length == #typenames)
+
+  local types = {}
+  for i = 1, #typenames do
+    types[typenames[i]] = typesizes:get(i-1)
+  end
+  
+  local fieldoffsets = self:read_array("uint32_t", msg:get_fieldoffsets())
+  local fieldnames = msg:get_fieldnames()
+  assert(fieldoffsets.length  == #fieldnames)
+
+  local fields = {}
+  for i = 1, #fieldnames do
+    fields[fieldnames[i]] = fieldoffsets:get(i-1)
+  end
+
+  self:log_msg("reflect_info", "ReflectInfo: types= %s", table.concat(typenames, ", "))
+
+  return {fieldoffsets = fields, typesizes = types}
+end
+
 local function init(self)
   self.strings = {}
   self.protos = {}
@@ -1587,6 +1611,15 @@ function api:parseheader(header)
   else
     self.maxsection = 0
     self.section_names = {}
+  end
+
+  local reflecinfo, limit = header:get_reflect()
+
+  if reflecinfo then
+    local reader = self:create_fbreader("ReflectInfo", reflecinfo, limit)
+    local info = self:readfb("ReflectInfo", reader)
+    self.fieldoffsets = info.fieldoffsets
+    self.typesizes = info.typesizes
   end
 end
 

@@ -41,6 +41,7 @@ message header {
   vmsettings : VMSettings
   vmdef : VMDef
   gcinfo : gc_info
+  reflect : ReflectInfo
 }
 
 message stringmarker{
@@ -399,4 +400,11 @@ message perf_section (no_vtable, enumlist : section) {
   istrace : bool
   isstart : bool
   id : 21
+}
+
+table ReflectInfo{
+  typenames : stringlist
+  typesizes : [uint32]
+  fieldnames : stringlist
+  fieldoffsets : [uint32]
 }
