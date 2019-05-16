@@ -1349,6 +1349,28 @@ function readers:perf_section(msg)
   return id, isstart, length
 end
 
+function readers:reflect_info(msg)
+  local typesizes = self:read_array("uint32_t", msg:get_typesizes())
+  local typenames = msg.typenames
+  assert(typesizes.length == #typenames)
+  local types = {}
+  for i = 1, #typenames do
+    types[typenames[i]] = typesizes:get(i-1)
+  end
+  self.typesizes = types
+  
+  local fieldoffsets = self:read_array("uint32_t", msg:get_fieldoffsets())
+  local fieldnames = msg.fieldnames
+  assert(fieldoffsets.length  == #fieldnames)
+  local fields = {}
+  for i = 1, #fieldnames do
+    fields[fieldnames[i]] = fieldoffsets:get(i-1)
+  end
+  self.fieldoffsets = fields
+  
+  self:log_msg("reflect_info", "ReflectInfo: types= %s", table.concat(typenames, ", "))
+end
+
 local function init(self)
   self.strings = {}
   self.protos = {}

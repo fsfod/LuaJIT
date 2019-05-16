@@ -415,6 +415,20 @@ module.messages = {
     ]],
     enumlist = "section",
   },
+  
+  {
+    name = "reflect_info",
+    fields = [[
+      typenames_length : u32
+      typenames : stringlist[typenames_length]
+      typesizes_length :  u8
+      typesizes : u32[typesizes_length]
+      fieldnames_length : u32
+      fieldnames : stringlist[fieldnames_length]
+      fieldoffsets_length :  u8
+      fieldoffsets : u32[fieldoffsets_length]
+    ]]
+  },
 }
 
 module.structs = {
