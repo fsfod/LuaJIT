@@ -279,12 +279,16 @@ static void write_gcproto(jitlog_State *context, UserBuf* ub, GCproto* pt)
   }
 }
 
-static void memorize_proto(jitlog_State* context, GCproto* pt)
+static void memorize_proto(jitlog_State* context, GCproto* pt, int firstload)
 {
   lua_State* L = mainthread(context->g);
   TValue key;
   int i;
   setprotoV(L, &key, pt);
+
+  if (!firstload && jitlog_isfiltered(context, LOGFILTER_PROTO_LOADONLY)) {
+    return;
+  }
 
   if (!(context->mode & JITLogMode_DisableMemorization) && !memorize_gcref(L, context->protos, &key, &context->protocount)) {
     /* Already written this proto to the jitlog */
@@ -344,7 +348,7 @@ static void memorize_func(jitlog_State* context, GCfunc* fn)
   }
 
   if (isluafunc(fn)) {
-    memorize_proto(context, funcproto(fn));
+    memorize_proto(context, funcproto(fn), 0);
   }
   write_gcfunc(&context->ub, fn);
   context->events_written |= JITLOGEVENT_GCOBJ;
@@ -551,7 +555,7 @@ static void memorize_existing(jitlog_State *context, MemorizeFilter filter)
     int gct = o->gch.gct;
     if (gct == ~LJ_TPROTO) {
       if (filter & MEMORIZE_PROTOS) {
-        memorize_proto(context, (GCproto *)o);
+        memorize_proto(context, (GCproto *)o, 1);
       }
     } else if (gct == ~LJ_TFUNC) {
       GCfunc *fn = (GCfunc *)o;
@@ -583,7 +587,7 @@ static void jitlog_tracestart(jitlog_State *context, GCtrace *T)
   jit_State *J = G2J(context->g);
   GCproto *startpt = &gcref(T->startpt)->pt;
   BCPos startpc = proto_bcpos(startpt, mref(T->startpc, const BCIns));
-  memorize_proto(context, startpt);
+  memorize_proto(context, startpt, 0);
 
   context->startfunc = J->fn;
   context->lastdepth = J->framedepth;
@@ -653,12 +657,12 @@ static void jitlog_writetrace(jitlog_State *context, GCtrace *T, int abort)
   BCPos startpc = proto_bcpos(startpt, mref(T->startpc, const BCIns));
   BCPos stoppc;
 
-  memorize_proto(context, startpt);
+  memorize_proto(context, startpt, 0);
   lua_assert(context->startfunc != NULL || (context->lastfunc == NULL && context->startfunc == NULL));
   /* Check if we saw this trace being recorded otherwise we will be lacking some info */
   if (context->startfunc) {
     stoppt = getcurlualoc(context, &stoppc);
-    memorize_proto(context, stoppt);
+    memorize_proto(context, stoppt, 0);
   } else {
     stoppt = NULL;
     stoppc = 0;
@@ -850,7 +854,7 @@ static void jitlog_exit(jitlog_State *context, VMEventData_TExit *exitState)
 
 static void jitlog_protobl(jitlog_State *context, VMEventData_ProtoBL *data)
 {
-  memorize_proto(context, data->pt);
+  memorize_proto(context, data->pt, 0);
   log_protobl(&context->ub, data->pt, data->pc);
   context->events_written |= JITLOGEVENT_PROTO_BLACKLISTED;
 }
@@ -945,7 +949,7 @@ static void jitlog_protoloaded(jitlog_State *context, GCproto *pt)
   if (jitlog_isfiltered(context, LOGFILTER_PROTO_LOADED)) {
     return;
   }
-  memorize_proto(context, pt);
+  memorize_proto(context, pt, 1);
   log_protoloaded(&context->ub, pt);
   context->events_written |= JITLOGEVENT_PROTO_LOADED;
 }
@@ -1811,7 +1815,7 @@ static int jlib_labelproto(lua_State *L)
   if (!tvisfunc(obj) || !isluafunc(funcV(obj))) {
     luaL_error(L, "Expected a Lua function for the first the parameter to label in the log");
   }
-  memorize_proto(context, funcproto(funcV(obj)));
+  memorize_proto(context, funcproto(funcV(obj)), 0);
   jitlog_labelobj(context, obj2gco(funcproto(funcV(obj))), label, flags);
   return 0;
 }
