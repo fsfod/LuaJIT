@@ -19,6 +19,8 @@ typedef enum JITLogFilter {
 
   LOGFILTER_LOADSTRING_SOURCE = 0x80,
   LOGFILTER_FILE_SOURCE       = 0x100,
+  /* Only try to memorize GCproto's when there first loaded */
+  LOGFILTER_PROTO_LOADONLY    = 0x200,
   LOGFILTER_SCRIPT_SOURCE     = LOGFILTER_LOADSTRING_SOURCE | LOGFILTER_FILE_SOURCE,
 
 
