@@ -1527,6 +1527,78 @@ function readers:gcstats(msg)
   return stats
 end
 
+local lockind = util.make_enum{
+  "proto",
+  "pc",
+  "cfunc",
+  "callstack",
+  "trace_id",
+  "trace_exit",
+  "trace_mcode",
+}
+
+function readers:obj_alloc(msg)
+  local address = addrtonum(msg.address)
+  local location_kind = lockind[msg.location_kind]
+
+  local object = {
+    id = -1,
+    eventid = self.eventid,
+    address = address,
+    type = objtypes[msg.type],
+    location_kind = location_kind,
+    size = msg.size,
+    extra = msg.extra,
+  }
+
+  if location_kind == "proto" then
+    object.location = self.proto_lookup[addrtonum(msg.location)]
+  elseif location_kind == "cfunc" then
+    object.location = self.func_lookup[addrtonum(msg.location)]
+  elseif location_kind == "trace_id" then
+    object.location = tonumber(msg.location)
+    object.trace = object.location_kind
+  elseif location_kind == "trace_exit" then
+    local loc = tonumber(msg.location)
+    object.location = tonumber(msg.location)
+    object.trace = bit.rshift(loc)
+  else
+    assert(false, "NYI other location types")
+  end
+
+  table.insert(self.obj_allocs, object)
+
+  self:log_msg("obj_alloc", "ObjAlloc(%s): size = %d, address = 0x%x, location = %s", object.type, msg.size, address, tostring(object.location))
+
+  if self.objects then
+    local objectid = self.objectid + 1
+    self.objectid = objectid
+    object.id = objectid
+    self.objects[address] = objectid
+  end
+
+  return object
+end
+
+function readers:obj_free(msg)
+  local address = addrtonum(msg.address)
+  local type = objtypes[msg.type]
+  local objectid = self.objects[address]
+
+  self:log_msg("obj_free", "ObjFree(%s): address = 0x%x, size = %d", type, address, msg.size) 
+  self.objects[address] = nil
+  return objectid, type, address
+end
+
+function readers:tab_resize(msg)
+  local address = addrtonum(msg.address)
+  local hsize = bit.lshift(1, band(msg.ahsize, 0xff))
+  local asize = rshift(msg.ahsize, 8)
+  
+  self:log_msg("tab_resize", "TableResize: address = 0x%x, hsize = %d, asize = %d", address,  hsize, asize)
+  return address, self.objects[address], hsize, asize
+end
+
 local function init(self)
   self.strings = {}
   self.protos = {}
@@ -1563,6 +1635,9 @@ local function init(self)
   -- GCstats based systems
   self.gcsnapshots = {}
   self.gcstats = {}
+  self.obj_allocs = {}
+  self.objects = {} -- Address to object Id that indexes in to obj_allocs
+  self.objectid = 1
 
   return t
 end

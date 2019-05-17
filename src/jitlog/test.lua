@@ -10,6 +10,7 @@ local apigen = require"jitlog.generator"
 local readerlib = require("jitlog.reader")
 assert(readerlib.makereader())
 local jitlog = require("jitlog")
+local fun = require("jitlog.fun")
 
 local parser = apigen.create_parser()
 parser:parse_structlist(msgdef.structs)
@@ -1153,7 +1154,51 @@ it("GC stats", function()
   assert(gcstats[5].string.acount == 0)
   assert(gcstats[5].table.atotal == 0)
   assert(gcstats[5].string.atotal == 0)
-end
+end)
+
+it("object allocation log", function()
+  -- Make sure were not half way through a GC cycle
+  collectgarbage("collect")
+  
+  local t
+  jitlog.start()
+  assert(jitlog.set_objalloc_logging(true))
+  local f1 = function()
+    return function() return {} end,  function()
+      -- Trigger table resize
+      t[1] = true
+      t[2] = 1
+      t[3] = 5
+    end
+  end
+  local f2, f3 = f1()
+  jitlog.labelobj(f1, "f1")
+  jitlog.labelobj(f2, "f2")
+  jitlog.labelobj(f3, "f3")
+  t = f2()
+  jitlog.labelobj(t, "t")
+  f2()
+  tostring(t)
+  t = nil
+  collectgarbage("collect")
+  jitlog.set_objalloc_logging(false)
+  
+  local result = parselog(jitlog.savetostring(), false)
+  local labels = result.objlabel_lookup
+  local allocs = fun.iter(result.obj_allocs):
+                 filter(function(o) return o.type == "table" or o.type == "string" or o.type == "func_lua" end):
+                 totable()
+  --fun.iter()head
+  assert(#allocs == 6, #allocs)
+  assert(allocs[1].type == "func_lua")
+  assert(allocs[2].type == "func_lua")
+  assert(allocs[3].type == "func_lua")
+  
+  assert(labels["f1"].address ~= labels["f2"].address)
+  assert(labels["f1"].address == allocs[1].address)
+  assert(labels["f2"].address == allocs[2].address)
+  assert(labels["f3"].address == allocs[3].address)
+end)
   
 local failed = false
 

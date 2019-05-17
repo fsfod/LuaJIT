@@ -465,6 +465,37 @@ module.messages = {
       objstats : ObjStat[objtype_count]
     ]]
   },
+
+  {
+    name = "obj_alloc",
+    fields = [[
+      type : 4
+      location_kind : 4
+      extra : 10
+      location : GCRefPtr
+      address : GCRefPtr
+      size : u32
+    ]]
+  },
+
+  {
+    name = "obj_free",
+    fields = [[
+      type : 4
+      size : 20
+      address : GCRefPtr
+    ]]
+  },
+
+  {
+    name = "tab_resize",
+    fields = [[
+      oldh : 5
+      olda : 18
+      address : GCRefPtr
+      ahsize : u32
+    ]]
+  },
 }
 
 module.structs = {
