@@ -10,6 +10,7 @@
 #include "lj_vmevent.h"
 #include "lj_debug.h"
 #include "lj_ircall.h"
+#include "lj_gcstats.h"
 #include "luajit.h"
 #include "lauxlib.h"
 #include "lj_target.h"
@@ -1860,6 +1861,34 @@ static int write_rawobj(UserBuf *ub, GCobj* o, uint16_t flags, int extramem)
   return 1;
 }
 
+LJ_STATIC_ASSERT(sizeof(SnapObj) == sizeof(SnapshotObj));
+
+LUA_API int jitlog_write_gcsnapshot(JITLogUserContext *usrcontext, const char *label, int addobjmem)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+  global_State *g = context->g;
+  GCSnapshot *snap = gcsnapshot_create(mainthread(context->g), addobjmem);
+
+  if (snap->gcmem_size > 0xffffff00) {
+    lua_assert(0 && "NYI snapshots larger than 4GB");
+    return 0;
+  }
+  
+  gcsnapshot_Args args = {
+    .label = label,
+    .objs = (SnapObj *)snap->objects,
+    .objcount = snap->count,
+    .objmem = (uint8_t*)snap->gcmem,
+    .objmemsz = (uint32_t)snap->gcmem_size,
+    .registry = tabV(&g->registrytv),
+    .globalenv = gcrefp(G2GG(g)->L.env, GCtab),
+  };
+  log_gcsnapshot(&context->ub, &args);
+  gcsnapshot_free(snap);
+  context->events_written |= JITLOGEVENT_GCSNAPSHOT;
+  return 1;
+}
+
 /* -- Lua module to control the JITLog ------------------------------------ */
 
 static jitlog_State* jlib_getstate(lua_State *L)
@@ -2172,6 +2201,18 @@ static int jlib_write_rawobj(lua_State *L)
   return 0;
 }
 
+static int jlib_write_gcsnapshot(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  int addobjmem = 0;
+  const char *label = strdata(lj_lib_checkstr(L, 1));
+  if ((L->top-L->base) > 1) {
+    addobjmem = tvistruecond(lj_lib_checkany(L, 2));
+  }
+  jitlog_write_gcsnapshot(ctx2usr(context), label, addobjmem);
+  return 0;
+}
+
 static const luaL_Reg jitlog_lib[] = {
   {"start", jlib_start},
   {"shutdown", jlib_shutdown},
@@ -2196,6 +2237,7 @@ static const luaL_Reg jitlog_lib[] = {
   {"section_start", jlib_section_start},
   {"section_end", jlib_section_end},
   {"write_rawobj",jlib_write_rawobj},
+  {"write_gcsnapshot", jlib_write_gcsnapshot},
   {NULL, NULL},
 };
 

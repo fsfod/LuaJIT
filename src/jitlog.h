@@ -39,6 +39,7 @@ typedef enum JITLogEventTypes {
   JITLOGEVENT_GCSTATE           = 0x800,
   JITLOGEVENT_STACK             = 0x1000,
   JITLOGEVENT_PERFINFO          = 0x2000,
+  JITLOGEVENT_GCSNAPSHOT        = 0x4000,
 
   JITLOGEVENT_SHOULDRESET = JITLOGEVENT_TRACE_EXITS | JITLOGEVENT_GCSTATE | JITLOGEVENT_TRACE_ABORT,
 
@@ -129,5 +130,13 @@ LUA_API int jitlog_setsink_mmap(JITLogUserContext *usrcontext, const char *path,
 **  that can be used for arbitrary data otherwise just use 0. 
 */
 LUA_API void jitlog_writemarker(JITLogUserContext *usrcontext, const char *label, int flags);
+
+/*
+** Write a snapshot of all the Lua objects currently allocated the base information collected is 
+** there address, size and type. If addobjmem is true all the memory of the objects is included 
+** in the snapshot as well this can massively increase the size of the snapshot.
+*/
+LUA_API int jitlog_write_gcsnapshot(JITLogUserContext *usrcontext, const char *label, int addobjmem);
+
 #endif
 

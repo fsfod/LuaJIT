@@ -1393,6 +1393,102 @@ function readers:obj_raw(msg)
   return object
 end
 
+local gcsnapshotlib = {}
+
+function gcsnapshotlib:getstats()
+  local count = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+  local totals = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+  local maxsize = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+
+  local objs = self.objs
+  for i=0, self.objcount-1 do
+    local info = objs:get(i).typesize
+    local otype = band(info, 15) + 1
+    local size = bit.rshift(info, 4)
+    if otype > 12 then
+      error(format("bad object type %d address %s, index = %d out of %d", otype, tostring(objs:get(i).address), i, self.objcount))
+    end
+    assert(otype < 12, objs:get(i).address)
+    count[otype] = count[otype] + 1
+    totals[otype] = totals[otype] + size
+    maxsize[otype] = math.max(maxsize[otype], size)
+  end
+  
+  local stats = {
+    counts = {},
+    memtotals = {},
+    maxsize = {},
+  }
+  
+  for i, name in ipairs(objtypes.names) do
+    stats.counts[name] = count[i]
+    stats.memtotals[name] = totals[i]
+    stats.maxsize[name] = maxsize[i]
+  end
+  
+  return stats
+end
+
+function gcsnapshotlib:getobj(i)
+  local info = self.objs:get(i).typesize
+  local typename = objtypes[band(info, 15)]
+  local size = bit.rshift(info, 4)
+  return typename, self.objs:get(i).address, size
+end
+
+function gcsnapshotlib:dumpobjs(filter)
+  local objs = self.objs
+  for i=0, self.objcount-1 do
+    local info = objs:get(i).typesize
+    local otype = band(info, 15)
+    local typename = objtypes[otype]
+    local size = bit.rshift(info, 4)
+    if not filter or filter[typename] then
+      print(string.format("%s : %d, %d", typename, tonumber(objs:get(i).address), size))
+    end
+  end
+end
+
+function gcsnapshotlib:findobj(address)
+  local objs = self.objs
+  for i=0, self.objcount-1 do
+    if objs:get(i).address == address then
+      return i, self:getobj(i)
+    end
+  end
+  return nil
+end
+
+msgobj_mt.gcsnapshot = {
+  __index = gcsnapshotlib,
+  __tostring = function(self)
+    return string.format("GCSnapshot: label = '%s' objects = %d, object mem size = ", self.label, self.objcount, objmemsz)
+  end,
+}
+
+function readers:gcsnapshot(msg)
+  local objcount = msg.objcount
+  local objmemsz = msg.objmemsz 
+  local objs = self:read_array("SnapObj", msg:get_objs(), objcount) 
+  local objmem = self:read_array("char", msg:get_objmem(), objmemsz)
+
+  local snap = {
+    id = #self.gcsnapshots + 1,
+    eventid = self.eventid,
+    label = msg.label,
+    time = msg.time,
+    objs = objs,
+    objcount = objcount,
+    objmem = objmem,
+    objmemsz = objmemsz,
+  }
+  setmetatable(snap, self.msgobj_mt.gcsnapshot)
+  
+  self:log_msg("gcsnapshot", "GCSnapshot: label = '%s' objects = %d, total object mem = %s", snap.label,  objcount, objmemsz)
+  tinsert(self.gcsnapshots, snap)
+  return snap
+end
+
 local function init(self)
   self.strings = {}
   self.protos = {}
@@ -1425,6 +1521,9 @@ local function init(self)
   self.section_starts = {}
   self.section_counts = {}
   self.section_time = {}
+
+  -- GCstats based systems
+  self.gcsnapshots = {}
 
   return t
 end
