@@ -8,6 +8,7 @@ local fbsparser = require("jitlog.fbs_parser")
 local apigen = require"jitlog.generator"
 local readerlib = require("jitlog.reader")
 local jitlog = require("jitlog")
+local fun = require("jitlog.fun")
 
 local msgschema = fbsparser.parse_fbsfile("jitlog/messages.jlfbs")
 local msginfo_vm

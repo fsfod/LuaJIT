@@ -70,6 +70,7 @@ typedef struct jitlog_State {
   JITLogEventTypes events_written;
   char infullgc;
   GCAllocationStats *gcstats;
+  char oballoc_stacks;
 } jitlog_State;
 
 
@@ -997,6 +998,117 @@ void jitlog_loadscript(jitlog_State *context, lua_State *L, VMEventData_LoadScri
   }
 }
 
+typedef enum LocKind {
+  LOCATION_None,
+  LOCATION_PROTO,
+  LOCATION_PC,
+  LOCATION_CFUNC,
+  LOCATION_CALLSTACK,
+  LOCATION_TRACE_ID,
+  LOCATION_TRACE_EXIT,
+  LOCATION_TRACE_MCODE,
+} LocKind;
+
+static void gcalloc_cb(jitlog_State *context, GCobj *o, uint32_t info, size_t size)
+{
+  int free = (info & 0x80) != 0;
+  int tid = info & 0x7f;
+  uint32_t type = 0;
+  uint32_t extra = 0;
+
+  /* Array and\or hash part of a table has been resized */
+  if (tid == (1 + ~LJ_TUDATA)) {
+    GCtab *t = (GCtab *)o;
+    uint32_t ahsize = t->asize << 8;
+    ahsize |= t->hmask > 0 ? lj_fls(t->hmask+1) : 0;
+    log_tab_resize(&context->ub, (info >> 8) & 0xff, info >> 16, o, ahsize);
+    context->events_written |= JITLOGEVENT_OBJALLOC;
+    return;
+  }
+
+  if (!free && 0) {
+    if (tid == ~LJ_TSTR) {
+      memorize_string(context, (GCstr *)o);
+      return;
+    } else if(tid == ~LJ_TFUNC) {
+      memorize_func(context, (GCfunc *)o);
+      return;
+    }
+  }
+
+  type = obj_type(o);
+
+  if (tid == ~LJ_TCDATA) {
+    extra = ((GCcdata *)o)->ctypeid;
+  }
+
+  if (free) {
+    /* We only have 20 bits represent the size just set it to 0 if it overflows that */
+    if (size > 0xfffff) {
+      size = 0;
+    }
+    log_obj_free(&context->ub, type, (uint32_t)(size <= 0xfffff ? size : 0), o);
+    context->events_written |= JITLOGEVENT_OBJALLOC;
+    return;
+  }
+
+  global_State *g = context->g;
+  lua_State *L = gcrefp(g->cur_L, lua_State);
+  int lockind = 0;
+  void *loc = NULL;
+
+  if(context->traceexit) {
+    // This should mostly be cdata being unsunk in lj_snap_restore
+    lockind = LOCATION_TRACE_EXIT;
+    loc = (void *)(uintptr_t)context->traceexit;
+  } else if(g->vmstate > 0) {
+    /* Called from a JIT'ed trace */
+    loc = (void *)(uintptr_t)g->vmstate;
+    lockind = LOCATION_TRACE_ID;
+  } else {
+    GCfunc *f = curr_func(L);
+    if(isluafunc(f)) {
+      loc = funcproto(f);
+      lockind = LOCATION_PROTO;
+      // can cause a tab resize event from our memorization table growing
+      memorize_proto(context, funcproto(f), 0);
+    } else {
+      loc = f;
+      lockind = LOCATION_CFUNC;
+      if (f->c.gct == ~LJ_TFUNC) {
+        // can cause a tab resize event from our memorization table growing
+        memorize_func(context, f);
+      }
+    }
+  }
+
+  if (context->oballoc_stacks) {
+    luastack_Args callstack = capture_stack(context, L, StackCaptureMode_CallFrames);
+    obj_allocstack_Args args = {
+      .type = type,
+      .extra = extra,
+      .address = o,
+      .size = (uint32_t)size,
+      .location_kind = lockind,
+      .location = loc,
+      .stack = &callstack,
+    };
+    log_obj_allocstack(&context->ub, &args);
+  } else {
+    obj_alloc_Args args = {
+      .type = type,
+      .extra = extra,
+      .address = o,
+      .size = (uint32_t)size,
+      .location_kind = lockind,
+      .location = loc,
+    };
+    log_obj_alloc(&context->ub, &args);
+  }
+
+  context->events_written |= JITLOGEVENT_OBJALLOC;
+}
+
 static gc_info_Args build_gcinfo(jitlog_State* context) {
   global_State* g = context->g;
   gc_info_Args args = {
@@ -1632,8 +1744,31 @@ static int jitlog_set_gcstats_enabled(jitlog_State *context, int enable)
     }
     context->gcstats = start_gcstats_tracker(L);
   } else { 
+    if (context->g->objalloc_cb == (lua_ObjAlloc_cb)&gcalloc_cb) {
+      /* we shouldn't have both callbacks enabled at the same time */
+      lua_assert(!context->gcstats);
+      return 0;
+    }
     stop_gcstats_tracker(context->gcstats);
     context->gcstats = NULL;
+  }
+  return 1;
+}
+
+static int jitlog_setobjalloclog(jitlog_State *context, int enable)
+{
+  if (enable) {
+    if (context->g->objalloc_cb != NULL) {
+      return context->g->objalloc_cb == (lua_ObjAlloc_cb)&gcalloc_cb;
+    }
+    context->g->objalloc_cb = (lua_ObjAlloc_cb)&gcalloc_cb;
+    context->g->objallocd = context;
+  } else {
+    if (context->g->objalloc_cb != (lua_ObjAlloc_cb)&gcalloc_cb) {
+      return 1;
+    }
+    context->g->objalloc_cb = NULL;
+    context->g->objallocd = NULL;
   }
   return 1;
 }
@@ -1758,6 +1893,12 @@ LUA_API JITLogUserContext* jitlog_startasync(lua_State* L, UserBuf* sink)
 
 static void clear_objalloc_callback(jitlog_State *context)
 {
+  global_State *g = context->g;
+  if (g->objalloc_cb == (lua_ObjAlloc_cb)&gcalloc_cb) {
+    lua_assert(!context->gcstats);
+    g->objalloc_cb = NULL;
+    g->objallocd = NULL;
+  }
   if (context->gcstats) {
     stop_gcstats_tracker(context->gcstats);
     context->gcstats = NULL;
@@ -2679,6 +2820,18 @@ static int jlib_reset_gcstats(lua_State *L)
   return 0;
 }
 
+static int jlib_set_objalloc_logging(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  int enable = tvistruecond(lj_lib_checkany(L, 1));
+  int ret = jitlog_setobjalloclog(context, enable);
+  if (enable && (L->top - L->base) > 1) {
+    context->oballoc_stacks = tvistruecond(lj_lib_checkany(L, 2));
+  }
+  setboolV(L->base+1, ret);
+  return 1;
+}
+
 static const luaL_Reg jitlog_lib[] = {
   {"start", jlib_start},
   {"shutdown", jlib_shutdown},
@@ -2706,6 +2859,7 @@ static const luaL_Reg jitlog_lib[] = {
   {"setgcstats_enabled", jlib_setgcstats_enabled},
   {"write_gcstats", jlib_write_gcstats},
   {"reset_gcstats", jlib_reset_gcstats},
+  {"set_objalloc_logging", jlib_set_objalloc_logging},
   {NULL, NULL},
 };
 

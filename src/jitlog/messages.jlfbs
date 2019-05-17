@@ -459,3 +459,35 @@ struct ObjStat{
   atotal : uint64
   ftotal : uint64
 }
+
+message obj_alloc (no_vtable){
+  type : 4
+  location_kind : 4
+  extra : 10
+  location : GCRefPtr
+  address : GCRefPtr
+  size : uint32
+}
+
+message obj_allocstack (mapto : obj_alloc) {
+  type : uint8
+  location_kind : uint8
+  extra : uint16
+  location : GCRefPtr
+  address : GCRefPtr
+  size : uint32
+  stack : luastack
+}
+
+message obj_free (no_vtable){
+  type : 4
+  size : 20
+  address : GCRefPtr
+}
+
+message tab_resize (no_vtable){
+  oldh : 5
+  olda : 18
+  address : GCRefPtr
+  ahsize : uint32
+}
