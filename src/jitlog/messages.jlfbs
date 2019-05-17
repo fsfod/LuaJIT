@@ -148,6 +148,7 @@ message gcstate {
   stepstart : uint64
   prevstate : uint8
   gcinfo : gc_info
+  gcstats : gc_stats (optional)
 }
 
 table gc_info{
@@ -439,4 +440,22 @@ struct HugeSnapObj {
   typeinfo : uint32
   index : uint32
   size : uint64
+}
+
+message gc_stats_snapshot{
+  time : timestamp
+  note : string (optional)
+  gcstats : gc_stats
+}
+
+table gc_stats{
+  totalmem : uint64
+  objstats : [ObjStat]
+}
+
+struct ObjStat{
+  acount : uint32
+  fcount : uint32
+  atotal : uint64
+  ftotal : uint64
 }

@@ -1111,6 +1111,12 @@ function readers:gcstate(msg)
     self.gctime[prev_phase] = (self.gctime[prev_phase] or 0) + info.steptime
   end
 
+  local gcstats = msg:get_gcstats()
+  if gcstats then
+    local stats = self:readfb("gc_stats", gcstats, "gcstate", msg.time)
+    stats.gcstate = prev_phase
+  end
+
   self:update_gcinfo(info, "gcstate")
   return phase, prev_phase
 end
@@ -1646,6 +1652,58 @@ function readers:gcsnapshot(msg)
   return snap
 end
 
+function readers:gc_stats_snapshot(msg, msgname)
+  local gc_stats = msg:get_gcstats()
+  self:log_msg("gc_stats_snapshot", "GCStats: totalmem = %dKb, note = %s", gc_stats.totalmem/1024, msg.note)
+
+  return self:readfb("gc_stats", gc_stats, msgname, msg.time, msg.note)
+end
+
+local objtype_stats = {
+  "string",
+  "upvalue",
+  "thread",
+  "proto",
+  "func_lua",
+  "func_c",
+  "trace",
+  "cdata",
+  "table",
+  "udata",
+  "table_hash",
+  "table_array",
+}
+
+function fbreaders:gc_stats(gcstats, source, time, note)
+  assert(source, "Missing message source for gc_stats fb table")
+
+  local objstats = {}
+  local gc_stats = {
+    eventid = self.eventid,
+    totalmem = gcstats.totalmem,
+    objstats = objstats,
+    source = source,
+    time = time,
+    note = note,
+  }
+
+  local allocation_stats = self:read_array("ObjStat", gcstats:get_objstats())
+  assert(allocation_stats.length <= #objtype_stats)
+  
+  for i, name in ipairs(objtype_stats) do
+    local n = i-1
+    local ostat = {
+      acount = allocation_stats:get(n).acount, 
+      fcount = allocation_stats:get(n).fcount,
+      atotal = allocation_stats:get(n).atotal, 
+      ftotal = allocation_stats:get(n).ftotal,
+    }
+    objstats[name] = ostat
+  end
+  tinsert(self.gcstats, gc_stats)
+  return gc_stats
+end
+
 local function init(self)
   self.strings = {}
   self.protos = {}
@@ -1689,6 +1747,7 @@ local function init(self)
 
   -- GCstats based systems
   self.gcsnapshots = {}
+  self.gcstats = {}
 
   return t
 end

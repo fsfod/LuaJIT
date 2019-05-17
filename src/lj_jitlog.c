@@ -69,6 +69,7 @@ typedef struct jitlog_State {
   uint64_t resetpoint;
   JITLogEventTypes events_written;
   char infullgc;
+  GCAllocationStats *gcstats;
 } jitlog_State;
 
 
@@ -1009,7 +1010,18 @@ static gc_info_Args build_gcinfo(jitlog_State* context) {
   return args;
 }
 
-static void jitlog_gcstate(jitlog_State* context, int newstate)
+static gc_stats_Args build_gcstats(jitlog_State* context) 
+{
+  lua_assert(context->gcstats);
+  gc_stats_Args gcstats = {
+    .totalmem = context->g->gc.total,
+    .objstats = (ObjStat*)context->gcstats->stats,
+    .objstats_length = sizeof(context->gcstats->stats) / sizeof(context->gcstats->stats[0]),
+  };
+  return gcstats;
+}
+
+static void jitlog_gcstate(jitlog_State *context, int newstate)
 {
   if (jitlog_isfiltered(context, LOGFILTER_GC_STATE)) {
     return;
@@ -1031,7 +1043,12 @@ static void jitlog_gcstate(jitlog_State* context, int newstate)
 
   gcinfo.state = newstate != -1 ? newstate : g->gc.state;
   
-  log_gcstate(&context->ub, g->gc.state, context->gcstart, &gcinfo);
+  if (context->gcstats) {
+    gc_stats_Args gcstats = build_gcstats(context);
+    log_gcstate(&context->ub, g->gc.state, context->gcstart, &gcinfo, &gcstats);
+  } else {
+    log_gcstate(&context->ub, g->gc.state, context->gcstart, &gcinfo, NULL);
+  }
 
   context->gcstep_max = 0;
   context->gcstep_time = 0;
@@ -1606,6 +1623,21 @@ LUA_API JITLogUserContext* jitlog_getjlctx(lua_State *L) {
   return cb == jitlog_callback ? ctx2usr((jitlog_State *)current_context) : NULL;
 }
 
+static int jitlog_set_gcstats_enabled(jitlog_State *context, int enable)
+{
+  lua_State *L = mainthread(context->g);
+  if (enable) {
+    if (context->g->objalloc_cb != NULL) {
+      return context->gcstats != NULL;
+    }
+    context->gcstats = start_gcstats_tracker(L);
+  } else { 
+    stop_gcstats_tracker(context->gcstats);
+    context->gcstats = NULL;
+  }
+  return 1;
+}
+
 /* -- JITLog public API ---------------------------------------------------- */
 
 LUA_API int luaopen_jitlog(lua_State *L);
@@ -1724,9 +1756,18 @@ LUA_API JITLogUserContext* jitlog_startasync(lua_State* L, UserBuf* sink)
   return &context->user;
 }
 
+static void clear_objalloc_callback(jitlog_State *context)
+{
+  if (context->gcstats) {
+    stop_gcstats_tracker(context->gcstats);
+    context->gcstats = NULL;
+  }
+}
+
 static void free_context(jitlog_State *context)
 {
   UserBuf *ubuf = &context->ub;
+  clear_objalloc_callback(context);
   ubuf_flush(ubuf);
   ubuf_free(ubuf);
 
@@ -1753,6 +1794,7 @@ static void jitlog_shutdown(jitlog_State *context)
     luaJIT_gcevent_sethook(L, NULL, NULL);
   }
 
+  clear_objalloc_callback(context);
 
   if (context->loadstate > 1) {
     free_pinnedtab(L, context->strings);
@@ -2251,6 +2293,24 @@ LUA_API int jitlog_write_gcsnapshot(JITLogUserContext *usrcontext, const char *l
   return 1;
 }
 
+LUA_API int jitlog_write_gcstats(JITLogUserContext *usrcontext, const char *note)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+  global_State* g = context->g;
+
+  if (!context->gcstats) {
+    return 0;
+  }
+  gc_stats_Args args = {
+    .totalmem = g->gc.total,
+    .objstats = (ObjStat*)context->gcstats->stats,
+    .objstats_length = sizeof(context->gcstats->stats) / sizeof(context->gcstats->stats[0]),
+  };
+  log_gc_stats_snapshot(&context->ub, note, &args);
+  jitlog_checkflush(context, JITLOGEVENT_GCSTATS);
+  return 1;
+}
+
 /* -- Lua module to control the JITLog ------------------------------------ */
 
 static jitlog_State* jlib_getstate(lua_State *L)
@@ -2581,6 +2641,44 @@ static int jlib_write_gcsnapshot(lua_State *L)
   return 0;
 }
 
+static int jlib_setgcstats_enabled(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  int enable = tvistruecond(lj_lib_checkany(L, 1));
+  int ret = jitlog_set_gcstats_enabled(context, enable);
+  setboolV(L->base+1, ret);
+  return 1;
+}
+
+static void reset_gcstats(jitlog_State *context)
+{
+  memset(context->gcstats->stats, 0, sizeof(context->gcstats->stats));
+}
+
+static int jlib_write_gcstats(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  if (!context->gcstats) {
+    luaL_error(L, "GC stats collection system is not active");
+  }
+  const char *note = NULL;
+  if ((L->top - L->base) > 0) {
+    note = strdata(lj_lib_checkstr(L, 1));
+  }
+  jitlog_write_gcstats(ctx2usr(context), note);
+  return 0;
+}
+
+static int jlib_reset_gcstats(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  if (!context->gcstats) {
+    luaL_error(L, "GC stats collection system is not active");
+  }
+  reset_gcstats(context);
+  return 0;
+}
+
 static const luaL_Reg jitlog_lib[] = {
   {"start", jlib_start},
   {"shutdown", jlib_shutdown},
@@ -2605,6 +2703,9 @@ static const luaL_Reg jitlog_lib[] = {
   {"section_end", jlib_section_end},
   {"write_rawobj",jlib_write_rawobj},
   {"write_gcsnapshot", jlib_write_gcsnapshot},
+  {"setgcstats_enabled", jlib_setgcstats_enabled},
+  {"write_gcstats", jlib_write_gcstats},
+  {"reset_gcstats", jlib_reset_gcstats},
   {NULL, NULL},
 };
 

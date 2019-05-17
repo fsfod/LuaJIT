@@ -1234,6 +1234,192 @@ it("GC snapshot", function()
   assert(sumtab(stats2.memtotals) < snap2.objmemsz)
 end)
 
+it("GC stats", function()
+  collectgarbage("collect")
+  local t
+  jitlog.start()
+  assert(jitlog.setgcstats_enabled(true))
+  -- Allocate one table
+  t = {}
+  jitlog.write_gcstats("start")
+  -- Trigger table resize
+  t[1] = true
+  t[2] = 1
+  t[3] = 5
+  jitlog.write_gcstats("tabresize")
+
+  -- Allocate one string
+  t = tostring(t)
+  jitlog.write_gcstats("stralloc")
+  -- Reset the GC stat counters back to zero
+  jitlog.reset_gcstats()
+  jitlog.write_gcstats("reset")
+
+  t = nil
+  collectgarbage("collect")
+  jitlog.write_gcstats()
+  jitlog.setgcstats_enabled(false)
+  -- Should error while gc object stats collection is turned off
+  assert(not pcall(jitlog.write_gcstats))
+  assert(not pcall(jitlog.reset_gcstats))
+
+  local result = parselog(jitlog.savetostring())
+  assert(#result.gcstats >= 9)
+  local gcstats = result.gcstats
+  assert(gcstats[1].note == "start")
+  local objstats = gcstats[1].objstats
+  assert(objstats.table.acount == 1)
+  assert(objstats.table.atotal > 0)
+  assert(objstats.table.fcount == 0)
+  assert(objstats.string.acount == 0)
+  assert(objstats.string.atotal == 0)
+  assert(objstats.string.ftotal == 0)
+  assert(objstats.table_array.acount == 0)
+  assert(objstats.table_array.atotal == 0)
+
+  --Check the array part of tables was resized twice
+  assert(gcstats[2].note == "tabresize")
+  objstats = gcstats[2].objstats
+  assert(objstats.table.acount == 1)
+  assert(objstats.table.atotal > 0)
+  assert(objstats.table.fcount == 0)
+  assert(objstats.table_array.acount == 2)
+  assert(objstats.table_array.atotal > 0)
+  assert(objstats.table_array.fcount == 0)
+  assert(objstats.table_array.ftotal == 0)
+
+  -- Check we saw one string allocation
+  assert(gcstats[3].note == "stralloc")
+  objstats = gcstats[3].objstats
+  assert(objstats.table.acount == 1)
+  assert(objstats.table.fcount == 0)
+  assert(objstats.string.acount == 1)
+  assert(objstats.string.atotal > 0)
+
+  --Check reset_gcstats sets the stats back to zero
+  assert(gcstats[4].note == "reset")
+  for otype, stats in pairs(gcstats[4].objstats) do
+    if type(stats) == "table" then
+      assert(stats.acount == 0, otype)
+      assert(stats.fcount == 0, otype)
+      assert(stats.atotal == 0, otype)
+      assert(stats.ftotal == 0, otype)
+    end
+  end
+
+  -- Check obj stats from gc events
+  for i = 5, #gcstats-1 do
+    assert(gcstats[i].source ~= "gc_stats_snapshot")
+    assert(gcstats[i].note == nil)
+  end
+
+  -- After a full GC cycle we should see at least one table and string destroyed
+  assert(gcstats[#gcstats].note == nil)
+  assert(gcstats[#gcstats].source == "gc_stats_snapshot")
+  objstats = gcstats[#gcstats].objstats
+  assert(objstats.table.fcount > 0)
+  assert(objstats.string.fcount > 0)
+  assert(objstats.table.ftotal > 0)
+  assert(objstats.string.ftotal > 0)
+  assert(objstats.table.acount == 0)
+  assert(objstats.string.acount == 0)
+  assert(objstats.table.atotal == 0)
+  assert(objstats.string.atotal == 0)
+
+  local function checkrange(first, last)
+    local acounts = {}
+    local atotal = {}
+    local fcounts = {}
+    local ftotal = {}
+
+    for name, _ in pairs(gcstats[1].objstats) do
+      acounts[name] = 0
+      atotal[name]  = 0
+      fcounts[name] = 0
+      ftotal[name]  = 0
+    end
+
+    for i = first, last do
+      for name, otype in pairs(gcstats[i].objstats) do
+        if otype.acount < acounts[name] then
+          error(string.format("Obj allocation count %s should only increase", name))
+        end
+        if otype.atotal < atotal[name] then
+          error(string.format("Obj memory total %s should only increase", name))
+        end
+
+        if otype.fcount < fcounts[name] then
+          error(string.format("Obj free count %s should only increase", name))
+        end
+        if otype.ftotal < ftotal[name] then
+          error(string.format("Obj memory total %s should only increase", name))
+        end
+
+        acounts[name] = otype.acount
+        atotal[name]  = otype.atotal
+        fcounts[name] = otype.fcount
+        ftotal[name]  = otype.ftotal
+      end
+    end
+  end
+
+  checkrange(1, 3)
+  checkrange(4, #gcstats)
+end)
+
+it("object allocation log", function()
+  -- Make sure were not half way through a GC cycle
+  collectgarbage("collect")
+  
+  local t
+  jitlog.start()
+  assert(jitlog.set_objalloc_logging(true))
+  local f1 = function()
+    return function() return {} end,  function()
+      -- Trigger table resize
+      t[1] = true
+      t[2] = 1
+      t[3] = 5
+    end
+  end
+  local f2, f3 = f1()
+  jitlog.labelobj(f1, "f1")
+  jitlog.labelobj(f2, "f2")
+  jitlog.labelobj(f3, "f3")
+
+  -- Enable logging Lua call stacks for object allocations
+  jitlog.set_objalloc_logging(true, true)
+  t = f2()
+  jitlog.labelobj(t, "t")
+  f2()
+  tostring(t)
+  t = nil
+  collectgarbage("collect")
+  jitlog.set_objalloc_logging(false)
+  
+  local result = parselog(jitlog.savetostring(), false)
+  local labels = result.objlabel_lookup
+  local allocs = fun.iter(result.obj_allocs):
+                 filter(function(o) return o.type == "table" or o.type == "string" or o.type == "func_lua" end):
+                 totable()
+  --fun.iter()head
+  assert(#allocs == 6, #allocs)
+  assert(allocs[1].type == "func_lua")
+  assert(allocs[2].type == "func_lua")
+  assert(allocs[3].type == "func_lua")
+
+  assert(allocs[1].stack == nil)
+  assert(allocs[2].stack == nil)
+  assert(allocs[3].stack == nil)
+  assert(allocs[4].stack ~= nil)
+  assert(allocs[5].stack ~= nil)
+  
+  assert(labels["f1"].address ~= labels["f2"].address)
+  assert(labels["f1"].address == allocs[1].address)
+  assert(labels["f2"].address == allocs[2].address)
+  assert(labels["f3"].address == allocs[3].address)
+end)
+  
 local failed = false
 
 pcall(jitlog.shutdown)
