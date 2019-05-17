@@ -416,3 +416,27 @@ message obj_raw{
   objmem : [uint8]
   extra : [uint8]
 }
+
+message gcsnapshot{
+  time : timestamp
+  capture_time : uint64
+  label: string (optional)
+  registry : GCRefPtr
+  globalenv : GCRefPtr
+  objs : [SnapObj]
+  huge_objs : [HugeSnapObj]
+  objmem : [uint8]
+  ctypeids : [uint16]
+}
+
+struct SnapObj{
+  address : GCRef
+  typesize : uint32
+}
+
+struct HugeSnapObj {
+  address : GCRef
+  typeinfo : uint32
+  index : uint32
+  size : uint64
+}

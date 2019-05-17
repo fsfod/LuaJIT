@@ -444,6 +444,20 @@ module.messages = {
       fieldoffsets : u32[fieldoffsets_length]
     ]]
   },
+
+  {
+    name = "gcsnapshot",
+    fields = [[
+      time : timestamp
+      label: string
+      registry : GCRefPtr
+      globalenv : GCRefPtr
+      objcount :  u32
+      objs : SnapObj[objcount]
+      objmemsz :  u64
+      objmem : u8[objmemsz]
+    ]]
+  },
 }
 
 module.structs = {
@@ -478,6 +492,14 @@ module.structs = {
       time : u64
       count : u32
       max : u32
+    ]]
+  },
+
+  {
+    name = "SnapObj",
+    fields = [[
+      address : GCRef
+      typesize : u32
     ]]
   },
 }
