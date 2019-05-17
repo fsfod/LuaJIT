@@ -1077,6 +1077,84 @@ it("GC snapshot", function()
   assert(sumtab(stats2.memtotals) < snap2.objmemsz)
 end)
 
+it("GC stats", function()
+  local t
+  jitlog.start()
+  assert(jitlog.setgcstats_enabled(true))
+  -- Allocate one table
+  t = {}
+  jitlog.write_gcstats()
+  -- Trigger table resize
+  t[1] = true
+  t[2] = 1
+  t[3] = 5
+  jitlog.write_gcstats()
+  
+  -- Allocate one string
+  t = tostring(t)
+  jitlog.write_gcstats()
+  -- Reset the GC stat counters back to zero
+  jitlog.reset_gcstats()
+  jitlog.write_gcstats()
+  
+  t = nil
+  collectgarbage("collect")
+  jitlog.write_gcstats()
+  jitlog.setgcstats_enabled(false)
+  -- Should error while statcs collection is turned off
+  assert(not pcall(jitlog.write_gcstats))
+  assert(not pcall(jitlog.reset_gcstats))
+  
+  local result = parselog(jitlog.savetostring())
+  assert(#result.gcstats == 5)
+  local gcstats = result.gcstats
+  assert(gcstats[1].table.acount == 1, gcstats[1].table.acount)
+  assert(gcstats[1].table.atotal > 0)
+  assert(gcstats[1].table.fcount == 0)
+  assert(gcstats[1].string.acount == 0)
+  assert(gcstats[1].string.atotal == 0)
+  assert(gcstats[1].string.ftotal == 0)
+  assert(gcstats[1].table_array.acount == 0)
+  assert(gcstats[1].table_array.atotal == 0)
+  
+  --Check the array part of tables was resized twice
+  assert(gcstats[2].table.acount == 1)
+  assert(gcstats[2].table.atotal > 0)
+  assert(gcstats[2].table.fcount == 0)
+  assert(gcstats[2].table_array.acount == 2)
+  assert(gcstats[2].table_array.atotal > 0)
+  assert(gcstats[2].table_array.fcount == 0)
+  assert(gcstats[2].table_array.ftotal == 0)
+  
+  -- Check we saw one string allocation
+  assert(gcstats[3].table.acount == 1)
+  assert(gcstats[3].table.fcount == 0)
+  assert(gcstats[3].string.acount == 1)
+  assert(gcstats[3].string.fcount == 0)
+  assert(gcstats[3].string.atotal > 0)
+  assert(gcstats[3].string.ftotal == 0)
+  
+  --Check reset_gcstats sets the stats back to zero
+  for otype, stats in pairs(gcstats[4]) do
+    if type(stats) == "table" then
+      assert(stats.acount == 0, otype)
+      assert(stats.fcount == 0, otype)
+      assert(stats.atotal == 0, otype)
+      assert(stats.ftotal == 0, otype)
+    end
+  end
+  
+  -- After a full GC cycle we should see at least one table and string destroyed 
+  assert(gcstats[5].table.fcount > 0)
+  assert(gcstats[5].string.fcount > 0)
+  assert(gcstats[5].table.ftotal > 0)
+  assert(gcstats[5].string.ftotal > 0)
+  assert(gcstats[5].table.acount == 0)
+  assert(gcstats[5].string.acount == 0)
+  assert(gcstats[5].table.atotal == 0)
+  assert(gcstats[5].string.atotal == 0)
+end
+  
 local failed = false
 
 pcall(jitlog.shutdown)

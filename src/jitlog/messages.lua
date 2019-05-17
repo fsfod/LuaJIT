@@ -456,6 +456,15 @@ module.messages = {
       objmem : u8[objmemsz]
     ]]
   },
+
+  {
+    name = "gcstats",
+    fields = [[
+      time : timestamp
+      objtype_count :  u8
+      objstats : ObjStat[objtype_count]
+    ]]
+  },
 }
 
 module.structs = {
@@ -498,6 +507,16 @@ module.structs = {
     fields = [[
       address : GCRef
       typesize : u32
+    ]]
+  },
+
+  {
+    name = "ObjStat",
+    fields = [[
+      acount : u32
+      fcount : u32
+      atotal : u64
+      ftotal : u64
     ]]
   },
 }

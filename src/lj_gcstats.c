@@ -517,6 +517,9 @@ static void gcstats_tracker_callback(GCAllocationStats *state, GCobj *o, uint32_
     uint32_t oldhsize = hinfo != -1 ? 1 << hinfo : 0;
     uint32_t hsize = t->hmask + 1;
 
+    /* For tables acount is number times tables have been reallocated because they increased in size and
+    ** fcount is the number of times it has decreased in size.
+    */
     if (hsize != oldhsize) {
       if (hsize > oldhsize) {
         state->stats[10].acount++;

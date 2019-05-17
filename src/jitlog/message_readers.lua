@@ -1489,6 +1489,44 @@ function readers:gcsnapshot(msg)
   return snap
 end
 
+local objtype_stats = {
+  "string",
+  "upvalue",
+  "thread",
+  "proto",
+  "func_lua",
+  "func_c",
+  "trace",
+  "cdata",
+  "table",
+  "udata",
+  "table_hash",
+  "table_array",
+}
+
+function readers:gcstats(msg)
+  local objtype_count = msg.objtype_count
+  local allocation_stats = self:read_array("ObjStat", msg:get_objstats())
+  local stats = {
+    time = msg.time,
+    eventid = self.eventid,
+  }
+  assert(objtype_count <= #objtype_stats)
+  
+  for i, name in ipairs(objtype_stats) do
+    local n = i-1
+    local ostat = {
+      acount = allocation_stats:get(n).acount, 
+      fcount = allocation_stats:get(n).fcount,
+      atotal = allocation_stats:get(n).atotal, 
+      ftotal = allocation_stats:get(n).ftotal,
+    }
+    stats[name] = ostat
+  end
+  tinsert(self.gcstats, stats)
+  return stats
+end
+
 local function init(self)
   self.strings = {}
   self.protos = {}
@@ -1524,6 +1562,7 @@ local function init(self)
 
   -- GCstats based systems
   self.gcsnapshots = {}
+  self.gcstats = {}
 
   return t
 end
