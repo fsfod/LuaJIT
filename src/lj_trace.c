@@ -857,12 +857,6 @@ int LJ_FASTCALL lj_trace_exit(jit_State *J, void *exptr)
   }
 #endif
   lua_assert(T != NULL && J->exitno < T->nsnap);
-  exd.J = J;
-  exd.exptr = exptr;
-  errcode = lj_vm_cpcall(L, NULL, &exd, trace_exit_cp);
-  if (errcode)
-    return -errcode;  /* Return negated error code. */
-
   lj_vmevent_callback_(L, VMEVENT_TRACE_EXIT,
     VMEventData_TExit eventdata;
     eventdata.gcexit = G(L)->gc.gcexit;
@@ -874,6 +868,14 @@ int LJ_FASTCALL lj_trace_exit(jit_State *J, void *exptr)
     eventdata.spill = &ex->spill;
     eventdata.spill_size = sizeof(ex->spill);
   );
+  exd.J = J;
+  exd.exptr = exptr;
+  errcode = lj_vm_cpcall(L, NULL, &exd, trace_exit_cp);
+  if (errcode) {
+    /* Signal the trace exit has finished being processed */
+    lj_vmevent_callback(L, VMEVENT_TRACE_EXIT, NULL);
+    return -errcode;  /* Return negated error code. */
+  }
 
   if (!(LJ_HASPROFILE && (G(L)->hookmask & HOOK_PROFILE)))
     lj_vmevent_send(L, TEXIT,
@@ -908,6 +910,8 @@ int LJ_FASTCALL lj_trace_exit(jit_State *J, void *exptr)
       }
     }
   }
+  /* Signal the trace exit has finished being processed */
+  lj_vmevent_callback(L, VMEVENT_TRACE_EXIT, NULL);
   /* Return MULTRES or 0. */
   ERRNO_RESTORE
   switch (bc_op(*pc)) {
