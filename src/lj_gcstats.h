@@ -64,11 +64,20 @@ typedef struct SnapshotObj {
 
 #endif
 
+typedef struct HugeSnapshotObj {
+  GCRef address;
+  uint32_t typeinfo;
+  uint32_t index;
+  size_t size; 
+} HugeSnapshotObj;
+
 typedef struct GCSnapshotHandle GCSnapshotHandle;
 
 typedef struct GCSnapshot {
   uint32_t count;
   SnapshotObj* objects;
+  uint32_t huge_count;
+  HugeSnapshotObj *huge_objects;
   char* gcmem;
   size_t gcmem_size;
   GCSnapshotHandle* handle;
