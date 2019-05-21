@@ -65,53 +65,56 @@ const char dynamicsize[~LJ_TNUMX] = {
   0,   // LJ_TUDATA	   (~12u)
 };
 
-const char typeconverter[~LJ_TNUMX] = {
-  -1,          // LJ_TNIL	   (~0u)
-  -1,          // LJ_TFALSE  (~1u)
-  -1,          // LJ_TTRUE   (~2u)
-  -1,          // LJ_TLIGHTUD  (~3u)
-  GCObjType_String,    // LJ_TSTR    (~4u)
-  GCObjType_Upvalue,     // LJ_TUPVAL	 (~5u) 
-  GCObjType_Thread,    // LJ_TTHREAD   (~6u)
-  GCObjType_FuncPrototype, // LJ_TPROTO	 (~7u)
-  GCObjType_Function,    // LJ_TFUNC	 (~8u)
-  GCObjType_Trace,     // LJ_TTRACE  (~9u)
-  GCObjType_CData,     // LJ_TCDATA  (~10u)
-  GCObjType_Table,     // LJ_TTAB	   (~11u)
-  GCObjType_UData,     // LJ_TUDATA	 (~12u)
-};
-
 const int8_t invtypeconverter[GCObjType_Max] = {
   (int8_t)~LJ_TSTR,    //  GCObjType_String,     (~4u)
   (int8_t)~LJ_TUPVAL,  //  GCObjType_Upvalue,    (~5u) 
   (int8_t)~LJ_TTHREAD, //  GCObjType_Thread,     (~6u)
   (int8_t)~LJ_TPROTO,  //  GCObjType_FuncPrototype,(~7u)
   (int8_t)~LJ_TFUNC,   //  GCObjType_Function,   (~8u)
+  (int8_t)~LJ_TFUNC,
   (int8_t)~LJ_TTRACE,  //  GCObjType_Trace,    (~9u)
   (int8_t)~LJ_TCDATA,  //  GCObjType_CData,    (~10u)
   (int8_t)~LJ_TTAB,    //  GCObjType_Table,    (~11u)
   (int8_t)~LJ_TUDATA,  //  GCObjType_UData,    (~12u)
-};      
+};
+
+static GCObjType gcobj_type(GCobj *o) {
+  switch (o->gch.gct) {
+  case ~LJ_TSTR:
+    return GCObjType_String;
+  case ~LJ_TUPVAL:
+    return GCObjType_Upvalue;
+  case ~LJ_TTHREAD:
+    return GCObjType_Thread;
+  case ~LJ_TPROTO:
+    return GCObjType_FuncPrototype;
+  case ~LJ_TFUNC:
+    return isluafunc(&o->fn) ? GCObjType_LuaFunction : GCObjType_CFunction;
+  case ~LJ_TTRACE:
+    return GCObjType_Trace;
+  case ~LJ_TCDATA:
+    return GCObjType_CData;
+  case ~LJ_TTAB:
+    return GCObjType_Table;
+  case ~LJ_TUDATA:
+    return GCObjType_UData;
+  default:
+    lua_assert(0);
+    return -1;
+  }
+}
 
 //TODO: do counts of userdata based on grouping by hashtable pointer
 LUA_API void gcstats_collect(lua_State *L, GCStats* result)
 {
-  global_State *g = G(L);
-  GCObjStat objstats[~LJ_TNUMX] = {0};
-  int i = 0;
+  global_State *g = G(L);;
 
-  gcstats_walklist(g, gcref(g->gc.root), objstats);
-
-  gcstats_strings(L, &objstats[~LJ_TSTR]);
+  memset(result->objstats, 0, sizeof(result->objstats));
+  gcstats_walklist(g, gcref(g->gc.root), result->objstats);
+  gcstats_strings(L, &result->objstats[GCObjType_String]);
 
   tablestats(tabV(&g->registrytv), &result->registry);
   tablestats(tabref(L->env), &result->globals);
-
-  //Adjust the object slot indexes for external consumption
-  for (i = 0; i < GCObjType_Max; i++)
-  {
-    memcpy(&result->objstats[i], &objstats[invtypeconverter[i]], sizeof(GCObjStat));
-  }
 }
 
 size_t gcstats_strings(lua_State *L, GCObjStat* result)
@@ -120,13 +123,11 @@ size_t gcstats_strings(lua_State *L, GCObjStat* result)
   size_t count = 0, maxsize = 0, totalsize = 0;
   GCobj *o;
 
-  for (MSize i = 0; i <= g->strmask; i++)
-  {
+  for (MSize i = 0; i <= g->strmask; i++) {
     /* walk all the string hash chains. */
     o = gcref(g->strhash[i]);
 
-    while (o != NULL)
-    {
+    while (o != NULL) {
       size_t size = sizestring(&o->str);
 
       totalsize += size;
@@ -146,32 +147,20 @@ size_t gcstats_strings(lua_State *L, GCObjStat* result)
 
 void gcstats_walklist(global_State *g, GCobj *liststart, GCObjStat* result)
 {
-
   GCobj *o = liststart;
-  GCObjStat stats[~LJ_TNUMX] = {0};
 
-  if (liststart == NULL)
-  {
+  if (liststart == NULL) {
     return;
   }
 
-  while (o != NULL)
-  {
-    int gct = o->gch.gct;
+  while (o != NULL) {
     size_t size = gcobj_size(o);
-
-    stats[gct].count++;
-    stats[gct].totalsize += size;
-    stats[gct].maxsize = stats[gct].maxsize > size ? stats[gct].maxsize : size;
+    GCObjStat *stat = &result[gcobj_type(o)];
+    stat->count++;
+    stat->totalsize += size;
+    stat->maxsize = stat->maxsize > size ? stat->maxsize : size;
 
     o = gcref(o->gch.nextgc);
-  }
-
-  for (size_t i = ~LJ_TSTR; i < ~LJ_TNUMX; i++)
-  {
-    result[i].count += stats[i].count;
-    result[i].totalsize += stats[i].totalsize;
-    result[i].maxsize = stats[i].maxsize > result[i].maxsize ? result[i].maxsize : stats[i].maxsize;
   }
 }
 
@@ -262,12 +251,13 @@ static int dump_gcobjects(lua_State *L, GCobj *liststart, LJList* list, UserBuf*
       size = (1 << 28) - 1;
     }
 
-    entry->typeandsize = ((uint32_t)size << 4) | typeconverter[gct];
+    entry->typeandsize = ((uint32_t)size << 4) | gcobj_type(o);
     setgcrefp(entry->address, o);
     lj_list_increment(L, *list, SnapshotObj);
     
     if (buf) {
       if (gct != ~LJ_TTAB && gct != ~LJ_TTHREAD) {
+        // protos and functions have theres variable sized fields collocated after them in memory
         ubuf_putmem(buf, o, (MSize)size);
       } else if (gct == ~LJ_TTAB) {
         ubuf_putmem(buf, o, sizeof(GCtab));
@@ -320,7 +310,7 @@ static uint32_t dump_strings(lua_State *L, LJList* list, UserBuf* buf)
       }
 
       entry = lj_list_current(L, *list, SnapshotObj);
-      entry->typeandsize = ((uint32_t)size << 4) | typeconverter[~LJ_TSTR];
+      entry->typeandsize = ((uint32_t)size << 4) | GCObjType_String;
       setgcrefp(entry->address, o);
       lj_list_increment(L, *list, SnapshotObj);
 
@@ -496,26 +486,26 @@ static void gcstats_tracker_callback(GCAllocationStats *state, GCobj *o, uint32_
 
     if (hsize != oldhsize) {
       if (hsize > oldhsize) {
-        state->stats[9].acount++;
-        state->stats[9].atotal += hsize - oldhsize;
+        state->stats[10].acount++;
+        state->stats[10].atotal += hsize - oldhsize;
       } else {
-        state->stats[9].fcount++;
-        state->stats[9].ftotal += oldhsize - hsize;
+        state->stats[10].fcount++;
+        state->stats[10].ftotal += oldhsize - hsize;
       }
     }
 
     if (t->asize != oldasize) {
       if (t->asize > oldasize) {
-        state->stats[10].acount++;
-        state->stats[10].atotal += t->asize - oldasize;
+        state->stats[11].acount++;
+        state->stats[11].atotal += t->asize - oldasize;
       } else {
-        state->stats[10].fcount++;
-        state->stats[10].ftotal += oldasize - t->asize;
+        state->stats[11].fcount++;
+        state->stats[11].ftotal += oldasize - t->asize;
       }
     }
     return;
   } else {
-    tid = typeconverter[tid];
+    tid = gcobj_type(o);
   }
 
   if (!free) {
