@@ -408,3 +408,11 @@ table ReflectInfo{
   fieldnames : stringlist
   fieldoffsets : [uint32]
 }
+
+message obj_raw{
+  objtype : uint8
+  flags : uint16
+  address : GCRefPtr
+  objmem : [uint8]
+  extra : [uint8]
+}

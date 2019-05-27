@@ -384,6 +384,19 @@ module.messages = {
       slots : TValue[slots_length]
     ]]
   },
+  
+  {
+    name = "obj_raw",
+    fields = [[
+      objtype : 4
+      flags : 16
+      address : GCRefPtr
+      objmem_length : u32
+      objmem : u8[objmem_length]
+      extra_length : u32
+      extra : u8[extra_length]
+    ]],
+  },
 
   {
     name = "perf_counters",

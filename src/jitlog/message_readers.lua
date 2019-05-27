@@ -1,5 +1,6 @@
 local ffi = require"ffi"
 local util = require("jitlog.util")
+local reflect_reader = require("jitlog.reflect_reader")
 require("table.new")
 local format = string.format
 local tinsert = table.insert
@@ -1534,6 +1535,23 @@ function fbreaders:ReflectInfo(msg)
   return {fieldoffsets = fields, typesizes = types}
 end
 
+function readers:obj_raw(msg)
+  local address = addrtonum(msg.address)
+  local objmem, memsize = msg:get_objmem()
+  local type = objtypes[msg.objtype]
+  local object = {
+    eventid = self.eventid,
+    address = address,
+    type = kind,
+    size = memsize,
+    objmem = self:read_array("char", objmem, memsize),
+    extramem = self:read_array("char", msg:get_extra()),
+  }
+  table.insert(self.rawobjs, object)
+  self:log_msg("obj_raw", "RawObj(%s): size = %d, extra = %d, address = 0x%x", type, memsize, object.extramem.length, address)
+  return object
+end
+
 local function init(self)
   self.strings = {}
   self.protos = {}
@@ -1542,6 +1560,7 @@ local function init(self)
   self.func_lookup = {}
   self.traces = {}
   self.aborts = {}
+  self.rawobjs = {}
 
   self.markers = {}
   -- Record id marker messages in to table 
@@ -1620,6 +1639,9 @@ function api:parseheader(header)
     local info = self:readfb("ReflectInfo", reader)
     self.fieldoffsets = info.fieldoffsets
     self.typesizes = info.typesizes
+
+    -- Reflect getters are built on demand when first accessed
+    self.reflect = reflect_reader.create(info.fieldoffsets, info.typesizes)
   end
 end
 
