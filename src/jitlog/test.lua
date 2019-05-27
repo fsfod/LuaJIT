@@ -948,6 +948,74 @@ it("perf_timers", function()
   assert(perf_sets[2].timers.jitlog_vmevent > 0)
 end)
 
+it("write raw GC object", function()
+  local t1, t2, t3, t4 = {}, {1,2}, {a = 1, b = 2}, {1,2, a = 1, b = 2}
+  setmetatable(t1, t1)
+  jitlog.start()
+  jitlog.write_rawobj(t1)
+  jitlog.write_rawobj(t1, true)
+  jitlog.write_rawobj(t2)
+  jitlog.write_rawobj(t2, true)
+  jitlog.write_rawobj(t3)
+  jitlog.write_rawobj(t3, true)
+  jitlog.write_rawobj(t4)
+  jitlog.write_rawobj(t4, true)
+  
+  local result = parselog(jitlog.savetostring())
+  local getter = result.reflect.table
+  
+  local objs = result.rawobjs
+  assert(#objs == 8)
+  local mt = {
+    __index = function(rawobj, key)
+      return getter(rawobj.objmem:rawdata(), rawobj.objmem.length, key)
+    end
+  }
+  for _, obj in ipairs(objs) do
+    setmetatable(obj, mt)
+  end
+
+  local o1, o2 = objs[1], objs[2]
+  -- Empty table
+  assert(o1.asize == 0)
+  assert(o1.hmask == 0)
+  assert(o1.meta == o2.address)
+  assert(o1.extramem.length == 0)
+  assert(o2.asize == 0)
+  assert(o2.hmask == 0)
+  assert(o2.meta == o1.address)
+  assert(o2.extramem.length == 0)
+  
+  -- Two slot array, LuaJIT always has 0 index slot
+  o1, o2 = objs[3], objs[4]
+  assert(o1.asize == 3)
+  assert(o1.hmask == 0)
+  assert(o1.meta == 0)
+  assert(o1.extramem.length == 0)
+  assert(o2.asize == 3)
+  assert(o2.hmask == 0)
+  assert(o2.extramem.length == 3*result.typesizes.TValue)
+  local slots = ffi.cast("TValue*", o2.extramem:rawdata())
+  assert(slots[1].num == 1)
+  assert(slots[2].num == 2)
+  
+  -- Two entry hashtable
+  o1, o2 = objs[5], objs[6]
+  assert(o1.asize == 0)
+  assert(o1.hmask == 1)
+  assert(o1.extramem.length == 0)
+  assert(o2.asize == 0)
+  assert(o2.hmask == 1)
+  assert(o2.extramem.length == 2*result.typesizes.table_node)
+  
+  -- Mixed array and hash table
+  o1, o2 = objs[7], objs[8]
+  assert(o1.asize == 3)
+  assert(o1.hmask == 1)
+  assert(objs[8].asize == 3)
+  assert(objs[8].hmask == 1)
+end)
+
 local failed = false
 
 pcall(jitlog.shutdown)

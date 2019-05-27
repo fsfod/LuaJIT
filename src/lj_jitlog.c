@@ -1792,6 +1792,74 @@ LUA_API void jitlog_saveperftimers(JITLogUserContext *usrcontext, uint16_t *ids,
 
 #endif
 
+size_t gcobj_size(GCobj* o);
+
+static int write_rawobj(UserBuf *ub, GCobj* o, uint16_t flags, int extramem)
+{
+  size_t size = gcobj_size(o);
+  char* extra = NULL;
+
+  obj_raw_Args args = {
+    .objtype = obj_type(o),
+    .flags = flags,
+    .address = o,
+    .objmem = (uint8_t*)o,
+  };
+
+  if (o->gch.gct == ~LJ_TTAB) {
+    size = sizeof(GCtab);
+    if (extramem) {
+      size_t asize = o->tab.asize * sizeof(TValue);
+      size_t hsize = 0;
+      if (o->tab.hmask) {
+        hsize = (o->tab.hmask + 1) * sizeof(Node);
+      }
+      /* Messages size needs to fit in 32 bits */
+      if ((asize+hsize) > LJ_MAX_MEM32) {
+        lua_assert(0);
+        return 0;
+      }
+      /* 
+      ** we can only pass one buffer for the extra data so if this is a mixed array and hash table
+      ** then we have combine them into one big chunk of memory to pass as extra data.
+      */
+      if (o->tab.asize && o->tab.hmask) {
+        extra = malloc(asize + hsize);
+        args.extra = (uint8_t *)extra;
+        args.extra_length = (uint32_t)(asize + hsize);
+        memcpy(extra, tvref(o->tab.array), asize);
+        memcpy(extra + asize, noderef(o->tab.node), hsize);
+      } else if(o->tab.asize) {
+        args.extra = (uint8_t*)tvref(o->tab.array);
+        args.extra_length = (uint32_t)asize;
+      } else if (o->tab.hmask) {
+        args.extra = (uint8_t*)noderef(o->tab.node);
+        args.extra_length = (uint32_t)hsize;
+      }
+    }
+  } else if (o->gch.gct == ~LJ_TTHREAD) {
+    size = sizeof(lua_State);
+    if (extramem) {
+      args.extra_length = gco2th(o)->stacksize * sizeof(TValue);
+      args.extra = (uint8_t*)tvref(o->th.stack);
+    }
+  }
+
+  /* Max message size is limited to 32 bits */
+  if (size > LJ_MAX_MEM32) {
+    lua_assert(0);
+    return 0;
+  }
+  args.objmem_length = (uint32_t)size;
+
+  log_obj_raw(ub, &args);
+
+  if (extra) {
+    free(extra);
+  }
+  return 1;
+}
+
 /* -- Lua module to control the JITLog ------------------------------------ */
 
 static jitlog_State* jlib_getstate(lua_State *L)
@@ -2090,6 +2158,20 @@ static int jlib_section_end(lua_State *L)
   return 0;
 }
 
+static int jlib_write_rawobj(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  TValue *obj = lj_lib_checkany(L, 1);
+  int extramem = L->base + 1 < L->top ? tvistruecond(L->base + 1) : 0;
+  int flags = luaL_optint(L, 3, 0);
+
+  if (!tvisgcv(obj)) {
+    luaL_error(L, "Expected an GC object for the first the parameter");
+  }
+  write_rawobj(&context->ub, gcV(obj), flags, extramem);
+  return 0;
+}
+
 static const luaL_Reg jitlog_lib[] = {
   {"start", jlib_start},
   {"shutdown", jlib_shutdown},
@@ -2113,6 +2195,7 @@ static const luaL_Reg jitlog_lib[] = {
   {"reset_perftimers", jlib_reset_perftimers},
   {"section_start", jlib_section_start},
   {"section_end", jlib_section_end},
+  {"write_rawobj",jlib_write_rawobj},
   {NULL, NULL},
 };
 
