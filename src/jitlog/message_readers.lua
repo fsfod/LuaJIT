@@ -940,6 +940,7 @@ function readers:trace(msg)
   trace.constants = self:read_array("IRIns", msg:get_constants())
   trace.tracedfuncs = self:read_array("TracedFunc", msg:get_tracedfuncs())
   trace.tracedbc = self:read_array("TracedBC", msg:get_tracedbc())
+  trace.iroffsets = self:read_array("uint32_t", msg:get_iroffsets())
 
   if aborted then
     trace.abortcode = msg.abortcode

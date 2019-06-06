@@ -384,6 +384,65 @@ it("trace", function()
   assert(traces[1].id ~= traces[2].id and traces[2].id ~= traces[3].id)
 end)
 
+it("IR offsets", function()
+  jit.off()
+  jit.on()
+  jitlog.start()
+  local a = 0 
+  for i = 1, 300 do
+    if i >= 100 then
+      if i <= 200 then
+        a = a + 1
+      else
+        a = a + 2
+      end
+    end
+  end
+  assert(a == 301)
+  
+  local mixin = {{
+    actions = {
+      trace = function(self, msg, trace)
+        trace:dumpIR()
+      end
+    }
+  }}
+  
+  local result = parselog(jitlog.savetostring())--, true, mixin)
+  assert(result.exits > 0)
+  assert(#result.aborts == 0)
+  local traces = result.traces
+  assert(#traces == 3)
+  local extra = 6
+  assert(traces[1].iroffsets.length == traces[1].ins_count+extra, traces[1].ins_count)
+  assert(traces[2].iroffsets.length == traces[2].ins_count+extra)
+  assert(traces[3].iroffsets.length == traces[3].ins_count+extra)
+  
+  local lastoffset = 0
+  local trace = traces[1]
+  for i = 0, trace.ins_count-1 do
+    local offset = bit.band(trace.iroffsets:get(i), 0xffff)
+   -- print(i, offset)
+    if offset ~= 0 then
+      assert(offset < trace.mcodesize, i)
+      assert(offset >= lastoffset, i)
+      lastoffset = offset
+    end
+  end
+  
+  trace = traces[2]
+  lastoffset = 0
+  for i = 0, trace.ins_count-1 do
+    local offset = bit.band(trace.iroffsets:get(i), 0xffff)
+    --print(i, offset)
+    if offset ~= 0 then
+      assert(offset < trace.mcodesize, i)
+      assert(offset >= lastoffset, i)
+      lastoffset = offset
+    end
+  end
+end)
+
 local function nojit_loop(f, n)
   local ret
   n = n or 200

@@ -265,6 +265,8 @@ module.messages = {
       tracedfuncs : TracedFunc[tracedfuncs_length]
       tracedbc_length : u32
       tracedbc : TracedBC[tracedbc_length]
+      iroffsets_length : u32
+      iroffsets : u32[iroffsets_length]
     ]],
     structcopy = {
       fields = {

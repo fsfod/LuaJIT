@@ -726,6 +726,8 @@ static void jitlog_writetrace(jitlog_State *context, GCtrace *T, int abort)
     .tracedfuncs_length = context->traced_funcs_count,
     .tracedbc = context->traced_bc,
     .tracedbc_length = context->traced_bc_count,
+    .iroffsets = (uint32_t *)T->iroffsets,
+    .iroffsets_length = T->niroffsets,
   };
 
   log_trace(&context->ub, &args);
@@ -1563,6 +1565,10 @@ static void jitlog_loadstage2(lua_State *L, jitlog_State *context)
   context->traced_funcs_capacity = 32;
   context->traced_bc = jl_newvec(context, 32, TracedBC);
   context->traced_bc_capacity = 32;
+
+#if LJ_HASJIT
+  L2J(L)->flags |= JIT_F_RECORD_IROFFSETS;
+#endif
 
   lj_lib_prereg(L, "jitlog", luaopen_jitlog, tabref(L->env));
   context->loadstate = 3;
