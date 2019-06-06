@@ -308,6 +308,7 @@ message trace{
   snapmap : [uint32] (buflen : nsnapmap)
   tracedfuncs : [TracedFunc]
   tracedbc : [TracedBC]
+  iroffsets : [uint32]
   structcopy = {
     fields = {
       id = "traceno",

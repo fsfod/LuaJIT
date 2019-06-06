@@ -92,6 +92,7 @@ typedef struct ASMState {
   MCode *invmcp;	/* Points to invertible loop branch (or NULL). */
   MCode *flagmcp;	/* Pending opportunity to merge flag setting ins. */
   MCode *realign;	/* Realign loop if not NULL. */
+  IRRef fuseirnum;
 
 #ifdef RID_NUM_KREF
   intptr_t krefk[RID_NUM_KREF];
@@ -172,6 +173,8 @@ IRFLDEF(FLOFS)
 #undef FLOFS
   0
 };
+
+void lj_asm_irofs(ASMState *as, IRRef ir, int used);
 
 /* -- Target-specific instruction emitter --------------------------------- */
 
@@ -520,6 +523,7 @@ static void ra_evictset(ASMState *as, RegSet drop)
 static void ra_evictk(ASMState *as)
 {
   RegSet work;
+  MCode *mcpstart = as->mcp;
 #if !LJ_SOFTFP
   work = ~as->freeset & RSET_FPR;
   while (work) {
@@ -542,6 +546,7 @@ static void ra_evictk(ASMState *as)
     }
     rset_clear(work, r);
   }
+  lj_asm_irofs(as, IROFS_REMATK, mcpstart != as->mcp);
 }
 
 #ifdef RID_NUM_KREF
@@ -2111,13 +2116,16 @@ static void asm_tail_link(ASMState *as)
     setgcref(IR(as->J->ktrace)[LJ_GC64].gcr, obj2gco(as->J->curfinal));
     IR(as->J->ktrace)->o = IR_KGC;
   }
+  lj_asm_irofs(as, IROFS_BASE_SETUP, 1);
 
   /* Sync the interpreter state with the on-trace state. */
   asm_stack_restore(as, snap);
+  lj_asm_irofs(as, IROFS_STACK_RESTORE, 1);
 
   /* Root traces that add frames need to check the stack at the end. */
   if (!as->parent && gotframe)
     asm_stack_check(as, as->topslot, NULL, as->freeset & RSET_GPR, snapno);
+  lj_asm_irofs(as, as->J->cur.nins, 1);
 }
 
 /* -- Trace setup --------------------------------------------------------- */
@@ -2405,6 +2413,65 @@ static void asm_setup_regsp(ASMState *as)
 
 /* -- Assembler core ------------------------------------------------------ */
 
+void lj_asm_irofs(ASMState *as, IRRef ir, int used)
+{
+  jit_State *J = as->J;
+  int i;
+
+  if (!J->iroffsets) {
+    return;
+  }
+
+  if (ir >= REF_BIAS) {
+    i = ir-REF_BIAS;
+  } else {
+    i = ir + (J->cur.nins-REF_BIAS);
+  }
+
+  lj_assertA(i >= 0 && ((uint32_t)i) < ((J->cur.nins-REF_BIAS) + IROFS_EXTRA), "Bad instruction index for IR offset");
+  if (used) {
+    J->iroffsets[i].offset = as->mcp;
+    J->iroffsets[i].fuseirnum = as->fuseirnum;
+  } else {
+    J->iroffsets[i].offset = 0;
+    J->iroffsets[i].fuseirnum = 0;
+  }
+
+  as->fuseirnum = 0;
+}
+
+static void irofs_finalize(ASMState *as, GCtrace *T)
+{
+  jit_State *J = as->J;
+  MSize i, szofs = IROFS_EXTRA + T->nins-REF_BIAS;
+  IROffsetRecord* list = T->iroffsets;
+  MCode *mcpend = as->mcp;
+  
+  if (!J->iroffsets) {
+    lj_assertA(T->niroffsets == 0 && T->iroffsets == NULL, "No IR offsets written");
+    T->iroffsets = NULL;
+    T->niroffsets = 0;
+    return;
+  }
+
+  lj_assertA(list, "IR Offset list not initialized");
+  lj_assertA(T->niroffsets == szofs, "Bad IR offset count");
+
+  for (i = 0; i < szofs; i++) {
+    if (J->iroffsets[i].offset != NULL) {
+      /* Assumes a trace's machine code is never larger than 64kb */
+      list[i].offset = (uint16_t)(J->iroffsets[i].offset - mcpend);
+    } else {
+      list[i].offset = 0;
+    }
+    if(i < (T->nins-REF_BIAS)) {
+      list[i].fuseirnum = J->iroffsets[i].fuseirnum > REF_BIAS ? J->iroffsets[i].fuseirnum-REF_BIAS : 0;
+    } else {
+      list[i].fuseirnum = J->iroffsets[i].fuseirnum;
+    }
+  }
+}
+
 /* Assemble a trace. */
 void lj_asm_trace(jit_State *J, GCtrace *T)
 {
@@ -2419,6 +2486,16 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
       do { ir--; nins--; } while (ir->o == IR_NOP || ir->o == IR_RENAME);
       T->nins = nins;
     }
+  }
+
+  int offsetcount = -1;
+
+  if (J->flags & JIT_F_RECORD_IROFFSETS) {
+    if (J->iroffsets == NULL) {
+      J->iroffsets = lj_mem_newvec(J->L, 32, IRCodeOffset);
+      J->iroffsets_capacity = 32;
+    }
+    offsetcount = 0;
   }
 
   /* Ensure an initialized instruction beyond the last one for HIOP checks. */
@@ -2488,9 +2565,28 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
     as->gcsteps = 0;
     as->sectref = as->loopref;
     as->fuseref = (as->flags & JIT_F_OPT_FUSE) ? as->loopref : FUSE_DISABLED;
+    as->fuseirnum = 0;
     asm_setup_regsp(as);
-    if (!as->loopref)
+
+    if (offsetcount != -1) {
+      MSize minsize = ((J->cur.nins-REF_BIAS)+IROFS_EXTRA);
+      offsetcount = 0;
+      J->iroffset_mcpstart = as->mcp;
+
+      if (minsize > J->iroffsets_capacity) {       
+        MSize nsz = J->iroffsets_capacity*2;
+        while (nsz < minsize) {
+          nsz = nsz*2;
+        }
+        lj_mem_reallocvec(J->L, J->iroffsets, J->iroffsets_capacity, nsz, IRCodeOffset);
+        J->iroffsets_capacity = nsz;
+      }
+      memset(J->iroffsets, 0, J->iroffsets_capacity*sizeof(IRCodeOffset));
+    }
+
+    if (!as->loopref) {
       asm_tail_link(as);
+    }
 
     /* Assemble a trace in linear backwards order. */
     for (as->curins--; as->curins > as->stopins; as->curins--) {
@@ -2500,13 +2596,21 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
 		 "IR %04d has unsplit 64 bit type",
 		 (int)(ir - as->ir) - REF_BIAS);
       asm_snap_prev(as);
-      if (!ra_used(ir) && !ir_sideeff(ir) && (as->flags & JIT_F_OPT_DCE))
-	continue;  /* Dead-code elimination can be soooo easy. */
+      if (!ra_used(ir) && !ir_sideeff(ir) && (as->flags & JIT_F_OPT_DCE)) {
+        /* Flag instruction as no offset */
+        lj_asm_irofs(as, as->curins, 0);
+        continue;  /* Dead-code elimination can be soooo easy. */
+      }
       if (irt_isguard(ir->t))
 	asm_snap_prep(as);
       RA_DBG_REF();
       checkmclim(as);
       asm_ir(as, ir);
+
+      if(offsetcount != -1) {
+        /* Flagged sinked values as skipped */
+        lj_asm_irofs(as, as->curins, (ir->o != IR_XSTORE || ir->r != RID_SINK));
+      }
     }
 
     if (as->realign && J->curfinal->nins >= T->nins)
@@ -2520,8 +2624,12 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
       asm_snap_prep(as);  /* The GC check is a guard. */
       asm_gc_check(as);
       as->curins = as->stopins;
+      lj_asm_irofs(as, IROFS_GCCHECK, 1);
+    } else {
+      lj_asm_irofs(as, IROFS_GCCHECK, 0);
     }
     ra_evictk(as);
+    
     if (as->parent)
       asm_head_side(as);
     else
@@ -2564,6 +2672,7 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
   asm_mcode_fixup(T->mcode, T->szmcode);
 #endif
   lj_mcode_sync(T->mcode, as->mctoporig);
+  irofs_finalize(as, T);
 }
 
 #undef IR

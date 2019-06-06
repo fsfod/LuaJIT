@@ -790,6 +790,8 @@ static void jitlog_writetrace(jitlog_State *context, GCtrace *T, TraceWriteKind 
     .tracedfuncs_length = context->traced_funcs_count,
     .tracedbc = context->traced_bc,
     .tracedbc_length = context->traced_bc_count,
+    .iroffsets = (uint32_t *)T->iroffsets,
+    .iroffsets_length = T->niroffsets,
   };
 
   log_trace(&context->ub, &args);
@@ -1875,6 +1877,11 @@ static jitlog_State *jitlog_start_safe(lua_State *L, UserBuf *ub)
 
   luaJIT_vmevent_sethook(L, jitlog_callback, context);
   update_gcevents(context, 0);
+
+#if LJ_HASJIT
+  L2J(L)->flags |= JIT_F_RECORD_IROFFSETS;
+#endif
+
   return context;
 }
 
