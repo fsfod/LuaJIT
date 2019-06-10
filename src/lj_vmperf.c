@@ -14,7 +14,9 @@ uint64_t lj_perf_overhead = (uint64_t)UINT64_MAX;
 extern const char *TimerId_names[];
 extern const char *CounterId_names[];
 
+#if VMPERF_MODE != 1
 VMPerfData lj_perfdata = { 0 };
+#endif
 
 void lj_perf_init(lua_State *L)
 {

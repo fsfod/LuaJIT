@@ -30,6 +30,7 @@
 #include "luajit.h"
 #include "lj_vmevent.h"
 #include "jitlog.h"
+#include "lj_vmperf.h"
 
 /* -- Stack handling ------------------------------------------------------ */
 
@@ -162,6 +163,7 @@ static TValue *cpluaopen(lua_State *L, lua_CFunction dummy, void *ud)
 static void close_state(lua_State *L)
 {
   global_State *g = G(L);
+  int ggsize = sizeof(GG_State) + lj_perfdata_size;
   lj_func_closeuv(L, tvref(L->stack));
   lj_gc_freeall(g);
   lua_assert(gcref(g->gc.root) == obj2gco(L));
@@ -173,13 +175,13 @@ static void close_state(lua_State *L)
   lj_mem_freevec(g, g->strhash, g->strmask+1, GCRef);
   lj_buf_free(g, &g->tmpbuf);
   lj_mem_freevec(g, tvref(L->stack), L->stacksize, TValue);
-  lua_assert(g->gc.total == sizeof(GG_State));
+  lua_assert(g->gc.total == ggsize);
 #ifndef LUAJIT_USE_SYSMALLOC
   if (g->allocf == lj_alloc_f)
     lj_alloc_destroy(g->allocd);
   else
 #endif
-    g->allocf(g->allocd, G2GG(g), sizeof(GG_State), 0);
+    g->allocf(g->allocd, G2GG(g), ggsize, 0);
 }
 
 static void check_initjitlog(lua_State *L)
@@ -209,14 +211,16 @@ lua_State *lj_state_newstate(lua_Alloc f, void *ud)
 LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
 #endif
 {
-  GG_State *GG = (GG_State *)f(ud, NULL, 0, sizeof(GG_State));
+  int ggsize = sizeof(GG_State) + lj_perfdata_size;
+  GG_State *GG = (GG_State *)f(ud, NULL, 0, ggsize);
   lua_State *L = &GG->L;
   global_State *g = &GG->g;
   if (GG == NULL || !checkptrGC(GG)) return NULL;
-  memset(GG, 0, sizeof(GG_State));
+  memset(GG, 0, ggsize);
   L->gct = ~LJ_TTHREAD;
   L->marked = LJ_GC_WHITE0 | LJ_GC_FIXED | LJ_GC_SFIXED;  /* Prevent free. */
   L->dummy_ffid = FF_C;
+  L->perfdata = GG_PERFDATA(GG);
   setmref(L->glref, g);
   g->gc.currentwhite = LJ_GC_WHITE0 | LJ_GC_FIXED;
   g->strempty.marked = LJ_GC_WHITE0;
@@ -239,7 +243,7 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
   g->gc.state = GCSpause;
   setgcref(g->gc.root, obj2gco(L));
   setmref(g->gc.sweep, &g->gc.root);
-  g->gc.total = sizeof(GG_State);
+  g->gc.total = ggsize;
   g->gc.pause = LUAI_GCPAUSE;
   g->gc.stepmul = LUAI_GCMUL;
   lj_dispatch_init((GG_State *)L);
@@ -304,6 +308,7 @@ lua_State *lj_state_new(lua_State *L)
   L1->stacksize = 0;
   setmref(L1->stack, NULL);
   L1->cframe = NULL;
+  L->perfdata = L->perfdata;
   /* NOBARRIER: The lua_State is new (marked white). */
   setgcrefnull(L1->openupval);
   setmrefr(L1->glref, L->glref);

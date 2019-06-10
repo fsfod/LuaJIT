@@ -104,6 +104,7 @@ LJ_AINLINE uint64_t stop_getticks_b()
 }
 
 void lj_perf_init(lua_State *L);
+extern const int lj_perfdata_size;
 
 #ifdef LJ_ENABLESTATS
 
@@ -125,6 +126,8 @@ typedef struct VMPerfTimer{
   uint32_t maxticks;
 } VMPerfTimer;
 
+#define GG_PERFDATA(gg) (VMPerfData *)((gg)+1)
+
 typedef struct VMPerfData {
   uint32_t counters[Counter_MAX + 1];
   VMPerfTimer timers[Timer_MAX + 1];
@@ -139,7 +142,6 @@ typedef struct VMPerfData {
   #define COUNTERS_POINTER(L) (UNUSED(L), lj_perfdata.counters)
   #define TIMERS_POINTER(L) (UNUSED(L), lj_perfdata.timers)
 #else
-  extern VMPerfData lj_perfdata;
   #define TIMER_START(name) \
     uint64_t name##_start = start_getticks()
 #endif
@@ -148,6 +150,25 @@ typedef struct VMPerfData {
   timer->time += (ticks); \
   timer->count++; \
   timer->maxticks = (uint32_t)(ticks > timer->maxticks ? ticks : timer->maxticks)
+
+#if VMPERF_MODE == 1
+  #define COUNTERS_POINTER(L) (((VMPerfData *)(L)->perfdata)->counters)
+  #define PERF_COUNTER(name) ((VMPerfData *)(L)->perfdata)->counters[Counter_##name]++
+
+  #define TIMERS_POINTER(L) (((VMPerfData *)(L)->perfdata)->timers)
+  #define TIMER_END(evtname) \
+  { \
+    uint64_t stopticks = stop_getticks(); \
+    VMPerfTimer *timer = ((VMPerfData *)L->perfdata)->timers + Timer_##evtname; \
+    TIMERUPDATE(timer, stopticks-evtname##_start); \
+  }
+  #define TIMER_ADD(evtname, ticks) \
+  { \
+    VMPerfTimer *timer = ((VMPerfData *)L->perfdata)->timers + Timer_##evtname; \
+    TIMERUPDATE(timer, ticks); \
+  }
+#elif VMPERF_MODE == 2
+  extern VMPerfData lj_perfdata;
 
   #define COUNTERS_POINTER(L) (UNUSED(L), lj_perfdata.counters)
   #define PERF_COUNTER(name) lj_perfdata.counters[Counter_##name]++
@@ -164,11 +185,14 @@ typedef struct VMPerfData {
     VMPerfTimer *timer = &lj_perfdata.timers[Timer_##evtname]; \
     TIMERUPDATE(timer, ticks); \
   }
+#endif
 
 void lj_perf_printcounters(lua_State *L);
 void lj_perf_printtimers(lua_State *L);
 
 #else
+
+#define GG_PERFDATA(gg) (NULL)
 
 #define TicksStart()
 #define TicksEnd()
