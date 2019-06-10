@@ -211,6 +211,7 @@ LUA_API void gcsnapshot_free(GCSnapshot* snapshot)
 
   ubuf_free(&handle->sb);
   lj_mem_freevec(g, handle->list.list, handle->list.capacity, SnapshotObj);
+  lj_mem_freevec(g, handle->huge_list.list, handle->huge_list.capacity, HugeSnapshotObj);
 
   lj_mem_free(g, handle, sizeof(GCSnapshotHandle) + sizeof(GCSnapshot));
 }
