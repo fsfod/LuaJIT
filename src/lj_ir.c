@@ -32,6 +32,8 @@
 #include "lj_strscan.h"
 #include "lj_strfmt.h"
 #include "lj_lib.h"
+#include "lj_vmevent.h"
+
 
 /* Some local macros to save typing. Undef'd at the end. */
 #define IR(ref)			(&J->cur.ir[(ref)])
@@ -123,7 +125,11 @@ TRef LJ_FASTCALL lj_ir_emit(jit_State *J)
   ir->op1 = fins->op1;
   ir->op2 = fins->op2;
   J->guardemit.irt |= fins->t.irt;
-  return TREF(ref, irt_t((ir->t = fins->t)));
+  ir->t = fins->t;
+#ifdef LJ_IR_DEBUG
+  lj_vmevent_callback(J->L, VMEVENT_JIT_IREMIT, (void *)(uintptr_t)((J->folddepth << 16)|ref));
+#endif
+  return TREF(ref, irt_t(ir->t));
 }
 
 /* Emit call to a C function. */

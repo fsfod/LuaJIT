@@ -531,6 +531,26 @@ module.messages = {
       pc : ptr @argtype(const BCIns*)
     ]],
   },
+
+  {
+    name = "ir_emit",
+    fields = [[
+      irref : u16 @argtype(IRRef)
+      depth : u8
+      ins : u64
+    ]],
+  },
+
+  {
+    name = "ir_fold",
+    fields = [[
+      foldfunc : u8 @enum(fold_names)
+      depth : u8
+      result : u16
+      orig_ins : u64
+      ins : u64
+    ]],
+  },
 }
 
 module.structs = {

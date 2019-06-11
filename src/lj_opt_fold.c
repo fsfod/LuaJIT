@@ -29,6 +29,7 @@
 #include "lj_vm.h"
 #include "lj_strscan.h"
 #include "lj_strfmt.h"
+#include "lj_vmevent.h"
 
 /* Here's a short description how the FOLD engine processes instructions:
 **
@@ -2475,7 +2476,23 @@ retry:
     uint32_t h = fold_hashkey(k);
     uint32_t fh = fold_hash[h];  /* Lookup key in semi-perfect hash table. */
     if ((fh & 0xffffff) == k || (fh = fold_hash[h+1], (fh & 0xffffff) == k)) {
+#ifdef LJ_IR_DEBUG
+      IRIns before = *fins;
+      int id = fh >> 24;
+      int depth = J->folddepth++;
+      ref = (IRRef)tref_ref(fold_func[id](J));
+      J->folddepth--;
+      VMEventData_IRFold eventdata = {
+        .foldid = id,
+        .orig_ins = before.tv.u64,
+        .irref = ref,
+        .result = ref,
+        .depth = depth,
+      };
+      lj_vmevent_callback(J->L, VMEVENT_JIT_FOLD, &eventdata);
+#else
       ref = (IRRef)tref_ref(fold_func[fh >> 24](J));
+#endif
       if (ref != NEXTFOLD)
 	break;
     }
@@ -2525,7 +2542,11 @@ TRef LJ_FASTCALL lj_opt_cse(jit_State *J)
     J->chain[op] = (IRRef1)ref;
     ir->o = fins->o;
     J->guardemit.irt |= fins->t.irt;
-    return TREF(ref, irt_t((ir->t = fins->t)));
+    ir->t = fins->t;
+#ifdef LJ_IR_DEBUG
+    lj_vmevent_callback(J->L, VMEVENT_JIT_IREMIT, (void*)(uintptr_t)((J->folddepth << 16) | ref));
+#endif
+    return TREF(ref, irt_t(ir->t));
   }
 }
 

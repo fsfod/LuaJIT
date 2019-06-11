@@ -1632,6 +1632,47 @@ function readers:trace_snap(msg)
   self.snapnum = self.snapnum + 1
 end
 
+local fold_ins = ffi.new("IRIns")
+
+function readers:ir_emit(msg)
+  fold_ins.tv.u64 = msg.ins
+  local op, irt, op1, op2 = self:decode_irins(fold_ins)
+  
+  self:log_msg("ir_emit", "%sIREmit: %-3d %-5s %-6s %s, %s", string.rep(".", msg.depth), msg.irref-REF_BIAS,  irt, op, op1, op2)
+end
+
+local fold_result = util.make_enum{
+  "NEXTFOLD",		-- Couldn't fold, pass on.
+  "RETRYFOLD",	-- Retry fold with modified fins.
+  "KINTFOLD",		-- Return ref for int constant in fins->i.
+  "FAILFOLD",		-- Guard would always fail.
+  "DROPFOLD",		-- Guard eliminated.
+  "MAX_FOLD",
+}
+
+function readers:ir_fold(msg)
+  local func = self.enums.fold_names[msg.foldfunc]
+  local result = msg.result
+  if result < fold_result.MAX_FOLD then
+    result = fold_result[result]
+  elseif result > REF_BIAS then
+    result = result - REF_BIAS
+  else
+    result = REF_BIAS - result
+  end
+  fold_ins.tv.u64 = msg.ins
+
+  local op, irt, op1, op2 = self:decode_irins(fold_ins)
+  if msg.orig_ins == msg.ins then
+    self:log_msg("ir_fold", "%sIRFold(%s): %s, op: %s %s %s %s", string.rep(".", msg.depth), func, tostring(result), irt, op, op1, op2)
+  else
+    fold_ins.tv.u64 = msg.orig_ins
+    local o_op, o_irt, o_op1, o_op2 = self:decode_irins(fold_ins)
+     self:log_msg("ir_fold", "%sIRFold(%s): %s, op: %s %s %s %s > %s %s %s %s", string.rep(".", msg.depth), func, tostring(result),  o_op, o_irt, o_op1, o_op2, irt, op, op1, op2)
+  end
+  
+end
+
 local function init(self)
   self.strings = {}
   self.protos = {}

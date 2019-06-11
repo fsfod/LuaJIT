@@ -188,7 +188,7 @@ void emit_fold(BuildCtx *ctx)
   }
 
   fprintf(ctx->fp, "/* This is a generated file. DO NOT EDIT! */\n\n");
-  fprintf(ctx->fp, "static const FoldFunc fold_func[] = {\n");
+  fprintf(ctx->fp, "#define FOLDDEF(_) \\\n");
 
   lineno = 0;
   funcidx = 0;
@@ -205,13 +205,11 @@ void emit_fold(BuildCtx *ctx)
 	foldrule(p);
       } else if ((p[0] == 'F' || p[0] == 'X') && p[1] == '(' && q) {
 	p += 2;
-	*q = '\0';
-	if (funcidx)
-	  fprintf(ctx->fp, ",\n");
+	*q = '\0';	  
 	if (p[-2] == 'X')
-	  fprintf(ctx->fp, "  %s", p);
+	  fprintf(ctx->fp, "  _(%s) \\\n", p);
 	else
-	  fprintf(ctx->fp, "  fold_%s", p);
+	  fprintf(ctx->fp, "  _(fold_%s) \\\n", p);
 	funcidx++;
       } else {
 	buf[strlen(buf)-1] = '\0';
@@ -221,9 +219,20 @@ void emit_fold(BuildCtx *ctx)
       }
     }
   }
-  fclose(fp);
+  fprintf(ctx->fp, "\n\n");
+  fprintf(ctx->fp, "#define FOLDFUNC(name)  name, \n");
+  fprintf(ctx->fp, "static const FoldFunc fold_func[] = {\n");
+  fprintf(ctx->fp, "FOLDDEF(FOLDFUNC)");
   fprintf(ctx->fp, "\n};\n\n");
 
+  fprintf(ctx->fp, "#define FOLDNAME(name)  #name, \n");
+  fprintf(ctx->fp, "const char* fold_names[] = {\n");
+  fprintf(ctx->fp, "FOLDDEF(FOLDNAME)");
+  fprintf(ctx->fp, "\n};\n\n");
+  fprintf(ctx->fp, "int lj_numfold = sizeof(fold_names)/sizeof(char*);\n\n");
+
+  fclose(fp);
+  
   makehash(ctx);
 }
 

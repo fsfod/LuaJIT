@@ -1111,6 +1111,32 @@ static void free_context(jitlog_State *context);
 
 static void jitlog_loadstage2(lua_State *L, jitlog_State *context);
 
+void jitlog_irfold(jitlog_State *context, VMEventData_IRFold *info)
+{
+  if (context->mode & JITLogMode_VerboseTraceLog) {
+    jit_State* J = G2J(context->g);
+    ir_fold_Args args = {
+      .foldfunc = info->foldid,
+      .result = info->result,
+      .orig_ins = info->orig_ins,
+      .ins = J->fold.ins.tv.u64,
+      .depth = info->depth,
+
+    };
+    log_ir_fold(&context->ub, &args);
+  }
+}
+
+static void jitlog_iremit(jitlog_State* context, uint32_t data) 
+{
+  if (context->mode & JITLogMode_VerboseTraceLog) {
+    jit_State* J = G2J(context->g);
+    IRRef ref = data & 0xffff;
+    int depth = data >> 16;
+    log_ir_emit(&context->ub, ref, depth, J->cur.ir[ref].tv.u64);
+  }
+}
+
 static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *eventdata)
 {
   VMEvent2 event = (VMEvent2)eventid;
@@ -1145,6 +1171,12 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
       break;
     case VMEVENT_TRACE_FLUSH:
       jitlog_traceflush(context, (FlushReason)(uintptr_t)eventdata);
+      break;
+    case VMEVENT_JIT_FOLD:
+      jitlog_irfold(context, (VMEventData_IRFold*)eventdata);
+      break;
+    case VMEVENT_JIT_IREMIT:
+      jitlog_iremit(context, (uint32_t)(uintptr_t)eventdata);
       break;
 #endif
     case VMEVENT_LOADSCRIPT:
@@ -1443,6 +1475,9 @@ static const char *const trlink_names[] = {
   "interpreter", "return", "stitch"
 };
 
+extern const char* fold_names[];
+extern int lj_numfold;
+
 #define write_enum(context, name, strarray) write_enumdef(context, name, strarray, (sizeof(strarray)/sizeof(strarray[0])), 0)
 
 static void write_header(jitlog_State *context)
@@ -1487,6 +1522,7 @@ static void write_header(jitlog_State *context)
   write_enum(context, "irfpmath", irfpmath_names);
   write_enum(context, "irfields", irfield_names);
   write_enum(context, "trace_link", trlink_names);
+  write_enumdef(context, "fold_names", fold_names, lj_numfold, 0);
 
   for (int i = 0; enuminfo_list[i].name; i++) {
     write_enumdef(context, enuminfo_list[i].name, enuminfo_list[i].namelist, enuminfo_list[i].count, 0);

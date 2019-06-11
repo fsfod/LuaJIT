@@ -516,6 +516,7 @@ typedef struct jit_State {
   BCLine prev_line;	/* Previous line. */
   int prof_mode;	/* Profiling mode: 0, 'f', 'l'. */
 #endif
+  int folddepth;
 }
 #if LJ_TARGET_ARM
 LJ_ALIGN(16)		/* For DISPATCH-relative addresses in assembler part. */
