@@ -498,6 +498,39 @@ module.messages = {
       ahsize : u32
     ]]
   },
+
+  {
+    name = "trace_func",
+    fields = [[
+      depth : 16
+      func : GCRefPtr
+    ]],
+  },
+
+  {
+    name = "trace_bc",
+    fields = [[
+      bcpos : u32
+      ir_ins_length : 12
+      ir_ins : u64[ir_ins_length] @argtype(IRIns*)
+      ir_k_length : 12
+      irstart : u16
+      ir_k : u64[ir_k_length] @argtype(IRIns*)
+      ins : u64
+    ]],
+  },
+  
+  {
+    name = "trace_snap",
+    fields = [[
+      nslots : u8
+      topslot : u8
+      start : u16 // IR instruction ref
+      refcount : u8
+      refs : u32[refcount]
+      pc : ptr @argtype(const BCIns*)
+    ]],
+  },
 }
 
 module.structs = {

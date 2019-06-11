@@ -68,6 +68,12 @@ typedef enum JITLogMode {
   JITLogMode_DisableMemorization = 0x02,
   /* Automatically flush the userbuffer after a VM event if it generated any new messages. */
   JITLogMode_AutoFlush = 0x4,
+  /*
+  ** Turn on verbose trace progress messages that are written after each bytecode is traced 
+  ** that include any new IR instructions emitted since the previous bytecode executed while 
+  ** recording a trace.
+  */
+  JITLogMode_VerboseTraceLog = 0x8,
 } JITLogMode;
 
 LUA_API JITLogUserContext* jitlog_start(lua_State *L);

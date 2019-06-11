@@ -560,6 +560,7 @@ function readers:trace_start(msg)
     stitched = msg.stitched,
   }
   self.current_trace = trace
+  self.snapnum = 0
   self:log_msg("trace_start", "TraceStart(%d): start = %s, parentid = %d", id, startpt and startpt:get_displayname(),  msg.parentid)
   return trace
 end
@@ -1598,6 +1599,37 @@ function readers:tab_resize(msg)
   
   self:log_msg("tab_resize", "TableResize: address = 0x%x, hsize = %d, asize = %d", address,  hsize, asize)
   return address, self.objects[address], hsize, asize
+end
+
+function readers:trace_func(msg)
+  local address = addrtonum(msg.func)
+  local func = self.func_lookup[address]
+  self.cur_func = func
+  self:log_msg("trace_func", " Func: %s, depth = %d", func and tostring(func) or tostring(address), msg.depth)
+end
+
+function readers:trace_bc(msg)
+  local ins_count = msg.ir_ins_length
+  local k_count = msg.ir_k_length
+  
+  if ins_count > 0 then
+    local ir_ins = self:read_array("IRIns", msg:get_ir_ins())
+    local irname = self.enums.ir
+
+    for i=0, ins_count-1 do
+      local op, irt, op1, op2 = self:decode_irins(ir_ins:get(i))
+
+      self:log_msg("trace_bc", "   %-5s %-3d %-6s %s, %s", irt, msg.irstart+i, op, tostring(op1), tostring(op2))
+    end
+  end
+  local bc = self.cur_func and self.cur_func.proto and self.cur_func.proto:get_bcop(msg.bcpos) or "?"
+  self:log_msg("trace_bc", "  BC(%s, %d): ins = %d, k = %d", bc, msg.bcpos, ins_count, k_count)
+end
+
+function readers:trace_snap(msg)
+  local pt, line = self:pc2proto(addrtonum(msg.pc))
+  self:log_msg("trace_snap", "Snapshot(%d): start = %d, %s: %d", self.snapnum, msg.start, pt and pt.chunk or "?", line or -1)
+  self.snapnum = self.snapnum + 1
 end
 
 local function init(self)
