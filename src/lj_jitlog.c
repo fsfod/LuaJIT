@@ -1369,6 +1369,32 @@ static void jitlog_gcevent(void *contextptr, lua_State *L, int eventid, void *ev
   }
 }
 
+void jitlog_irfold(jitlog_State *context, VMEventData_IRFold *info)
+{
+  if (context->mode & JITLogMode_VerboseTraceLog) {
+    jit_State* J = G2J(context->g);
+    ir_fold_Args args = {
+      .foldfunc = info->foldid,
+      .result = info->result,
+      .orig_ins = info->orig_ins,
+      .ins = J->fold.ins.tv.u64,
+      .depth = info->depth,
+
+    };
+    log_ir_fold(&context->ub, &args);
+  }
+}
+
+static void jitlog_iremit(jitlog_State* context, uint32_t data) 
+{
+  if (context->mode & JITLogMode_VerboseTraceLog) {
+    jit_State* J = G2J(context->g);
+    IRRef ref = data & 0xffff;
+    int depth = data >> 16;
+    log_ir_emit(&context->ub, ref, depth, J->cur.ir[ref].tv.u64);
+  }
+}
+
 static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *eventdata)
 {
   VMEvent2 event = (VMEvent2)eventid;
@@ -1403,6 +1429,12 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
       break;
     case VMEVENT_TRACE_FLUSH:
       jitlog_traceflush(context, (FlushReason)(uintptr_t)eventdata);
+      break;
+    case VMEVENT_JIT_FOLD:
+      jitlog_irfold(context, (VMEventData_IRFold*)eventdata);
+      break;
+    case VMEVENT_JIT_IREMIT:
+      jitlog_iremit(context, (uint32_t)(uintptr_t)eventdata);
       break;
 #endif
     case VMEVENT_LOADSCRIPT:
@@ -1687,6 +1719,9 @@ static const char *const trlink_names[] = {
   "interpreter", "return", "stitch"
 };
 
+extern const char* fold_names[];
+extern const int lj_numfold;
+
 #define enum_entry(enumname, strarray) {.name = enumname, .valuenames = strarray, .valuenames_length = (sizeof(strarray)/sizeof(strarray[0]))}
 #define array_length(arr) (sizeof(arr)/sizeof((arr)[0]))
 
@@ -1695,6 +1730,7 @@ static enumdef_Args enumlist[] = {
   {.name = "CounterId",  .valuenames = CounterId_names, .valuenames_length = Counter_MAX},
   {.name = "TimerId",    .valuenames = TimerId_names,   .valuenames_length = Timer_MAX},
   {.name = "SectionId",  .valuenames = SectionId_names, .valuenames_length = Section_MAX},
+  {.name = "fold_names", .valuenames = fold_names, .valuenames_length = 0},
 };
 
 #define vmdef_array(name, name_array) \
@@ -1762,6 +1798,8 @@ static void write_header(jitlog_State *context)
     .gcinfo = &gcinfo,
     .reflect = &reflect_info,
   };
+  // We can't use an extern value as a constant at compile time
+  enumlist[sizeof(enumlist) / sizeof(enumdef_Args) - 1].valuenames_length = lj_numfold;
   log_header(&context->ub, &args);
 
   MSG_header* header = ((MSG_header*)ubufB(&context->ub));

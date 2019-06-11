@@ -518,3 +518,17 @@ message trace_snap{
   refs : [uint32]
   pc : ptr (argtype : const BCIns*)
 }
+
+message ir_emit (no_vtable){
+  irref : uint16 (argtype : IRRef)
+  depth : uint8
+  ins : uint64
+}
+
+message ir_fold (no_vtable){
+  foldfunc : uint8 (enum : fold_names)
+  depth : uint8
+  result : uint16
+  orig_ins : uint64
+  ins : uint64
+}

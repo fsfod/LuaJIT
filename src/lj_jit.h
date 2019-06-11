@@ -537,6 +537,7 @@ typedef struct jit_State {
   BCLine prev_line;	/* Previous line. */
   int prof_mode;	/* Profiling mode: 0, 'f', 'l'. */
 #endif
+  int folddepth;
 } jit_State;
 
 #ifdef LUA_USE_ASSERT

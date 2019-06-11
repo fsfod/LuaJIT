@@ -26,6 +26,8 @@ typedef enum VMEvent2 {
   VMEVENT_JIT_STAGE,
   VMEVENT_ERROR_THROWN,
   VMEVENT_JIT_INIT,
+  VMEVENT_JIT_FOLD,
+  VMEVENT_JIT_IREMIT,
   VMEVENT__MAX
 } VMEvent2;
 
@@ -122,5 +124,19 @@ typedef struct VMEventData_LuaError {
   int narg;
   void *frame;
 } VMEventData_LuaError;
+
+typedef struct VMEventData_IRFold {
+  unsigned long long orig_ins;
+  unsigned long long ins;
+  short foldid;
+  short depth;
+  unsigned short irref;
+  unsigned short result;
+} VMEventData_IRFold;
+
+typedef struct VMEventData_IREmit {
+  unsigned long long ins;
+  unsigned short irref;
+} VMEventData_IREmit;
 
 #endif
