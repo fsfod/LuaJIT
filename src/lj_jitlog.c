@@ -73,6 +73,10 @@ typedef struct jitlog_State {
   char oballoc_stacks;
   GCSize last_heapsize;
   GCSize heapsize_difflog;
+  IRRef last_nk;
+  IRRef last_nins;
+  IRIns last_ins;
+  uint16_t last_snap;
 } jitlog_State;
 
 
@@ -644,6 +648,10 @@ static void jitlog_tracestart(jitlog_State *context, GCtrace *T)
   context->lastpc = proto_bcpos(J->pt, J->pc);
   context->traced_funcs_count = 0;
   context->traced_bc_count = 0;
+  context->last_nk = T->nk;
+  context->last_nins = T->nins;
+  context->last_ins = J->fold.ins;
+  context->last_snap = 0;
 
   trace_start_Args args = {
     .id = T->traceno,
@@ -833,6 +841,20 @@ static void write_existingtraces(jitlog_State *context)
   }
 }
 
+static void write_tracesnap(UserBuf *ub, GCtrace *T, int snapno)
+{
+  SnapShot *snap = &T->snap[snapno];
+  trace_snap_Args args = {
+    .nslots = snap->nslots,
+    .topslot = snap->topslot,
+    .start = snap->ref - REF_BIAS,
+    .refs = &T->snapmap[snap->mapofs],
+    .refs_length = snap->nent,
+    .pc = snap_pc(&T->snapmap[snap->nent]),
+  };
+  log_trace_snap(ub, &args);
+}
+
 static void jitlog_tracebc(jitlog_State *context)
 {
   jit_State *J = G2J(context->g);
@@ -857,6 +879,9 @@ static void jitlog_tracebc(jitlog_State *context)
     }
     context->lastfunc = J->fn;
     context->lastdepth = J->framedepth;
+    if (context->mode & JITLogMode_VerboseTraceLog) {
+      log_trace_func(&context->ub, J->framedepth, J->fn);
+    }
   }
 
   if (J->pt || func_changed) {
@@ -876,6 +901,32 @@ static void jitlog_tracebc(jitlog_State *context)
     lua_assert(isluafunc(J->fn));
     context->lastlua = J->fn;
     context->lastpc = proto_bcpos(J->pt, J->pc);
+  }  
+
+  if (context->mode & JITLogMode_VerboseTraceLog) {
+    int kdif = context->last_nk - J->cur.nk;
+    int insdif = J->cur.nins - context->last_nins;
+    IRIns *ir = J->cur.ir;
+    trace_bc_Args args = {
+      .bcpos = context->lastpc,
+      .ir_ins = (J->cur.ir + J->cur.nins)- insdif,
+      .ir_ins_length = insdif > 0 ? insdif : 0,
+      .ir_k = ir + J->cur.nk,
+      .ir_k_length = kdif > 0 ? kdif : 0,
+      .irstart = J->cur.nins - REF_BIAS - insdif,
+      .ins = J->fold.ins.tv.u64, // normally this instruction is emitted but sometimes its CSE'ed away by the fold system
+    };
+    log_trace_bc(&context->ub, &args);
+    context->last_nk = J->cur.nk;
+    context->last_nins = J->cur.nins;
+    context->last_ins = J->fold.ins;
+
+    if (J->cur.nsnap != context->last_snap) {
+      for (int i = context->last_snap; i < (J->cur.nsnap - context->last_snap); i++) {
+        write_tracesnap(&context->ub, &J->cur, i);
+      }
+      context->last_snap = J->cur.nsnap;
+    }
   }
 }
 
@@ -2244,6 +2295,7 @@ LUA_API int jitlog_setmode(JITLogUserContext *usrcontext, JITLogMode mode, int e
   switch (mode) {
     case JITLogMode_TraceExitRegs:
     case JITLogMode_DisableMemorization:
+    case JITLogMode_VerboseTraceLog:
       break;
     default:
       /* Unknown mode return false */
@@ -2579,6 +2631,7 @@ typedef struct ModeEntry {
 static const ModeEntry jitlog_modes[] = {
   {"texit_regs", JITLogMode_TraceExitRegs},
   {"nomemo", JITLogMode_DisableMemorization},
+  {"verbose_trinfo", JITLogMode_VerboseTraceLog},
 };
 
 static int jlib_setmode(lua_State *L)

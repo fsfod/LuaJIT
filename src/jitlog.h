@@ -76,6 +76,12 @@ typedef enum JITLogMode {
   ** duplicate data to the jitlog.
   */
   JITLogMode_DisableMemorization = 0x02,
+  /*
+  ** Turn on verbose trace progress messages that are written after each bytecode is traced 
+  ** that include any new IR instructions emitted since the previous bytecode executed while 
+  ** recording a trace.
+  */
+  JITLogMode_VerboseTraceLog = 0x8,
 } JITLogMode;
 
 LUA_API JITLogUserContext* jitlog_start(lua_State *L);

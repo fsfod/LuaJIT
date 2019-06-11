@@ -497,3 +497,24 @@ message gc_heapsize (no_vtable){
   time : timestamp
   size : uint64
 }
+
+message trace_func (no_vtable){
+  depth : 16
+  func : GCRefPtr
+}
+
+message trace_bc{
+  bcpos : uint32
+  ir_ins : [uint64] (argtype : IRIns*)
+  irstart : uint16
+  ir_k : [uint64] (argtype : IRIns*)
+  ins : uint64
+}
+
+message trace_snap{
+  nslots : uint8
+  topslot : uint8
+  start : uint16 // IR instruction ref
+  refs : [uint32]
+  pc : ptr (argtype : const BCIns*)
+}
