@@ -206,6 +206,19 @@ module.messages = {
   },
 
   {
+    name = "trace_start",
+    fields = [[
+      time : timestamp
+      stitched : bool
+      id : u16
+      parentid : u16
+      rootid : u16
+      startpt : GCRefPtr @argtype(GCproto*)
+      startpc : u32 @argtype(BCPos)
+    ]]
+  },
+
+  {
     name = "traceexit_small",
     fields = [[
       isgcexit : bool

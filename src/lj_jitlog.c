@@ -378,6 +378,36 @@ void jitlog_labelobj(jitlog_State *context, GCobj *o, const char *label, int fla
 
 #if LJ_HASJIT
 
+static int isstitched(jitlog_State *context, GCtrace *T)
+{
+  jit_State *J = G2J(context->g);
+  if (J->parent == 0) {
+    BCOp op = bc_op(T->startins);
+    /* The parent trace rewrites the stack so this trace is started after the untraceable call */
+    return op == BC_CALLM || op == BC_CALL || op == BC_ITERC;
+  }
+  return 0;
+}
+
+static void jitlog_tracestart(jitlog_State *context, GCtrace *T)
+{ 
+  jit_State *J = G2J(context->g);
+  GCproto *startpt = &gcref(T->startpt)->pt;
+  BCPos startpc = proto_bcpos(startpt, mref(T->startpc, const BCIns));
+  memorize_proto(context, startpt);
+
+
+  trace_start_Args args = {
+    .id = T->traceno,
+    .startpt = startpt,
+    .stitched = isstitched(context, T),
+    .rootid = T->root,
+    .parentid = J->parent,
+    .startpc = startpc,
+  };
+  log_trace_start(&context->ub, &args);
+}
+
 static const uint32_t large_traceid = 1 << 14;
 static const uint32_t large_exitnum = 1 << 9;
 
@@ -526,6 +556,9 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
 
   switch (event) {
 #if LJ_HASJIT
+    case VMEVENT_TRACE_START:
+      jitlog_tracestart(context, (GCtrace*)eventdata);
+      break;
     case VMEVENT_TRACE_EXIT:
       jitlog_exit(context, (VMEventData_TExit*)eventdata);
       break;

@@ -454,6 +454,25 @@ function readers:protoloaded(msg)
   return address, proto
 end
 
+function readers:trace_start(msg)
+  local id = msg.id
+  local startpt = self.proto_lookup[addrtonum(msg.startpt)]
+  local trace = {
+    owner = self,
+    eventid = self.eventid,
+    time = msg.time,
+    id = id,
+    rootid = msg.rootid,
+    parentid = msg.parentid,
+    startpt = startpt,
+    startpc = msg.startpc,
+    stitched = msg.stitched,
+  }
+  self.current_trace = trace
+  self:log_msg("trace_start", "TraceStart(%d): parentid = %d, start = %s", id, msg.parentid, startpt and startpt:get_location())
+  return trace
+end
+
 function readers:traceexit(msg)
   local id = msg.traceid
   local exit = msg.exit
