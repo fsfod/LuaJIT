@@ -252,3 +252,14 @@ message obj_func{
   ffid : uint8
   upvalues : [uint64] (argtype : TValue *)
 }
+
+message trace_start{
+  time : timestamp
+  stitched : bool
+  id : uint16
+  parentid : uint16
+  parentexit : uint16
+  rootid : uint16
+  startpt : GCRefPtr (argtype : GCproto*)
+  startpc : uint32 (argtype : BCPos)
+}
