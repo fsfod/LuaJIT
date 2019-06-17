@@ -1212,6 +1212,7 @@ static void write_header(jitlog_State *context)
     .cpumodel_length = model_length,
     .os = LJ_OS_NAME,
     .ggaddress = (uintptr_t)G2GG(g),
+    .timerfreq = lj_perf_ticksfreq,
   };
   log_header(&context->ub, &args);
   free(msgnamelist);

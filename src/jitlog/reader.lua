@@ -136,14 +136,8 @@ function logreader:readheader(buff, buffsize, info)
   info.os = header:get_os()
   info.cpumodel = header:get_cpumodel()
   info.starttime = header.starttime
+  info.timerfreq = header.timerfreq
   self:log_msg("header", "LogHeader: Version %d, OS %s, CPU %s", info.version, info.os, info.cpumodel)
-
-  local tscfreq = string.match(info.cpumodel:lower(), "@ (.+)ghz$")
-  if tscfreq ~= nil then
-    info.tscfreq = tonumber(tscfreq)*1000000000
-  else
-    self:log_msg("header", "Warning: Failed to parse CPU frequency from CPU model string '%s'", info.cpumodel)
-  end
 
   local msgtype_count = header:get_msgtype_count()
   info.msgtype_count = msgtype_count
@@ -279,7 +273,7 @@ end
 
 function logreader:processheader(header)
   self.starttime = header.starttime
-  self.tscfreq = header.tscfreq
+  self.tscfreq = header.timerfreq
   self.msgtype_count = header.msgtype_count
 
   -- Make the msgtype enum for this file

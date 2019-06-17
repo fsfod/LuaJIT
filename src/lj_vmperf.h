@@ -19,6 +19,26 @@
 #error "NYI timer platform"
 #endif
 
+#if LJ_TARGET_WINDOWS
+#define _AMD64_
+#include <profileapi.h>
+#else
+#include <time.h>
+#endif
+
+LJ_AINLINE uint64_t getticks_os()
+{
+#if LJ_TARGET_WINDOWS
+  LARGE_INTEGER ticks;
+  QueryPerformanceCounter(&ticks);
+  return ticks.QuadPart;
+#elif LJ_TARGET_POSIX
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint64_t)ts.tv_sec * 1000000000u + ts.tv_nsec;
+#endif
+}
+
 /* Slightly modified from https://github.com/google/highwayhash/blob/master/highwayhash/tsc_timer.h */
 LJ_AINLINE uint64_t start_getticks()
 {
@@ -28,7 +48,7 @@ LJ_AINLINE uint64_t start_getticks()
 #elif LJ_TARGET_ARM64 
   asm volatile("mrs %0, cntvct_el0" : "=r"(t));
 #else
-  #error "Missing start_getticks implementation"
+  t = getticks_os();
 #endif
   return t;
 }
@@ -42,7 +62,7 @@ LJ_AINLINE uint64_t stop_getticks()
 #elif LJ_TARGET_ARM64 
   asm volatile("mrs %0, cntvct_el0" : "=r"(t));
 #else
-#error "Missing stop_getticks implementation"
+  t = getticks_os();
 #endif
   return t;
 }
@@ -105,6 +125,7 @@ LJ_AINLINE uint64_t stop_getticks_b()
 
 void lj_perf_init(lua_State *L);
 extern const int lj_perfdata_size;
+extern uint64_t lj_perf_ticksfreq;
 
 #ifdef LJ_ENABLESTATS
 

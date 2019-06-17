@@ -44,6 +44,7 @@ module.messages = {
       os : string
       starttime : timestamp
       ggaddress : u64
+      timerfreq : u64
     ]]
   },
 
