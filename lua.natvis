@@ -337,7 +337,7 @@
 </Type>
 
 <Type Name="SnapShot">
-  <DisplayString>IR: {ref-0x8000} , Exits {count,i}</DisplayString>
+  <DisplayString>IR: {ref-0x8000,i} , Exits {count,i}</DisplayString>
 </Type>
 
 <Type Name="jit_State">
@@ -503,6 +503,9 @@
 
 <Type Name="CTState">
   <Expand>
+    <Item Name="Misc Table">miscmap</Item>
+    <Item Name="Finalizers">finalizer</Item>
+    <Item Name="Callback state">cb</Item>
     <ArrayItems>
       <Size>top</Size>
       <ValuePointer>tab</ValuePointer>
@@ -522,6 +525,7 @@
   <Expand>
     <Item Name="CType State">(CTState*)ctype_state.ptr32</Item>
     <Item Name="GC State">gc</Item>
+    <Item Name="Jit State" Optional="true">*(jit_State *)(this+1)</Item>
     <Item Name="Registry">registrytv</Item>
     <Synthetic Name="Open Upvalues">
       <Expand>
