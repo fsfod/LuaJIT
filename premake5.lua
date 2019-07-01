@@ -554,7 +554,7 @@ end
     filter { "system:windows", "Debug*", "tags:FixedAddr" }
       linkoptions { "/FIXED", "/DEBUG", '/BASE:"0x00400000',  "/DYNAMICBASE:NO" }
 
-project "CreateRelease"
+  project "CreateRelease"
     kind "Utility"
     location "build"
     targetdir "output"
@@ -583,7 +583,7 @@ project "CreateRelease"
       files {
         "%{cfg.bindir}/luajit",
         "%{cfg.bindir}/libluajit.so",
-        "%{cfg.bindir}/lua51.lib",
+        "%{cfg.bindir}/libluajit.a",
       }
     
     filter {'files:**.h*'}
