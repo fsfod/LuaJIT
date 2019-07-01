@@ -502,8 +502,6 @@
     <Item Name="Registry">registrytv</Item>
     <Item Name="GC">gc</Item>
     <Item Name="CType State">(CTState*)ctype_state.ptr64</Item>
-    <Item Name="Arena(travesable)" Optional="true">travarena</Item>
-    <Item Name="Arena(non travesable)" Optional="true">arena</Item>
   </Expand>
 </Type>
     
@@ -518,97 +516,10 @@
 
   <Expand>
     <Item Name="Total Mem">total,i</Item> 
-    <Item Name="Curr Arena" Optional="true">(GCArena*)(((intptr_t)arenas[curarena]) &amp; ArenaCellMask)</Item> 
-    <Synthetic Name="Arenas" Optional="true">
-      <DisplayString>[size] = {arenastop,i}</DisplayString>
-      <Expand>
-        <IndexListItems>
-          <Size>arenastop</Size>
-          <ValueNode>(GCArena*)(((intptr_t)arenas[$i]) &amp; ~ArenaCellMask)</ValueNode>
-        </IndexListItems>
-      </Expand>
-    </Synthetic>
-    <Synthetic Name="Free Lists" Optional="true">
-      <DisplayString>[size] = {arenastop,i}</DisplayString>
-      <Expand>
-        <IndexListItems>
-          <Size>arenastop</Size>
-          <ValueNode>freelists[$i]</ValueNode>
-        </IndexListItems>
-      </Expand>
-    </Synthetic>
-    <Synthetic Name="Arena Flags" Optional="true">
-        <DisplayString>[size] = {arenastop,i}</DisplayString>
-        <Expand>
-            <IndexListItems>
-                <Size>arenastop</Size>
-                <ValueNode>(ArenaFlags)(((intptr_t)arenas[$i]) &amp; ArenaCellMask)</ValueNode>
-            </IndexListItems>
-        </Expand>
-    </Synthetic>
-    <Synthetic Name="Free Lists" Optional="true">
-        <DisplayString>[size] = {arenastop,i}</DisplayString>
-        <Expand>
-            <IndexListItems>
-                <Size>arenastop</Size>
-                <ValueNode>freelists[$i]</ValueNode>
-            </IndexListItems>
-        </Expand>
-    </Synthetic>
   </Expand>
 </Type>
 
-<Type Name="GCArena">
-  <DisplayString>Id {extra.id}, Used {celltopid-MinCellId,na}</DisplayString>
-  <Expand>
-    <Item Name="Flags">(ArenaFlags)extra.flags</Item>
-    <Item Name="CellTop">celltopid</Item>
-    <Item Name="Mem Used">(celltopid-MinCellId)*16</Item>
-    <Item Name="Cells Used">celltopid-MinCellId</Item>
-    <Item Name="Cells Left">MaxCellId - celltopid</Item>
-    <Item Name="Cells">cellsstart</Item>
-    <Item Name="Id">extra.id</Item>
-    <Item Name="extra">extra</Item>   
-    <Synthetic Name="[Grey List]" Condition="greybase.ptr64 != 0">
-      <DisplayString>[size] = {((uint32_t*)greybase.ptr64)[-1]-((greytop.ptr64-greybase.ptr64)/2)}</DisplayString>
-      <Expand>
-        <IndexListItems>
-          <Size>((uint32_t*)greybase.ptr64)[-1]-((greytop.ptr64-greybase.ptr64)/2)</Size>
-          <ValueNode>
-              (GCobj*)(cells+((GCCellID1*)greytop.ptr64)[$i])
-          </ValueNode>
-        </IndexListItems>
-      </Expand>
-    </Synthetic>
-    <Synthetic Name="[Grey Cell List]" Condition="greybase.ptr64 != 0">
-      <DisplayString>{((uint32_t*)greybase.ptr64)[-1]-((greytop.ptr64-greybase.ptr64)/2)}</DisplayString>
-      <Expand>
-        <IndexListItems>
-          <Size>((uint32_t*)greybase.ptr64)[-1]</Size>
-          <ValueNode>((GCCellID1*)(greybase.ptr64))[$i]</ValueNode>
-        </IndexListItems>
-      </Expand>
-    </Synthetic>
-    <Synthetic Name="[Fixed Cell List]" Condition="extra.fixedcells.ptr64 != 0">
-      <DisplayString>[size] = {extra.fixedtop}</DisplayString>
-      <Expand>
-        <IndexListItems>
-          <Size>extra.fixedtop</Size>
-          <ValueNode>*(GCobj*)(cells+((GCCellID1*)extra.fixedcells.ptr64)[$i])</ValueNode>
-        </IndexListItems>
-      </Expand>
-    </Synthetic>
-  </Expand>
-</Type>
 
-<Type Name="GCCell">
-  <DisplayString>{*((GCobj*)this),na}</DisplayString>
-  <Expand>
-    <Item Name="Obj">*(GCobj*)this</Item>
-    <Item Name="GCT">(*(GCobj*)this).gch.gct</Item>
-  </Expand>
-</Type>
-    
 <Type Name="lua_State">
   <DisplayString>Lua State {(GCobj*)(base[-2].u64 &amp; 0x7FFFFFFFFFFF),na}</DisplayString>
   <Expand>
