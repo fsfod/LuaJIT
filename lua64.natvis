@@ -12,6 +12,14 @@
     </Expand>
 </Type>
 
+<Type Name="GCRef">
+  <DisplayString Condition="gcptr64 != 0">{(GCobj*)(gcptr64 &amp; 0x7FFFFFFFFFFF)}</DisplayString>
+  <DisplayString Condition="gcptr64 == 0">nil</DisplayString>
+  <Expand>
+     <ExpandedItem Condition="gcptr64 != 0">(GCobj*)(gcptr64 &amp; 0x7FFFFFFFFFFF)</ExpandedItem>
+  </Expand>
+</Type>
+
 <Type Name="SBuf">
   <DisplayString>size: {((char*)p.ptr64) - (char*)b.ptr64} buff: {(char*)b.ptr64}</DisplayString>
   <Expand>
@@ -23,11 +31,22 @@
   </Expand>
 </Type>
   
-  <Type Name="GCRef">
-  <DisplayString Condition="gcptr64 != 0">{(GCobj*)(gcptr64 &amp; 0x7FFFFFFFFFFF)}</DisplayString>
-  <DisplayString Condition="gcptr64 == 0">nil</DisplayString>
+<Type Name="BCTrace">
+  <DisplayString>start: {pt}:{pt->firstline} }</DisplayString>
   <Expand>
-     <ExpandedItem Condition="gcptr64 != 0">(GCobj*)(gcptr64 &amp; 0x7FFFFFFFFFFF)</ExpandedItem>
+    <Item Name="size">bcsz</Item>
+    <ArrayItems>
+      <Size>bcsz</Size>
+      <ValuePointer>bc</ValuePointer>
+    </ArrayItems>
+  </Expand>
+</Type>
+
+<Type Name="TracedBC">
+  <DisplayString Condition="op &lt; BC_FUNCF">op: {op} pc: {pc}</DisplayString>
+  <DisplayString Condition="op &gt;= BC_FUNCF">op: {op} func: {func}</DisplayString>
+  <Expand>
+    <Item Name="func" Condition="op &gt;= BC_FUNCF">func</Item>
   </Expand>
 </Type>
 
@@ -54,8 +73,8 @@
     <ExpandedItem Condition="gch.gct == 12">ud</ExpandedItem>
   </Expand>
 </Type>
-  
-  <Type Name="TValue">
+
+<Type Name="TValue">
   <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == ~0u">nil</DisplayString>
   <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == ~1u">false</DisplayString>
   <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == ~2u">true</DisplayString>
@@ -98,10 +117,8 @@
     <Item Name="Metatable">metatable</Item>
     <Item Name="Enviroment Table">env</Item>
     <Item Name="Size">len,i</Item>
-    
+    <Item Name="Ptr">((void**)(this+1))[0]</Item>
     <Item Name="Data[0]">((unsigned int*)(this+1))[0]</Item>
-    <Item Name="Data[1]">((unsigned int*)(this+1))[1]</Item>
-    <Item Name="Data[2]">((unsigned int*)(this+1))[2]</Item>
   </Expand>
 </Type>
 
@@ -115,11 +132,11 @@
     <Item Name="metatable" Condition="metatable.gcptr64 != 0">metatable</Item>
     <Item Name="[asize]" Condition="hmask == 0 &amp;&amp; asize != 0">asize</Item>
     <Item Name="[hsize]">hmask</Item>
-    <ArrayItems Condition="asize != 0">
+    <ArrayItems Condition="hmask == 0">
       <Size>asize</Size>
       <ValuePointer>(TValue*)(array.ptr64)</ValuePointer>
     </ArrayItems>
-    <ArrayItems Condition="hmask != 0">
+    <ArrayItems Condition="asize == 0">
       <Size>hmask+1</Size>
       <ValuePointer>(Node*)(node.ptr64)</ValuePointer>
     </ArrayItems>
@@ -131,6 +148,15 @@
           <Size>asize</Size>
           <ValueNode>(Node*)(node.ptr64)</ValueNode>
         </IndexListItems>
+      </Expand>
+    </Synthetic>
+    <Synthetic Name="Hash" Condition="hmask != 0">
+      <DisplayString>{hmask+1}</DisplayString>
+      <Expand>
+        <ArrayItems>
+          <Size>hmask+1</Size>
+          <ValuePointer>(Node*)(node.ptr64)</ValuePointer>
+        </ArrayItems>
       </Expand>
     </Synthetic>
   </Expand>
@@ -149,17 +175,11 @@
     <Item Name="Param Count">numparams,i</Item>
     <Item Name="Trace">trace,i</Item>
     <Item Name="Total Size">sizept,i</Item>
-      
-    <Synthetic Name="GC Constants">
-      <DisplayString>[size] = {sizekgc}</DisplayString>
-      <Expand>
-        <IndexListItems>
-          <Size>sizekgc</Size>
-          <ValueNode>((GCRef*)k.ptr64)[-$i],na</ValueNode>
-        </IndexListItems>
-      </Expand>
-    </Synthetic>
-      
+    <Item Name="Hot Count" Optional="true">hotcount,i</Item>
+    <Item Name="CallCount" Optional="true">callcount,i</Item>
+    <Item Name="Loop Count" Optional="true">loopcount,i</Item>
+    <Item Name="PC Addr">(uint64_t)(this+1),p</Item>
+
     <Synthetic Name="Byte Code">
       <DisplayString>Header {(BCOp)(((BCIns*)(this+1))[0]&amp;0xff)}</DisplayString>
       <Expand>
@@ -169,6 +189,17 @@
         </IndexListItems>
       </Expand>
     </Synthetic>
+
+    <Synthetic Name="GC Constants">
+      <DisplayString>[size] = {sizekgc}</DisplayString>
+      <Expand>
+        <IndexListItems>
+          <Size>sizekgc</Size>
+          <ValueNode>((GCRef*)k.ptr64)[-$i],na</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
+
     <Synthetic Name="PC Line Numbers">
       <DisplayString>{sizebc}</DisplayString>
       <Expand>
@@ -264,7 +295,8 @@
     <Item Name="Root Trace" Condition="root != 0">root,i</Item>
     <Item Name="Starting Function">startpt</Item>
     <Item Name="Start Bytecode">(BCOp)(startins&amp;0xff)</Item>
-    <Item Name="Link Type">(TraceLink)linktype</Item>     
+    <Item Name="Link Type">(TraceLink)linktype</Item>
+    <Item Name="MCode">mcode</Item>
     
     <Synthetic Name="IR Byte Code">
       <DisplayString>[size] = {nins-0x8000,i}</DisplayString>
@@ -304,11 +336,21 @@
         </IndexListItems>
       </Expand>
     </Synthetic>
+    
+    <Synthetic Name="Snapshot Map raw">
+      <DisplayString>[size] = {nsnapmap,i}</DisplayString>
+      <Expand>
+        <IndexListItems>
+          <Size>nsnapmap</Size>
+          <ValueNode>snapmap[$i]</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
   </Expand>
 </Type>
 
 <Type Name="SnapShot">
-  <DisplayString>IR: {ref-0x8000} , Exits {count,i}</DisplayString>
+  <DisplayString>IR: {ref-0x8000,i} , Exits {count,i}</DisplayString>
 </Type>
 
 <Type Name="jit_State">
@@ -321,6 +363,10 @@
     <Item Name="Root Trace">((GCtrace**)trace)[cur.root]</Item>
     <Item Name="Exit or Parent Trace">((GCtrace**)trace)[parent]</Item>
     <Item Name="Exit Number">exitno,i</Item>
+    <Item Name="Start Trace" Optional="true">((GCRef*)trace)[starttrace]</Item>
+    <Item Name="Last Exit" Optional="true">((GCRef*)trace)[lastexit &gt;&gt; 16]</Item>
+    <Item Name="Last Exit ID" Optional="true">(lastexit &amp; 0xffff)</Item>
+    <Item Name="Last Trace" Optional="true">((GCRef*)trace)[lasttrace]</Item>
     <Item Name="Start Instruction">(BCOp)(cur.startins&amp;0xff)</Item>
     <Item Name="Lua State">L</Item>
     <Item Name="Fold Ins">fold.ins</Item>
@@ -340,7 +386,7 @@
       <DisplayString>[size] = {0x8000-cur.nk,i}</DisplayString>
       <Expand>
         <IndexListItems>
-          <Size>(0x8000-cur.nk)+1</Size>
+          <Size>0x8000-cur.nk</Size>
           <ValueNode>irbuf[0x8000-$i]</ValueNode>
         </IndexListItems>
       </Expand>
@@ -351,7 +397,7 @@
       <Expand>
         <IndexListItems>
           <Size>baseslot+maxslot</Size>
-          <ValueNode>(IRType)((base[$i] &gt;&gt; 24) &amp; IRT_TYPE)</ValueNode>
+          <ValueNode>(IRType)((slot[$i] &gt;&gt; 24) &amp; IRT_TYPE)</ValueNode>
         </IndexListItems>
       </Expand>
     </Synthetic>
@@ -361,7 +407,7 @@
       <Expand>
         <ArrayItems>
           <Size>sizetrace</Size>
-          <ValuePointer>(GCtrace**)trace</ValuePointer>
+          <ValuePointer>(GCRef*)trace</ValuePointer>
         </ArrayItems>
       </Expand>
     </Synthetic>
@@ -369,16 +415,13 @@
 </Type>
 
 <Type Name="GCupval">
-  <DisplayString Condition="closed == 1 &amp;&amp; immutable == 0">Closed {tv}</DisplayString>
-  <DisplayString Condition="closed == 1 &amp;&amp; immutable == 1">Closed Immutable {tv} </DisplayString>
-  <DisplayString Condition="closed == 0">Open {*((TValue*)v.ptr64)}</DisplayString>
+  <DisplayString Condition="closed == 1">Closed, {tv}</DisplayString>
+  <DisplayString Condition="closed == 0">Open, {*(TValue*)v.ptr64}</DisplayString>
   
   <Expand>
-    <Item Name="CellId">( (intptr)this)&gt;&gt; 4</Item>
-    <Item Name="Immutable">immutable</Item>
     <Item Name="v" Condition="closed == 1">tv</Item>
     <Item Name="v" Condition="closed == 0">(TValue*)v.ptr64</Item>
-
+    <Item Name="Immutable">immutable</Item>
     <Item Name="Prev" Condition="closed == 0">(GCupval*)prev.gcptr64</Item>
     <Item Name="Next" Condition="closed == 0">(GCupval*)next.gcptr64</Item>
   </Expand>
@@ -397,6 +440,7 @@
         </IndexListItems>
       </Expand>
     </Synthetic>
+    <Item Name="[UpValues]">nupvalues,i</Item>
     <ArrayItems>
       <Size>nupvalues</Size>
       <ValuePointer>uvptr</ValuePointer>
@@ -418,7 +462,7 @@
 
 <Type Name="GCfunc">
   <DisplayString Condition="c.ffid == 0">{l}</DisplayString>
-  <DisplayString Condition="c.ffid != 1">{c}</DisplayString>
+  <DisplayString Condition="c.ffid != 0">{c}</DisplayString>
   <Expand>
     <ExpandedItem Condition="c.ffid == 0">l</ExpandedItem>
     <ExpandedItem Condition="c.ffid != 0">c</ExpandedItem>
@@ -436,6 +480,7 @@
   <DisplayString Condition="(ftsz &amp; 7) == 7">Lua PCALL in hook</DisplayString>
   <Expand>
       <Item Name="PC Address" Condition="pcr.ptr64 &gt; 65000">pcr.ptr64&amp;~3</Item>
+      <Item Name="Call Base" Condition="pcr.ptr64 &gt; 65000">(uint8_t)(((BCIns*)(pcr.ptr64&amp;~3))[-1]&gt;&gt; 8)</Item>
       <Item Name="Stack offset" Condition="pcr.ptr64 &lt; 65000">pcr.ptr64&gt;&gt;3</Item>
   </Expand>
 </Type>  
@@ -472,7 +517,9 @@
   <DisplayString Condition="((marked &amp; 0x80) != 0)">{ctypeid,i} VLA</DisplayString>
   <DisplayString>{ctypeid,i}</DisplayString>
   <Expand>
+    <Item Name="Ptr">((void**)(this+1))[0]</Item>
     <Item Name="Data[0]">((unsigned int*)(this+1))[0]</Item>
+    <Item Name="Data">((unsigned char*)(this+1))</Item>
   </Expand>
 </Type>
 
@@ -480,7 +527,7 @@
   <Expand>
     <Item Name="Misc Table">miscmap</Item>
     <Item Name="Finalizers">finalizer</Item>
-    <Item Name="Callback state">cb</Item> 
+    <Item Name="Callback state">cb</Item>
     <ArrayItems>
       <Size>top</Size>
       <ValuePointer>tab</ValuePointer>
@@ -496,29 +543,67 @@
   <DisplayString Condition="vmstate == ~4">VMState: Trace Record</DisplayString>
   <DisplayString Condition="vmstate == ~5">VMState: Trace Optimizer</DisplayString>
   <DisplayString Condition="vmstate == ~6">VMState: Assembler</DisplayString>
+  <DisplayString>VMState: {vmstate}</DisplayString>
 
   <Expand>
-    <Item Name="Main Thread">mainthref</Item>
-    <Item Name="Registry">registrytv</Item>
-    <Item Name="GC">gc</Item>
     <Item Name="CType State">(CTState*)ctype_state.ptr64</Item>
+    <Item Name="GC State">gc</Item>
+    <Item Name="JIT State" Optional="true">*(jit_State *)(this+1)</Item>
+    <Item Name="Registry">registrytv</Item>
+    <Item Name="GG State">*(GG_State *)(((char*)this)-(int)(((lua_State*)0)+1))</Item>
+    <Synthetic Name="Open Upvalues">
+      <Expand>
+        <LinkedListItems>
+          <HeadPointer>&amp;uvhead</HeadPointer>
+          <NextPointer>(GCupval*)next.gcptr64</NextPointer>
+          <ValueNode>this</ValueNode>
+        </LinkedListItems>
+      </Expand>
+    </Synthetic>
+    <Item Name="Hook function">hookf</Item>
+    <Item Name="Hook mask">hookmask</Item>
   </Expand>
 </Type>
-    
+
 <Type Name="GCState">
-  <DisplayString Condition="state == GCSpause">GC State: paused</DisplayString>
-  <DisplayString Condition="state == GCSpropagate">GC State: propagate</DisplayString>
-  <DisplayString Condition="state == GCSatomic">GC State: atomic</DisplayString>
-  <DisplayString Condition="state == GCSsweepstring">GC State: sweepstring</DisplayString>
-  <DisplayString Condition="state == GCSsweep">GC State: sweep</DisplayString>
-  <DisplayString Condition="state == GCSpause">GC State: paused</DisplayString>
-  <DisplayString Condition="state == GCSfinalize">GC State: finalize</DisplayString>
-
+  <DisplayString Condition="state == 0">GCState: Pause</DisplayString>
+  <DisplayString Condition="state == 1">GCState: Propagate</DisplayString>
+  <DisplayString Condition="state == 2">GCState: Atomic</DisplayString>
+  <DisplayString Condition="state == 3">GCState: Sweep Strings</DisplayString>
+  <DisplayString Condition="state == 4">GCState: Sweep</DisplayString>
+  <DisplayString Condition="state == 5">GCState: Finalize</DisplayString>
   <Expand>
-    <Item Name="Total Mem">total,i</Item> 
+	  <Item Name="Total Memory">total,i</Item>
+	  <Item Name="GC Threshold">threshold,i</Item>
+	  <Item Name="Heap Size Pause">pause,i</Item>
+	  <Item Name="Step Rate Multiplier">stepmul,i</Item>
+	  <Item Name="GC Rate Debt">debt,i</Item>
+  
+    <Synthetic Name="GC Objects1">
+      <Expand>
+        <CustomListItems>
+          <Variable Name="orig_head" InitialValue="((GCobj*)root.gcptr64)"/>
+          <Variable Name="iter" InitialValue="((GCobj*)root.gcptr64)"/>
+          <Loop>
+            <Break Condition="iter == 0"/>
+            <Item>*iter</Item>
+            <Exec>iter = (GCobj*)(iter-&gt;gch.nextgc.gcptr64)</Exec>
+          </Loop>
+        </CustomListItems>
+      </Expand>
+    </Synthetic>
+    
+    <Synthetic Name="GC Objects2">
+      <Expand>        
+        <LinkedListItems>
+          <HeadPointer>((GCobj*)root.gcptr64)</HeadPointer>
+          <NextPointer>(GCobj*)gch.nextgc.gcptr64</NextPointer>
+          <ValueNode>this</ValueNode>
+        </LinkedListItems>
+      </Expand>
+    </Synthetic>
   </Expand>
 </Type>
-
 
 <Type Name="lua_State">
   <DisplayString>Lua State {(GCobj*)(base[-2].u64 &amp; 0x7FFFFFFFFFFF),na}</DisplayString>
@@ -526,7 +611,7 @@
     <Item Name="Current Function">(GCobj*)(base[-2].u64 &amp; 0x7FFFFFFFFFFF),na</Item>  
     <Item Name="Global State">*(global_State*)glref.ptr64</Item>
     <Item Name="GG State">*(GG_State *)(((char*)glref.ptr64)-(int)(((lua_State*)0)+1))</Item>
-    <Item Name="Jit State" Optional="true">*(jit_State *)(((global_State*)glref.ptr64)+1)</Item>
+    <Item Name="JIT State" Optional="true">*(jit_State *)(((global_State*)glref.ptr64)+1)</Item>
     <Item Name="Globals">env</Item>
     <Item Name="Registry">(*(global_State*)glref.ptr64).registrytv</Item>
     

@@ -56,7 +56,7 @@
   <DisplayString Condition="gch.gct == 6">{{thread: {th}}}</DisplayString>
   <DisplayString Condition="gch.gct == 7">{{proto: {pt}}}</DisplayString>
   <DisplayString Condition="gch.gct == 8">{{function: {fn}}}</DisplayString>
-  <DisplayString Condition="gch.gct == 9">{{trace: {(GCtrace*)this}}}</DisplayString>
+  <DisplayString Condition="gch.gct == 9" Optional="true">{{trace: {(GCtrace*)this}}}</DisplayString>
   <DisplayString Condition="gch.gct == 10">{{cdata: {cd}}}</DisplayString>
   <DisplayString Condition="gch.gct == 11">{{table: {tab}}}</DisplayString>
   <DisplayString Condition="gch.gct == 12">{{userdata: {ud}}}</DisplayString>
@@ -67,12 +67,12 @@
     <ExpandedItem Condition="gch.gct == 6">th</ExpandedItem>
     <ExpandedItem Condition="gch.gct == 7">pt</ExpandedItem>
     <ExpandedItem Condition="gch.gct == 8">fn</ExpandedItem>
-    <ExpandedItem Condition="gch.gct == 9">(GCtrace*)this</ExpandedItem>
+    <ExpandedItem Condition="gch.gct == 9" Optional="true">(GCtrace*)this</ExpandedItem>
     <ExpandedItem Condition="gch.gct == 10">cd</ExpandedItem>
     <ExpandedItem Condition="gch.gct == 11">tab</ExpandedItem>
     <ExpandedItem Condition="gch.gct == 12">ud</ExpandedItem>
   </Expand>
-</Type> 
+</Type>
 
 <Type Name="TValue">
   <DisplayString Condition="it == ~0u">nil</DisplayString>
@@ -85,7 +85,7 @@
   <DisplayString Condition="it == ~6u">{gcr,na}</DisplayString>
   <DisplayString Condition="it == ~7u">{gcr,na}</DisplayString>
   <DisplayString Condition="it == ~8u">{gcr,na}</DisplayString>
-  <DisplayString Condition="it == ~9u">{*((GCtrace*)gcr.gcptr32)}</DisplayString>
+  <DisplayString Condition="it == ~9u" Optional="true">{*((GCtrace*)gcr.gcptr32)}</DisplayString>
   <DisplayString Condition="it == ~10u">{gcr,na}</DisplayString>
   <DisplayString Condition="it == ~11u">table: {(GCtab*)gcr.gcptr32,na}</DisplayString>
   <DisplayString Condition="it == ~12u">{gcr}</DisplayString>
@@ -97,7 +97,7 @@
     <ExpandedItem Condition="it == ~6u">gcr</ExpandedItem>
     <ExpandedItem Condition="it == ~7u">gcr</ExpandedItem>
     <ExpandedItem Condition="it == ~8u">gcr</ExpandedItem>
-    <ExpandedItem Condition="it == ~9u">*((GCtrace*)gcr.gcptr32)</ExpandedItem>
+    <ExpandedItem Condition="it == ~9u" Optional="true">*((GCtrace*)gcr.gcptr32)</ExpandedItem>
     <ExpandedItem Condition="it == ~10u">gcr</ExpandedItem>
     <ExpandedItem Condition="it == ~11u">gcr</ExpandedItem>
     <ExpandedItem Condition="it == ~12u">gcr</ExpandedItem>
@@ -115,10 +115,8 @@
     <Item Name="Metatable">metatable</Item>
     <Item Name="Enviroment Table">env</Item>
     <Item Name="Size">len,i</Item>
-    
+    <Item Name="Ptr">((void**)(this+1))[0]</Item>
     <Item Name="Data[0]">((unsigned int*)(this+1))[0]</Item>
-    <Item Name="Data[1]">((unsigned int*)(this+1))[1]</Item>
-    <Item Name="Data[2]">((unsigned int*)(this+1))[2]</Item>
   </Expand>
 </Type>
 
@@ -189,6 +187,17 @@
         </IndexListItems>
       </Expand>
     </Synthetic>
+
+    <Synthetic Name="GC Constants">
+      <DisplayString>[size] = {sizekgc}</DisplayString>
+      <Expand>
+        <IndexListItems>
+          <Size>sizekgc</Size>
+          <ValueNode>((GCRef*)k.ptr32)[-$i],na</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
+
     <Synthetic Name="PC Line Numbers">
       <DisplayString>{sizebc}</DisplayString>
       <Expand>
@@ -402,12 +411,15 @@
 </Type>
 
 <Type Name="GCupval">
-  <DisplayString Condition="closed == 1">Closed {tv}</DisplayString>
-  <DisplayString Condition="closed == 0">Open {*(TValue*)v.ptr32}</DisplayString>
+  <DisplayString Condition="closed == 1">Closed, {tv}</DisplayString>
+  <DisplayString Condition="closed == 0">Open, {*(TValue*)v.ptr32}</DisplayString>
   
   <Expand>
-    <ExpandedItem Condition="closed == 1">tv</ExpandedItem>
-    <ExpandedItem Condition="closed == 0">*(TValue*)v.ptr32</ExpandedItem>
+    <Item Name="v" Condition="closed == 1">tv</Item>
+    <Item Name="v" Condition="closed == 0">(TValue*)v.ptr32</Item>
+    <Item Name="Immutable">immutable</Item>
+    <Item Name="Prev" Condition="closed == 0">(GCupval*)prev.gcptr32</Item>
+    <Item Name="Next" Condition="closed == 0">(GCupval*)next.gcptr32</Item>
   </Expand>
 </Type>
 
@@ -424,6 +436,7 @@
         </IndexListItems>
       </Expand>
     </Synthetic>
+    <Item Name="[UpValues]">nupvalues,i</Item>
     <ArrayItems>
       <Size>nupvalues</Size>
       <ValuePointer>uvptr</ValuePointer>
@@ -445,7 +458,7 @@
 
 <Type Name="GCfunc">
   <DisplayString Condition="c.ffid == 0">{l}</DisplayString>
-  <DisplayString Condition="c.ffid != 1">{c}</DisplayString>
+  <DisplayString Condition="c.ffid != 0">{c}</DisplayString>
   <Expand>
     <ExpandedItem Condition="c.ffid == 0">l</ExpandedItem>
     <ExpandedItem Condition="c.ffid != 0">c</ExpandedItem>
@@ -499,6 +512,11 @@
 <Type Name="GCcdata">
   <DisplayString Condition="((marked &amp; 0x80) != 0)">{ctypeid,i} VLA</DisplayString>
   <DisplayString>{ctypeid,i}</DisplayString>
+  <Expand>
+    <Item Name="Ptr">((void**)(this+1))[0]</Item>
+    <Item Name="Data[0]">((unsigned int*)(this+1))[0]</Item>
+    <Item Name="Data">((unsigned char*)(this+1))</Item>
+  </Expand>
 </Type>
 
 <Type Name="CTState">
@@ -521,12 +539,14 @@
   <DisplayString Condition="vmstate == ~4">VMState: Trace Record</DisplayString>
   <DisplayString Condition="vmstate == ~5">VMState: Trace Optimizer</DisplayString>
   <DisplayString Condition="vmstate == ~6">VMState: Assembler</DisplayString>
+  <DisplayString>VMState: {vmstate}</DisplayString>
 
   <Expand>
     <Item Name="CType State">(CTState*)ctype_state.ptr32</Item>
     <Item Name="GC State">gc</Item>
-    <Item Name="Jit State" Optional="true">*(jit_State *)(this+1)</Item>
+    <Item Name="JIT State" Optional="true">*(jit_State *)(this+1)</Item>
     <Item Name="Registry">registrytv</Item>
+    <Item Name="GG State">*(GG_State *)(((char*)this)-(int)(((lua_State*)0)+1))</Item>
     <Synthetic Name="Open Upvalues">
       <Expand>
         <LinkedListItems>
@@ -549,11 +569,11 @@
   <DisplayString Condition="state == 4">GCState: Sweep</DisplayString>
   <DisplayString Condition="state == 5">GCState: Finalize</DisplayString>
   <Expand>
-	<Item Name="Total Memory">total,i</Item>
-	<Item Name="GC Threshold">threshold,i</Item>
-	<Item Name="Heap Size Pause">pause,i</Item>
-	<Item Name="Step Rate Multiplier">stepmul,i</Item>
-	<Item Name="GC Rate Debt">debt,i</Item>
+	  <Item Name="Total Memory">total,i</Item>
+	  <Item Name="GC Threshold">threshold,i</Item>
+	  <Item Name="Heap Size Pause">pause,i</Item>
+	  <Item Name="Step Rate Multiplier">stepmul,i</Item>
+	  <Item Name="GC Rate Debt">debt,i</Item>
   
     <Synthetic Name="GC Objects1">
       <Expand>
@@ -590,7 +610,7 @@
     
     <Item Name="Global State">*(global_State*)glref.ptr32</Item>
     <Item Name="GG State">*(GG_State *)(((char*)glref.ptr32)-(int)(((lua_State*)0)+1))</Item>
-    <Item Name="Jit State">*(jit_State *)(((global_State*)glref.ptr32)+1)</Item>
+    <Item Name="JIT State" Optional="true">*(jit_State *)(((global_State*)glref.ptr32)+1)</Item>
     <Item Name="Globals">env</Item>
     <Item Name="Registry">(*(global_State*)glref.ptr32).registrytv</Item>
     
