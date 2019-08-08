@@ -1,22 +1,22 @@
 /*
-** SINK: Allocation Sinking and Store Sinking.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-*/
-
-#define lj_opt_sink_c
-#define LUA_CORE
+ * SINK: Allocation Sinking and Store Sinking.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ */
 
 #include "lj_obj.h"
 
 #if LJ_HASJIT
 
-#include "lj_ir.h"
-#include "lj_jit.h"
-#include "lj_iropt.h"
-#include "lj_target.h"
+#include "jit/lj_ir.h"
+#include "jit/lj_jit.h"
+#include "jit/lj_iropt.h"
+#include "jit/lj_target.h"
 
 /* Some local macros to save typing. Undef'd at the end. */
-#define IR(ref)		(&J->cur.ir[(ref)])
+#define IR(ref)         (&J->cur.ir[(ref)])
 
 /* Check whether the store ref points to an eligible allocation. */
 static IRIns *sink_checkalloc(jit_State *J, IRIns *irs)
@@ -27,10 +27,10 @@ static IRIns *sink_checkalloc(jit_State *J, IRIns *irs)
   if (ir->o == IR_HREFK || ir->o == IR_AREF)
     ir = IR(ir->op1);
   else if (!(ir->o == IR_HREF || ir->o == IR_NEWREF ||
-	     ir->o == IR_FREF || ir->o == IR_ADD))
+             ir->o == IR_FREF || ir->o == IR_ADD))
     return NULL;  /* Unhandled reference type (for XSTORE). */
   ir = IR(ir->op1);
-  if (!(ir->o == IR_TNEW || ir->o == IR_TDUP || ir->o == IR_CNEW))
+  if (!(ir->o == IR_TNEW || irt_ktdup(&J->cur, ir) || ir->o == IR_CNEW))
     return NULL;  /* Not an allocation. */
   return ir;  /* Return allocation. */
 }
@@ -51,7 +51,7 @@ static int sink_checkphi(jit_State *J, IRIns *ira, IRRef ref)
   if (ref >= REF_FIRST) {
     IRIns *ir = IR(ref);
     if (irt_isphi(ir->t) || (ir->o == IR_CONV && ir->op2 == IRCONV_NUM_INT &&
-			     irt_isphi(IR(ir->op1)->t))) {
+                             irt_isphi(IR(ir->op1)->t))) {
       ira->prev++;
       return 1;  /* Sinkable PHI. */
     }
@@ -79,27 +79,24 @@ static void sink_mark_ins(jit_State *J)
     case IR_BASE:
       return;  /* Finished. */
     case IR_CALLL:  /* IRCALL_lj_tab_len */
-    case IR_ALOAD: case IR_HLOAD: case IR_XLOAD: case IR_TBAR:
+    case IR_ALOAD: case IR_HLOAD: case IR_HKLOAD: case IR_XLOAD: case IR_TBAR:
       irt_setmark(IR(ir->op1)->t);  /* Mark ref for remaining loads. */
       break;
     case IR_FLOAD:
       if (irt_ismarked(ir->t) || ir->op2 == IRFL_TAB_META)
-	irt_setmark(IR(ir->op1)->t);  /* Mark table for remaining loads. */
+        irt_setmark(IR(ir->op1)->t);  /* Mark table for remaining loads. */
       break;
     case IR_ASTORE: case IR_HSTORE: case IR_FSTORE: case IR_XSTORE: {
       IRIns *ira = sink_checkalloc(J, ir);
       if (!ira || (irt_isphi(ira->t) && !sink_checkphi(J, ira, ir->op2)))
-	irt_setmark(IR(ir->op1)->t);  /* Mark ineligible ref. */
+        irt_setmark(IR(ir->op1)->t);  /* Mark ineligible ref. */
       irt_setmark(IR(ir->op2)->t);  /* Mark stored value. */
       break;
       }
 #if LJ_HASFFI
     case IR_CNEWI:
-      if (irt_isphi(ir->t) &&
-	  (!sink_checkphi(J, ir, ir->op2) ||
-	   (LJ_32 && ir+1 < irlast && (ir+1)->o == IR_HIOP &&
-	    !sink_checkphi(J, ir, (ir+1)->op2))))
-	irt_setmark(ir->t);  /* Mark ineligible allocation. */
+      if (irt_isphi(ir->t) && (!sink_checkphi(J, ir, ir->op2)))
+        irt_setmark(ir->t);  /* Mark ineligible allocation. */
       /* fallthrough */
 #endif
     case IR_USTORE:
@@ -115,17 +112,17 @@ static void sink_mark_ins(jit_State *J)
       IRIns *irl = IR(ir->op1), *irr = IR(ir->op2);
       irl->prev = irr->prev = 0;  /* Clear PHI value counts. */
       if (irl->o == irr->o &&
-	  (irl->o == IR_TNEW || irl->o == IR_TDUP ||
-	   (LJ_HASFFI && (irl->o == IR_CNEW || irl->o == IR_CNEWI))))
-	break;
+          (irl->o == IR_TNEW || irt_ktdup(&J->cur, irl) ||
+           (LJ_HASFFI && (irl->o == IR_CNEW || irl->o == IR_CNEWI))))
+        break;
       irt_setmark(irl->t);
       irt_setmark(irr->t);
       break;
       }
     default:
       if (irt_ismarked(ir->t) || irt_isguard(ir->t)) {  /* Propagate mark. */
-	if (ir->op1 >= REF_FIRST) irt_setmark(IR(ir->op1)->t);
-	if (ir->op2 >= REF_FIRST) irt_setmark(IR(ir->op2)->t);
+        if (ir->op1 >= REF_FIRST) irt_setmark(IR(ir->op1)->t);
+        if (ir->op2 >= REF_FIRST) irt_setmark(IR(ir->op2)->t);
       }
       break;
     }
@@ -136,7 +133,7 @@ static void sink_mark_ins(jit_State *J)
 static void sink_mark_snap(jit_State *J, SnapShot *snap)
 {
   SnapEntry *map = &J->cur.snapmap[snap->mapofs];
-  MSize n, nent = snap->nent;
+  size_t n, nent = snap->nent;
   for (n = 0; n < nent; n++) {
     IRRef ref = snap_ref(map[n]);
     if (!irref_isk(ref))
@@ -171,42 +168,44 @@ static void sink_sweep_ins(jit_State *J)
     case IR_ASTORE: case IR_HSTORE: case IR_FSTORE: case IR_XSTORE: {
       IRIns *ira = sink_checkalloc(J, ir);
       if (ira && !irt_ismarked(ira->t)) {
-	int delta = (int)(ir - ira);
-	ir->prev = REGSP(RID_SINK, delta > 255 ? 255 : delta);
+        int delta = (int)(ir - ira);
+        ir->prev = REGSP(RID_SINK, delta > STORE_FAR_FROM_ALLOC ? STORE_FAR_FROM_ALLOC : delta);
       } else {
-	ir->prev = REGSP_INIT;
+        ir->prev = REGSP_INIT;
       }
       break;
       }
     case IR_NEWREF:
       if (!irt_ismarked(IR(ir->op1)->t)) {
-	ir->prev = REGSP(RID_SINK, 0);
+        ir->prev = REGSP(RID_SINK, 0);
       } else {
-	irt_clearmark(ir->t);
-	ir->prev = REGSP_INIT;
+        irt_clearmark(ir->t);
+        ir->prev = REGSP_INIT;
       }
       break;
 #if LJ_HASFFI
     case IR_CNEW: case IR_CNEWI:
 #endif
     case IR_TNEW: case IR_TDUP:
+      if (ir->o == IR_TDUP && !irt_kgc(IR((ir)->op1)))
+        break;
       if (!irt_ismarked(ir->t)) {
-	ir->t.irt &= ~IRT_GUARD;
-	ir->prev = REGSP(RID_SINK, 0);
-	J->cur.sinktags = 1;  /* Signal present SINK tags to assembler. */
+        ir->t.irt &= ~IRT_GUARD;
+        ir->prev = REGSP(RID_SINK, 0);
+        J->cur.sinktags = 1;  /* Signal present SINK tags to assembler. */
       } else {
-	irt_clearmark(ir->t);
-	ir->prev = REGSP_INIT;
+        irt_clearmark(ir->t);
+        ir->prev = REGSP_INIT;
       }
       break;
     case IR_PHI: {
       IRIns *ira = IR(ir->op2);
       if (!irt_ismarked(ira->t) &&
-	  (ira->o == IR_TNEW || ira->o == IR_TDUP ||
-	   (LJ_HASFFI && (ira->o == IR_CNEW || ira->o == IR_CNEWI)))) {
-	ir->prev = REGSP(RID_SINK, 0);
+          (ira->o == IR_TNEW || irt_ktdup(&J->cur, ira) ||
+           (LJ_HASFFI && (ira->o == IR_CNEW || ira->o == IR_CNEWI)))) {
+        ir->prev = REGSP(RID_SINK, 0);
       } else {
-	ir->prev = REGSP_INIT;
+        ir->prev = REGSP_INIT;
       }
       break;
       }
@@ -226,7 +225,7 @@ static void sink_sweep_ins(jit_State *J)
 void lj_opt_sink(jit_State *J)
 {
   const uint32_t need = (JIT_F_OPT_SINK|JIT_F_OPT_FWD|
-			 JIT_F_OPT_DCE|JIT_F_OPT_CSE|JIT_F_OPT_FOLD);
+                         JIT_F_OPT_DCE|JIT_F_OPT_CSE|JIT_F_OPT_FOLD);
   if ((J->flags & need) == need &&
       (J->chain[IR_TNEW] || J->chain[IR_TDUP] ||
        (LJ_HASFFI && (J->chain[IR_CNEW] || J->chain[IR_CNEWI])))) {

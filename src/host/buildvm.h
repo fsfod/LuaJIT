@@ -1,7 +1,10 @@
 /*
-** LuaJIT VM builder.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-*/
+ * uJIT VM builder.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ */
 
 #ifndef _BUILDVM_H
 #define _BUILDVM_H
@@ -13,26 +16,26 @@
 #include <errno.h>
 
 #include "lj_def.h"
-#include "lj_arch.h"
+#include "uj_arch.h"
 
 /* Hardcoded limits. Increase as needed. */
-#define BUILD_MAX_RELOC		200	/* Max. number of relocations. */
-#define BUILD_MAX_FOLD		4096	/* Max. number of fold rules. */
+#define BUILD_MAX_RELOC         200     /* Max. number of relocations. */
+#define BUILD_MAX_FOLD          4096    /* Max. number of fold rules. */
 
 /* Prefix for scanned library definitions. */
-#define LIBDEF_PREFIX		"LJLIB_"
+#define LIBDEF_PREFIX           "LJLIB_"
 
 /* Prefix for scanned fold definitions. */
-#define FOLDDEF_PREFIX		"LJFOLD"
+#define FOLDDEF_PREFIX          "LJFOLD"
 
 /* Prefixes for generated labels. */
-#define LABEL_PREFIX		"lj_"
-#define LABEL_PREFIX_BC		LABEL_PREFIX "BC_"
-#define LABEL_PREFIX_FF		LABEL_PREFIX "ff_"
-#define LABEL_PREFIX_CF		LABEL_PREFIX "cf_"
-#define LABEL_PREFIX_FFH	LABEL_PREFIX "ffh_"
-#define LABEL_PREFIX_LIBCF	LABEL_PREFIX "lib_cf_"
-#define LABEL_PREFIX_LIBINIT	LABEL_PREFIX "lib_init_"
+#define LABEL_PREFIX            "lj_"
+#define LABEL_PREFIX_BC         LABEL_PREFIX "BC_"
+#define LABEL_PREFIX_FF         LABEL_PREFIX "ff_"
+#define LABEL_PREFIX_CF         LABEL_PREFIX "cf_"
+#define LABEL_PREFIX_FFH        LABEL_PREFIX "ffh_"
+#define LABEL_PREFIX_LIBCF      LABEL_PREFIX "lib_cf_"
+#define LABEL_PREFIX_LIBINIT    LABEL_PREFIX "lib_init_"
 
 /* Forward declaration. */
 struct dasm_State;
@@ -40,11 +43,11 @@ struct dasm_State;
 /* Build modes. */
 #define BUILDDEF(_) \
   _(elfasm) _(coffasm) _(machasm) _(peobj) _(raw) \
-  _(bcdef) _(ffdef) _(libdef) _(recdef) _(vmdef) \
+  _(bcdef) _(ffdef) _(libdef) _(recdef) \
   _(folddef)
 
 typedef enum {
-#define BUILDENUM(name)		BUILD_##name,
+#define BUILDENUM(name)         BUILD_##name,
 BUILDDEF(BUILDENUM)
 #undef BUILDENUM
   BUILD__MAX

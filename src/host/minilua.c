@@ -1,5 +1,5 @@
 /* This is a heavily customized and minimized copy of Lua 5.1.5. */
-/* It's only used to build LuaJIT. It does NOT have all standard functions! */
+/* It's only used to build uJIT. It does NOT have all standard functions! */
 /******************************************************************************
 * Copyright (C) 1994-2012 Lua.org, PUC-Rio.  All rights reserved.
 *
@@ -27,7 +27,6 @@ typedef unsigned __int64 U64;
 #else
 typedef unsigned long long U64;
 #endif
-int _CRT_glob = 0;
 #include <stddef.h>
 #include <stdarg.h>
 #include <limits.h>

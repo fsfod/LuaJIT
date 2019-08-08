@@ -1,23 +1,24 @@
 /*
-** NARROW: Narrowing of numbers to integers (double to int32_t).
-** STRIPOV: Stripping of overflow checks.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-*/
-
-#define lj_opt_narrow_c
-#define LUA_CORE
+ * NARROW: Narrowing of numbers to integers (double to int32_t).
+ * STRIPOV: Stripping of overflow checks.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ */
 
 #include "lj_obj.h"
 
 #if LJ_HASJIT
 
 #include "lj_bc.h"
-#include "lj_ir.h"
-#include "lj_jit.h"
-#include "lj_iropt.h"
-#include "lj_trace.h"
+#include "uj_str.h"
+#include "jit/lj_ir.h"
+#include "jit/lj_jit.h"
+#include "jit/lj_iropt.h"
+#include "jit/lj_trace.h"
 #include "lj_vm.h"
-#include "lj_strscan.h"
+#include "utils/uj_math.h"
 
 /* Rationale for narrowing optimizations:
 **
@@ -90,13 +91,13 @@
 */
 
 /* Some local macros to save typing. Undef'd at the end. */
-#define IR(ref)			(&J->cur.ir[(ref)])
-#define fins			(&J->fold.ins)
+#define IR(ref)                 (&J->cur.ir[(ref)])
+#define fins                    (&J->fold.ins)
 
 /* Pass IR on to next optimization in chain (FOLD). */
-#define emitir(ot, a, b)	(lj_ir_set(J, (ot), (a), (b)), lj_opt_fold(J))
+#define emitir(ot, a, b)        (lj_ir_set(J, (ot), (a), (b)), lj_opt_fold(J))
 
-#define emitir_raw(ot, a, b)	(lj_ir_set(J, (ot), (a), (b)), lj_ir_emit(J))
+#define emitir_raw(ot, a, b)    (lj_ir_set(J, (ot), (a), (b)), lj_ir_emit(J))
 
 /* -- Elimination of narrowing type conversions --------------------------- */
 
@@ -180,33 +181,33 @@
 */
 
 /* Maximum backpropagation depth and maximum stack size. */
-#define NARROW_MAX_BACKPROP	100
-#define NARROW_MAX_STACK	256
+#define NARROW_MAX_BACKPROP     100
+#define NARROW_MAX_STACK        256
 
 /* The stack machine has a 32 bit instruction format: [IROpT | IRRef1]
 ** The lower 16 bits hold a reference (or 0). The upper 16 bits hold
 ** the IR opcode + type or one of the following special opcodes:
 */
 enum {
-  NARROW_REF,		/* Push ref. */
-  NARROW_CONV,		/* Push conversion of ref. */
-  NARROW_SEXT,		/* Push sign-extension of ref. */
-  NARROW_INT		/* Push KINT ref. The next code holds an int32_t. */
+  NARROW_REF,           /* Push ref. */
+  NARROW_CONV,          /* Push conversion of ref. */
+  NARROW_SEXT,          /* Push sign-extension of ref. */
+  NARROW_INT            /* Push KINT ref. The next code holds an int32_t. */
 };
 
 typedef uint32_t NarrowIns;
 
-#define NARROWINS(op, ref)	(((op) << 16) + (ref))
-#define narrow_op(ins)		((IROpT)((ins) >> 16))
-#define narrow_ref(ins)		((IRRef1)(ins))
+#define NARROWINS(op, ref)      (((op) << 16) + (ref))
+#define narrow_op(ins)          ((IROpT)((ins) >> 16))
+#define narrow_ref(ins)         ((IRRef1)(ins))
 
 /* Context used for narrowing of type conversions. */
 typedef struct NarrowConv {
-  jit_State *J;		/* JIT compiler state. */
-  NarrowIns *sp;	/* Current stack pointer. */
-  NarrowIns *maxsp;	/* Maximum stack pointer minus redzone. */
-  IRRef mode;		/* Conversion mode (IRCONV_*). */
-  IRType t;		/* Destination type: IRT_INT or IRT_I64. */
+  jit_State *J;         /* JIT compiler state. */
+  NarrowIns *sp;        /* Current stack pointer. */
+  NarrowIns *maxsp;     /* Maximum stack pointer minus redzone. */
+  IRRef mode;           /* Conversion mode (IRCONV_*). */
+  IRType t;             /* Destination type: IRT_INT or IRT_I64. */
   NarrowIns stack[NARROW_MAX_STACK];  /* Stack holding stack-machine code. */
 } NarrowConv;
 
@@ -218,7 +219,7 @@ static BPropEntry *narrow_bpc_get(jit_State *J, IRRef1 key, IRRef mode)
     BPropEntry *bp = &J->bpropcache[i];
     /* Stronger checks are ok, too. */
     if (bp->key == key && bp->mode >= mode &&
-	((bp->mode ^ mode) & IRCONV_MODEMASK) == 0)
+        ((bp->mode ^ mode) & IRCONV_MODEMASK) == 0)
       return bp;
   }
   return NULL;
@@ -249,11 +250,11 @@ static void narrow_stripov_backprop(NarrowConv *nc, IRRef ref, int depth)
       NarrowIns *savesp = nc->sp;
       narrow_stripov_backprop(nc, ir->op1, depth);
       if (nc->sp < nc->maxsp) {
-	narrow_stripov_backprop(nc, ir->op2, depth);
-	if (nc->sp < nc->maxsp) {
-	  *nc->sp++ = NARROWINS(IRT(ir->o - IR_ADDOV + IR_ADD, IRT_INT), ref);
-	  return;
-	}
+        narrow_stripov_backprop(nc, ir->op2, depth);
+        if (nc->sp < nc->maxsp) {
+          *nc->sp++ = NARROWINS(IRT(ir->o - IR_ADDOV + IR_ADD, IRT_INT), ref);
+          return;
+        }
       }
       nc->sp = savesp;  /* Path too deep, need to backtrack. */
     }
@@ -268,7 +269,7 @@ static int narrow_conv_backprop(NarrowConv *nc, IRRef ref, int depth)
   IRIns *ir = IR(ref);
   IRRef cref;
 
-  if (nc->sp >= nc->maxsp) return 10;  /* Path too deep. */
+  if (nc->sp >= nc->maxsp) { return 10; } /* Path too deep. */
 
   /* Check the easy cases first. */
   if (ir->o == IR_CONV && (ir->op2 & IRCONV_SRCMASK) == IRT_INT) {
@@ -280,22 +281,22 @@ static int narrow_conv_backprop(NarrowConv *nc, IRRef ref, int depth)
       *nc->sp++ = NARROWINS(NARROW_SEXT, 0);  /* Sign-extend integer. */
     return 0;
   } else if (ir->o == IR_KNUM) {  /* Narrow FP constant. */
-    lua_Number n = ir_knum(ir)->n;
+    lua_Number n = numV(ir_knum(ir));
     if ((nc->mode & IRCONV_CONVMASK) == IRCONV_TOBIT) {
       /* Allows a wider range of constants. */
       int64_t k64 = (int64_t)n;
       if (n == (lua_Number)k64) {  /* Only if const doesn't lose precision. */
-	*nc->sp++ = NARROWINS(NARROW_INT, 0);
-	*nc->sp++ = (NarrowIns)k64;  /* But always truncate to 32 bits. */
-	return 0;
+        *nc->sp++ = NARROWINS(NARROW_INT, 0);
+        *nc->sp++ = (NarrowIns)k64;  /* But always truncate to 32 bits. */
+        return 0;
       }
     } else {
       int32_t k = lj_num2int(n);
       /* Only if constant is a small integer. */
       if (checki16(k) && n == (lua_Number)k) {
-	*nc->sp++ = NARROWINS(NARROW_INT, 0);
-	*nc->sp++ = (NarrowIns)k;
-	return 0;
+        *nc->sp++ = NARROWINS(NARROW_INT, 0);
+        *nc->sp++ = (NarrowIns)k;
+        return 0;
       }
     }
     return 10;  /* Never narrow other FP constants (this is rare). */
@@ -306,9 +307,9 @@ static int narrow_conv_backprop(NarrowConv *nc, IRRef ref, int depth)
   while (cref > ref) {
     IRIns *cr = IR(cref);
     if (cr->op1 == ref &&
-	(fins->o == IR_TOBIT ||
-	 ((cr->op2 & IRCONV_MODEMASK) == (nc->mode & IRCONV_MODEMASK) &&
-	  irt_isguard(cr->t) >= irt_isguard(fins->t)))) {
+        (fins->o == IR_TOBIT ||
+         ((cr->op2 & IRCONV_MODEMASK) == (nc->mode & IRCONV_MODEMASK) &&
+          irt_isguard(cr->t) >= irt_isguard(fins->t)))) {
       *nc->sp++ = NARROWINS(NARROW_REF, cref);
       return 0;  /* Already there, no additional conversion needed. */
     }
@@ -332,9 +333,9 @@ static int narrow_conv_backprop(NarrowConv *nc, IRRef ref, int depth)
       mode = (IRT_INT<<5)|IRT_NUM|IRCONV_INDEX;
       bp = narrow_bpc_get(nc->J, (IRRef1)ref, mode);
       if (bp) {
-	*nc->sp++ = NARROWINS(NARROW_REF, bp->val);
-	*nc->sp++ = NARROWINS(NARROW_SEXT, 0);
-	return 0;
+        *nc->sp++ = NARROWINS(NARROW_REF, bp->val);
+        *nc->sp++ = NARROWINS(NARROW_SEXT, 0);
+        return 0;
       }
     }
     if (++depth < NARROW_MAX_BACKPROP && nc->sp < nc->maxsp) {
@@ -342,8 +343,8 @@ static int narrow_conv_backprop(NarrowConv *nc, IRRef ref, int depth)
       int count = narrow_conv_backprop(nc, ir->op1, depth);
       count += narrow_conv_backprop(nc, ir->op2, depth);
       if (count <= 1) {  /* Limit total number of conversions. */
-	*nc->sp++ = NARROWINS(IRT(ir->o, nc->t), ref);
-	return count;
+        *nc->sp++ = NARROWINS(IRT(ir->o, nc->t), ref);
+        return count;
       }
       nc->sp = savesp;  /* Too many conversions, need to backtrack. */
     }
@@ -374,28 +375,31 @@ static IRRef narrow_conv_emit(jit_State *J, NarrowConv *nc)
     } else if (op == NARROW_SEXT) {
       lua_assert(sp >= nc->stack+1);
       sp[-1] = emitir(IRT(IR_CONV, IRT_I64), sp[-1],
-		      (IRT_I64<<5)|IRT_INT|IRCONV_SEXT);
+                      (IRT_I64<<5)|IRT_INT|IRCONV_SEXT);
     } else if (op == NARROW_INT) {
-      lua_assert(next < last);
-      *sp++ = nc->t == IRT_I64 ?
-	      lj_ir_kint64(J, (int64_t)(int32_t)*next++) :
-	      lj_ir_kint(J, *next++);
+      if (next < last) {
+        *sp++ = nc->t == IRT_I64 ?
+                lj_ir_kint64(J, (int64_t)(int32_t)*next++) :
+                lj_ir_kint(J, *next++);
+      } else {
+        lua_assert(0); /* Something gone wrong on backpropagation collection */
+      }
     } else {  /* Regular IROpT. Pops two operands and pushes one result. */
       IRRef mode = nc->mode;
       lua_assert(sp >= nc->stack+2);
       sp--;
       /* Omit some overflow checks for array indexing. See comments above. */
       if ((mode & IRCONV_CONVMASK) == IRCONV_INDEX) {
-	if (next == last && irref_isk(narrow_ref(sp[0])) &&
-	  (uint32_t)IR(narrow_ref(sp[0]))->i + 0x40000000u < 0x80000000u)
-	  guardot = 0;
-	else  /* Otherwise cache a stronger check. */
-	  mode += IRCONV_CHECK-IRCONV_INDEX;
+        if (next == last && irref_isk(narrow_ref(sp[0])) &&
+          (uint32_t)IR(narrow_ref(sp[0]))->i + 0x40000000u < 0x80000000u)
+          guardot = 0;
+        else  /* Otherwise cache a stronger check. */
+          mode += IRCONV_CHECK-IRCONV_INDEX;
       }
       sp[-1] = emitir(op+guardot, sp[-1], sp[0]);
       /* Add to cache. */
       if (narrow_ref(ref))
-	narrow_bpc_set(J, narrow_ref(ref), narrow_ref(sp[-1]), mode);
+        narrow_bpc_set(J, narrow_ref(ref), narrow_ref(sp[-1]), mode);
     }
   }
   lua_assert(sp == nc->stack+1);
@@ -403,7 +407,7 @@ static IRRef narrow_conv_emit(jit_State *J, NarrowConv *nc)
 }
 
 /* Narrow a type conversion of an arithmetic operation. */
-TRef LJ_FASTCALL lj_opt_narrow_convert(jit_State *J)
+TRef lj_opt_narrow_convert(jit_State *J)
 {
   if ((J->flags & JIT_F_OPT_NARROW)) {
     NarrowConv nc;
@@ -439,17 +443,17 @@ static TRef narrow_stripov(jit_State *J, TRef tr, int lastop, IRRef mode)
       op1 = narrow_stripov(J, op1, lastop, mode);
       op2 = narrow_stripov(J, op2, lastop, mode);
       tr = emitir(IRT(op - IR_ADDOV + IR_ADD,
-		      ((mode & IRCONV_DSTMASK) >> IRCONV_DSH)), op1, op2);
+                      ((mode & IRCONV_DSTMASK) >> IRCONV_DSH)), op1, op2);
       narrow_bpc_set(J, ref, tref_ref(tr), mode);
     }
-  } else if (LJ_64 && (mode & IRCONV_SEXT) && !irt_is64(ir->t)) {
+  } else if ((mode & IRCONV_SEXT) && !irt_is64(ir->t)) {
     tr = emitir(IRT(IR_CONV, IRT_INTP), tr, mode);
   }
   return tr;
 }
 
 /* Narrow array index. */
-TRef LJ_FASTCALL lj_opt_narrow_index(jit_State *J, TRef tr)
+TRef lj_opt_narrow_index(jit_State *J, TRef tr)
 {
   IRIns *ir;
   lua_assert(tref_isnumber(tr));
@@ -464,7 +468,7 @@ TRef LJ_FASTCALL lj_opt_narrow_index(jit_State *J, TRef tr)
 }
 
 /* Narrow conversion to integer operand (overflow undefined). */
-TRef LJ_FASTCALL lj_opt_narrow_toint(jit_State *J, TRef tr)
+TRef lj_opt_narrow_toint(jit_State *J, TRef tr)
 {
   if (tref_isstr(tr))
     tr = emitir(IRTG(IR_STRTO, IRT_NUM), tr, 0);
@@ -480,7 +484,7 @@ TRef LJ_FASTCALL lj_opt_narrow_toint(jit_State *J, TRef tr)
 }
 
 /* Narrow conversion to bitop operand (overflow wrapped). */
-TRef LJ_FASTCALL lj_opt_narrow_tobit(jit_State *J, TRef tr)
+TRef lj_opt_narrow_tobit(jit_State *J, TRef tr)
 {
   if (tref_isstr(tr))
     tr = emitir(IRTG(IR_STRTO, IRT_NUM), tr, 0);
@@ -497,15 +501,14 @@ TRef LJ_FASTCALL lj_opt_narrow_tobit(jit_State *J, TRef tr)
 
 #if LJ_HASFFI
 /* Narrow C array index (overflow undefined). */
-TRef LJ_FASTCALL lj_opt_narrow_cindex(jit_State *J, TRef tr)
+TRef lj_opt_narrow_cindex(jit_State *J, TRef tr)
 {
   lua_assert(tref_isnumber(tr));
   if (tref_isnum(tr))
-    return emitir(IRT(IR_CONV, IRT_INTP), tr, (IRT_INTP<<5)|IRT_NUM|IRCONV_ANY);
+    return emitir(IRT(IR_CONV, IRT_INTP), tr,
+                  (IRT_INTP<<5)|IRT_NUM|IRCONV_TRUNC|IRCONV_ANY);
   /* Undefined overflow semantics allow stripping of ADDOV, SUBOV and MULOV. */
-  return narrow_stripov(J, tr, IR_MULOV,
-			LJ_64 ? ((IRT_INTP<<5)|IRT_INT|IRCONV_SEXT) :
-				((IRT_INTP<<5)|IRT_INT|IRCONV_TOBIT));
+  return narrow_stripov(J, tr, IR_MULOV, (IRT_INTP<<5)|IRT_INT|IRCONV_SEXT);
 }
 #endif
 
@@ -523,7 +526,7 @@ static TRef conv_str_tonum(jit_State *J, TRef tr, TValue *o)
   if (tref_isstr(tr)) {
     tr = emitir(IRTG(IR_STRTO, IRT_NUM), tr, 0);
     /* Would need an inverted STRTO for this rare and useless case. */
-    if (!lj_strscan_num(strV(o), o))  /* Convert in-place. Value used below. */
+    if (!uj_str_tonumtv(strV(o), o))  /* Convert in-place. Value used below. */
       lj_trace_err(J, LJ_TRERR_BADTYPE);  /* Punt if non-numeric. */
   }
   return tr;
@@ -531,15 +534,15 @@ static TRef conv_str_tonum(jit_State *J, TRef tr, TValue *o)
 
 /* Narrowing of arithmetic operations. */
 TRef lj_opt_narrow_arith(jit_State *J, TRef rb, TRef rc,
-			 TValue *vb, TValue *vc, IROp op)
+                         TValue *vb, TValue *vc, IROp op)
 {
   rb = conv_str_tonum(J, rb, vb);
   rc = conv_str_tonum(J, rc, vc);
   /* Must not narrow MUL in non-DUALNUM variant, because it loses -0. */
-  if ((op >= IR_ADD && op <= (LJ_DUALNUM ? IR_MUL : IR_SUB)) &&
+  if ((op >= IR_ADD && op <= IR_SUB) &&
       tref_isinteger(rb) && tref_isinteger(rc) &&
-      numisint(lj_vm_foldarith(numberVnum(vb), numberVnum(vc),
-			       (int)op - (int)IR_ADD)))
+      numisint(uj_math_foldarith(numV(vb), numV(vc),
+                                 (enum FoldarithOp)((int)op - (int)IR_ADD))))
     return emitir(IRTGI((int)op - (int)IR_ADD + (int)IR_ADDOV), rb, rc);
   if (!tref_isnum(rb)) rb = emitir(IRTN(IR_CONV), rb, IRCONV_NUM_INT);
   if (!tref_isnum(rc)) rc = emitir(IRTN(IR_CONV), rc, IRCONV_NUM_INT);
@@ -551,7 +554,7 @@ TRef lj_opt_narrow_unm(jit_State *J, TRef rc, TValue *vc)
 {
   rc = conv_str_tonum(J, rc, vc);
   if (tref_isinteger(rc)) {
-    if ((uint32_t)numberVint(vc) != 0x80000000u)
+    if ((uint32_t)lj_num2int(numV(vc)) != 0x80000000u)
       return emitir(IRTGI(IR_SUBOV), lj_ir_kint(J, 0), rc);
     rc = emitir(IRTN(IR_CONV), rc, IRCONV_NUM_INT);
   }
@@ -564,9 +567,9 @@ TRef lj_opt_narrow_mod(jit_State *J, TRef rb, TRef rc, TValue *vb, TValue *vc)
   TRef tmp;
   rb = conv_str_tonum(J, rb, vb);
   rc = conv_str_tonum(J, rc, vc);
-  if ((LJ_DUALNUM || (J->flags & JIT_F_OPT_NARROW)) &&
+  if ((J->flags & JIT_F_OPT_NARROW) &&
       tref_isinteger(rb) && tref_isinteger(rc) &&
-      (tvisint(vc) ? intV(vc) != 0 : !tviszero(vc))) {
+      !tviszero(vc)) {
     emitir(IRTGI(IR_NE), rc, lj_ir_kint(J, 0));
     return emitir(IRTI(IR_MOD), rb, rc);
   }
@@ -586,30 +589,18 @@ TRef lj_opt_narrow_pow(jit_State *J, TRef rb, TRef rc, TValue *vb, TValue *vc)
   rb = lj_ir_tonum(J, rb);  /* Left arg is always treated as an FP number. */
   rc = conv_str_tonum(J, rc, vc);
   /* Narrowing must be unconditional to preserve (-x)^i semantics. */
-  if (tvisint(vc) || numisint(numV(vc))) {
-    int checkrange = 0;
-    /* Split pow is faster for bigger exponents. But do this only for (+k)^i. */
-    if (tref_isk(rb) && (int32_t)ir_knum(IR(tref_ref(rb)))->u32.hi >= 0) {
-      int32_t k = numberVint(vc);
-      if (!(k >= -65536 && k <= 65536)) goto split_pow;
-      checkrange = 1;
-    }
+  if (numisint(numV(vc))) {
     if (!tref_isinteger(rc)) {
       /* Guarded conversion to integer! */
       rc = emitir(IRTGI(IR_CONV), rc, IRCONV_INT_NUM|IRCONV_CHECK);
     }
-    if (checkrange && !tref_isk(rc)) {  /* Range guard: -65536 <= i <= 65536 */
-      TRef tmp = emitir(IRTI(IR_ADD), rc, lj_ir_kint(J, 65536));
-      emitir(IRTGI(IR_ULE), tmp, lj_ir_kint(J, 2*65536));
-    }
     return emitir(IRTN(IR_POW), rb, rc);
   }
-split_pow:
   /* FOLD covers most cases, but some are easier to do here. */
   if (tref_isk(rb) && tvispone(ir_knum(IR(tref_ref(rb)))))
     return rb;  /* 1 ^ x ==> 1 */
   rc = lj_ir_tonum(J, rc);
-  if (tref_isk(rc) && ir_knum(IR(tref_ref(rc)))->n == 0.5)
+  if (tref_isk(rc) && numV(ir_knum(IR(tref_ref(rc)))) == 0.5)
     return emitir(IRTN(IR_FPMATH), rb, IRFPM_SQRT);  /* x ^ 0.5 ==> sqrt(x) */
   /* Split up b^c into exp2(c*log2(b)). Assembler may rejoin later. */
   rb = emitir(IRTN(IR_FPMATH), rb, IRFPM_LOG2);
@@ -620,26 +611,25 @@ split_pow:
 /* -- Predictive narrowing of induction variables ------------------------- */
 
 /* Narrow a single runtime value. */
-static int narrow_forl(jit_State *J, cTValue *o)
+static int narrow_forl(jit_State *J, const TValue *o)
 {
-  if (tvisint(o)) return 1;
-  if (LJ_DUALNUM || (J->flags & JIT_F_OPT_NARROW)) return numisint(numV(o));
+  if (J->flags & JIT_F_OPT_NARROW) return numisint(numV(o));
   return 0;
 }
 
 /* Narrow the FORL index type by looking at the runtime values. */
-IRType lj_opt_narrow_forl(jit_State *J, cTValue *tv)
+IRType lj_opt_narrow_forl(jit_State *J, const TValue *tv)
 {
-  lua_assert(tvisnumber(&tv[FORL_IDX]) &&
-	     tvisnumber(&tv[FORL_STOP]) &&
-	     tvisnumber(&tv[FORL_STEP]));
+  lua_assert(tvisnum(&tv[FORL_IDX]) &&
+             tvisnum(&tv[FORL_STOP]) &&
+             tvisnum(&tv[FORL_STEP]));
   /* Narrow only if the runtime values of start/stop/step are all integers. */
   if (narrow_forl(J, &tv[FORL_IDX]) &&
       narrow_forl(J, &tv[FORL_STOP]) &&
       narrow_forl(J, &tv[FORL_STEP])) {
     /* And if the loop index can't possibly overflow. */
-    lua_Number step = numberVnum(&tv[FORL_STEP]);
-    lua_Number sum = numberVnum(&tv[FORL_STOP]) + step;
+    lua_Number step = numV(&tv[FORL_STEP]);
+    lua_Number sum = numV(&tv[FORL_STOP]) + step;
     if (0 <= step ? (sum <= 2147483647.0) : (sum >= -2147483648.0))
       return IRT_INT;
   }

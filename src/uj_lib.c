@@ -1,258 +1,270 @@
 /*
-** Library function support.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-*/
+ * Library function support.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ */
 
-#define lj_lib_c
-#define LUA_CORE
-
+#include "lua.h"
 #include "lauxlib.h"
 
 #include "lj_obj.h"
+#include "uj_err.h"
+#include "uj_str.h"
 #include "lj_gc.h"
-#include "lj_err.h"
-#include "lj_str.h"
 #include "lj_tab.h"
-#include "lj_func.h"
-#include "lj_bc.h"
-#include "lj_dispatch.h"
-#include "lj_vm.h"
-#include "lj_strscan.h"
-#include "lj_lib.h"
+#include "uj_func.h"
+#include "uj_dispatch.h"
+#include "uj_lib.h"
 
 /* -- Library initialization ---------------------------------------------- */
 
-static GCtab *lib_create_table(lua_State *L, const char *libname, int hsize)
+struct reg_state {
+	GCtab *tab; /* table of the lib being registered (e.g. _G.math). */
+	GCtab *env; /* environment to create builtins with. */
+	GCfunc *ofn; /* the most recently registered builtin. */
+	BCIns *bcff; /* next free BC for fast functions. */
+	const lua_CFunction *cf; /* module's lj_lib_cf_* (see lj_libdef.h). */
+	const uint8_t *p; /* module's lj_lib_init_* (see lj_libdef.h). */
+	size_t len; /* metadata from current pos in lj_lib_init_*. */
+	uint32_t tag; /* metadata from current pos in lj_lib_init_*. */
+	int ffid; /* next free fast function ID. */
+};
+
+void uj_lib_emplace(lua_State *L, const char *libname, int hsize)
 {
-  if (libname) {
-    luaL_findtable(L, LUA_REGISTRYINDEX, "_LOADED", 16);
-    lua_getfield(L, -1, libname);
-    if (!tvistab(L->top-1)) {
-      L->top--;
-      if (luaL_findtable(L, LUA_GLOBALSINDEX, libname, hsize) != NULL)
-	lj_err_callerv(L, LJ_ERR_BADMODN, libname);
-      settabV(L, L->top, tabV(L->top-1));
-      L->top++;
-      lua_setfield(L, -3, libname);  /* _LOADED[libname] = new table */
-    }
-    L->top--;
-    settabV(L, L->top-1, tabV(L->top));
-  } else {
-    lua_createtable(L, 0, hsize);
-  }
-  return tabV(L->top-1);
+	lua_assert(NULL != libname);
+
+	luaL_findtable(L, LUA_REGISTRYINDEX, "_LOADED", 16);
+	lua_getfield(L, -1, libname);
+	if (!lua_istable(L, -1)) {
+		lua_pop(L, 1);
+		if (luaL_findtable(L, LUA_GLOBALSINDEX, libname, hsize) != NULL)
+			uj_err_callerv(L, UJ_ERR_BADMODN, libname);
+		lua_pushvalue(L, -1);
+		lua_setfield(L, -3, libname); /* _LOADED[libname] = new table */
+	}
+	lua_remove(L, -2); /* Remove _LOADED table from the stack. */
 }
 
-void lj_lib_register(lua_State *L, const char *libname,
-		     const uint8_t *p, const lua_CFunction *cf)
+static GCtab *lib_create_tab(lua_State *L, const char *libname, int hsize)
 {
-  GCtab *env = tabref(L->env);
-  GCfunc *ofn = NULL;
-  int ffid = *p++;
-  BCIns *bcff = &L2GG(L)->bcff[*p++];
-  GCtab *tab = lib_create_table(L, libname, *p++);
-  ptrdiff_t tpos = L->top - L->base;
+	GCtab *tab;
 
-  /* Avoid barriers further down. */
-  lj_gc_anybarriert(L, tab);
-  tab->nomm = 0;
+	if (libname)
+		uj_lib_emplace(L, libname, hsize);
+	else
+		lua_createtable(L, 0, hsize);
 
-  for (;;) {
-    uint32_t tag = *p++;
-    MSize len = tag & LIBINIT_LENMASK;
-    tag &= LIBINIT_TAGMASK;
-    if (tag != LIBINIT_STRING) {
-      const char *name;
-      MSize nuv = (MSize)(L->top - L->base - tpos);
-      GCfunc *fn = lj_func_newC(L, nuv, env);
-      if (nuv) {
-	L->top = L->base + tpos;
-	memcpy(fn->c.upvalue, L->top, sizeof(TValue)*nuv);
-      }
-      fn->c.ffid = (uint8_t)(ffid++);
-      name = (const char *)p;
-      p += len;
-      if (tag == LIBINIT_CF)
-	setmref(fn->c.pc, &G(L)->bc_cfunc_int);
-      else
-	setmref(fn->c.pc, bcff++);
-      if (tag == LIBINIT_ASM_)
-	fn->c.f = ofn->c.f;  /* Copy handler from previous function. */
-      else
-	fn->c.f = *cf++;  /* Get cf or handler from C function table. */
-      if (len) {
-	/* NOBARRIER: See above for common barrier. */
-	setfuncV(L, lj_tab_setstr(L, tab, lj_str_new(L, name, len)), fn);
-      }
-      ofn = fn;
-    } else {
-      switch (tag | len) {
-      case LIBINIT_SET:
-	L->top -= 2;
-	if (tvisstr(L->top+1) && strV(L->top+1)->len == 0)
-	  env = tabV(L->top);
-	else  /* NOBARRIER: See above for common barrier. */
-	  copyTV(L, lj_tab_set(L, tab, L->top+1), L->top);
-	break;
-      case LIBINIT_NUMBER:
-	memcpy(&L->top->n, p, sizeof(double));
-	L->top++;
-	p += sizeof(double);
-	break;
-      case LIBINIT_COPY:
-	copyTV(L, L->top, L->top - *p++);
-	L->top++;
-	break;
-      case LIBINIT_LASTCL:
-	setfuncV(L, L->top++, ofn);
-	break;
-      case LIBINIT_FFID:
-	ffid++;
-	break;
-      case LIBINIT_END:
-	return;
-      default:
-	setstrV(L, L->top++, lj_str_new(L, (const char *)p, len));
-	p += len;
-	break;
-      }
-    }
-  }
+	tab = tabV(L->top - 1);
+	/* Avoid barriers further down. */
+	lj_gc_anybarriert(L, tab);
+	tab->nomm = 0;
+
+	return tab;
+}
+
+static LJ_AINLINE GCstr *lib_create_str(lua_State *L, struct reg_state *rs)
+{
+	GCstr *str = uj_str_new(L, (const char *)rs->p, rs->len);
+
+	rs->p += rs->len;
+	return str;
+}
+
+static GCfunc *lib_create_func(lua_State *L, struct reg_state *rs,
+			       ptrdiff_t tpos)
+{
+	size_t nuv = (size_t)(L->top - L->base - tpos);
+	GCfunc *fn = uj_func_newC(L, nuv, rs->env);
+
+	if (nuv) {
+		L->top = L->base + tpos;
+		memcpy(fn->c.upvalue, L->top, sizeof(TValue) * nuv);
+	}
+
+	fn->c.ffid = (uint8_t)rs->ffid;
+	rs->ffid++;
+	/*
+	 * pc ("body" of the function as a GCfunc object):
+	 * LIBINIT_CF (builtin is implemented fully in C): Set BC_FUNCC
+	 * as function's "body" (actual invocation of the implementation is a
+	 * part of the BC_FUNCC semantics).
+	 * Otherwise (builtin is implemented as a fast function): Consume
+	 * next free pseudo-BC for fast functions and set it as function's
+	 * "body".
+	 *
+	 * f (actual implementation or its part):
+	 * LIBINIT_ASM_ (builtin is implemented as a fast function and shares
+	 * fallback part with the last declared LJLIB_ASM function): Inherit
+	 * implementation from the previously processed function.
+	 * Otherwise (builtin is implemented fully in C): Consume next
+	 * implementation from the array of functions (see
+	 * static const lua_CFunction lj_lib_cf_* in lj_libdef.h).
+	 */
+	if (rs->tag == LIBINIT_ASM_ && NULL == rs->ofn) {
+		uj_err(L, UJ_ERR_BADFREG);
+		return NULL; /* unreachable */
+	}
+
+	fn->c.pc = (rs->tag == LIBINIT_CF) ? &G(L)->bc_cfunc_int : (rs->bcff)++;
+	fn->c.f = (rs->tag == LIBINIT_ASM_) ? rs->ofn->c.f : *(rs->cf)++;
+
+	if (rs->len) {
+		GCstr *name = lib_create_str(L, rs);
+		/* NOBARRIER: See lib_create_tab for common barrier. */
+		setfuncV(L, lj_tab_setstr(L, rs->tab, name), fn);
+	}
+
+	return fn;
+}
+
+static int lib_register_misc(lua_State *L, struct reg_state *rs)
+{
+	switch (rs->tag | rs->len) {
+	case LIBINIT_SET: {
+		/*
+		 * Set a value from the top of the stack as a new env
+		 * OR store a kv-pair into the lib table.
+		 */
+		L->top -= 2;
+		if (tvisstr(L->top + 1) && strV(L->top + 1)->len == 0)
+			rs->env = tabV(L->top);
+		else /* NOBARRIER: See lib_create_tab for common barrier. */
+			copyTV(L, lj_tab_set(L, rs->tab, L->top + 1), L->top);
+		break;
+	}
+	case LIBINIT_NUMBER: {
+		/* Read a double from lj_lib_init_* and push it on the stack. */
+		double tmp;
+
+		memcpy(&tmp, rs->p, sizeof(tmp));
+		rs->p += sizeof(tmp);
+		setnumV(L->top, tmp);
+		L->top++;
+		break;
+	}
+	case LIBINIT_COPY: {
+		/*
+		 * lua_pushvalue(L, index) so that a value could be used as
+		 * an upvalue for the next builtin.
+		 */
+		copyTV(L, L->top, L->top - *(rs->p)++);
+		L->top++;
+		break;
+	}
+	case LIBINIT_LASTCL: {
+		/*
+		 * Copy the most recently registered builtin on stack so that
+		 * it could be used as an upvalue for the next builtin.
+		 */
+		if (NULL == rs->ofn) {
+			uj_err(L, UJ_ERR_BADFREG);
+			break; /* unreachable */
+		}
+		setfuncV(L, L->top++, rs->ofn);
+		break;
+	}
+	case LIBINIT_FFID: {
+		/* Dummy-consume ffid for non-registered builtins. */
+		(rs->ffid)++;
+		break;
+	}
+	case LIBINIT_END: {
+		return 1; /* End of lj_lib_init_* */
+	}
+	default: {
+		/* Read a string from lj_lib_init_* and push it on the stack. */
+		setstrV(L, L->top++, lib_create_str(L, rs));
+		break;
+	}
+	}
+	return 0;
+}
+
+void uj_lib_register(lua_State *L, const char *libname, const uint8_t *p,
+		     const lua_CFunction *cf)
+{
+	int ffid = *p++;
+	BCIns *bcff = &L2GG(L)->bcff[*p++];
+	GCtab *tab = lib_create_tab(L, libname, *p++);
+	const ptrdiff_t tpos = L->top - L->base;
+	struct reg_state rs = {0};
+
+	rs.tab = tab;
+	rs.env = L->env;
+	rs.cf = cf;
+	rs.bcff = bcff;
+	rs.p = p;
+	rs.ffid = ffid;
+
+	for (;;) {
+		rs.tag = *(rs.p)++;
+		rs.len = rs.tag & LIBINIT_LENMASK;
+		rs.tag &= LIBINIT_TAGMASK;
+
+		if (rs.tag != LIBINIT_STRING) {
+			rs.ofn = lib_create_func(L, &rs, tpos);
+		} else {
+			if (lib_register_misc(L, &rs) != 0)
+				return;
+		}
+	}
 }
 
 /* -- Type checks --------------------------------------------------------- */
 
-TValue *lj_lib_checkany(lua_State *L, int narg)
+GCstr *uj_lib_checkstr(lua_State *L, unsigned int narg)
 {
-  TValue *o = L->base + narg-1;
-  if (o >= L->top)
-    lj_err_arg(L, narg, LJ_ERR_NOVAL);
-  return o;
+	TValue *tv = uj_lib_narg2tv(L, narg);
+	GCstr *s;
+
+	if (tv >= L->top || !uj_str_is_coercible(tv))
+		uj_err_argt(L, narg, LUA_TSTRING);
+
+	if (LJ_LIKELY(tvisstr(tv)))
+		return strV(tv);
+
+	lua_assert(tvisnum(tv));
+	s = uj_str_fromnumber(L, tv->n);
+	setstrV(L, tv, s);
+	return s;
 }
 
-GCstr *lj_lib_checkstr(lua_State *L, int narg)
+GCtab *uj_lib_checktabornil(lua_State *L, unsigned int narg)
 {
-  TValue *o = L->base + narg-1;
-  if (o < L->top) {
-    if (LJ_LIKELY(tvisstr(o))) {
-      return strV(o);
-    } else if (tvisnumber(o)) {
-      GCstr *s = lj_str_fromnumber(L, o);
-      setstrV(L, o, s);
-      return s;
-    }
-  }
-  lj_err_argt(L, narg, LUA_TSTRING);
-  return NULL;  /* unreachable */
+	const TValue *tv = uj_lib_narg2tv(L, narg);
+
+	if (tv < L->top) {
+		if (tvistab(tv))
+			return tabV(tv);
+		else if (tvisnil(tv))
+			return NULL;
+	}
+	uj_err_arg(L, UJ_ERR_NOTABN, narg);
+	return NULL; /* unreachable */
 }
 
-GCstr *lj_lib_optstr(lua_State *L, int narg)
+int uj_lib_checkopt(lua_State *L, unsigned int narg, int def, const char *lst)
 {
-  TValue *o = L->base + narg-1;
-  return (o < L->top && !tvisnil(o)) ? lj_lib_checkstr(L, narg) : NULL;
-}
+	const char *opt;
+	size_t optlen;
+	uint8_t len;
+	int i;
 
-#if LJ_DUALNUM
-void lj_lib_checknumber(lua_State *L, int narg)
-{
-  TValue *o = L->base + narg-1;
-  if (!(o < L->top && lj_strscan_numberobj(o)))
-    lj_err_argt(L, narg, LUA_TNUMBER);
-}
-#endif
+	const GCstr *s = def >= 0 ? uj_lib_optstr(L, narg) :
+				    uj_lib_checkstr(L, narg);
 
-lua_Number lj_lib_checknum(lua_State *L, int narg)
-{
-  TValue *o = L->base + narg-1;
-  if (!(o < L->top &&
-	(tvisnumber(o) || (tvisstr(o) && lj_strscan_num(strV(o), o)))))
-    lj_err_argt(L, narg, LUA_TNUMBER);
-  if (LJ_UNLIKELY(tvisint(o))) {
-    lua_Number n = (lua_Number)intV(o);
-    setnumV(o, n);
-    return n;
-  } else {
-    return numV(o);
-  }
-}
+	if (NULL == s)
+		return def;
 
-int32_t lj_lib_checkint(lua_State *L, int narg)
-{
-  TValue *o = L->base + narg-1;
-  if (!(o < L->top && lj_strscan_numberobj(o)))
-    lj_err_argt(L, narg, LUA_TNUMBER);
-  if (LJ_LIKELY(tvisint(o))) {
-    return intV(o);
-  } else {
-    int32_t i = lj_num2int(numV(o));
-    if (LJ_DUALNUM) setintV(o, i);
-    return i;
-  }
+	opt = strdata(s);
+	optlen = s->len;
+	for (i = 0; 0 != (len = *(const uint8_t *)lst); i++) {
+		if (len == optlen && memcmp(opt, lst + 1, optlen) == 0)
+			return i;
+		lst += 1 + len;
+	}
+	uj_err_argv(L, UJ_ERR_INVOPTM, narg, opt);
 }
-
-int32_t lj_lib_optint(lua_State *L, int narg, int32_t def)
-{
-  TValue *o = L->base + narg-1;
-  return (o < L->top && !tvisnil(o)) ? lj_lib_checkint(L, narg) : def;
-}
-
-int32_t lj_lib_checkbit(lua_State *L, int narg)
-{
-  TValue *o = L->base + narg-1;
-  if (!(o < L->top && lj_strscan_numberobj(o)))
-    lj_err_argt(L, narg, LUA_TNUMBER);
-  if (LJ_LIKELY(tvisint(o))) {
-    return intV(o);
-  } else {
-    int32_t i = lj_num2bit(numV(o));
-    if (LJ_DUALNUM) setintV(o, i);
-    return i;
-  }
-}
-
-GCfunc *lj_lib_checkfunc(lua_State *L, int narg)
-{
-  TValue *o = L->base + narg-1;
-  if (!(o < L->top && tvisfunc(o)))
-    lj_err_argt(L, narg, LUA_TFUNCTION);
-  return funcV(o);
-}
-
-GCtab *lj_lib_checktab(lua_State *L, int narg)
-{
-  TValue *o = L->base + narg-1;
-  if (!(o < L->top && tvistab(o)))
-    lj_err_argt(L, narg, LUA_TTABLE);
-  return tabV(o);
-}
-
-GCtab *lj_lib_checktabornil(lua_State *L, int narg)
-{
-  TValue *o = L->base + narg-1;
-  if (o < L->top) {
-    if (tvistab(o))
-      return tabV(o);
-    else if (tvisnil(o))
-      return NULL;
-  }
-  lj_err_arg(L, narg, LJ_ERR_NOTABN);
-  return NULL;  /* unreachable */
-}
-
-int lj_lib_checkopt(lua_State *L, int narg, int def, const char *lst)
-{
-  GCstr *s = def >= 0 ? lj_lib_optstr(L, narg) : lj_lib_checkstr(L, narg);
-  if (s) {
-    const char *opt = strdata(s);
-    MSize len = s->len;
-    int i;
-    for (i = 0; *(const uint8_t *)lst; i++) {
-      if (*(const uint8_t *)lst == len && memcmp(opt, lst+1, len) == 0)
-	return i;
-      lst += 1+*(const uint8_t *)lst;
-    }
-    lj_err_argv(L, narg, LJ_ERR_INVOPTM, opt);
-  }
-  return def;
-}
-

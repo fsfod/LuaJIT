@@ -1,39 +1,31 @@
 /*
-** String scanning.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-*/
+ * String scanning.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ */
 
-#ifndef _LJ_STRSCAN_H
-#define _LJ_STRSCAN_H
-
-#include "lj_obj.h"
+#ifndef _UJIT_UTILS_STRSCAN_H
+#define _UJIT_UTILS_STRSCAN_H
 
 /* Options for accepted/returned formats. */
-#define STRSCAN_OPT_TOINT	0x01  /* Convert to int32_t, if possible. */
-#define STRSCAN_OPT_TONUM	0x02  /* Always convert to double. */
-#define STRSCAN_OPT_IMAG	0x04
-#define STRSCAN_OPT_LL		0x08
-#define STRSCAN_OPT_C		0x10
+#define STRSCAN_OPT_TONUM 0x01  /* Always convert to double. */
+#define STRSCAN_OPT_IMAG  0x02  /* Support I/i suffix for imaginary numbers. */
+#define STRSCAN_OPT_LL    0x04  /* Convert to signed/unsigned long long. */
+#define STRSCAN_OPT_C     0x08  /* Convert to signed/unsiged int. */
 
-/* Returned format. */
+/* Desribes conversion status and format of the output. */
 typedef enum {
-  STRSCAN_ERROR,
-  STRSCAN_NUM, STRSCAN_IMAG,
-  STRSCAN_INT, STRSCAN_U32, STRSCAN_I64, STRSCAN_U64,
+  STRSCAN_ERROR, /* Error during conversion. All other values denote successful conversion. */
+  STRSCAN_NUM,   /* Output is double. */
+  STRSCAN_IMAG,  /* Output is double, but the input was warked with I/i suffix. */
+  STRSCAN_INT,   /* Output is  int32_t, stored in lower 4 bytes of the output buffer. */
+  STRSCAN_U32,   /* Output is uint32_t, stored in lower 4 bytes of the output buffer. */
+  STRSCAN_I64,   /* Output is  int64_t. */
+  STRSCAN_U64,   /* Output is uint64_t. */
 } StrScanFmt;
 
-LJ_FUNC StrScanFmt lj_strscan_scan(const uint8_t *p, TValue *o, uint32_t opt);
-LJ_FUNC int LJ_FASTCALL lj_strscan_num(GCstr *str, TValue *o);
-#if LJ_DUALNUM
-LJ_FUNC int LJ_FASTCALL lj_strscan_number(GCstr *str, TValue *o);
-#else
-#define lj_strscan_number(s, o)		lj_strscan_num((s), (o))
-#endif
+StrScanFmt strscan_tonumber(const uint8_t *p, double *d, uint32_t opt);
 
-/* Check for number or convert string to number/int in-place (!). */
-static LJ_AINLINE int lj_strscan_numberobj(TValue *o)
-{
-  return tvisnumber(o) || (tvisstr(o) && lj_strscan_number(strV(o), o));
-}
-
-#endif
+#endif /* !_UJIT_UTILS_STRSCAN_H */

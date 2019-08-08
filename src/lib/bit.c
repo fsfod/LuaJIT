@@ -1,58 +1,56 @@
 /*
-** Bit manipulation library.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-*/
-
-#define lib_bit_c
-#define LUA_LIB
+ * Bit manipulation library.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ */
 
 #include "lua.h"
 #include "lauxlib.h"
-#include "lualib.h"
+#include "lextlib.h"
 
 #include "lj_obj.h"
-#include "lj_err.h"
-#include "lj_str.h"
-#include "lj_lib.h"
+#include "uj_lib.h"
 
 /* ------------------------------------------------------------------------ */
 
 #define LJLIB_MODULE_bit
 
-LJLIB_ASM(bit_tobit)		LJLIB_REC(bit_unary IR_TOBIT)
+LJLIB_ASM(bit_tobit)            LJLIB_REC(.)
 {
-  lj_lib_checknumber(L, 1);
+  uj_lib_checknum(L, 1);
   return FFH_RETRY;
 }
-LJLIB_ASM_(bit_bnot)		LJLIB_REC(bit_unary IR_BNOT)
-LJLIB_ASM_(bit_bswap)		LJLIB_REC(bit_unary IR_BSWAP)
+LJLIB_ASM_(bit_bnot)            LJLIB_REC(.)
+LJLIB_ASM_(bit_bswap)           LJLIB_REC(.)
 
-LJLIB_ASM(bit_lshift)		LJLIB_REC(bit_shift IR_BSHL)
+LJLIB_ASM(bit_lshift)           LJLIB_REC(.)
 {
-  lj_lib_checknumber(L, 1);
-  lj_lib_checkbit(L, 2);
+  uj_lib_checknum(L, 1);
+  uj_lib_checkbit(L, 2);
   return FFH_RETRY;
 }
-LJLIB_ASM_(bit_rshift)		LJLIB_REC(bit_shift IR_BSHR)
-LJLIB_ASM_(bit_arshift)		LJLIB_REC(bit_shift IR_BSAR)
-LJLIB_ASM_(bit_rol)		LJLIB_REC(bit_shift IR_BROL)
-LJLIB_ASM_(bit_ror)		LJLIB_REC(bit_shift IR_BROR)
+LJLIB_ASM_(bit_rshift)          LJLIB_REC(.)
+LJLIB_ASM_(bit_arshift)         LJLIB_REC(.)
+LJLIB_ASM_(bit_rol)             LJLIB_REC(.)
+LJLIB_ASM_(bit_ror)             LJLIB_REC(.)
 
-LJLIB_ASM(bit_band)		LJLIB_REC(bit_nary IR_BAND)
+LJLIB_ASM(bit_band)             LJLIB_REC(.)
 {
   int i = 0;
-  do { lj_lib_checknumber(L, ++i); } while (L->base+i < L->top);
+  do { uj_lib_checknum(L, ++i); } while (L->base+i < L->top);
   return FFH_RETRY;
 }
-LJLIB_ASM_(bit_bor)		LJLIB_REC(bit_nary IR_BOR)
-LJLIB_ASM_(bit_bxor)		LJLIB_REC(bit_nary IR_BXOR)
+LJLIB_ASM_(bit_bor)             LJLIB_REC(.)
+LJLIB_ASM_(bit_bxor)            LJLIB_REC(.)
 
 /* ------------------------------------------------------------------------ */
 
 LJLIB_CF(bit_tohex)
 {
-  uint32_t b = (uint32_t)lj_lib_checkbit(L, 1);
-  int32_t i, n = L->base+1 >= L->top ? 8 : lj_lib_checkbit(L, 2);
+  uint32_t b = (uint32_t)uj_lib_checkbit(L, 1);
+  int32_t i, n = L->base+1 >= L->top ? 8 : uj_lib_checkbit(L, 2);
   const char *hexdigits = "0123456789abcdef";
   char buf[8];
   if (n < 0) { n = -n; hexdigits = "0123456789ABCDEF"; }
@@ -68,7 +66,7 @@ LJLIB_CF(bit_tohex)
 
 LUALIB_API int luaopen_bit(lua_State *L)
 {
-  LJ_LIB_REG(L, LUA_BITLIBNAME, bit);
+  LJ_LIB_REG(L, LUAE_BITLIBNAME, bit);
   return 1;
 }
 

@@ -1,55 +1,59 @@
 /*
-** C type conversions.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-*/
+ * C type conversions.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ */
 
 #include "lj_obj.h"
 
 #if LJ_HASFFI
 
-#include "lj_err.h"
+#include "uj_err.h"
 #include "lj_tab.h"
-#include "lj_ctype.h"
-#include "lj_cdata.h"
-#include "lj_cconv.h"
-#include "lj_ccallback.h"
+#include "ffi/lj_ctype.h"
+#include "ffi/lj_cdata.h"
+#include "ffi/lj_cconv.h"
+#include "ffi/lj_ccallback.h"
+#include "utils/fp.h"
 
 /* -- Conversion errors --------------------------------------------------- */
 
 /* Bad conversion. */
 LJ_NORET static void cconv_err_conv(CTState *cts, CType *d, CType *s,
-				    CTInfo flags)
+                                    CTInfo flags)
 {
   const char *dst = strdata(lj_ctype_repr(cts->L, ctype_typeid(cts, d), NULL));
   const char *src;
   if ((flags & CCF_FROMTV))
-    src = lj_obj_typename[1+(ctype_isnum(s->info) ? LUA_TNUMBER :
-			     ctype_isarray(s->info) ? LUA_TSTRING : LUA_TNIL)];
+    src = uj_obj_typename[1+(ctype_isnum(s->info) ? LUA_TNUMBER :
+                             ctype_isarray(s->info) ? LUA_TSTRING : LUA_TNIL)];
   else
     src = strdata(lj_ctype_repr(cts->L, ctype_typeid(cts, s), NULL));
   if (CCF_GETARG(flags))
-    lj_err_argv(cts->L, CCF_GETARG(flags), LJ_ERR_FFI_BADCONV, src, dst);
+    uj_err_argv(cts->L, UJ_ERR_FFI_BADCONV, CCF_GETARG(flags), src, dst);
   else
-    lj_err_callerv(cts->L, LJ_ERR_FFI_BADCONV, src, dst);
+    uj_err_callerv(cts->L, UJ_ERR_FFI_BADCONV, src, dst);
 }
 
 /* Bad conversion from TValue. */
 LJ_NORET static void cconv_err_convtv(CTState *cts, CType *d, TValue *o,
-				      CTInfo flags)
+                                      CTInfo flags)
 {
   const char *dst = strdata(lj_ctype_repr(cts->L, ctype_typeid(cts, d), NULL));
   const char *src = lj_typename(o);
   if (CCF_GETARG(flags))
-    lj_err_argv(cts->L, CCF_GETARG(flags), LJ_ERR_FFI_BADCONV, src, dst);
+    uj_err_argv(cts->L, UJ_ERR_FFI_BADCONV, CCF_GETARG(flags), src, dst);
   else
-    lj_err_callerv(cts->L, LJ_ERR_FFI_BADCONV, src, dst);
+    uj_err_callerv(cts->L, UJ_ERR_FFI_BADCONV, src, dst);
 }
 
 /* Initializer overflow. */
 LJ_NORET static void cconv_err_initov(CTState *cts, CType *d)
 {
   const char *dst = strdata(lj_ctype_repr(cts->L, ctype_typeid(cts, d), NULL));
-  lj_err_callerv(cts->L, LJ_ERR_FFI_INITOV, dst);
+  uj_err_callerv(cts->L, UJ_ERR_FFI_INITOV, dst);
 }
 
 /* -- C type compatibility checks ----------------------------------------- */
@@ -82,25 +86,25 @@ int lj_cconv_compatptr(CTState *cts, CType *d, CType *s, CTInfo flags)
       s = cconv_childqual(cts, s, &squal);
     if ((flags & CCF_SAME)) {
       if (dqual != squal)
-	return 0;  /* Different qualifiers. */
+        return 0;  /* Different qualifiers. */
     } else if (!(flags & CCF_IGNQUAL)) {
       if ((dqual & squal) != squal)
-	return 0;  /* Discarded qualifiers. */
+        return 0;  /* Discarded qualifiers. */
       if (ctype_isvoid(d->info) || ctype_isvoid(s->info))
-	return 1;  /* Converting to/from void * is always ok. */
+        return 1;  /* Converting to/from void * is always ok. */
     }
     if (ctype_type(d->info) != ctype_type(s->info) ||
-	d->size != s->size)
+        d->size != s->size)
       return 0;  /* Different type or different size. */
     if (ctype_isnum(d->info)) {
       if (((d->info ^ s->info) & (CTF_BOOL|CTF_FP)))
-	return 0;  /* Different numeric types. */
+        return 0;  /* Different numeric types. */
     } else if (ctype_ispointer(d->info)) {
       /* Check child types for compatibility. */
       return lj_cconv_compatptr(cts, d, s, flags|CCF_SAME);
     } else if (ctype_isstruct(d->info)) {
       if (d != s)
-	return 0;  /* Must be exact same type for struct/union. */
+        return 0;  /* Must be exact same type for struct/union. */
     } else if (ctype_isfunc(d->info)) {
       /* NYI: structural equality of functions. */
     }
@@ -116,7 +120,7 @@ int lj_cconv_compatptr(CTState *cts, CType *d, CType *s, CTInfo flags)
 ** The JIT compiler will do a much better job specializing for each case.
 */
 void lj_cconv_ct_ct(CTState *cts, CType *d, CType *s,
-		    uint8_t *dp, uint8_t *sp, CTInfo flags)
+                    uint8_t *dp, uint8_t *sp, CTInfo flags)
 {
   CTSize dsize = d->size, ssize = s->size;
   CTInfo dinfo = d->info, sinfo = s->info;
@@ -133,8 +137,8 @@ void lj_cconv_ct_ct(CTState *cts, CType *d, CType *s,
   lua_assert(!ctype_isnum(sinfo) || ssize > 0);
   lua_assert(!ctype_isbool(dinfo) || dsize == 1 || dsize == 4);
   lua_assert(!ctype_isbool(sinfo) || ssize == 1 || ssize == 4);
-  lua_assert(!ctype_isinteger(dinfo) || (1u<<lj_fls(dsize)) == dsize);
-  lua_assert(!ctype_isinteger(sinfo) || (1u<<lj_fls(ssize)) == ssize);
+  lua_assert(!ctype_isinteger(dinfo) || (1u<<lj_bsr(dsize)) == dsize);
+  lua_assert(!ctype_isinteger(sinfo) || (1u<<lj_bsr(ssize)) == ssize);
 
   switch (cconv_idx2(dinfo, sinfo)) {
   /* Destination is a bool. */
@@ -143,7 +147,7 @@ void lj_cconv_ct_ct(CTState *cts, CType *d, CType *s,
     if (dsize == 1) *dp = *sp; else *(int *)dp = *sp;
     break;
   case CCX(B, I): {
-    MSize i;
+    size_t i;
     uint8_t b = 0;
     for (i = 0; i < ssize; i++) b |= sp[i];
     b = (b != 0);
@@ -164,21 +168,11 @@ void lj_cconv_ct_ct(CTState *cts, CType *d, CType *s,
   case CCX(I, I):
   conv_I_I:
     if (dsize > ssize) {  /* Zero-extend or sign-extend LSB. */
-#if LJ_LE
       uint8_t fill = (!(sinfo & CTF_UNSIGNED) && (sp[ssize-1]&0x80)) ? 0xff : 0;
       memcpy(dp, sp, ssize);
       memset(dp + ssize, fill, dsize-ssize);
-#else
-      uint8_t fill = (!(sinfo & CTF_UNSIGNED) && (sp[0]&0x80)) ? 0xff : 0;
-      memset(dp, fill, dsize-ssize);
-      memcpy(dp + (dsize-ssize), sp, ssize);
-#endif
     } else {  /* Copy LSB. */
-#if LJ_LE
       memcpy(dp, sp, dsize);
-#else
-      memcpy(dp, sp + (ssize-dsize), dsize);
-#endif
     }
     break;
   case CCX(I, F): {
@@ -199,9 +193,9 @@ void lj_cconv_ct_ct(CTState *cts, CType *d, CType *s,
       *(uint32_t *)dp = (uint32_t)n;
     } else if (dsize == 8) {
       if (!(dinfo & CTF_UNSIGNED))
-	*(int64_t *)dp = (int64_t)n;
+        *(int64_t *)dp = (int64_t)n;
       else
-	*(uint64_t *)dp = lj_num2u64(n);
+        *(uint64_t *)dp = lj_num2u64(n);
     } else {
       goto err_conv;  /* NYI: conversion to >64 bit integers. */
     }
@@ -234,13 +228,13 @@ void lj_cconv_ct_ct(CTState *cts, CType *d, CType *s,
     if (ssize < 4 || (ssize == 4 && !(sinfo & CTF_UNSIGNED))) {
       int32_t i;
       if (ssize == 4) {
-	i = *(int32_t *)sp;
+        i = *(int32_t *)sp;
       } else if (!(sinfo & CTF_UNSIGNED)) {
-	if (ssize == 2) i = *(int16_t *)sp;
-	else i = *(int8_t *)sp;
+        if (ssize == 2) i = *(int16_t *)sp;
+        else i = *(int8_t *)sp;
       } else {
-	if (ssize == 2) i = *(uint16_t *)sp;
-	else i = *(uint8_t *)sp;
+        if (ssize == 2) i = *(uint16_t *)sp;
+        else i = *(uint8_t *)sp;
       }
       n = (double)i;
     } else if (ssize == 4) {
@@ -331,7 +325,7 @@ void lj_cconv_ct_ct(CTState *cts, CType *d, CType *s,
   case CCX(P, F):
     if (!(flags & CCF_CAST) || !(flags & CCF_FROMTV)) goto err_conv;
     /* The signed conversion is cheaper. x64 really has 47 bit pointers. */
-    dinfo = CTINFO(CT_NUM, (LJ_64 && dsize == 8) ? 0 : CTF_UNSIGNED);
+    dinfo = CTINFO(CT_NUM, (dsize == 8) ? 0 : CTF_UNSIGNED);
     goto conv_I_F;
 
   case CCX(P, P):
@@ -348,7 +342,7 @@ void lj_cconv_ct_ct(CTState *cts, CType *d, CType *s,
   /* Destination is an array. */
   case CCX(A, A):
     if ((flags & CCF_CAST) || (d->info & CTF_VLA) || dsize != ssize ||
-	d->size == CTSIZE_INVALID || !lj_cconv_compatptr(cts, d, s, flags))
+        d->size == CTSIZE_INVALID || !lj_cconv_compatptr(cts, d, s, flags))
       goto err_conv;
     goto copyval;
 
@@ -371,26 +365,16 @@ copyval:  /* Copy value. */
 
 /* Convert C type to TValue. Caveat: expects to get the raw CType! */
 int lj_cconv_tv_ct(CTState *cts, CType *s, CTypeID sid,
-		   TValue *o, uint8_t *sp)
+                   TValue *o, uint8_t *sp)
 {
   CTInfo sinfo = s->info;
   if (ctype_isnum(sinfo)) {
     if (!ctype_isbool(sinfo)) {
       if (ctype_isinteger(sinfo) && s->size > 4) goto copyval;
-      if (LJ_DUALNUM && ctype_isinteger(sinfo)) {
-	int32_t i;
-	lj_cconv_ct_ct(cts, ctype_get(cts, CTID_INT32), s,
-		       (uint8_t *)&i, sp, 0);
-	if ((sinfo & CTF_UNSIGNED) && i < 0)
-	  setnumV(o, (lua_Number)(uint32_t)i);
-	else
-	  setintV(o, i);
-      } else {
-	lj_cconv_ct_ct(cts, ctype_get(cts, CTID_DOUBLE), s,
-		       (uint8_t *)&o->n, sp, 0);
-	/* Numbers are NOT canonicalized here! Beware of uninitialized data. */
-	lua_assert(tvisnum(o));
-      }
+      lj_cconv_ct_ct(cts, ctype_get(cts, CTID_DOUBLE), s,
+                     (uint8_t *)&o->n, sp, 0);
+      /* Numbers are NOT canonicalized here! Beware of uninitialized data. */
+      settag(o, LJ_TNUMX);
     } else {
       uint32_t b = s->size == 1 ? (*sp != 0) : (*(int *)sp != 0);
       setboolV(o, b);
@@ -435,17 +419,14 @@ int lj_cconv_tv_bf(CTState *cts, CType *s, TValue *o, uint8_t *sp)
   lua_assert(pos < 8*ctype_bitcsz(info));
   lua_assert(bsz > 0 && bsz <= 8*ctype_bitcsz(info));
   if (pos + bsz > 8*ctype_bitcsz(info))
-    lj_err_caller(cts->L, LJ_ERR_FFI_NYIPACKBIT);
+    uj_err_caller(cts->L, UJ_ERR_FFI_NYIPACKBIT);
   if (!(info & CTF_BOOL)) {
     CTSize shift = 32 - bsz;
     if (!(info & CTF_UNSIGNED)) {
       setintV(o, (int32_t)(val << (shift-pos)) >> shift);
     } else {
       val = (val << (shift-pos)) >> shift;
-      if (!LJ_DUALNUM || (int32_t)val < 0)
-	setnumV(o, (lua_Number)(uint32_t)val);
-      else
-	setintV(o, (int32_t)val);
+      setnumV(o, (lua_Number)(uint32_t)val);
     }
   } else {
     lua_assert(bsz == 1);
@@ -458,7 +439,7 @@ int lj_cconv_tv_bf(CTState *cts, CType *s, TValue *o, uint8_t *sp)
 
 /* Convert table to array. */
 static void cconv_array_tab(CTState *cts, CType *d,
-			    uint8_t *dp, GCtab *t, CTInfo flags)
+                            uint8_t *dp, GCtab *t, CTInfo flags)
 {
   int32_t i;
   CType *dc = ctype_rawchild(cts, d);  /* Array element type. */
@@ -485,7 +466,7 @@ static void cconv_array_tab(CTState *cts, CType *d,
 
 /* Convert table to sub-struct/union. */
 static void cconv_substruct_tab(CTState *cts, CType *d, uint8_t *dp,
-				GCtab *t, int32_t *ip, CTInfo flags)
+                                GCtab *t, int32_t *ip, CTInfo flags)
 {
   CTypeID id = d->sib;
   while (id) {
@@ -494,36 +475,36 @@ static void cconv_substruct_tab(CTState *cts, CType *d, uint8_t *dp,
     if (ctype_isfield(df->info) || ctype_isbitfield(df->info)) {
       TValue *tv;
       int32_t i = *ip, iz = i;
-      if (!gcref(df->name)) continue;  /* Ignore unnamed fields. */
+      if (df->name == NULL) continue;  /* Ignore unnamed fields. */
       if (i >= 0) {
       retry:
-	tv = (TValue *)lj_tab_getint(t, i);
-	if (!tv || tvisnil(tv)) {
-	  if (i == 0) { i = 1; goto retry; }  /* 1-based tables. */
-	  if (iz == 0) { *ip = i = -1; goto tryname; }  /* Init named fields. */
-	  break;  /* Stop at first nil. */
-	}
-	*ip = i + 1;
+        tv = (TValue *)lj_tab_getint(t, i);
+        if (!tv || tvisnil(tv)) {
+          if (i == 0) { i = 1; goto retry; }  /* 1-based tables. */
+          if (iz == 0) { *ip = i = -1; goto tryname; }  /* Init named fields. */
+          break;  /* Stop at first nil. */
+        }
+        *ip = i + 1;
       } else {
       tryname:
-	tv = (TValue *)lj_tab_getstr(t, gco2str(gcref(df->name)));
-	if (!tv || tvisnil(tv)) continue;
+        tv = (TValue *)lj_tab_getstr(t, df->name);
+        if (!tv || tvisnil(tv)) continue;
       }
       if (ctype_isfield(df->info))
-	lj_cconv_ct_tv(cts, ctype_rawchild(cts, df), dp+df->size, tv, flags);
+        lj_cconv_ct_tv(cts, ctype_rawchild(cts, df), dp+df->size, tv, flags);
       else
-	lj_cconv_bf_tv(cts, df, dp+df->size, tv);
+        lj_cconv_bf_tv(cts, df, dp+df->size, tv);
       if ((d->info & CTF_UNION)) break;
     } else if (ctype_isxattrib(df->info, CTA_SUBTYPE)) {
       cconv_substruct_tab(cts, ctype_rawchild(cts, df),
-			  dp+df->size, t, ip, flags);
+                          dp+df->size, t, ip, flags);
     }  /* Ignore all other entries in the chain. */
   }
 }
 
 /* Convert table to struct/union. */
 static void cconv_struct_tab(CTState *cts, CType *d,
-			     uint8_t *dp, GCtab *t, CTInfo flags)
+                             uint8_t *dp, GCtab *t, CTInfo flags)
 {
   int32_t i = 0;
   memset(dp, 0, d->size);  /* Much simpler to clear the struct first. */
@@ -532,17 +513,13 @@ static void cconv_struct_tab(CTState *cts, CType *d,
 
 /* Convert TValue to C type. Caveat: expects to get the raw CType! */
 void lj_cconv_ct_tv(CTState *cts, CType *d,
-		    uint8_t *dp, TValue *o, CTInfo flags)
+                    uint8_t *dp, TValue *o, CTInfo flags)
 {
   CTypeID sid = CTID_P_VOID;
   CType *s;
   void *tmpptr;
   uint8_t tmpbool, *sp = (uint8_t *)&tmpptr;
-  if (LJ_LIKELY(tvisint(o))) {
-    sp = (uint8_t *)&o->i;
-    sid = CTID_INT32;
-    flags |= CCF_FROMTV;
-  } else if (LJ_LIKELY(tvisnum(o))) {
+  if (LJ_LIKELY(tvisnum(o))) {
     sp = (uint8_t *)&o->n;
     sid = CTID_DOUBLE;
     flags |= CCF_FROMTV;
@@ -568,7 +545,7 @@ void lj_cconv_ct_tv(CTState *cts, CType *d,
       CTSize ofs;
       CType *cct = lj_ctype_getfield(cts, d, str, &ofs);
       if (!cct || !ctype_isconstval(cct->info))
-	goto err_conv;
+        goto err_conv;
       lua_assert(d->size == 4);
       sp = (uint8_t *)&cct->size;
       sid = ctype_cid(cct->info);
@@ -576,9 +553,9 @@ void lj_cconv_ct_tv(CTState *cts, CType *d,
       CType *dc = ctype_rawchild(cts, d);
       CTSize sz = str->len+1;
       if (!ctype_isinteger(dc->info) || dc->size != 1)
-	goto err_conv;
+        goto err_conv;
       if (d->size != 0 && d->size < sz)
-	sz = d->size;
+        sz = d->size;
       memcpy(dp, strdata(str), sz);
       return;
     } else {  /* Otherwise pass it as a const char[]. */
@@ -649,7 +626,7 @@ void lj_cconv_bf_tv(CTState *cts, CType *d, uint8_t *dp, TValue *o)
   lua_assert(bsz > 0 && bsz <= 8*ctype_bitcsz(info));
   /* Check if a packed bitfield crosses a container boundary. */
   if (pos + bsz > 8*ctype_bitcsz(info))
-    lj_err_caller(cts->L, LJ_ERR_FFI_NYIPACKBIT);
+    uj_err_caller(cts->L, UJ_ERR_FFI_NYIPACKBIT);
   mask = ((1u << bsz) - 1u) << pos;
   val = (val << pos) & mask;
   /* NYI: packed bitfields may cause misaligned reads/writes. */
@@ -665,11 +642,11 @@ void lj_cconv_bf_tv(CTState *cts, CType *d, uint8_t *dp, TValue *o)
 
 /* Initialize an array with TValues. */
 static void cconv_array_init(CTState *cts, CType *d, CTSize sz, uint8_t *dp,
-			     TValue *o, MSize len)
+                             TValue *o, size_t len)
 {
   CType *dc = ctype_rawchild(cts, d);  /* Array element type. */
   CTSize ofs, esize = dc->size;
-  MSize i;
+  size_t i;
   if (len*esize > sz)
     cconv_err_initov(cts, d);
   for (i = 0, ofs = 0; i < len; i++, ofs += esize)
@@ -683,25 +660,25 @@ static void cconv_array_init(CTState *cts, CType *d, CTSize sz, uint8_t *dp,
 
 /* Initialize a sub-struct/union with TValues. */
 static void cconv_substruct_init(CTState *cts, CType *d, uint8_t *dp,
-				 TValue *o, MSize len, MSize *ip)
+                                 TValue *o, size_t len, size_t *ip)
 {
   CTypeID id = d->sib;
   while (id) {
     CType *df = ctype_get(cts, id);
     id = df->sib;
     if (ctype_isfield(df->info) || ctype_isbitfield(df->info)) {
-      MSize i = *ip;
-      if (!gcref(df->name)) continue;  /* Ignore unnamed fields. */
+      size_t i = *ip;
+      if (df->name == NULL) continue;  /* Ignore unnamed fields. */
       if (i >= len) break;
       *ip = i + 1;
       if (ctype_isfield(df->info))
-	lj_cconv_ct_tv(cts, ctype_rawchild(cts, df), dp+df->size, o + i, 0);
+        lj_cconv_ct_tv(cts, ctype_rawchild(cts, df), dp+df->size, o + i, 0);
       else
-	lj_cconv_bf_tv(cts, df, dp+df->size, o + i);
+        lj_cconv_bf_tv(cts, df, dp+df->size, o + i);
       if ((d->info & CTF_UNION)) break;
     } else if (ctype_isxattrib(df->info, CTA_SUBTYPE)) {
       cconv_substruct_init(cts, ctype_rawchild(cts, df),
-			   dp+df->size, o, len, ip);
+                           dp+df->size, o, len, ip);
       if ((d->info & CTF_UNION)) break;
     }  /* Ignore all other entries in the chain. */
   }
@@ -709,9 +686,9 @@ static void cconv_substruct_init(CTState *cts, CType *d, uint8_t *dp,
 
 /* Initialize a struct/union with TValues. */
 static void cconv_struct_init(CTState *cts, CType *d, CTSize sz, uint8_t *dp,
-			      TValue *o, MSize len)
+                              TValue *o, size_t len)
 {
-  MSize i = 0;
+  size_t i = 0;
   memset(dp, 0, sz);  /* Much simpler to clear the struct first. */
   cconv_substruct_init(cts, d, dp, o, len, &i);
   if (i < len)
@@ -735,7 +712,7 @@ int lj_cconv_multi_init(CTState *cts, CType *d, TValue *o)
 
 /* Initialize C type with TValues. Caveat: expects to get the raw CType! */
 void lj_cconv_ct_init(CTState *cts, CType *d, CTSize sz,
-		      uint8_t *dp, TValue *o, MSize len)
+                      uint8_t *dp, TValue *o, size_t len)
 {
   if (len == 0)
     memset(dp, 0, sz);

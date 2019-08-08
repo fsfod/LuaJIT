@@ -1,21 +1,27 @@
 /*
-** C declaration parser.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-*/
+ * C declaration parser.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ */
 
 #include "lj_obj.h"
 
 #if LJ_HASFFI
 
 #include "lj_gc.h"
-#include "lj_err.h"
-#include "lj_str.h"
-#include "lj_ctype.h"
-#include "lj_cparse.h"
+#include "uj_err.h"
+#include "uj_errmsg.h"
+#include "uj_str.h"
+#include "uj_sbuf.h"
+#include "ffi/lj_ctype.h"
+#include "ffi/lj_cparse.h"
 #include "lj_frame.h"
 #include "lj_vm.h"
-#include "lj_char.h"
-#include "lj_strscan.h"
+#include "uj_cframe.h"
+#include "utils/strscan.h"
+#include "utils/lj_char.h"
 
 /*
 ** Important note: this is NOT a validating C parser! This is a minimal
@@ -31,14 +37,14 @@
 
 /* C lexer token names. */
 static const char *const ctoknames[] = {
-#define CTOKSTR(name, str)	str,
+#define CTOKSTR(name, str)      str,
 CTOKDEF(CTOKSTR)
 #undef CTOKSTR
   NULL
 };
 
 /* Forward declaration. */
-LJ_NORET static void cp_err(CPState *cp, ErrMsg em);
+LJ_NORET static void cp_err(CPState *cp, enum err_msg em);
 
 static const char *cp_tok2str(CPState *cp, CPToken tok)
 {
@@ -46,9 +52,9 @@ static const char *cp_tok2str(CPState *cp, CPToken tok)
   if (tok > CTOK_OFS)
     return ctoknames[tok-CTOK_OFS-1];
   else if (!lj_char_iscntrl(tok))
-    return lj_str_pushf(cp->L, "%c", tok);
+    return uj_str_pushf(cp->L, "%c", tok);
   else
-    return lj_str_pushf(cp->L, "char(%d)", tok);
+    return uj_str_pushf(cp->L, "char(%d)", tok);
 }
 
 /* End-of-line? */
@@ -85,24 +91,13 @@ static LJ_NOINLINE CPChar cp_get_bs(CPState *cp)
   return cp_get(cp);
 }
 
-/* Grow save buffer. */
-static LJ_NOINLINE void cp_save_grow(CPState *cp, CPChar c)
-{
-  MSize newsize;
-  if (cp->sb.sz >= CPARSE_MAX_BUF/2)
-    cp_err(cp, LJ_ERR_XELEM);
-  newsize = cp->sb.sz * 2;
-  lj_str_resizebuf(cp->L, &cp->sb, newsize);
-  cp->sb.buf[cp->sb.n++] = (char)c;
-}
-
 /* Save character in buffer. */
-static LJ_AINLINE void cp_save(CPState *cp, CPChar c)
-{
-  if (LJ_UNLIKELY(cp->sb.n + 1 > cp->sb.sz))
-    cp_save_grow(cp, c);
-  else
-    cp->sb.buf[cp->sb.n++] = (char)c;
+static LJ_AINLINE void cp_save(CPState *cp, CPChar c) {
+  struct sbuf *sb = &cp->sb;
+  uj_sbuf_push_char(sb, (char)c);
+  if (uj_sbuf_size(sb) >= CPARSE_MAX_BUF) {
+    cp_err(cp, UJ_ERR_XELEM);
+  }
 }
 
 /* Skip line break. Handles "\n", "\r", "\r\n" or "\n\r". */
@@ -113,7 +108,7 @@ static void cp_newline(CPState *cp)
   cp->linenumber++;
 }
 
-LJ_NORET static void cp_errmsg(CPState *cp, CPToken tok, ErrMsg em, ...)
+LJ_NORET static void cp_errmsg_(CPState *cp, CPToken tok, const char *em, ...)
 {
   const char *msg, *tokstr;
   lua_State *L;
@@ -121,38 +116,46 @@ LJ_NORET static void cp_errmsg(CPState *cp, CPToken tok, ErrMsg em, ...)
   if (tok == 0) {
     tokstr = NULL;
   } else if (tok == CTOK_IDENT || tok == CTOK_INTEGER || tok == CTOK_STRING ||
-	     tok >= CTOK_FIRSTDECL) {
-    if (cp->sb.n == 0) cp_save(cp, '$');
+             tok >= CTOK_FIRSTDECL) {
+    if (uj_sbuf_size(&cp->sb) == 0) { cp_save(cp, '$'); }
     cp_save(cp, '\0');
-    tokstr = cp->sb.buf;
+    tokstr = uj_sbuf_front(&cp->sb);
   } else {
     tokstr = cp_tok2str(cp, tok);
   }
   L = cp->L;
   va_start(argp, em);
-  msg = lj_str_pushvf(L, err2msg(em), argp);
+  msg = uj_str_pushvf(L, em, argp);
   va_end(argp);
   if (tokstr)
-    msg = lj_str_pushf(L, err2msg(LJ_ERR_XNEAR), msg, tokstr);
+    msg = uj_str_pushf(L, uj_errmsg(UJ_ERR_XNEAR), msg, tokstr);
   if (cp->linenumber > 1)
-    msg = lj_str_pushf(L, "%s at line %d", msg, cp->linenumber);
-  lj_err_callermsg(L, msg);
+    msg = uj_str_pushf(L, "%s at line %d", msg, cp->linenumber);
+  uj_err_msg_caller(L, msg);
 }
+
+/*
+ * NB! Using a macro preserves the convenient look of the interface and works
+ * around undefined behaviour issue with the arg of enum type preceding
+ * the variadic arguments.
+ */
+#define cp_errmsg(L, /* CPToken */ tok, /* enum err_msg */ em, ...) \
+  cp_errmsg_((L), (tok), uj_errmsg(em), __VA_ARGS__)
 
 LJ_NORET LJ_NOINLINE static void cp_err_token(CPState *cp, CPToken tok)
 {
-  cp_errmsg(cp, cp->tok, LJ_ERR_XTOKEN, cp_tok2str(cp, tok));
+  cp_errmsg(cp, cp->tok, UJ_ERR_XTOKEN, cp_tok2str(cp, tok));
 }
 
 LJ_NORET LJ_NOINLINE static void cp_err_badidx(CPState *cp, CType *ct)
 {
   GCstr *s = lj_ctype_repr(cp->cts->L, ctype_typeid(cp->cts, ct), NULL);
-  cp_errmsg(cp, 0, LJ_ERR_FFI_BADIDX, strdata(s));
+  cp_errmsg(cp, 0, UJ_ERR_FFI_BADIDX, strdata(s));
 }
 
-LJ_NORET LJ_NOINLINE static void cp_err(CPState *cp, ErrMsg em)
+LJ_NORET LJ_NOINLINE static void cp_err(CPState *cp, enum err_msg em)
 {
-  cp_errmsg(cp, 0, em);
+  cp_errmsg(cp, 0, em, NULL);
 }
 
 /* -- Main lexical scanner ------------------------------------------------ */
@@ -161,15 +164,22 @@ LJ_NORET LJ_NOINLINE static void cp_err(CPState *cp, ErrMsg em)
 static CPToken cp_number(CPState *cp)
 {
   StrScanFmt fmt;
-  TValue o;
+  FpConv conv;
+
   do { cp_save(cp, cp->c); } while (lj_char_isident(cp_get(cp)));
   cp_save(cp, '\0');
-  fmt = lj_strscan_scan((const uint8_t *)cp->sb.buf, &o, STRSCAN_OPT_C);
-  if (fmt == STRSCAN_INT) cp->val.id = CTID_INT32;
-  else if (fmt == STRSCAN_U32) cp->val.id = CTID_UINT32;
-  else if (!(cp->mode & CPARSE_MODE_SKIP))
-    cp_errmsg(cp, CTOK_INTEGER, LJ_ERR_XNUMBER);
-  cp->val.u32 = (uint32_t)o.i;
+
+  fmt = strscan_tonumber((const uint8_t *)uj_sbuf_front(&cp->sb), &(conv.d),
+                         STRSCAN_OPT_C);
+  if (fmt == STRSCAN_INT) {
+    cp->val.id = CTID_INT32;
+  } else if (fmt == STRSCAN_U32) {
+    cp->val.id = CTID_UINT32;
+  } else if (!(cp->mode & CPARSE_MODE_SKIP)) {
+    cp_errmsg(cp, CTOK_INTEGER, UJ_ERR_XNUMBER, NULL);
+  }
+
+  cp->val.u32 = conv.lo;
   return CTOK_INTEGER;
 }
 
@@ -177,7 +187,7 @@ static CPToken cp_number(CPState *cp)
 static CPToken cp_ident(CPState *cp)
 {
   do { cp_save(cp, cp->c); } while (lj_char_isident(cp_get(cp)));
-  cp->str = lj_str_new(cp->L, cp->sb.buf, cp->sb.n);
+  cp->str = uj_str_frombuf(cp->L, &cp->sb);
   cp->val.id = lj_ctype_getname(cp->cts, &cp->ct, cp->str, cp->tmask);
   if (ctype_type(cp->ct->info) == CT_KW)
     return ctype_cid(cp->ct->info);
@@ -190,23 +200,23 @@ static CPToken cp_param(CPState *cp)
   CPChar c = cp_get(cp);
   TValue *o = cp->param;
   if (lj_char_isident(c) || c == '$')  /* Reserve $xyz for future extensions. */
-    cp_errmsg(cp, c, LJ_ERR_XSYNTAX);
+    cp_errmsg(cp, c, UJ_ERR_XSYNTAX, NULL);
   if (!o || o >= cp->L->top)
-    cp_err(cp, LJ_ERR_FFI_NUMPARAM);
+    cp_err(cp, UJ_ERR_FFI_NUMPARAM);
   cp->param = o+1;
   if (tvisstr(o)) {
     cp->str = strV(o);
     cp->val.id = 0;
     cp->ct = &cp->cts->tab[0];
     return CTOK_IDENT;
-  } else if (tvisnumber(o)) {
-    cp->val.i32 = numberVint(o);
+  } else if (tvisnum(o)) {
+    cp->val.i32 = lj_num2int(numV(o));
     cp->val.id = CTID_INT32;
     return CTOK_INTEGER;
   } else {
     GCcdata *cd;
     if (!tviscdata(o))
-      lj_err_argtype(cp->L, (int)(o-cp->L->base)+1, "type parameter");
+      uj_err_argtype(cp->L, (int)(o-cp->L->base)+1, "type parameter");
     cd = cdataV(o);
     if (cd->ctypeid == CTID_CTYPEID)
       cp->val.id = *(CTypeID *)cdataptr(cd);
@@ -223,11 +233,11 @@ static CPToken cp_string(CPState *cp)
   cp_get(cp);
   while (cp->c != delim) {
     CPChar c = cp->c;
-    if (c == '\0') cp_errmsg(cp, CTOK_EOF, LJ_ERR_XSTR);
+    if (c == '\0') cp_errmsg(cp, CTOK_EOF, UJ_ERR_XSTR, NULL);
     if (c == '\\') {
       c = cp_get(cp);
       switch (c) {
-      case '\0': cp_errmsg(cp, CTOK_EOF, LJ_ERR_XSTR); break;
+      case '\0': cp_errmsg(cp, CTOK_EOF, UJ_ERR_XSTR, NULL); break;
       case 'a': c = '\a'; break;
       case 'b': c = '\b'; break;
       case 'f': c = '\f'; break;
@@ -237,25 +247,25 @@ static CPToken cp_string(CPState *cp)
       case 'v': c = '\v'; break;
       case 'e': c = 27; break;
       case 'x':
-	c = 0;
-	while (lj_char_isxdigit(cp_get(cp)))
-	  c = (c<<4) + (lj_char_isdigit(cp->c) ? cp->c-'0' : (cp->c&15)+9);
-	cp_save(cp, (c & 0xff));
-	continue;
+        c = 0;
+        while (lj_char_isxdigit(cp_get(cp)))
+          c = (c<<4) + (lj_char_isdigit(cp->c) ? cp->c-'0' : (cp->c&15)+9);
+        cp_save(cp, (c & 0xff));
+        continue;
       default:
-	if (lj_char_isdigit(c)) {
-	  c -= '0';
-	  if (lj_char_isdigit(cp_get(cp))) {
-	    c = c*8 + (cp->c - '0');
-	    if (lj_char_isdigit(cp_get(cp))) {
-	      c = c*8 + (cp->c - '0');
-	      cp_get(cp);
-	    }
-	  }
-	  cp_save(cp, (c & 0xff));
-	  continue;
-	}
-	break;
+        if (lj_char_isdigit(c)) {
+          c -= '0';
+          if (lj_char_isdigit(cp_get(cp))) {
+            c = c*8 + (cp->c - '0');
+            if (lj_char_isdigit(cp_get(cp))) {
+              c = c*8 + (cp->c - '0');
+              cp_get(cp);
+            }
+          }
+          cp_save(cp, (c & 0xff));
+          continue;
+        }
+        break;
       }
     }
     cp_save(cp, c);
@@ -263,11 +273,11 @@ static CPToken cp_string(CPState *cp)
   }
   cp_get(cp);
   if (delim == '"') {
-    cp->str = lj_str_new(cp->L, cp->sb.buf, cp->sb.n);
+    cp->str = uj_str_frombuf(cp->L, &cp->sb);
     return CTOK_STRING;
   } else {
-    if (cp->sb.n != 1) cp_err_token(cp, '\'');
-    cp->val.i32 = (int32_t)(char)cp->sb.buf[0];
+    if (uj_sbuf_size(&cp->sb) != 1) { cp_err_token(cp, '\''); }
+    cp->val.i32 = (int32_t)(*uj_sbuf_front(&cp->sb));
     cp->val.id = CTID_INT32;
     return CTOK_INTEGER;
   }
@@ -279,7 +289,7 @@ static void cp_comment_c(CPState *cp)
   do {
     if (cp_get(cp) == '*') {
       do {
-	if (cp_get(cp) == '/') { cp_get(cp); return; }
+        if (cp_get(cp) == '/') { cp_get(cp); return; }
       } while (cp->c == '*');
     }
     if (cp_iseol(cp->c)) cp_newline(cp);
@@ -296,7 +306,7 @@ static void cp_comment_cpp(CPState *cp)
 /* Lexical scanner for C. Only a minimal subset is implemented. */
 static CPToken cp_next_(CPState *cp)
 {
-  lj_str_resetbuf(&cp->sb);
+  uj_sbuf_reset(&cp->sb);
   for (;;) {
     if (lj_char_isident(cp->c))
       return lj_char_isdigit(cp->c) ? cp_number(cp) : cp_ident(cp);
@@ -350,26 +360,26 @@ static LJ_NOINLINE CPToken cp_next(CPState *cp)
 /* Namespaces for resolving identifiers. */
 #define CPNS_DEFAULT \
   ((1u<<CT_KW)|(1u<<CT_TYPEDEF)|(1u<<CT_FUNC)|(1u<<CT_EXTERN)|(1u<<CT_CONSTVAL))
-#define CPNS_STRUCT	((1u<<CT_KW)|(1u<<CT_STRUCT)|(1u<<CT_ENUM))
+#define CPNS_STRUCT     ((1u<<CT_KW)|(1u<<CT_STRUCT)|(1u<<CT_ENUM))
 
-typedef CTypeID CPDeclIdx;	/* Index into declaration stack. */
-typedef uint32_t CPscl;		/* Storage class flags. */
+typedef CTypeID CPDeclIdx;      /* Index into declaration stack. */
+typedef uint32_t CPscl;         /* Storage class flags. */
 
 /* Type declaration context. */
 typedef struct CPDecl {
-  CPDeclIdx top;	/* Top of declaration stack. */
-  CPDeclIdx pos;	/* Insertion position in declaration chain. */
-  CPDeclIdx specpos;	/* Saved position for declaration specifier. */
-  uint32_t mode;	/* Declarator mode. */
-  CPState *cp;		/* C parser state. */
-  GCstr *name;		/* Name of declared identifier (if direct). */
-  GCstr *redir;		/* Redirected symbol name. */
-  CTypeID nameid;	/* Existing typedef for declared identifier. */
-  CTInfo attr;		/* Attributes. */
-  CTInfo fattr;		/* Function attributes. */
-  CTInfo specattr;	/* Saved attributes. */
-  CTInfo specfattr;	/* Saved function attributes. */
-  CTSize bits;		/* Field size in bits (if any). */
+  CPDeclIdx top;        /* Top of declaration stack. */
+  CPDeclIdx pos;        /* Insertion position in declaration chain. */
+  CPDeclIdx specpos;    /* Saved position for declaration specifier. */
+  uint32_t mode;        /* Declarator mode. */
+  CPState *cp;          /* C parser state. */
+  GCstr *name;          /* Name of declared identifier (if direct). */
+  GCstr *redir;         /* Redirected symbol name. */
+  CTypeID nameid;       /* Existing typedef for declared identifier. */
+  CTInfo attr;          /* Attributes. */
+  CTInfo fattr;         /* Function attributes. */
+  CTInfo specattr;      /* Saved attributes. */
+  CTInfo specfattr;     /* Saved function attributes. */
+  CTSize bits;          /* Field size in bits (if any). */
   CType stack[CPARSE_MAX_DECLSTACK];  /* Type declaration stack. */
 } CPDecl;
 
@@ -385,8 +395,8 @@ static void cp_init(CPState *cp)
   cp->depth = 0;
   cp->curpack = 0;
   cp->packstack[0] = 255;
-  lj_str_initbuf(&cp->sb);
-  lj_str_resizebuf(cp->L, &cp->sb, LJ_MIN_SBUF);
+  uj_sbuf_init(cp->L, &cp->sb);
+  uj_sbuf_reserve(&cp->sb, LJ_MIN_SBUF);
   lua_assert(cp->p != NULL);
   cp_get(cp);  /* Read-ahead first char. */
   cp->tok = 0;
@@ -397,8 +407,7 @@ static void cp_init(CPState *cp)
 /* Cleanup C parser state. */
 static void cp_cleanup(CPState *cp)
 {
-  global_State *g = G(cp->L);
-  lj_str_freebuf(g, &cp->sb);
+  uj_sbuf_free(cp->L, &cp->sb);
 }
 
 /* Check and consume optional token. */
@@ -462,7 +471,7 @@ static void cp_expr_sizeof(CPState *cp, CPValue *k, int wantsz)
     if (sz != CTSIZE_INVALID)
       k->u32 = sz;
     else if (k->id != CTID_A_CCHAR)  /* Special case for sizeof("string"). */
-      cp_err(cp, LJ_ERR_FFI_INVSIZE);
+      cp_err(cp, UJ_ERR_FFI_INVSIZE);
   } else {
     k->u32 = 1u << ctype_align(info);
   }
@@ -502,7 +511,7 @@ static void cp_expr_prefix(CPState *cp, CPValue *k)
   } else if (cp_opt(cp, '&')) {  /* Address operator. */
     cp_expr_unary(cp, k);
     k->id = lj_ctype_intern(cp->cts, CTINFO(CT_PTR, CTALIGN_PTR+k->id),
-			    CTSIZE_PTR);
+                            CTSIZE_PTR);
   } else if (cp_opt(cp, CTOK_SIZEOF)) {
     cp_expr_sizeof(cp, k, 1);
   } else if (cp_opt(cp, CTOK_ALIGNOF)) {
@@ -526,7 +535,7 @@ static void cp_expr_prefix(CPState *cp, CPValue *k)
     k->id = CTID_A_CCHAR;
   } else {
   err_expr:
-    cp_errmsg(cp, cp->tok, LJ_ERR_XSYMBOL);
+    cp_errmsg(cp, cp->tok, UJ_ERR_XSYMBOL, NULL);
   }
 }
 
@@ -540,9 +549,9 @@ static void cp_expr_postfix(CPState *cp, CPValue *k)
       cp_expr_comma(cp, &k2);
       ct = lj_ctype_rawref(cp->cts, k->id);
       if (!ctype_ispointer(ct->info)) {
-	ct = lj_ctype_rawref(cp->cts, k2.id);
-	if (!ctype_ispointer(ct->info))
-	  cp_err_badidx(cp, ct);
+        ct = lj_ctype_rawref(cp->cts, k2.id);
+        if (!ctype_ispointer(ct->info))
+          cp_err_badidx(cp, ct);
       }
       cp_check(cp, ']');
       k->u32 = 0;
@@ -551,17 +560,17 @@ static void cp_expr_postfix(CPState *cp, CPValue *k)
       CType *fct;
       ct = lj_ctype_rawref(cp->cts, k->id);
       if (cp->tok == CTOK_DEREF) {
-	if (!ctype_ispointer(ct->info))
-	  cp_err_badidx(cp, ct);
-	ct = lj_ctype_rawref(cp->cts, ctype_cid(ct->info));
+        if (!ctype_ispointer(ct->info))
+          cp_err_badidx(cp, ct);
+        ct = lj_ctype_rawref(cp->cts, ctype_cid(ct->info));
       }
       cp_next(cp);
       if (cp->tok != CTOK_IDENT) cp_err_token(cp, CTOK_IDENT);
       if (!ctype_isstruct(ct->info) || ct->size == CTSIZE_INVALID ||
-	  !(fct = lj_ctype_getfield(cp->cts, ct, cp->str, &ofs)) ||
-	  ctype_isbitfield(fct->info)) {
-	GCstr *s = lj_ctype_repr(cp->cts->L, ctype_typeid(cp->cts, ct), NULL);
-	cp_errmsg(cp, 0, LJ_ERR_FFI_BADMEMBER, strdata(s), strdata(cp->str));
+          !(fct = lj_ctype_getfield(cp->cts, ct, cp->str, &ofs)) ||
+          ctype_isbitfield(fct->info)) {
+        GCstr *s = lj_ctype_repr(cp->cts->L, ctype_typeid(cp->cts, ct), NULL);
+        cp_errmsg(cp, 0, UJ_ERR_FFI_BADMEMBER, strdata(s), strdata(cp->str));
       }
       ct = fct;
       k->u32 = ctype_isconstval(ct->info) ? ct->size : 0;
@@ -582,124 +591,124 @@ static void cp_expr_infix(CPState *cp, CPValue *k, int pri)
     switch (pri) {
     case 0:
       if (cp_opt(cp, '?')) {
-	CPValue k3;
-	cp_expr_comma(cp, &k2);  /* Right-associative. */
-	cp_check(cp, ':');
-	cp_expr_sub(cp, &k3, 0);
-	k->u32 = k->u32 ? k2.u32 : k3.u32;
-	k->id = k2.id > k3.id ? k2.id : k3.id;
-	continue;
+        CPValue k3;
+        cp_expr_comma(cp, &k2);  /* Right-associative. */
+        cp_check(cp, ':');
+        cp_expr_sub(cp, &k3, 0);
+        k->u32 = k->u32 ? k2.u32 : k3.u32;
+        k->id = k2.id > k3.id ? k2.id : k3.id;
+        continue;
       }
     case 1:
       if (cp_opt(cp, CTOK_OROR)) {
-	cp_expr_sub(cp, &k2, 2); k->i32 = k->u32 || k2.u32; k->id = CTID_INT32;
-	continue;
+        cp_expr_sub(cp, &k2, 2); k->i32 = k->u32 || k2.u32; k->id = CTID_INT32;
+        continue;
       }
     case 2:
       if (cp_opt(cp, CTOK_ANDAND)) {
-	cp_expr_sub(cp, &k2, 3); k->i32 = k->u32 && k2.u32; k->id = CTID_INT32;
-	continue;
+        cp_expr_sub(cp, &k2, 3); k->i32 = k->u32 && k2.u32; k->id = CTID_INT32;
+        continue;
       }
     case 3:
       if (cp_opt(cp, '|')) {
-	cp_expr_sub(cp, &k2, 4); k->u32 = k->u32 | k2.u32; goto arith_result;
+        cp_expr_sub(cp, &k2, 4); k->u32 = k->u32 | k2.u32; goto arith_result;
       }
     case 4:
       if (cp_opt(cp, '^')) {
-	cp_expr_sub(cp, &k2, 5); k->u32 = k->u32 ^ k2.u32; goto arith_result;
+        cp_expr_sub(cp, &k2, 5); k->u32 = k->u32 ^ k2.u32; goto arith_result;
       }
     case 5:
       if (cp_opt(cp, '&')) {
-	cp_expr_sub(cp, &k2, 6); k->u32 = k->u32 & k2.u32; goto arith_result;
+        cp_expr_sub(cp, &k2, 6); k->u32 = k->u32 & k2.u32; goto arith_result;
       }
     case 6:
       if (cp_opt(cp, CTOK_EQ)) {
-	cp_expr_sub(cp, &k2, 7); k->i32 = k->u32 == k2.u32; k->id = CTID_INT32;
-	continue;
+        cp_expr_sub(cp, &k2, 7); k->i32 = k->u32 == k2.u32; k->id = CTID_INT32;
+        continue;
       } else if (cp_opt(cp, CTOK_NE)) {
-	cp_expr_sub(cp, &k2, 7); k->i32 = k->u32 != k2.u32; k->id = CTID_INT32;
-	continue;
+        cp_expr_sub(cp, &k2, 7); k->i32 = k->u32 != k2.u32; k->id = CTID_INT32;
+        continue;
       }
     case 7:
       if (cp_opt(cp, '<')) {
-	cp_expr_sub(cp, &k2, 8);
-	if (k->id == CTID_INT32 && k2.id == CTID_INT32)
-	  k->i32 = k->i32 < k2.i32;
-	else
-	  k->i32 = k->u32 < k2.u32;
-	k->id = CTID_INT32;
-	continue;
+        cp_expr_sub(cp, &k2, 8);
+        if (k->id == CTID_INT32 && k2.id == CTID_INT32)
+          k->i32 = k->i32 < k2.i32;
+        else
+          k->i32 = k->u32 < k2.u32;
+        k->id = CTID_INT32;
+        continue;
       } else if (cp_opt(cp, '>')) {
-	cp_expr_sub(cp, &k2, 8);
-	if (k->id == CTID_INT32 && k2.id == CTID_INT32)
-	  k->i32 = k->i32 > k2.i32;
-	else
-	  k->i32 = k->u32 > k2.u32;
-	k->id = CTID_INT32;
-	continue;
+        cp_expr_sub(cp, &k2, 8);
+        if (k->id == CTID_INT32 && k2.id == CTID_INT32)
+          k->i32 = k->i32 > k2.i32;
+        else
+          k->i32 = k->u32 > k2.u32;
+        k->id = CTID_INT32;
+        continue;
       } else if (cp_opt(cp, CTOK_LE)) {
-	cp_expr_sub(cp, &k2, 8);
-	if (k->id == CTID_INT32 && k2.id == CTID_INT32)
-	  k->i32 = k->i32 <= k2.i32;
-	else
-	  k->i32 = k->u32 <= k2.u32;
-	k->id = CTID_INT32;
-	continue;
+        cp_expr_sub(cp, &k2, 8);
+        if (k->id == CTID_INT32 && k2.id == CTID_INT32)
+          k->i32 = k->i32 <= k2.i32;
+        else
+          k->i32 = k->u32 <= k2.u32;
+        k->id = CTID_INT32;
+        continue;
       } else if (cp_opt(cp, CTOK_GE)) {
-	cp_expr_sub(cp, &k2, 8);
-	if (k->id == CTID_INT32 && k2.id == CTID_INT32)
-	  k->i32 = k->i32 >= k2.i32;
-	else
-	  k->i32 = k->u32 >= k2.u32;
-	k->id = CTID_INT32;
-	continue;
+        cp_expr_sub(cp, &k2, 8);
+        if (k->id == CTID_INT32 && k2.id == CTID_INT32)
+          k->i32 = k->i32 >= k2.i32;
+        else
+          k->i32 = k->u32 >= k2.u32;
+        k->id = CTID_INT32;
+        continue;
       }
     case 8:
       if (cp_opt(cp, CTOK_SHL)) {
-	cp_expr_sub(cp, &k2, 9); k->u32 = k->u32 << k2.u32;
-	continue;
+        cp_expr_sub(cp, &k2, 9); k->u32 = k->u32 << k2.u32;
+        continue;
       } else if (cp_opt(cp, CTOK_SHR)) {
-	cp_expr_sub(cp, &k2, 9);
-	if (k->id == CTID_INT32)
-	  k->i32 = k->i32 >> k2.i32;
-	else
-	  k->u32 = k->u32 >> k2.u32;
-	continue;
+        cp_expr_sub(cp, &k2, 9);
+        if (k->id == CTID_INT32)
+          k->i32 = k->i32 >> k2.i32;
+        else
+          k->u32 = k->u32 >> k2.u32;
+        continue;
       }
     case 9:
       if (cp_opt(cp, '+')) {
-	cp_expr_sub(cp, &k2, 10); k->u32 = k->u32 + k2.u32;
+        cp_expr_sub(cp, &k2, 10); k->u32 = k->u32 + k2.u32;
       arith_result:
-	if (k2.id > k->id) k->id = k2.id;  /* Trivial promotion to unsigned. */
-	continue;
+        if (k2.id > k->id) k->id = k2.id;  /* Trivial promotion to unsigned. */
+        continue;
       } else if (cp_opt(cp, '-')) {
-	cp_expr_sub(cp, &k2, 10); k->u32 = k->u32 - k2.u32; goto arith_result;
+        cp_expr_sub(cp, &k2, 10); k->u32 = k->u32 - k2.u32; goto arith_result;
       }
     case 10:
       if (cp_opt(cp, '*')) {
-	cp_expr_unary(cp, &k2); k->u32 = k->u32 * k2.u32; goto arith_result;
+        cp_expr_unary(cp, &k2); k->u32 = k->u32 * k2.u32; goto arith_result;
       } else if (cp_opt(cp, '/')) {
-	cp_expr_unary(cp, &k2);
-	if (k2.id > k->id) k->id = k2.id;  /* Trivial promotion to unsigned. */
-	if (k2.u32 == 0 ||
-	    (k->id == CTID_INT32 && k->u32 == 0x80000000u && k2.i32 == -1))
-	  cp_err(cp, LJ_ERR_BADVAL);
-	if (k->id == CTID_INT32)
-	  k->i32 = k->i32 / k2.i32;
-	else
-	  k->u32 = k->u32 / k2.u32;
-	continue;
+        cp_expr_unary(cp, &k2);
+        if (k2.id > k->id) k->id = k2.id;  /* Trivial promotion to unsigned. */
+        if (k2.u32 == 0 ||
+            (k->id == CTID_INT32 && k->u32 == 0x80000000u && k2.i32 == -1))
+          cp_err(cp, UJ_ERR_BADVAL);
+        if (k->id == CTID_INT32)
+          k->i32 = k->i32 / k2.i32;
+        else
+          k->u32 = k->u32 / k2.u32;
+        continue;
       } else if (cp_opt(cp, '%')) {
-	cp_expr_unary(cp, &k2);
-	if (k2.id > k->id) k->id = k2.id;  /* Trivial promotion to unsigned. */
-	if (k2.u32 == 0 ||
-	    (k->id == CTID_INT32 && k->u32 == 0x80000000u && k2.i32 == -1))
-	  cp_err(cp, LJ_ERR_BADVAL);
-	if (k->id == CTID_INT32)
-	  k->i32 = k->i32 % k2.i32;
-	else
-	  k->u32 = k->u32 % k2.u32;
-	continue;
+        cp_expr_unary(cp, &k2);
+        if (k2.id > k->id) k->id = k2.id;  /* Trivial promotion to unsigned. */
+        if (k2.u32 == 0 ||
+            (k->id == CTID_INT32 && k->u32 == 0x80000000u && k2.i32 == -1))
+          cp_err(cp, UJ_ERR_BADVAL);
+        if (k->id == CTID_INT32)
+          k->i32 = k->i32 % k2.i32;
+        else
+          k->u32 = k->u32 % k2.u32;
+        continue;
       }
     default:
       return;
@@ -710,7 +719,7 @@ static void cp_expr_infix(CPState *cp, CPValue *k, int pri)
 /* Parse and evaluate unary expression. */
 static void cp_expr_unary(CPState *cp, CPValue *k)
 {
-  if (++cp->depth > CPARSE_MAX_DECLDEPTH) cp_err(cp, LJ_ERR_XLEVELS);
+  if (++cp->depth > CPARSE_MAX_DECLDEPTH) cp_err(cp, UJ_ERR_XLEVELS);
   cp_expr_prefix(cp, k);
   cp_expr_postfix(cp, k);
   cp->depth--;
@@ -729,7 +738,7 @@ static void cp_expr_kint(CPState *cp, CPValue *k)
   CType *ct;
   cp_expr_sub(cp, k, 0);
   ct = ctype_raw(cp->cts, k->id);
-  if (!ctype_isinteger(ct->info)) cp_err(cp, LJ_ERR_BADVAL);
+  if (!ctype_isinteger(ct->info)) cp_err(cp, UJ_ERR_BADVAL);
 }
 
 /* Parse (non-negative) size expression. */
@@ -737,7 +746,7 @@ static CTSize cp_expr_ksize(CPState *cp)
 {
   CPValue k;
   cp_expr_kint(cp, &k);
-  if (k.u32 >= 0x80000000u) cp_err(cp, LJ_ERR_FFI_INVSIZE);
+  if (k.u32 >= 0x80000000u) cp_err(cp, UJ_ERR_FFI_INVSIZE);
   return k.u32;
 }
 
@@ -747,11 +756,11 @@ static CTSize cp_expr_ksize(CPState *cp)
 static CPDeclIdx cp_add(CPDecl *decl, CTInfo info, CTSize size)
 {
   CPDeclIdx top = decl->top;
-  if (top >= CPARSE_MAX_DECLSTACK) cp_err(decl->cp, LJ_ERR_XLEVELS);
+  if (top >= CPARSE_MAX_DECLSTACK) cp_err(decl->cp, UJ_ERR_XLEVELS);
   decl->stack[top].info = info;
   decl->stack[top].size = size;
   decl->stack[top].sib = 0;
-  setgcrefnull(decl->stack[top].name);
+  decl->stack[top].name = NULL;
   decl->stack[top].next = decl->stack[decl->pos].next;
   decl->stack[decl->pos].next = (CTypeID1)top;
   decl->top = top+1;
@@ -768,16 +777,10 @@ static CPDeclIdx cp_push(CPDecl *decl, CTInfo info, CTSize size)
 static void cp_push_attributes(CPDecl *decl)
 {
   CType *ct = &decl->stack[decl->pos];
-  if (ctype_isfunc(ct->info)) {  /* Ok to modify in-place. */
-#if LJ_TARGET_X86
-    if ((decl->fattr & CTFP_CCONV))
-      ct->info = (ct->info & (CTMASK_NUM|CTF_VARARG|CTMASK_CID)) +
-		 (decl->fattr & ~CTMASK_CID);
-#endif
-  } else {
+  if (!ctype_isfunc(ct->info)) {
     if ((decl->attr & CTFP_ALIGNED) && !(decl->mode & CPARSE_MODE_FIELD))
       cp_push(decl, CTINFO(CT_ATTRIB, CTATTRIB(CTA_ALIGN)),
-	      ctype_align(decl->attr));
+              ctype_align(decl->attr));
   }
 }
 
@@ -792,7 +795,7 @@ static void cp_push_type(CPDecl *decl, CTypeID id)
     cp_push(decl, CTINFO(CT_TYPEDEF, id), 0);  /* Don't copy unique types. */
     if ((decl->attr & CTF_QUAL)) {  /* Push unmerged qualifiers. */
       cp_push(decl, CTINFO(CT_ATTRIB, CTATTRIB(CTA_QUAL)),
-	      (decl->attr & CTF_QUAL));
+              (decl->attr & CTF_QUAL));
       decl->attr &= ~CTF_QUAL;
     }
     break;
@@ -849,16 +852,16 @@ static CTypeID cp_decl_intern(CPState *cp, CPDecl *decl)
       CTypeID fid;
       CTypeID sib;
       if (id) {
-	CType *refct = ctype_raw(cp->cts, id);
-	/* Reject function or refarray return types. */
-	if (ctype_isfunc(refct->info) || ctype_isrefarray(refct->info))
-	  cp_err(cp, LJ_ERR_FFI_INVTYPE);
+        CType *refct = ctype_raw(cp->cts, id);
+        /* Reject function or refarray return types. */
+        if (ctype_isfunc(refct->info) || ctype_isrefarray(refct->info))
+          cp_err(cp, UJ_ERR_FFI_INVTYPE);
       }
       /* No intervening attributes allowed, skip forward. */
       while (idx) {
-	CType *ctn = &decl->stack[idx];
-	if (!ctype_isattrib(ctn->info)) break;
-	idx = ctn->next;  /* Skip attribute. */
+        CType *ctn = &decl->stack[idx];
+        if (!ctype_isattrib(ctn->info)) break;
+        idx = ctn->next;  /* Skip attribute. */
       }
       sib = ct->sib;  /* Next line may reallocate the C type table. */
       fid = lj_ctype_new(cp->cts, &fct);
@@ -869,69 +872,69 @@ static CTypeID cp_decl_intern(CPState *cp, CPDecl *decl)
       id = fid;
     } else if (ctype_isattrib(info)) {
       if (ctype_isxattrib(info, CTA_QUAL))
-	cinfo |= size;
+        cinfo |= size;
       else if (ctype_isxattrib(info, CTA_ALIGN))
-	CTF_INSERT(cinfo, ALIGN, size);
+        CTF_INSERT(cinfo, ALIGN, size);
       id = lj_ctype_intern(cp->cts, info+id, size);
       /* Inherit csize/cinfo from original type. */
     } else {
       if (ctype_isnum(info)) {  /* Handle mode/vector-size attributes. */
-	lua_assert(id == 0);
-	if (!(info & CTF_BOOL)) {
-	  CTSize msize = ctype_msizeP(decl->attr);
-	  CTSize vsize = ctype_vsizeP(decl->attr);
-	  if (msize && (!(info & CTF_FP) || (msize == 4 || msize == 8))) {
-	    CTSize malign = lj_fls(msize);
-	    if (malign > 4) malign = 4;  /* Limit alignment. */
-	    CTF_INSERT(info, ALIGN, malign);
-	    size = msize;  /* Override size via mode. */
-	  }
-	  if (vsize) {  /* Vector size set? */
-	    CTSize esize = lj_fls(size);
-	    if (vsize >= esize) {
-	      /* Intern the element type first. */
-	      id = lj_ctype_intern(cp->cts, info, size);
-	      /* Then create a vector (array) with vsize alignment. */
-	      size = (1u << vsize);
-	      if (vsize > 4) vsize = 4;  /* Limit alignment. */
-	      if (ctype_align(info) > vsize) vsize = ctype_align(info);
-	      info = CTINFO(CT_ARRAY, (info & CTF_QUAL) + CTF_VECTOR +
-				      CTALIGN(vsize));
-	    }
-	  }
-	}
+        lua_assert(id == 0);
+        if (!(info & CTF_BOOL)) {
+          CTSize msize = ctype_msizeP(decl->attr);
+          CTSize vsize = ctype_vsizeP(decl->attr);
+          if (msize && (!(info & CTF_FP) || (msize == 4 || msize == 8))) {
+            CTSize malign = lj_bsr(msize);
+            if (malign > 4) malign = 4;  /* Limit alignment. */
+            CTF_INSERT(info, ALIGN, malign);
+            size = msize;  /* Override size via mode. */
+          }
+          if (vsize) {  /* Vector size set? */
+            CTSize esize = lj_bsr(size);
+            if (vsize >= esize) {
+              /* Intern the element type first. */
+              id = lj_ctype_intern(cp->cts, info, size);
+              /* Then create a vector (array) with vsize alignment. */
+              size = (1u << vsize);
+              if (vsize > 4) vsize = 4;  /* Limit alignment. */
+              if (ctype_align(info) > vsize) vsize = ctype_align(info);
+              info = CTINFO(CT_ARRAY, (info & CTF_QUAL) + CTF_VECTOR +
+                                      CTALIGN(vsize));
+            }
+          }
+        }
       } else if (ctype_isptr(info)) {
-	/* Reject pointer/ref to ref. */
-	if (id && ctype_isref(ctype_raw(cp->cts, id)->info))
-	  cp_err(cp, LJ_ERR_FFI_INVTYPE);
-	if (ctype_isref(info)) {
-	  info &= ~CTF_VOLATILE;  /* Refs are always const, never volatile. */
-	  /* No intervening attributes allowed, skip forward. */
-	  while (idx) {
-	    CType *ctn = &decl->stack[idx];
-	    if (!ctype_isattrib(ctn->info)) break;
-	    idx = ctn->next;  /* Skip attribute. */
-	  }
-	}
+        /* Reject pointer/ref to ref. */
+        if (id && ctype_isref(ctype_raw(cp->cts, id)->info))
+          cp_err(cp, UJ_ERR_FFI_INVTYPE);
+        if (ctype_isref(info)) {
+          info &= ~CTF_VOLATILE;  /* Refs are always const, never volatile. */
+          /* No intervening attributes allowed, skip forward. */
+          while (idx) {
+            CType *ctn = &decl->stack[idx];
+            if (!ctype_isattrib(ctn->info)) break;
+            idx = ctn->next;  /* Skip attribute. */
+          }
+        }
       } else if (ctype_isarray(info)) {  /* Check for valid array size etc. */
-	if (ct->sib == 0) {  /* Only check/size arrays not copied by unroll. */
-	  if (ctype_isref(cinfo))  /* Reject arrays of refs. */
-	    cp_err(cp, LJ_ERR_FFI_INVTYPE);
-	  /* Reject VLS or unknown-sized types. */
-	  if (ctype_isvltype(cinfo) || csize == CTSIZE_INVALID)
-	    cp_err(cp, LJ_ERR_FFI_INVSIZE);
-	  /* a[] and a[?] keep their invalid size. */
-	  if (size != CTSIZE_INVALID) {
-	    uint64_t xsz = (uint64_t)size * csize;
-	    if (xsz >= 0x80000000u) cp_err(cp, LJ_ERR_FFI_INVSIZE);
-	    size = (CTSize)xsz;
-	  }
-	}
-	if ((cinfo & CTF_ALIGN) > (info & CTF_ALIGN))  /* Find max. align. */
-	  info = (info & ~CTF_ALIGN) | (cinfo & CTF_ALIGN);
-	info |= (cinfo & CTF_QUAL);  /* Inherit qual. */
+        if (ct->sib == 0) {  /* Only check/size arrays not copied by unroll. */
+          if (ctype_isref(cinfo))  /* Reject arrays of refs. */
+            cp_err(cp, UJ_ERR_FFI_INVTYPE);
+          /* Reject VLS or unknown-sized types. */
+          if (ctype_isvltype(cinfo) || csize == CTSIZE_INVALID)
+            cp_err(cp, UJ_ERR_FFI_INVSIZE);
+          /* a[] and a[?] keep their invalid size. */
+          if (size != CTSIZE_INVALID) {
+            uint64_t xsz = (uint64_t)size * csize;
+            if (xsz >= 0x80000000u) cp_err(cp, UJ_ERR_FFI_INVSIZE);
+            size = (CTSize)xsz;
+          }
+        }
+        if ((cinfo & CTF_ALIGN) > (info & CTF_ALIGN))  /* Find max. align. */
+          info = (info & ~CTF_ALIGN) | (cinfo & CTF_ALIGN);
+        info |= (cinfo & CTF_QUAL);  /* Inherit qual. */
       } else {
-	lua_assert(ctype_isvoid(info));
+        lua_assert(ctype_isvoid(info));
       }
       csize = size;
       cinfo = info+id;
@@ -942,8 +945,6 @@ static CTypeID cp_decl_intern(CPState *cp, CPDecl *decl)
 }
 
 /* -- C declaration parser ------------------------------------------------ */
-
-#define H_(le, be)	LJ_ENDIAN_SELECT(0x##le, 0x##be)
 
 /* Reset declaration state to declaration specifier. */
 static void cp_decl_reset(CPDecl *decl)
@@ -973,7 +974,7 @@ static CTypeID cp_decl_constinit(CPState *cp, CType **ctp, CTypeID ctypeid)
   info = ctt->info;
   size = ctt->size;
   if (!ctype_isinteger(info) || !(info & CTF_CONST) || size > 4)
-    cp_err(cp, LJ_ERR_FFI_INVTYPE);
+    cp_err(cp, UJ_ERR_FFI_INVTYPE);
   cp_check(cp, '=');
   cp_expr_sub(cp, &k, 0);
   constid = lj_ctype_new(cp->cts, ctp);
@@ -1006,7 +1007,7 @@ static void cp_decl_align(CPState *cp, CPDecl *decl)
   CTSize al = 4;  /* Unspecified alignment is 16 bytes. */
   if (cp->tok == '(') {
     al = cp_decl_sizeattr(cp);
-    al = al ? lj_fls(al) : 0;
+    al = al ? lj_bsr(al) : 0;
   }
   CTF_INSERT(decl->attr, ALIGN, al);
   decl->attr |= CTFP_ALIGNED;
@@ -1021,7 +1022,7 @@ static void cp_decl_asm(CPState *cp, CPDecl *decl)
   if (cp->tok == CTOK_STRING) {
     GCstr *str = cp->str;
     while (cp_next(cp) == CTOK_STRING) {
-      lj_str_pushf(cp->L, "%s%s", strdata(str), strdata(cp->str));
+      uj_str_pushf(cp->L, "%s%s", strdata(str), strdata(cp->str));
       cp->L->top--;
       str = strV(cp->L->top);
     }
@@ -1042,7 +1043,7 @@ static void cp_decl_mode(CPState *cp, CPDecl *decl)
       s++;
       vlen = *s++ - '0';
       if (*s >= '0' && *s <= '9')
-	vlen = vlen*10 + (*s++ - '0');
+        vlen = vlen*10 + (*s++ - '0');
     }
     switch (*s++) {
     case 'Q': sz = 1; break;
@@ -1055,7 +1056,7 @@ static void cp_decl_mode(CPState *cp, CPDecl *decl)
     }
     if (*s == 'I' || *s == 'F') {
       CTF_INSERT(decl->attr, MSIZEP, sz);
-      if (vlen) CTF_INSERT(decl->attr, VSIZEP, lj_fls(vlen*sz));
+      if (vlen) CTF_INSERT(decl->attr, VSIZEP, lj_bsr(vlen*sz));
     }
   bad_size:
     cp_next(cp);
@@ -1066,64 +1067,42 @@ static void cp_decl_mode(CPState *cp, CPDecl *decl)
 /* Parse GCC __attribute__((...)). */
 static void cp_decl_gccattribute(CPState *cp, CPDecl *decl)
 {
+  const uint32_t *suppl_hash = cp->cts->suppl_hash;
+
   cp_next(cp);
   cp_check(cp, '(');
   cp_check(cp, '(');
   while (cp->tok != ')') {
     if (cp->tok == CTOK_IDENT) {
       GCstr *attrstr = cp->str;
+      const uint32_t hash = attrstr->hash;
+
       cp_next(cp);
-      switch (attrstr->hash) {
-      case H_(64a9208e,8ce14319): case H_(8e6331b2,95a282af):  /* aligned */
-	cp_decl_align(cp, decl);
-	break;
-      case H_(42eb47de,f0ede26c): case H_(29f48a09,cf383e0c):  /* packed */
-	decl->attr |= CTFP_PACKED;
-	break;
-      case H_(0a84eef6,8dfab04c): case H_(995cf92c,d5696591):  /* mode */
-	cp_decl_mode(cp, decl);
-	break;
-      case H_(0ab31997,2d5213fa): case H_(bf875611,200e9990):  /* vector_size */
-	{
-	  CTSize vsize = cp_decl_sizeattr(cp);
-	  if (vsize) CTF_INSERT(decl->attr, VSIZEP, lj_fls(vsize));
-	}
-	break;
-#if LJ_TARGET_X86
-      case H_(5ad22db8,c689b848): case H_(439150fa,65ea78cb):  /* regparm */
-	CTF_INSERT(decl->fattr, REGPARM, cp_decl_sizeattr(cp));
-	decl->fattr |= CTFP_CCONV;
-	break;
-      case H_(18fc0b98,7ff4c074): case H_(4e62abed,0a747424):  /* cdecl */
-	CTF_INSERT(decl->fattr, CCONV, CTCC_CDECL);
-	decl->fattr |= CTFP_CCONV;
-	break;
-      case H_(72b2e41b,494c5a44): case H_(f2356d59,f25fc9bd):  /* thiscall */
-	CTF_INSERT(decl->fattr, CCONV, CTCC_THISCALL);
-	decl->fattr |= CTFP_CCONV;
-	break;
-      case H_(0d0ffc42,ab746f88): case H_(21c54ba1,7f0ca7e3):  /* fastcall */
-	CTF_INSERT(decl->fattr, CCONV, CTCC_FASTCALL);
-	decl->fattr |= CTFP_CCONV;
-	break;
-      case H_(ef76b040,9412e06a): case H_(de56697b,c750e6e1):  /* stdcall */
-	CTF_INSERT(decl->fattr, CCONV, CTCC_STDCALL);
-	decl->fattr |= CTFP_CCONV;
-	break;
-      case H_(ea78b622,f234bd8e): case H_(252ffb06,8d50f34b):  /* sseregparm */
-	decl->fattr |= CTF_SSEREGPARM;
-	decl->fattr |= CTFP_CCONV;
-	break;
-#endif
-      default:  /* Skip all other attributes. */
-	goto skip_attr;
+      if (hash == suppl_hash[CTOK_SUPPL_aligned] ||
+          hash == suppl_hash[CTOK_SUPPL___aligned__]) {
+        cp_decl_align(cp, decl);
+      } else if (hash == suppl_hash[CTOK_SUPPL_packed] ||
+                 hash == suppl_hash[CTOK_SUPPL___packed__]) {
+        decl->attr |= CTFP_PACKED;
+      } else if (hash == suppl_hash[CTOK_SUPPL_mode] ||
+                 hash == suppl_hash[CTOK_SUPPL___mode__]) {
+        cp_decl_mode(cp, decl);
+      } else if (hash == suppl_hash[CTOK_SUPPL_vector_size] ||
+                 hash == suppl_hash[CTOK_SUPPL___vector_size__]) {
+        CTSize vsize = cp_decl_sizeattr(cp);
+
+        if (vsize) {
+          CTF_INSERT(decl->attr, VSIZEP, lj_bsr(vsize));
+        }
+      } else {
+        goto skip_attr;
       }
     } else if (cp->tok >= CTOK_FIRSTDECL) {  /* For __attribute((const)) etc. */
       cp_next(cp);
     skip_attr:
       if (cp_opt(cp, '(')) {
-	while (cp->tok != ')' && cp->tok != CTOK_EOF) cp_next(cp);
-	cp_check(cp, ')');
+        while (cp->tok != ')' && cp->tok != CTOK_EOF) cp_next(cp);
+        cp_check(cp, ')');
       }
     } else {
       break;
@@ -1137,21 +1116,23 @@ static void cp_decl_gccattribute(CPState *cp, CPDecl *decl)
 /* Parse MSVC __declspec(...). */
 static void cp_decl_msvcattribute(CPState *cp, CPDecl *decl)
 {
+  const uint32_t *suppl_hash = cp->cts->suppl_hash;
+
   cp_next(cp);
   cp_check(cp, '(');
   while (cp->tok == CTOK_IDENT) {
     GCstr *attrstr = cp->str;
+    const uint32_t hash = attrstr->hash;
+
     cp_next(cp);
-    switch (attrstr->hash) {
-    case H_(bc2395fa,98f267f8):  /* align */
+
+    if (hash == suppl_hash[CTOK_SUPPL_align]) {
       cp_decl_align(cp, decl);
-      break;
-    default:  /* Ignore all other attributes. */
+    } else { /* Ignore all other attributes. */
       if (cp_opt(cp, '(')) {
-	while (cp->tok != ')' && cp->tok != CTOK_EOF) cp_next(cp);
-	cp_check(cp, ')');
+        while (cp->tok != ')' && cp->tok != CTOK_EOF) cp_next(cp);
+        cp_check(cp, ')');
       }
-      break;
     }
   }
   cp_check(cp, ')');
@@ -1170,15 +1151,9 @@ static void cp_decl_attributes(CPState *cp, CPDecl *decl)
     case CTOK_ASM: cp_decl_asm(cp, decl); continue;
     case CTOK_DECLSPEC: cp_decl_msvcattribute(cp, decl); continue;
     case CTOK_CCDECL:
-#if LJ_TARGET_X86
-      CTF_INSERT(decl->fattr, CCONV, cp->ct->size);
-      decl->fattr |= CTFP_CCONV;
-#endif
       break;
     case CTOK_PTRSZ:
-#if LJ_64
       CTF_INSERT(decl->attr, MSIZEP, cp->ct->size);
-#endif
       break;
     default: return;
     }
@@ -1201,10 +1176,10 @@ static CTypeID cp_struct_name(CPState *cp, CPDecl *sdecl, CTInfo info)
       sid = cp->val.id;
       ct = cp->ct;
       if ((ct->info ^ info) & (CTMASK_NUM|CTF_UNION))  /* Wrong type. */
-	cp_errmsg(cp, 0, LJ_ERR_FFI_REDEF, strdata(gco2str(gcref(ct->name))));
+        cp_errmsg(cp, 0, UJ_ERR_FFI_REDEF, strdata(ct->name));
     } else {  /* Create named, incomplete struct/union/enum. */
       if ((cp->mode & CPARSE_MODE_NOIMPLICIT))
-	cp_errmsg(cp, 0, LJ_ERR_FFI_BADTAG, strdata(cp->str));
+        cp_errmsg(cp, 0, UJ_ERR_FFI_BADTAG, strdata(cp->str));
       sid = lj_ctype_new(cp->cts, &ct);
       ct->info = info;
       ct->size = CTSIZE_INVALID;
@@ -1219,7 +1194,7 @@ static CTypeID cp_struct_name(CPState *cp, CPDecl *sdecl, CTInfo info)
   }
   if (cp->tok == '{') {
     if (ct->size != CTSIZE_INVALID || ct->sib)
-      cp_errmsg(cp, 0, LJ_ERR_FFI_REDEF, strdata(gco2str(gcref(ct->name))));
+      cp_errmsg(cp, 0, UJ_ERR_FFI_REDEF, strdata(ct->name));
     ct->sib = 1;  /* Indicate the type is currently being defined. */
   }
   return sid;
@@ -1230,19 +1205,17 @@ static CTSize cp_field_align(CPState *cp, CType *ct, CTInfo info)
 {
   CTSize align = ctype_align(info);
   UNUSED(cp); UNUSED(ct);
-#if (LJ_TARGET_X86 && !LJ_ABI_WIN) || (LJ_TARGET_ARM && __APPLE__)
-  /* The SYSV i386 and iOS ABIs limit alignment of non-vector fields to 2^2. */
+  /* The SYSV i386 limits alignment of non-vector fields to 2^2. */
   if (align > 2 && !(info & CTFP_ALIGNED)) {
     if (ctype_isarray(info) && !(info & CTF_VECTOR)) {
       do {
-	ct = ctype_rawchild(cp->cts, ct);
-	info = ct->info;
+        ct = ctype_rawchild(cp->cts, ct);
+        info = ct->info;
       } while (ctype_isarray(info) && !(info & CTF_VECTOR));
     }
     if (ctype_isnum(info) || ctype_isenum(info))
       align = 2;
   }
-#endif
   return align;
 }
 
@@ -1259,7 +1232,7 @@ static void cp_struct_layout(CPState *cp, CTypeID sid, CTInfo sattr)
     CTInfo attr = ct->size;  /* Field declaration attributes (temp.). */
 
     if (ctype_isfield(ct->info) ||
-	(ctype_isxattrib(ct->info, CTA_SUBTYPE) && attr)) {
+        (ctype_isxattrib(ct->info, CTA_SUBTYPE) && attr)) {
       CTSize align, amask;  /* Alignment (pow2) and alignment mask (bits). */
       CTSize sz;
       CTInfo info = lj_ctype_info(cp->cts, ctype_cid(ct->info), &sz);
@@ -1268,52 +1241,48 @@ static void cp_struct_layout(CPState *cp, CTypeID sid, CTInfo sattr)
 
       /* Check for size overflow and determine alignment. */
       if (sz >= 0x20000000u || bofs + csz < bofs || (info & CTF_VLA)) {
-	if (!(sz == CTSIZE_INVALID && ctype_isarray(info) &&
-	      !(sinfo & CTF_UNION)))
-	  cp_err(cp, LJ_ERR_FFI_INVSIZE);
-	csz = sz = 0;  /* Treat a[] and a[?] as zero-sized. */
+        if (!(sz == CTSIZE_INVALID && ctype_isarray(info) &&
+              !(sinfo & CTF_UNION)))
+          cp_err(cp, UJ_ERR_FFI_INVSIZE);
+        csz = sz = 0;  /* Treat a[] and a[?] as zero-sized. */
       }
       align = cp_field_align(cp, ct, info);
       if (((attr|sattr) & CTFP_PACKED) ||
-	  ((attr & CTFP_ALIGNED) && ctype_align(attr) > align))
-	align = ctype_align(attr);
+          ((attr & CTFP_ALIGNED) && ctype_align(attr) > align))
+        align = ctype_align(attr);
       if (cp->packstack[cp->curpack] < align)
-	align = cp->packstack[cp->curpack];
+        align = cp->packstack[cp->curpack];
       if (align > maxalign) maxalign = align;
       amask = (8u << align) - 1;
 
       bsz = ctype_bitcsz(ct->info);  /* Bitfield size (temp.). */
       if (bsz == CTBSZ_FIELD || !ctype_isfield(ct->info)) {
-	bsz = csz;  /* Regular fields or subtypes always fill the container. */
-	bofs = (bofs + amask) & ~amask;  /* Start new aligned field. */
-	ct->size = (bofs >> 3);  /* Store field offset. */
+        bsz = csz;  /* Regular fields or subtypes always fill the container. */
+        bofs = (bofs + amask) & ~amask;  /* Start new aligned field. */
+        ct->size = (bofs >> 3);  /* Store field offset. */
       } else {  /* Bitfield. */
-	if (bsz == 0 || (attr & CTFP_ALIGNED) ||
-	    (!((attr|sattr) & CTFP_PACKED) && (bofs & amask) + bsz > csz))
-	  bofs = (bofs + amask) & ~amask;  /* Start new aligned field. */
+        if (bsz == 0 || (attr & CTFP_ALIGNED) ||
+            (!((attr|sattr) & CTFP_PACKED) && (bofs & amask) + bsz > csz))
+          bofs = (bofs + amask) & ~amask;  /* Start new aligned field. */
 
-	/* Prefer regular field over bitfield. */
-	if (bsz == csz && (bofs & amask) == 0) {
-	  ct->info = CTINFO(CT_FIELD, ctype_cid(ct->info));
-	  ct->size = (bofs >> 3);  /* Store field offset. */
-	} else {
-	  ct->info = CTINFO(CT_BITFIELD,
-	    (info & (CTF_QUAL|CTF_UNSIGNED|CTF_BOOL)) +
-	    (csz << (CTSHIFT_BITCSZ-3)) + (bsz << CTSHIFT_BITBSZ));
-#if LJ_BE
-	  ct->info += ((csz - (bofs & (csz-1)) - bsz) << CTSHIFT_BITPOS);
-#else
-	  ct->info += ((bofs & (csz-1)) << CTSHIFT_BITPOS);
-#endif
-	  ct->size = ((bofs & ~(csz-1)) >> 3);  /* Store container offset. */
-	}
+        /* Prefer regular field over bitfield. */
+        if (bsz == csz && (bofs & amask) == 0) {
+          ct->info = CTINFO(CT_FIELD, ctype_cid(ct->info));
+          ct->size = (bofs >> 3);  /* Store field offset. */
+        } else {
+          ct->info = CTINFO(CT_BITFIELD,
+            (info & (CTF_QUAL|CTF_UNSIGNED|CTF_BOOL)) +
+            (csz << (CTSHIFT_BITCSZ-3)) + (bsz << CTSHIFT_BITBSZ));
+          ct->info += ((bofs & (csz-1)) << CTSHIFT_BITPOS);
+          ct->size = ((bofs & ~(csz-1)) >> 3);  /* Store container offset. */
+        }
       }
 
       /* Determine next offset or max. offset. */
       if ((sinfo & CTF_UNION)) {
-	if (bsz > bmaxofs) bmaxofs = bsz;
+        if (bsz > bmaxofs) bmaxofs = bsz;
       } else {
-	bofs += bsz;
+        bofs += bsz;
       }
     }  /* All other fields in the chain are already set up. */
 
@@ -1338,63 +1307,63 @@ static CTypeID cp_decl_struct(CPState *cp, CPDecl *sdecl, CTInfo sinfo)
       CPDecl decl;
       CPscl scl = cp_decl_spec(cp, &decl, CDF_STATIC);
       decl.mode = scl ? CPARSE_MODE_DIRECT :
-	CPARSE_MODE_DIRECT|CPARSE_MODE_ABSTRACT|CPARSE_MODE_FIELD;
+        CPARSE_MODE_DIRECT|CPARSE_MODE_ABSTRACT|CPARSE_MODE_FIELD;
 
       for (;;) {
-	CTypeID ctypeid;
+        CTypeID ctypeid;
 
-	if (lastdecl) cp_err_token(cp, '}');
+        if (lastdecl) cp_err_token(cp, '}');
 
-	/* Parse field declarator. */
-	decl.bits = CTSIZE_INVALID;
-	cp_declarator(cp, &decl);
-	ctypeid = cp_decl_intern(cp, &decl);
+        /* Parse field declarator. */
+        decl.bits = CTSIZE_INVALID;
+        cp_declarator(cp, &decl);
+        ctypeid = cp_decl_intern(cp, &decl);
 
-	if ((scl & CDF_STATIC)) {  /* Static constant in struct namespace. */
-	  CType *ct;
-	  CTypeID fieldid = cp_decl_constinit(cp, &ct, ctypeid);
-	  ctype_get(cp->cts, lastid)->sib = fieldid;
-	  lastid = fieldid;
-	  ctype_setname(ct, decl.name);
-	} else {
-	  CTSize bsz = CTBSZ_FIELD;  /* Temp. for layout phase. */
-	  CType *ct;
-	  CTypeID fieldid = lj_ctype_new(cp->cts, &ct);  /* Do this first. */
-	  CType *tct = ctype_raw(cp->cts, ctypeid);
+        if ((scl & CDF_STATIC)) {  /* Static constant in struct namespace. */
+          CType *ct;
+          CTypeID fieldid = cp_decl_constinit(cp, &ct, ctypeid);
+          ctype_get(cp->cts, lastid)->sib = fieldid;
+          lastid = fieldid;
+          ctype_setname(ct, decl.name);
+        } else {
+          CTSize bsz = CTBSZ_FIELD;  /* Temp. for layout phase. */
+          CType *ct;
+          CTypeID fieldid = lj_ctype_new(cp->cts, &ct);  /* Do this first. */
+          CType *tct = ctype_raw(cp->cts, ctypeid);
 
-	  if (decl.bits == CTSIZE_INVALID) {  /* Regular field. */
-	    if (ctype_isarray(tct->info) && tct->size == CTSIZE_INVALID)
-	      lastdecl = 1;  /* a[] or a[?] must be the last declared field. */
+          if (decl.bits == CTSIZE_INVALID) {  /* Regular field. */
+            if (ctype_isarray(tct->info) && tct->size == CTSIZE_INVALID)
+              lastdecl = 1;  /* a[] or a[?] must be the last declared field. */
 
-	    /* Accept transparent struct/union/enum. */
-	    if (!decl.name) {
-	      if (!((ctype_isstruct(tct->info) && !(tct->info & CTF_VLA)) ||
-		    ctype_isenum(tct->info)))
-		cp_err_token(cp, CTOK_IDENT);
-	      ct->info = CTINFO(CT_ATTRIB, CTATTRIB(CTA_SUBTYPE) + ctypeid);
-	      ct->size = ctype_isstruct(tct->info) ?
-			 (decl.attr|0x80000000u) : 0;  /* For layout phase. */
-	      goto add_field;
-	    }
-	  } else {  /* Bitfield. */
-	    bsz = decl.bits;
-	    if (!ctype_isinteger_or_bool(tct->info) ||
-		(bsz == 0 && decl.name) || 8*tct->size > CTBSZ_MAX ||
-		bsz > ((tct->info & CTF_BOOL) ? 1 : 8*tct->size))
-	      cp_errmsg(cp, ':', LJ_ERR_BADVAL);
-	  }
+            /* Accept transparent struct/union/enum. */
+            if (!decl.name) {
+              if (!((ctype_isstruct(tct->info) && !(tct->info & CTF_VLA)) ||
+                    ctype_isenum(tct->info)))
+                cp_err_token(cp, CTOK_IDENT);
+              ct->info = CTINFO(CT_ATTRIB, CTATTRIB(CTA_SUBTYPE) + ctypeid);
+              ct->size = ctype_isstruct(tct->info) ?
+                         (decl.attr|0x80000000u) : 0;  /* For layout phase. */
+              goto add_field;
+            }
+          } else {  /* Bitfield. */
+            bsz = decl.bits;
+            if (!ctype_isinteger_or_bool(tct->info) ||
+                (bsz == 0 && decl.name) || 8*tct->size > CTBSZ_MAX ||
+                bsz > ((tct->info & CTF_BOOL) ? 1 : 8*tct->size))
+              cp_errmsg(cp, ':', UJ_ERR_BADVAL, NULL);
+          }
 
-	  /* Create temporary field for layout phase. */
-	  ct->info = CTINFO(CT_FIELD, ctypeid + (bsz << CTSHIFT_BITCSZ));
-	  ct->size = decl.attr;
-	  if (decl.name) ctype_setname(ct, decl.name);
+          /* Create temporary field for layout phase. */
+          ct->info = CTINFO(CT_FIELD, ctypeid + (bsz << CTSHIFT_BITCSZ));
+          ct->size = decl.attr;
+          if (decl.name) ctype_setname(ct, decl.name);
 
-	add_field:
-	  ctype_get(cp->cts, lastid)->sib = fieldid;
-	  lastid = fieldid;
-	}
-	if (!cp_opt(cp, ',')) break;
-	cp_decl_reset(&decl);
+        add_field:
+          ctype_get(cp->cts, lastid)->sib = fieldid;
+          lastid = fieldid;
+        }
+        if (!cp_opt(cp, ',')) break;
+        cp_decl_reset(&decl);
       }
       cp_check(cp, ';');
     }
@@ -1420,36 +1389,36 @@ static CTypeID cp_decl_enum(CPState *cp, CPDecl *sdecl)
     do {
       GCstr *name = cp->str;
       if (cp->tok != CTOK_IDENT) cp_err_token(cp, CTOK_IDENT);
-      if (cp->val.id) cp_errmsg(cp, 0, LJ_ERR_FFI_REDEF, strdata(name));
+      if (cp->val.id) cp_errmsg(cp, 0, UJ_ERR_FFI_REDEF, strdata(name));
       cp_next(cp);
       if (cp_opt(cp, '=')) {
-	cp_expr_kint(cp, &k);
-	if (k.id == CTID_UINT32) {
-	  /* C99 says that enum constants are always (signed) integers.
-	  ** But since unsigned constants like 0x80000000 are quite common,
-	  ** those are left as uint32_t.
-	  */
-	  if (k.i32 >= 0) k.id = CTID_INT32;
-	} else {
-	  /* OTOH it's common practice and even mandated by some ABIs
-	  ** that the enum type itself is unsigned, unless there are any
-	  ** negative constants.
-	  */
-	  k.id = CTID_INT32;
-	  if (k.i32 < 0) einfo = CTINFO(CT_ENUM, CTALIGN(2) + CTID_INT32);
-	}
+        cp_expr_kint(cp, &k);
+        if (k.id == CTID_UINT32) {
+          /* C99 says that enum constants are always (signed) integers.
+          ** But since unsigned constants like 0x80000000 are quite common,
+          ** those are left as uint32_t.
+          */
+          if (k.i32 >= 0) k.id = CTID_INT32;
+        } else {
+          /* OTOH it's common practice and even mandated by some ABIs
+          ** that the enum type itself is unsigned, unless there are any
+          ** negative constants.
+          */
+          k.id = CTID_INT32;
+          if (k.i32 < 0) einfo = CTINFO(CT_ENUM, CTALIGN(2) + CTID_INT32);
+        }
       }
       /* Add named enum constant. */
       {
-	CType *ct;
-	CTypeID constid = lj_ctype_new(cp->cts, &ct);
-	ctype_get(cp->cts, lastid)->sib = constid;
-	lastid = constid;
-	ctype_setname(ct, name);
-	ct->info = CTINFO(CT_CONSTVAL, CTF_CONST|k.id);
-	ct->size = k.u32++;
-	if (k.u32 == 0x80000000u) k.id = CTID_UINT32;
-	lj_ctype_addname(cp->cts, ct, constid);
+        CType *ct;
+        CTypeID constid = lj_ctype_new(cp->cts, &ct);
+        ctype_get(cp->cts, lastid)->sib = constid;
+        lastid = constid;
+        ctype_setname(ct, name);
+        ct->info = CTINFO(CT_CONSTVAL, CTF_CONST|k.id);
+        ct->size = k.u32++;
+        if (k.u32 == 0x80000000u) k.id = CTID_UINT32;
+        lj_ctype_addname(cp->cts, ct, constid);
       }
       if (!cp_opt(cp, ',')) break;
     } while (cp->tok != '}');  /* Trailing ',' is ok. */
@@ -1481,21 +1450,21 @@ static CPscl cp_decl_spec(CPState *cp, CPDecl *decl, CPscl scl)
     if (cp->tok >= CTOK_FIRSTDECL && cp->tok <= CTOK_LASTDECLFLAG) {
       uint32_t cbit;
       if (cp->ct->size) {
-	if (sz) goto end_decl;
-	sz = cp->ct->size;
+        if (sz) goto end_decl;
+        sz = cp->ct->size;
       }
       cbit = (1u << (cp->tok - CTOK_FIRSTDECL));
       cds = cds | cbit | ((cbit & cds & CDF_LONG) << 1);
       if (cp->tok >= CTOK_FIRSTSCL) {
-	if (!(scl & cbit)) cp_errmsg(cp, cp->tok, LJ_ERR_FFI_BADSCL);
+        if (!(scl & cbit)) cp_errmsg(cp, cp->tok, UJ_ERR_FFI_BADSCL, NULL);
       } else if (tdef) {
-	goto end_decl;
+        goto end_decl;
       }
       cp_next(cp);
       continue;
     }
     if (sz || tdef ||
-	(cds & (CDF_SHORT|CDF_LONG|CDF_SIGNED|CDF_UNSIGNED|CDF_COMPLEX)))
+        (cds & (CDF_SHORT|CDF_LONG|CDF_SIGNED|CDF_UNSIGNED|CDF_COMPLEX)))
       break;
     switch (cp->tok) {
     case CTOK_STRUCT:
@@ -1509,9 +1478,9 @@ static CPscl cp_decl_spec(CPState *cp, CPDecl *decl, CPscl scl)
       continue;
     case CTOK_IDENT:
       if (ctype_istypedef(cp->ct->info)) {
-	tdef = ctype_cid(cp->ct->info);  /* Get typedef. */
-	cp_next(cp);
-	continue;
+        tdef = ctype_cid(cp->ct->info);  /* Get typedef. */
+        cp_next(cp);
+        continue;
       }
       break;
     case '$':
@@ -1538,18 +1507,18 @@ end_decl:
     CTInfo info = CTINFO(CT_NUM, (cds & CDF_UNSIGNED) ? CTF_UNSIGNED : 0);
     if ((cds & CDF_BOOL)) {
       if ((cds & ~(CDF_SCL|CDF_BOOL|CDF_INT|CDF_SIGNED|CDF_UNSIGNED)))
-	cp_errmsg(cp, 0, LJ_ERR_FFI_INVTYPE);
+        cp_errmsg(cp, 0, UJ_ERR_FFI_INVTYPE, NULL);
       info |= CTF_BOOL;
       if (!(cds & CDF_SIGNED)) info |= CTF_UNSIGNED;
       if (!sz) {
-	sz = 1;
+        sz = 1;
       }
     } else if ((cds & CDF_FP)) {
       info = CTINFO(CT_NUM, CTF_FP);
       if ((cds & CDF_LONG)) sz = sizeof(long double);
     } else if ((cds & CDF_CHAR)) {
       if ((cds & (CDF_CHAR|CDF_SIGNED|CDF_UNSIGNED)) == CDF_CHAR)
-	info |= CTF_UCHAR;  /* Handle platforms where char is unsigned. */
+        info |= CTF_UCHAR;  /* Handle platforms where char is unsigned. */
     } else if ((cds & CDF_SHORT)) {
       sz = sizeof(short);
     } else if ((cds & CDF_LONGLONG)) {
@@ -1559,11 +1528,11 @@ end_decl:
       sz = sizeof(long);
     } else if (!sz) {
       if (!(cds & (CDF_SIGNED|CDF_UNSIGNED)))
-	cp_errmsg(cp, cp->tok, LJ_ERR_FFI_DECLSPEC);
+        cp_errmsg(cp, cp->tok, UJ_ERR_FFI_DECLSPEC, NULL);
       sz = sizeof(int);
     }
     lua_assert(sz != 0);
-    info += CTALIGN(lj_fls(sz));  /* Use natural alignment. */
+    info += CTALIGN(lj_bsr(sz));  /* Use natural alignment. */
     info += (decl->attr & CTF_QUAL);  /* Merge qualifiers. */
     cp_push(decl, info, sz);
     decl->attr &= ~CTF_QUAL;
@@ -1600,10 +1569,10 @@ static void cp_decl_func(CPState *cp, CPDecl *fdecl)
       CTypeID ctypeid, fieldid;
       CType *ct;
       if (cp_opt(cp, '.')) {  /* Vararg function. */
-	cp_check(cp, '.');  /* Workaround for the minimalistic lexer. */
-	cp_check(cp, '.');
-	info |= CTF_VARARG;
-	break;
+        cp_check(cp, '.');  /* Workaround for the minimalistic lexer. */
+        cp_check(cp, '.');
+        info |= CTF_VARARG;
+        break;
       }
       cp_decl_spec(cp, &decl, CDF_REGISTER);
       decl.mode = CPARSE_MODE_DIRECT|CPARSE_MODE_ABSTRACT;
@@ -1611,19 +1580,19 @@ static void cp_decl_func(CPState *cp, CPDecl *fdecl)
       ctypeid = cp_decl_intern(cp, &decl);
       ct = ctype_raw(cp->cts, ctypeid);
       if (ctype_isvoid(ct->info))
-	break;
+        break;
       else if (ctype_isrefarray(ct->info))
-	ctypeid = lj_ctype_intern(cp->cts,
-	  CTINFO(CT_PTR, CTALIGN_PTR|ctype_cid(ct->info)), CTSIZE_PTR);
+        ctypeid = lj_ctype_intern(cp->cts,
+          CTINFO(CT_PTR, CTALIGN_PTR|ctype_cid(ct->info)), CTSIZE_PTR);
       else if (ctype_isfunc(ct->info))
-	ctypeid = lj_ctype_intern(cp->cts,
-	  CTINFO(CT_PTR, CTALIGN_PTR|ctypeid), CTSIZE_PTR);
+        ctypeid = lj_ctype_intern(cp->cts,
+          CTINFO(CT_PTR, CTALIGN_PTR|ctypeid), CTSIZE_PTR);
       /* Add new parameter. */
       fieldid = lj_ctype_new(cp->cts, &ct);
       if (anchor)
-	ctype_get(cp->cts, lastid)->sib = fieldid;
+        ctype_get(cp->cts, lastid)->sib = fieldid;
       else
-	anchor = fieldid;
+        anchor = fieldid;
       lastid = fieldid;
       if (decl.name) ctype_setname(ct, decl.name);
       ct->info = CTINFO(CT_FIELD, ctypeid);
@@ -1651,7 +1620,7 @@ static void cp_decl_func(CPState *cp, CPDecl *fdecl)
 /* Parse declarator. */
 static void cp_declarator(CPState *cp, CPDecl *decl)
 {
-  if (++cp->depth > CPARSE_MAX_DECLDEPTH) cp_err(cp, LJ_ERR_XLEVELS);
+  if (++cp->depth > CPARSE_MAX_DECLDEPTH) cp_err(cp, UJ_ERR_XLEVELS);
 
   for (;;) {  /* Head of declarator. */
     if (cp_opt(cp, '*')) {  /* Pointer. */
@@ -1660,12 +1629,10 @@ static void cp_declarator(CPState *cp, CPDecl *decl)
       cp_decl_attributes(cp, decl);
       sz = CTSIZE_PTR;
       info = CTINFO(CT_PTR, CTALIGN_PTR);
-#if LJ_64
       if (ctype_msizeP(decl->attr) == 4) {
-	sz = 4;
-	info = CTINFO(CT_PTR, CTALIGN(2));
+        sz = 4;
+        info = CTINFO(CT_PTR, CTALIGN(2));
       }
-#endif
       info += (decl->attr & (CTF_QUAL|CTF_REF));
       decl->attr &= ~(CTF_QUAL|(CTMASK_MSIZEP<<CTSHIFT_MSIZEP));
       cp_push(decl, info, sz);
@@ -1682,7 +1649,7 @@ static void cp_declarator(CPState *cp, CPDecl *decl)
     cp_decl_attributes(cp, decl);
     /* Resolve ambiguity between inner declarator and 1st function parameter. */
     if ((decl->mode & CPARSE_MODE_ABSTRACT) &&
-	(cp->tok == ')' || cp_istypedecl(cp))) goto func_decl;
+        (cp->tok == ')' || cp_istypedecl(cp))) goto func_decl;
     pos = decl->pos;
     cp_declarator(cp, decl);
     cp_check(cp, ')');
@@ -1730,27 +1697,29 @@ static CTypeID cp_decl_abstract(CPState *cp)
 /* Handle pragmas. */
 static void cp_pragma(CPState *cp, BCLine pragmaline)
 {
+  const uint32_t *suppl_hash = cp->cts->suppl_hash;
+
   cp_next(cp);
   if (cp->tok == CTOK_IDENT &&
-      cp->str->hash == H_(e79b999f,42ca3e85))  {  /* pack */
+      cp->str->hash == suppl_hash[CTOK_SUPPL_pack]) {
     cp_next(cp);
     cp_check(cp, '(');
     if (cp->tok == CTOK_IDENT) {
-      if (cp->str->hash == H_(738e923c,a1b65954)) {  /* push */
-	if (cp->curpack < CPARSE_MAX_PACKSTACK) {
-	  cp->packstack[cp->curpack+1] = cp->packstack[cp->curpack];
-	  cp->curpack++;
-	}
-      } else if (cp->str->hash == H_(6c71cf27,6c71cf27)) {  /* pop */
-	if (cp->curpack > 0) cp->curpack--;
+      if (cp->str->hash == suppl_hash[CTOK_SUPPL_push]) {
+        if (cp->curpack < CPARSE_MAX_PACKSTACK) {
+          cp->packstack[cp->curpack+1] = cp->packstack[cp->curpack];
+          cp->curpack++;
+        }
+      } else if (cp->str->hash == suppl_hash[CTOK_SUPPL_pop]) {
+        if (cp->curpack > 0) cp->curpack--;
       } else {
-	cp_errmsg(cp, cp->tok, LJ_ERR_XSYMBOL);
+        cp_errmsg(cp, cp->tok, UJ_ERR_XSYMBOL, NULL);
       }
       cp_next(cp);
       if (!cp_opt(cp, ',')) goto end_pack;
     }
     if (cp->tok == CTOK_INTEGER) {
-      cp->packstack[cp->curpack] = cp->val.u32 ? lj_fls(cp->val.u32) : 0;
+      cp->packstack[cp->curpack] = cp->val.u32 ? lj_bsr(cp->val.u32) : 0;
       cp_next(cp);
     } else {
       cp->packstack[cp->curpack] = 255;
@@ -1766,7 +1735,9 @@ static void cp_pragma(CPState *cp, BCLine pragmaline)
 /* Parse multiple C declarations of types or extern identifiers. */
 static void cp_decl_multi(CPState *cp)
 {
+  const uint32_t *suppl_hash = cp->cts->suppl_hash;
   int first = 1;
+
   while (cp->tok != CTOK_EOF) {
     CPDecl decl;
     CPscl scl;
@@ -1777,54 +1748,54 @@ static void cp_decl_multi(CPState *cp)
     if (cp->tok == '#') {  /* Workaround, since we have no preprocessor, yet. */
       BCLine pragmaline = cp->linenumber;
       if (!(cp_next(cp) == CTOK_IDENT &&
-	    cp->str->hash == H_(f5e6b4f8,1d509107)))  /* pragma */
-	cp_errmsg(cp, cp->tok, LJ_ERR_XSYMBOL);
+            cp->str->hash == suppl_hash[CTOK_SUPPL_pragma]))
+        cp_errmsg(cp, cp->tok, UJ_ERR_XSYMBOL, NULL);
       cp_pragma(cp, pragmaline);
       continue;
     }
     scl = cp_decl_spec(cp, &decl, CDF_TYPEDEF|CDF_EXTERN|CDF_STATIC);
     if ((cp->tok == ';' || cp->tok == CTOK_EOF) &&
-	ctype_istypedef(decl.stack[0].info)) {
+        ctype_istypedef(decl.stack[0].info)) {
       CTInfo info = ctype_rawchild(cp->cts, &decl.stack[0])->info;
       if (ctype_isstruct(info) || ctype_isenum(info))
-	goto decl_end;  /* Accept empty declaration of struct/union/enum. */
+        goto decl_end;  /* Accept empty declaration of struct/union/enum. */
     }
     for (;;) {
       CTypeID ctypeid;
       cp_declarator(cp, &decl);
       ctypeid = cp_decl_intern(cp, &decl);
       if (decl.name && !decl.nameid) {  /* NYI: redeclarations are ignored. */
-	CType *ct;
-	CTypeID id;
-	if ((scl & CDF_TYPEDEF)) {  /* Create new typedef. */
-	  id = lj_ctype_new(cp->cts, &ct);
-	  ct->info = CTINFO(CT_TYPEDEF, ctypeid);
-	  goto noredir;
-	} else if (ctype_isfunc(ctype_get(cp->cts, ctypeid)->info)) {
-	  /* Treat both static and extern function declarations as extern. */
-	  ct = ctype_get(cp->cts, ctypeid);
-	  /* We always get new anonymous functions (typedefs are copied). */
-	  lua_assert(gcref(ct->name) == NULL);
-	  id = ctypeid;  /* Just name it. */
-	} else if ((scl & CDF_STATIC)) {  /* Accept static constants. */
-	  id = cp_decl_constinit(cp, &ct, ctypeid);
-	  goto noredir;
-	} else {  /* External references have extern or no storage class. */
-	  id = lj_ctype_new(cp->cts, &ct);
-	  ct->info = CTINFO(CT_EXTERN, ctypeid);
-	}
-	if (decl.redir) {  /* Add attribute for redirected symbol name. */
-	  CType *cta;
-	  CTypeID aid = lj_ctype_new(cp->cts, &cta);
-	  ct = ctype_get(cp->cts, id);  /* Table may have been reallocated. */
-	  cta->info = CTINFO(CT_ATTRIB, CTATTRIB(CTA_REDIR));
-	  cta->sib = ct->sib;
-	  ct->sib = aid;
-	  ctype_setname(cta, decl.redir);
-	}
+        CType *ct;
+        CTypeID id;
+        if ((scl & CDF_TYPEDEF)) {  /* Create new typedef. */
+          id = lj_ctype_new(cp->cts, &ct);
+          ct->info = CTINFO(CT_TYPEDEF, ctypeid);
+          goto noredir;
+        } else if (ctype_isfunc(ctype_get(cp->cts, ctypeid)->info)) {
+          /* Treat both static and extern function declarations as extern. */
+          ct = ctype_get(cp->cts, ctypeid);
+          /* We always get new anonymous functions (typedefs are copied). */
+          lua_assert(ct->name == NULL);
+          id = ctypeid;  /* Just name it. */
+        } else if ((scl & CDF_STATIC)) {  /* Accept static constants. */
+          id = cp_decl_constinit(cp, &ct, ctypeid);
+          goto noredir;
+        } else {  /* External references have extern or no storage class. */
+          id = lj_ctype_new(cp->cts, &ct);
+          ct->info = CTINFO(CT_EXTERN, ctypeid);
+        }
+        if (decl.redir) {  /* Add attribute for redirected symbol name. */
+          CType *cta;
+          CTypeID aid = lj_ctype_new(cp->cts, &cta);
+          ct = ctype_get(cp->cts, id);  /* Table may have been reallocated. */
+          cta->info = CTINFO(CT_ATTRIB, CTATTRIB(CTA_REDIR));
+          cta->sib = ct->sib;
+          ct->sib = aid;
+          ctype_setname(cta, decl.redir);
+        }
       noredir:
-	ctype_setname(ct, decl.name);
-	lj_ctype_addname(cp->cts, ct, id);
+        ctype_setname(ct, decl.name);
+        lj_ctype_addname(cp->cts, ct, id);
       }
       if (!cp_opt(cp, ',')) break;
       cp_decl_reset(&decl);
@@ -1846,8 +1817,6 @@ static void cp_decl_single(CPState *cp)
   if (cp->tok != CTOK_EOF) cp_err_token(cp, CTOK_EOF);
 }
 
-#undef H_
-
 /* ------------------------------------------------------------------------ */
 
 /* Protected callback for C parser. */
@@ -1855,14 +1824,14 @@ static TValue *cpcparser(lua_State *L, lua_CFunction dummy, void *ud)
 {
   CPState *cp = (CPState *)ud;
   UNUSED(dummy);
-  cframe_errfunc(L->cframe) = -1;  /* Inherit error function. */
+  uj_cframe_errfunc_inherit(L->cframe);  /* Inherit error function. */
   cp_init(cp);
   if ((cp->mode & CPARSE_MODE_MULTI))
     cp_decl_multi(cp);
   else
     cp_decl_single(cp);
   if (cp->param && cp->param != cp->L->top)
-    cp_err(cp, LJ_ERR_FFI_NUMPARAM);
+    cp_err(cp, UJ_ERR_FFI_NUMPARAM);
   lua_assert(cp->depth == 0);
   return NULL;
 }

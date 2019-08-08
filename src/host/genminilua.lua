@@ -1,7 +1,9 @@
 ----------------------------------------------------------------------------
 -- Lua script to generate a customized, minified version of Lua.
--- The resulting 'minilua' is used for the build process of LuaJIT.
+-- The resulting 'minilua' is used for the build process of uJIT.
 ----------------------------------------------------------------------------
+-- Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+-- Portions taken verbatim or adapted from LuaJIT.
 -- Copyright (C) 2005-2017 Mike Pall. All rights reserved.
 -- Released under the MIT license. See Copyright Notice in luajit.h
 ----------------------------------------------------------------------------
@@ -13,7 +15,7 @@ local LUA_SOURCE
 
 local function usage()
   io.stderr:write("Usage: ", arg and arg[0] or "genminilua",
-		  " lua-", LUA_VERSION, "-source-dir\n")
+                  " lua-", LUA_VERSION, "-source-dir\n")
   os.exit(1)
 end
 
@@ -194,14 +196,14 @@ end
 
 local function def_istrue(def)
   return def == "INT_MAX > 2147483640L" or
-	 def == "LUAI_BITSINT >= 32" or
-	 def == "SIZE_Bx < LUAI_BITSINT-1" or
-	 def == "cast" or
-	 def == "defined(LUA_CORE)" or
-	 def == "MINSTRTABSIZE" or
-	 def == "LUA_MINBUFFER" or
-	 def == "HARDSTACKTESTS" or
-	 def == "UNUSED"
+         def == "LUAI_BITSINT >= 32" or
+         def == "SIZE_Bx < LUAI_BITSINT-1" or
+         def == "cast" or
+         def == "defined(LUA_CORE)" or
+         def == "MINSTRTABSIZE" or
+         def == "LUA_MINBUFFER" or
+         def == "HARDSTACKTESTS" or
+         def == "UNUSED"
 end
 
 local head, defs = {[[
@@ -210,7 +212,6 @@ typedef unsigned __int64 U64;
 #else
 typedef unsigned long long U64;
 #endif
-int _CRT_glob = 0;
 ]]}, {}
 
 local function preprocess(src)
@@ -223,32 +224,32 @@ local function preprocess(src)
       on = def_istrue(def)
     elseif pp == "else" then
       if oldon[lvl] then
-	if on == false then on = true else on = false end
+        if on == false then on = true else on = false end
       end
     elseif pp == "elif" then
       if oldon[lvl] then
-	on = def_istrue(def)
+        on = def_istrue(def)
       end
     elseif pp == "endif" then
       on = oldon[lvl]
       lvl = lvl - 1
     elseif on then
       if pp == "include" then
-	if not head[def] and not REMOVE_EXTINC[def] then
-	  head[def] = true
-	  head[#head+1] = "#include "..def.."\n"
-	end
+        if not head[def] and not REMOVE_EXTINC[def] then
+          head[def] = true
+          head[#head+1] = "#include "..def.."\n"
+        end
       elseif pp == "define" then
-	local k, sp, v = match(def, "([%w_]+)(%s*)(.*)")
-	if k and not (sp == "" and sub(v, 1, 1) == "(") then
-	  defs[k] = gsub(v, "%a[%w_]*", function(tok)
-	    return defs[tok] or tok
-	  end)
-	else
-	  t[#t+1] = "#define "..def.."\n"
-	end
+        local k, sp, v = match(def, "([%w_]+)(%s*)(.*)")
+        if k and not (sp == "" and sub(v, 1, 1) == "(") then
+          defs[k] = gsub(v, "%a[%w_]*", function(tok)
+            return defs[tok] or tok
+          end)
+        else
+          t[#t+1] = "#define "..def.."\n"
+        end
       elseif pp ~= "undef" then
-	error("unexpected directive: "..pp.." "..def)
+        error("unexpected directive: "..pp.." "..def)
       end
     end
     if on then t[#t+1] = txt end
@@ -289,10 +290,10 @@ local function strip_unused3(src)
   src = gsub(src, "luai_userstate%w+%b();", "")
   src = gsub(src, "%(%(c==.*luaY_parser%)", "luaY_parser")
   src = gsub(src, "trydecpoint%(ls,seminfo%)",
-		  "luaX_lexerror(ls,\"malformed number\",TK_NUMBER)")
+                  "luaX_lexerror(ls,\"malformed number\",TK_NUMBER)")
   src = gsub(src, "int c=luaZ_lookahead%b();", "")
   src = gsub(src, "luaL_register%(L,[^,]*,co_funcs%);\nreturn 2;",
-		  "return 1;")
+                  "return 1;")
   src = gsub(src, "getfuncname%b():", "NULL:")
   src = gsub(src, "getobjname%b():", "NULL:")
   src = gsub(src, "if%([^\n]*hookmask[^\n]*%)\n[^\n]*\n", "")
@@ -340,39 +341,39 @@ local function func_gather(src)
       local s
       d, w, s = match(src, "^(([%w_]+)[^\n]*([{;])\n)", pos)
       if not d then
-	d, w, s = match(src, "^(([%w_]+)[^(]*%b()([{;])\n)", pos)
-	if not d then d = match(src, "^[^\n]*\n", pos) end
+        d, w, s = match(src, "^(([%w_]+)[^(]*%b()([{;])\n)", pos)
+        if not d then d = match(src, "^[^\n]*\n", pos) end
       end
       if s == "{" then
-	d = d..sub(match(src, "^%b{}[^;\n]*;?\n", pos+#d-2), 3)
-	if sub(d, -2) == "{\n" then
-	  d = d..sub(match(src, "^%b{}[^;\n]*;?\n", pos+#d-2), 3)
-	end
+        d = d..sub(match(src, "^%b{}[^;\n]*;?\n", pos+#d-2), 3)
+        if sub(d, -2) == "{\n" then
+          d = d..sub(match(src, "^%b{}[^;\n]*;?\n", pos+#d-2), 3)
+        end
       end
       local k, v = nil, d
       if w == "typedef" then
-	if match(d, "^typedef enum") then
-	  head[#head+1] = d
-	else
-	  k = match(d, "([%w_]+);\n$")
-	  if not k then k = match(d, "^.-%(.-([%w_]+)%)%(") end
-	end
+        if match(d, "^typedef enum") then
+          head[#head+1] = d
+        else
+          k = match(d, "([%w_]+);\n$")
+          if not k then k = match(d, "^.-%(.-([%w_]+)%)%(") end
+        end
       elseif w == "enum" then
-	head[#head+1] = v
+        head[#head+1] = v
       elseif w ~= nil then
-	k = match(d, "^[^\n]-([%w_]+)[(%[=]")
-	if k then
-	  if w ~= "static" and k ~= "main" then v = "static "..d end
-	else
-	  k = w
-	end
+        k = match(d, "^[^\n]-([%w_]+)[(%[=]")
+        if k then
+          if w ~= "static" and k ~= "main" then v = "static "..d end
+        else
+          k = w
+        end
       end
       if w and k then
-	local o = nodes[k]
-	if o then nodes["*"..k] = o end
-	local n = #list+1
-	list[n] = v
-	nodes[k] = n
+        local o = nodes[k]
+        if o then nodes["*"..k] = o end
+        local n = #list+1
+        list[n] = v
+        nodes[k] = n
       end
     end
     pos = pos + #d
@@ -386,10 +387,10 @@ local function func_visit(nodes, list, used, n)
     if nodes[m] then
       local j = used[m]
       if not j then
-	used[m] = i
-	func_visit(nodes, list, used, m)
+        used[m] = i
+        func_visit(nodes, list, used, m)
       elseif i < j then
-	used[m] = i
+        used[m] = i
       end
     end
   end

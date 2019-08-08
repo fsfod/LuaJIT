@@ -1,24 +1,40 @@
 /*
-** Function handling (prototypes, functions and upvalues).
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-*/
+ * Function handling
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ */
 
-#ifndef _LJ_FUNC_H
-#define _LJ_FUNC_H
+#ifndef _UJ_FUNC_H
+#define _UJ_FUNC_H
 
 #include "lj_obj.h"
 
-/* Prototypes. */
-LJ_FUNC void LJ_FASTCALL lj_func_freeproto(global_State *g, GCproto *pt);
+GCfunc *uj_func_newC(lua_State *L, size_t nelems, GCtab *env);
+GCfunc *uj_func_newL_empty(lua_State *L, GCproto *pt, GCtab *env);
+GCfunc *uj_func_newL_gc(lua_State *L, GCproto *pt, GCfuncL *parent);
+size_t uj_func_sizeof(const GCfunc *fn);
+void uj_func_free(global_State *g, GCfunc *fn);
 
-/* Upvalues. */
-LJ_FUNCA void LJ_FASTCALL lj_func_closeuv(lua_State *L, TValue *level);
-LJ_FUNC void LJ_FASTCALL lj_func_freeuv(global_State *g, GCupval *uv);
+/*
+ * Checks if fn uses its environment. Following logic applies:
+ *  * For Lua functions, returns true if the function meets
+ *    at least one of following conditions:
+ *    * Its prototype accesses at least one global variable
+ *    * Function itself references at least one upvalue
+ *    If neither condition is met, returns false.
+ *  * For built-in functions, always returns false.
+ *  * For registered C functions, always returns true.
+ */
+int uj_func_usesfenv(const GCfunc *fn);
 
-/* Functions (closures). */
-LJ_FUNC GCfunc *lj_func_newC(lua_State *L, MSize nelems, GCtab *env);
-LJ_FUNC GCfunc *lj_func_newL_empty(lua_State *L, GCproto *pt, GCtab *env);
-LJ_FUNCA GCfunc *lj_func_newL_gc(lua_State *L, GCproto *pt, GCfuncL *parent);
-LJ_FUNC void LJ_FASTCALL lj_func_free(global_State *g, GCfunc *c);
+/* For a sealed function, propagates the seal mark to dependent objects. */
+void uj_func_seal_traverse(lua_State *L, GCfunc *fn, gco_mark_flipper marker);
 
-#endif
+static LJ_AINLINE int uj_func_has_upvalues(const GCfunc *fn)
+{
+	return isluafunc(fn) && fn->l.nupvalues != 0;
+}
+
+#endif /* !_UJ_FUNC_H */

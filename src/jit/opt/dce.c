@@ -1,21 +1,21 @@
 /*
-** DCE: Dead Code Elimination. Pre-LOOP only -- ASM already performs DCE.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-*/
-
-#define lj_opt_dce_c
-#define LUA_CORE
+ * DCE: Dead Code Elimination. Pre-LOOP only -- ASM already performs DCE.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ */
 
 #include "lj_obj.h"
 
 #if LJ_HASJIT
 
-#include "lj_ir.h"
-#include "lj_jit.h"
-#include "lj_iropt.h"
+#include "jit/lj_ir.h"
+#include "jit/lj_jit.h"
+#include "jit/lj_iropt.h"
 
 /* Some local macros to save typing. Undef'd at the end. */
-#define IR(ref)		(&J->cur.ir[(ref)])
+#define IR(ref)         (&J->cur.ir[(ref)])
 
 /* Scan through all snapshots and mark all referenced instructions. */
 static void dce_marksnap(jit_State *J)
@@ -24,11 +24,11 @@ static void dce_marksnap(jit_State *J)
   for (i = 0; i < nsnap; i++) {
     SnapShot *snap = &J->cur.snap[i];
     SnapEntry *map = &J->cur.snapmap[snap->mapofs];
-    MSize n, nent = snap->nent;
+    size_t n, nent = snap->nent;
     for (n = 0; n < nent; n++) {
       IRRef ref = snap_ref(map[n]);
       if (ref >= REF_FIRST)
-	irt_setmark(IR(ref)->t);
+        irt_setmark(IR(ref)->t);
     }
   }
 }
@@ -47,10 +47,7 @@ static void dce_propagate(jit_State *J)
       pchain[ir->o] = &ir->prev;
     } else if (!ir_sideeff(ir)) {
       *pchain[ir->o] = ir->prev;  /* Reroute original instruction chain. */
-      ir->t.irt = IRT_NIL;
-      ir->o = IR_NOP;  /* Replace instruction with NOP. */
-      ir->op1 = ir->op2 = 0;
-      ir->prev = 0;
+      ir_tonop(ir);
       continue;
     }
     if (ir->op1 >= REF_FIRST) irt_setmark(IR(ir->op1)->t);

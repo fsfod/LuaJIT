@@ -1,50 +1,109 @@
 /*
-** String handling.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-*/
+ * String handling.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ */
 
-#ifndef _LJ_STR_H
-#define _LJ_STR_H
-
-#include <stdarg.h>
+#ifndef _UJ_STR_H
+#define _UJ_STR_H
 
 #include "lj_obj.h"
+#include "uj_cstr.h"
+
+/* String helpers. */
+
+/* Check whether a string has a pattern matching special character. */
+int uj_str_has_pattern_specials(const GCstr *s);
+
+/* Returns a copy of string with lowered case. */
+GCstr *uj_str_lower(lua_State *L, const GCstr *s);
+
+/* Returns a copy of string with uppered case. */
+GCstr *uj_str_upper(lua_State *L, const GCstr *s);
 
 /* String interning. */
-LJ_FUNC int32_t LJ_FASTCALL lj_str_cmp(GCstr *a, GCstr *b);
-LJ_FUNC void lj_str_resize(lua_State *L, MSize newmask);
-LJ_FUNCA GCstr *lj_str_new(lua_State *L, const char *str, size_t len);
-LJ_FUNC void LJ_FASTCALL lj_str_free(global_State *g, GCstr *s);
+int32_t uj_str_cmp(const GCstr *a, const GCstr *b);
+GCstr *uj_str_new(lua_State *L, const char *str, size_t len);
+void uj_str_free(global_State *g, GCstr *s);
 
-#define lj_str_newz(L, s)	(lj_str_new(L, s, strlen(s)))
-#define lj_str_newlit(L, s)	(lj_str_new(L, "" s, sizeof(s)-1))
+GCstr *uj_str_frombuf(lua_State *L, const struct sbuf *sb);
+
+static LJ_AINLINE size_t uj_str_sizeof(const GCstr *s)
+{
+	return sizeof(GCstr) + s->len + 1;
+}
+
+static LJ_AINLINE GCstr *uj_str_newz(lua_State *L, const char *str)
+{
+	return uj_str_new(L, str, strlen(str));
+}
+
+/*
+ * Deep copy if G(`L`) and the owner of `str` are different global states,
+ * does nothing but return `str` otherwise.
+ */
+GCstr *uj_str_copy(lua_State *L, const GCstr *src);
 
 /* Type conversions. */
-LJ_FUNC size_t LJ_FASTCALL lj_str_bufnum(char *s, cTValue *o);
-LJ_FUNC char * LJ_FASTCALL lj_str_bufint(char *p, int32_t k);
-LJ_FUNCA GCstr * LJ_FASTCALL lj_str_fromnum(lua_State *L, const lua_Number *np);
-LJ_FUNC GCstr * LJ_FASTCALL lj_str_fromint(lua_State *L, int32_t k);
-LJ_FUNCA GCstr * LJ_FASTCALL lj_str_fromnumber(lua_State *L, cTValue *o);
-
-#define LJ_STR_INTBUF		(1+10)
-#define LJ_STR_NUMBUF		LUAI_MAXNUMBER2STR
+GCstr *uj_str_fromint(lua_State *L, int32_t k);
+GCstr *uj_str_fromnumber(lua_State *L, lua_Number n);
 
 /* String formatting. */
-LJ_FUNC const char *lj_str_pushvf(lua_State *L, const char *fmt, va_list argp);
-LJ_FUNC const char *lj_str_pushf(lua_State *L, const char *fmt, ...)
-#if defined(__GNUC__)
-  __attribute__ ((format (printf, 2, 3)))
-#endif
-  ;
+const char *uj_str_pushvf(lua_State *L, const char *fmt, va_list argp);
+__attribute__((format(printf, 2, 3))) const char *
+uj_str_pushf(lua_State *L, const char *fmt, ...);
 
-/* Resizable string buffers. Struct definition in lj_obj.h. */
-LJ_FUNC char *lj_str_needbuf(lua_State *L, SBuf *sb, MSize sz);
+/*
+ * Tries to convert payload of `GCstr *str` to a number. In case of success,
+ * stores the result into `lua_Number` pointed by `n`.
+ * Returns 1 if conversion was successful and `n` is properly updated.
+ * Returns 0 if conversion failed (`n` is not modified in this case).
+ */
+int uj_str_tonum(const GCstr *str, lua_Number *n);
 
-#define lj_str_initbuf(sb)	((sb)->buf = NULL, (sb)->sz = 0)
-#define lj_str_resetbuf(sb)	((sb)->n = 0)
-#define lj_str_resizebuf(L, sb, size) \
-  ((sb)->buf = (char *)lj_mem_realloc(L, (sb)->buf, (sb)->sz, (size)), \
-   (sb)->sz = (size))
-#define lj_str_freebuf(g, sb)	lj_mem_free(g, (void *)(sb)->buf, (sb)->sz)
+/*
+ * Tries to convert payload of `GCstr *str` to a number. In case of success,
+ * stores the result as a numeric payload for `TValue` pointed by `tv`
+ * and sets an appropriate tag for this `TValue`.
+ * Returns 1 if conversion was successful and `tv` is properly updated.
+ * Returns 0 if conversion failed (`tv` is not modified in this case).
+ */
+static LJ_AINLINE int uj_str_tonumtv(const GCstr *str, TValue *tv)
+{
+	return uj_cstr_tonumtv(strdata(str), tv);
+}
 
-#endif
+/* Check for number or convert string to number/int in-place (!). */
+static LJ_AINLINE int uj_str_tonumber(TValue *tv)
+{
+	return tvisnum(tv) || (tvisstr(tv) && uj_str_tonumtv(strV(tv), tv));
+}
+
+/* Checks if a TValue can be coerced to a string. */
+static LJ_AINLINE int uj_str_is_coercible(const TValue *tv)
+{
+	return tvisstr(tv) || tvisnum(tv) ? 1 : 0;
+}
+
+/*
+ * Performs naive concatenation of slots from `top` to `bottom` (both inclusive)
+ * as long as no incoercible slots are observed. Returns a pointer to the new
+ * concatenation stack top. If this value is equal to `bottom`, concatenation
+ * is fully done, and the result is stored in `bottom`. Otherwise a __concat
+ * metamethod should be invoked for `top` and `top - 1` slots.
+ */
+TValue *uj_str_cat_step(lua_State *L, TValue *bottom, TValue *top);
+
+/* Removes whitespace from both ends of a string. */
+GCstr *uj_str_trim(lua_State *L, const GCstr *str);
+
+#if LJ_HASJIT
+
+/* Helper interface to concatenate strings during IR folding. */
+GCstr *uj_str_cat_fold(lua_State *L, const GCstr *str1, const GCstr *str2);
+
+#endif /* LJ_HASJIT */
+
+#endif /* !_UJ_STR_H */

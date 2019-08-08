@@ -1,18 +1,24 @@
 /*
-** Fast function IDs.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-*/
+ * Fast function IDs.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ */
 
-#ifndef _LJ_FF_H
-#define _LJ_FF_H
+#ifndef _UJ_FF_H
+#define _UJ_FF_H
 
-/* Fast function ID. */
-typedef enum {
-  FF_LUA_ = FF_LUA,	/* Lua function (must be 0). */
-  FF_C_ = FF_C,		/* Regular C function (must be 1). */
-#define FFDEF(name)	FF_##name,
+#include "uj_funcid.h"
+
+/* Fast function IDs */
+enum fast_func {
+	FF_LUA_ = FF_LUA,
+	FF_C_ = FF_C,
+#define FFDEF(name) FF_##name,
 #include "lj_ffdef.h"
-  FF__MAX
-} FastFunc;
+#undef FFDEF
+	FF__MAX
+};
 
-#endif
+#endif /* !_UJ_FF_H */

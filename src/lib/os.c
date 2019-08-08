@@ -1,34 +1,26 @@
 /*
-** OS library.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-**
-** Major portions taken verbatim or adapted from the Lua interpreter.
-** Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
-*/
+ * OS library.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ *
+ * Major portions taken verbatim or adapted from the Lua interpreter.
+ * Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
+ */
 
 #include <errno.h>
+#include <locale.h>
 #include <time.h>
-
-#define lib_os_c
-#define LUA_LIB
+#include <unistd.h>
 
 #include "lua.h"
-#include "lauxlib.h"
 #include "lualib.h"
+#include "lauxlib.h"
 
 #include "lj_obj.h"
-#include "lj_err.h"
-#include "lj_lib.h"
-
-#if LJ_TARGET_POSIX
-#include <unistd.h>
-#else
-#include <stdio.h>
-#endif
-
-#if !LJ_TARGET_PSVITA
-#include <locale.h>
-#endif
+#include "uj_err.h"
+#include "uj_lib.h"
 
 /* ------------------------------------------------------------------------ */
 
@@ -36,26 +28,10 @@
 
 LJLIB_CF(os_execute)
 {
-#if LJ_NO_SYSTEM
-#if LJ_52
-  errno = ENOSYS;
-  return luaL_fileresult(L, 0, NULL);
-#else
-  lua_pushinteger(L, -1);
-  return 1;
-#endif
-#else
   const char *cmd = luaL_optstring(L, 1, NULL);
   int stat = system(cmd);
-#if LJ_52
-  if (cmd)
-    return luaL_execresult(L, stat);
-  setboolV(L->top++, 1);
-#else
   setintV(L->top++, stat);
-#endif
   return 1;
-#endif
 }
 
 LJLIB_CF(os_remove)
@@ -73,36 +49,23 @@ LJLIB_CF(os_rename)
 
 LJLIB_CF(os_tmpname)
 {
-#if LJ_TARGET_PS3 || LJ_TARGET_PS4 || LJ_TARGET_PSVITA
-  lj_err_caller(L, LJ_ERR_OSUNIQF);
-  return 0;
-#else
-#if LJ_TARGET_POSIX
-  char buf[15+1];
+  const char tmp_file_name[] = "/tmp/lua_XXXXXX";
+  const size_t buf_size = sizeof(tmp_file_name);
+  char buf[buf_size];
   int fp;
-  strcpy(buf, "/tmp/lua_XXXXXX");
+  strncpy(buf, tmp_file_name, buf_size);
   fp = mkstemp(buf);
   if (fp != -1)
     close(fp);
   else
-    lj_err_caller(L, LJ_ERR_OSUNIQF);
-#else
-  char buf[L_tmpnam];
-  if (tmpnam(buf) == NULL)
-    lj_err_caller(L, LJ_ERR_OSUNIQF);
-#endif
+    uj_err_caller(L, UJ_ERR_OSUNIQF);
   lua_pushstring(L, buf);
   return 1;
-#endif
 }
 
 LJLIB_CF(os_getenv)
 {
-#if LJ_TARGET_CONSOLE
-  lua_pushnil(L);
-#else
   lua_pushstring(L, getenv(luaL_checkstring(L, 1)));  /* if NULL push nil */
-#endif
   return 1;
 }
 
@@ -112,7 +75,7 @@ LJLIB_CF(os_exit)
   if (L->base < L->top && tvisbool(L->base))
     status = boolV(L->base) ? EXIT_SUCCESS : EXIT_FAILURE;
   else
-    status = lj_lib_optint(L, 1, EXIT_SUCCESS);
+    status = uj_lib_optint(L, 1, EXIT_SUCCESS);
   if (L->base+1 < L->top && tvistruecond(L->base+1))
     lua_close(L);
   exit(status);
@@ -158,7 +121,7 @@ static int getfield(lua_State *L, const char *key, int d)
     res = (int)lua_tointeger(L, -1);
   } else {
     if (d < 0)
-      lj_err_callerv(L, LJ_ERR_OSDATEF, key);
+      uj_err_callerv(L, UJ_ERR_OSDATEF, key);
     res = d;
   }
   lua_pop(L, 1);
@@ -170,22 +133,12 @@ LJLIB_CF(os_date)
   const char *s = luaL_optstring(L, 1, "%c");
   time_t t = luaL_opt(L, (time_t)luaL_checknumber, 2, time(NULL));
   struct tm *stm;
-#if LJ_TARGET_POSIX
   struct tm rtm;
-#endif
   if (*s == '!') {  /* UTC? */
     s++;  /* Skip '!' */
-#if LJ_TARGET_POSIX
     stm = gmtime_r(&t, &rtm);
-#else
-    stm = gmtime(&t);
-#endif
   } else {
-#if LJ_TARGET_POSIX
     stm = localtime_r(&t, &rtm);
-#else
-    stm = localtime(&t);
-#endif
   }
   if (stm == NULL) {  /* Invalid date? */
     setnilV(L->top-1);
@@ -207,13 +160,13 @@ LJLIB_CF(os_date)
     luaL_buffinit(L, &b);
     for (; *s; s++) {
       if (*s != '%' || *(s + 1) == '\0') {  /* No conversion specifier? */
-	luaL_addchar(&b, *s);
+        luaL_addchar(&b, *s);
       } else {
-	size_t reslen;
-	char buff[200];  /* Should be big enough for any conversion result. */
-	cc[1] = *(++s);
-	reslen = strftime(buff, sizeof(buff), cc, stm);
-	luaL_addlstring(&b, buff, reslen);
+        size_t reslen;
+        char buff[200];  /* Should be big enough for any conversion result. */
+        cc[1] = *(++s);
+        reslen = strftime(buff, sizeof(buff), cc, stm);
+        luaL_addlstring(&b, buff, reslen);
       }
     }
     luaL_pushresult(&b);
@@ -249,7 +202,7 @@ LJLIB_CF(os_time)
 LJLIB_CF(os_difftime)
 {
   lua_pushnumber(L, difftime((time_t)(luaL_checknumber(L, 1)),
-			     (time_t)(luaL_optnumber(L, 2, (lua_Number)0))));
+                             (time_t)(luaL_optnumber(L, 2, (lua_Number)0))));
   return 1;
 }
 
@@ -257,12 +210,9 @@ LJLIB_CF(os_difftime)
 
 LJLIB_CF(os_setlocale)
 {
-#if LJ_TARGET_PSVITA
-  lua_pushliteral(L, "C");
-#else
-  GCstr *s = lj_lib_optstr(L, 1);
+  GCstr *s = uj_lib_optstr(L, 1);
   const char *str = s ? strdata(s) : NULL;
-  int opt = lj_lib_checkopt(L, 2, 6,
+  int opt = uj_lib_checkopt(L, 2, 6,
     "\5ctype\7numeric\4time\7collate\10monetary\1\377\3all");
   if (opt == 0) opt = LC_CTYPE;
   else if (opt == 1) opt = LC_NUMERIC;
@@ -271,7 +221,6 @@ LJLIB_CF(os_setlocale)
   else if (opt == 4) opt = LC_MONETARY;
   else if (opt == 6) opt = LC_ALL;
   lua_pushstring(L, setlocale(opt, str));
-#endif
   return 1;
 }
 

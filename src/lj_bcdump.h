@@ -1,13 +1,16 @@
 /*
-** Bytecode dump definitions.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-*/
+ * Bytecode dump definitions.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ */
 
 #ifndef _LJ_BCDUMP_H
 #define _LJ_BCDUMP_H
 
 #include "lj_obj.h"
-#include "lj_lex.h"
+#include "frontend/lj_lex.h"
 
 /* -- Bytecode dump format ------------------------------------------------ */
 
@@ -29,21 +32,21 @@
 */
 
 /* Bytecode dump header. */
-#define BCDUMP_HEAD1		0x1b
-#define BCDUMP_HEAD2		0x4c
-#define BCDUMP_HEAD3		0x4a
+#define BCDUMP_HEAD1            0x1b
+#define BCDUMP_HEAD2            0x4c
+#define BCDUMP_HEAD3            0x4a
 
 /* If you perform *any* kind of private modifications to the bytecode itself
 ** or to the dump format, you *must* set BCDUMP_VERSION to 0x80 or higher.
 */
-#define BCDUMP_VERSION		1
+#define BCDUMP_VERSION          1
 
 /* Compatibility flags. */
-#define BCDUMP_F_BE		0x01
-#define BCDUMP_F_STRIP		0x02
-#define BCDUMP_F_FFI		0x04
+#define BCDUMP_F_BE             0x01
+#define BCDUMP_F_STRIP          0x02
+#define BCDUMP_F_FFI            0x04
 
-#define BCDUMP_F_KNOWN		(BCDUMP_F_FFI*2-1)
+#define BCDUMP_F_KNOWN          (BCDUMP_F_FFI*2-1)
 
 /* Type codes for the GC constants of a prototype. Plus length for strings. */
 enum {
@@ -59,8 +62,8 @@ enum {
 
 /* -- Bytecode reader/writer ---------------------------------------------- */
 
-LJ_FUNC int lj_bcwrite(lua_State *L, GCproto *pt, lua_Writer writer,
-		       void *data, int strip);
-LJ_FUNC GCproto *lj_bcread(LexState *ls);
+int lj_bcwrite(lua_State *L, GCproto *pt, lua_Writer writer,
+               void *data, int strip);
+GCproto *lj_bcread(LexState *ls);
 
 #endif

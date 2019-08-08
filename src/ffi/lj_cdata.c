@@ -1,19 +1,22 @@
 /*
-** C data management.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-*/
+ * C data management.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ */
 
 #include "lj_obj.h"
 
 #if LJ_HASFFI
 
 #include "lj_gc.h"
-#include "lj_err.h"
-#include "lj_str.h"
+#include "uj_mem.h"
+#include "uj_err.h"
 #include "lj_tab.h"
-#include "lj_ctype.h"
-#include "lj_cconv.h"
-#include "lj_cdata.h"
+#include "ffi/lj_ctype.h"
+#include "ffi/lj_cconv.h"
+#include "ffi/lj_cdata.h"
 
 /* -- C data allocation --------------------------------------------------- */
 
@@ -30,9 +33,9 @@ GCcdata *lj_cdata_newref(CTState *cts, const void *p, CTypeID id)
 GCcdata *lj_cdata_newv(CTState *cts, CTypeID id, CTSize sz, CTSize align)
 {
   global_State *g;
-  MSize extra = sizeof(GCcdataVar) + sizeof(GCcdata) +
-		(align > CT_MEMALIGN ? (1u<<align) - (1u<<CT_MEMALIGN) : 0);
-  char *p = lj_mem_newt(cts->L, extra + sz, char);
+  size_t extra = sizeof(GCcdataVar) + sizeof(GCcdata) +
+                (align > CT_MEMALIGN ? (1u<<align) - (1u<<CT_MEMALIGN) : 0);
+  char *p = (char *)uj_mem_alloc(cts->L, extra + sz);
   uintptr_t adata = (uintptr_t)p + sizeof(GCcdataVar) + sizeof(GCcdata);
   uintptr_t almask = (1u << align) - 1u;
   GCcdata *cd = (GCcdata *)(((adata + almask) & ~almask) - sizeof(GCcdata));
@@ -41,46 +44,46 @@ GCcdata *lj_cdata_newv(CTState *cts, CTypeID id, CTSize sz, CTSize align)
   cdatav(cd)->extra = extra;
   cdatav(cd)->len = sz;
   g = cts->g;
-  setgcrefr(cd->nextgc, g->gc.root);
-  setgcref(g->gc.root, obj2gco(cd));
+  cd->nextgc = g->gc.root;
+  g->gc.root = obj2gco(cd);
   newwhite(g, obj2gco(cd));
-  cd->marked |= 0x80;
+  cd->marked |= LJ_GC_CDATA_VAR;
   cd->gct = ~LJ_TCDATA;
   cd->ctypeid = id;
   return cd;
 }
 
 /* Free a C data object. */
-void LJ_FASTCALL lj_cdata_free(global_State *g, GCcdata *cd)
+void lj_cdata_free(global_State *g, GCcdata *cd)
 {
   if (LJ_UNLIKELY(cd->marked & LJ_GC_CDATA_FIN)) {
     GCobj *root;
     makewhite(g, obj2gco(cd));
     markfinalized(obj2gco(cd));
-    if ((root = gcref(g->gc.mmudata)) != NULL) {
-      setgcrefr(cd->nextgc, root->gch.nextgc);
-      setgcref(root->gch.nextgc, obj2gco(cd));
-      setgcref(g->gc.mmudata, obj2gco(cd));
+    if ((root = g->gc.mmudata) != NULL) {
+      cd->nextgc = root->gch.nextgc;
+      root->gch.nextgc = obj2gco(cd);
+      g->gc.mmudata = obj2gco(cd);
     } else {
-      setgcref(cd->nextgc, obj2gco(cd));
-      setgcref(g->gc.mmudata, obj2gco(cd));
+      cd->nextgc = obj2gco(cd);
+      g->gc.mmudata = obj2gco(cd);
     }
   } else if (LJ_LIKELY(!cdataisv(cd))) {
     CType *ct = ctype_raw(ctype_ctsG(g), cd->ctypeid);
     CTSize sz = ctype_hassize(ct->info) ? ct->size : CTSIZE_PTR;
     lua_assert(ctype_hassize(ct->info) || ctype_isfunc(ct->info) ||
-	       ctype_isextern(ct->info));
-    lj_mem_free(g, cd, sizeof(GCcdata) + sz);
+               ctype_isextern(ct->info));
+    uj_mem_free(MEM_G(g), cd, sizeof(GCcdata) + sz);
   } else {
-    lj_mem_free(g, memcdatav(cd), sizecdatav(cd));
+    uj_mem_free(MEM_G(g), memcdatav(cd), sizecdatav(cd));
   }
 }
 
-TValue * LJ_FASTCALL lj_cdata_setfin(lua_State *L, GCcdata *cd)
+TValue * lj_cdata_setfin(lua_State *L, GCcdata *cd)
 {
   global_State *g = G(L);
   GCtab *t = ctype_ctsG(g)->finalizer;
-  if (gcref(t->metatable)) {
+  if (t->metatable != NULL) {
     /* Add cdata to finalizer table, if still enabled. */
     TValue *tv, tmp;
     setcdataV(L, &tmp, cd);
@@ -97,8 +100,8 @@ TValue * LJ_FASTCALL lj_cdata_setfin(lua_State *L, GCcdata *cd)
 /* -- C data indexing ----------------------------------------------------- */
 
 /* Index C data by a TValue. Return CType and pointer. */
-CType *lj_cdata_index(CTState *cts, GCcdata *cd, cTValue *key, uint8_t **pp,
-		      CTInfo *qual)
+CType *lj_cdata_index(CTState *cts, GCcdata *cd, const TValue *key, uint8_t **pp,
+                      CTInfo *qual)
 {
   uint8_t *p = (uint8_t *)cdataptr(cd);
   CType *ct = ctype_get(cts, cd->ctypeid);
@@ -119,21 +122,18 @@ collect_attrib:
   }
   lua_assert(!ctype_isref(ct->info));  /* Interning rejects refs to refs. */
 
-  if (tvisint(key)) {
-    idx = (ptrdiff_t)intV(key);
-    goto integer_key;
-  } else if (tvisnum(key)) {  /* Numeric key. */
-    idx = LJ_64 ? (ptrdiff_t)numV(key) : (ptrdiff_t)lj_num2int(numV(key));
+  if (tvisnum(key)) {  /* Numeric key. */
+    idx = (ptrdiff_t)numV(key);
   integer_key:
     if (ctype_ispointer(ct->info)) {
       CTSize sz = lj_ctype_size(cts, ctype_cid(ct->info));  /* Element size. */
       if (sz == CTSIZE_INVALID)
-	lj_err_caller(cts->L, LJ_ERR_FFI_INVSIZE);
+        uj_err_caller(cts->L, UJ_ERR_FFI_INVSIZE);
       if (ctype_isptr(ct->info)) {
-	p = (uint8_t *)cdata_getptr(p, ct->size);
+        p = (uint8_t *)cdata_getptr(p, ct->size);
       } else if ((ct->info & (CTF_VECTOR|CTF_COMPLEX))) {
-	if ((ct->info & CTF_COMPLEX)) idx &= 1;
-	*qual |= CTF_CONST;  /* Valarray elements are constant. */
+        if ((ct->info & CTF_COMPLEX)) idx &= 1;
+        *qual |= CTF_CONST;  /* Valarray elements are constant. */
       }
       *pp = p + idx*(int32_t)sz;
       return ct;
@@ -144,7 +144,7 @@ collect_attrib:
     if (ctype_isenum(ctk->info)) ctk = ctype_child(cts, ctk);
     if (ctype_isinteger(ctk->info)) {
       lj_cconv_ct_ct(cts, ctype_get(cts, CTID_INT_PSZ), ctk,
-		     (uint8_t *)&idx, cdataptr(cdk), 0);
+                     (uint8_t *)&idx, cdataptr(cdk), 0);
       goto integer_key;
     }
   } else if (tvisstr(key)) {  /* String key. */
@@ -153,30 +153,30 @@ collect_attrib:
       CTSize ofs;
       CType *fct = lj_ctype_getfieldq(cts, ct, name, &ofs, qual);
       if (fct) {
-	*pp = p + ofs;
-	return fct;
+        *pp = p + ofs;
+        return fct;
       }
     } else if (ctype_iscomplex(ct->info)) {
       if (name->len == 2) {
-	*qual |= CTF_CONST;  /* Complex fields are constant. */
-	if (strdata(name)[0] == 'r' && strdata(name)[1] == 'e') {
-	  *pp = p;
-	  return ct;
-	} else if (strdata(name)[0] == 'i' && strdata(name)[1] == 'm') {
-	  *pp = p + (ct->size >> 1);
-	  return ct;
-	}
+        *qual |= CTF_CONST;  /* Complex fields are constant. */
+        if (strdata(name)[0] == 'r' && strdata(name)[1] == 'e') {
+          *pp = p;
+          return ct;
+        } else if (strdata(name)[0] == 'i' && strdata(name)[1] == 'm') {
+          *pp = p + (ct->size >> 1);
+          return ct;
+        }
       }
     } else if (cd->ctypeid == CTID_CTYPEID) {
       /* Allow indexing a (pointer to) struct constructor to get constants. */
       CType *sct = ctype_raw(cts, *(CTypeID *)p);
       if (ctype_isptr(sct->info))
-	sct = ctype_rawchild(cts, sct);
+        sct = ctype_rawchild(cts, sct);
       if (ctype_isstruct(sct->info)) {
-	CTSize ofs;
-	CType *fct = lj_ctype_getfield(cts, sct, name, &ofs);
-	if (fct && ctype_isconstval(fct->info))
-	  return fct;
+        CTSize ofs;
+        CType *fct = lj_ctype_getfield(cts, sct, name, &ofs);
+        if (fct && ctype_isconstval(fct->info))
+          return fct;
       }
       ct = sct;  /* Allow resolving metamethods for constructors, too. */
     }
@@ -276,7 +276,7 @@ void lj_cdata_set(CTState *cts, CType *d, uint8_t *dp, TValue *o, CTInfo qual)
 
   if (((d->info|qual) & CTF_CONST)) {
   err_const:
-    lj_err_caller(cts->L, LJ_ERR_FFI_WRCONST);
+    uj_err_caller(cts->L, UJ_ERR_FFI_WRCONST);
   }
 
   lj_cconv_ct_tv(cts, d, dp, o, 0);

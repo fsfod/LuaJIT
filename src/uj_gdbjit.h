@@ -1,22 +1,25 @@
 /*
-** Client for the GDB JIT API.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-*/
+ * Client for the GDB JIT API.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ */
 
-#ifndef _LJ_GDBJIT_H
-#define _LJ_GDBJIT_H
+#ifndef _UJ_GDBJIT_H
+#define _UJ_GDBJIT_H
 
 #include "lj_obj.h"
-#include "lj_jit.h"
+#include "jit/lj_jit.h"
 
-#if LJ_HASJIT && defined(LUAJIT_USE_GDBJIT)
+#if LJ_HASJIT && defined(GDBJIT)
 
-LJ_FUNC void lj_gdbjit_addtrace(jit_State *J, GCtrace *T);
-LJ_FUNC void lj_gdbjit_deltrace(jit_State *J, GCtrace *T);
+void uj_gdbjit_addtrace(const jit_State *J, GCtrace *T);
+void uj_gdbjit_deltrace(const jit_State *J, GCtrace *T);
 
-#else
-#define lj_gdbjit_addtrace(J, T)	UNUSED(T)
-#define lj_gdbjit_deltrace(J, T)	UNUSED(T)
-#endif
+#else /* LJ_HASJIT && defined(GDBJIT) */
+#define uj_gdbjit_addtrace(J, T) UNUSED(T)
+#define uj_gdbjit_deltrace(J, T) UNUSED(T)
+#endif /* LJ_HASJIT && defined(GDBJIT) */
 
-#endif
+#endif /* !_UJ_GDBJIT_H */

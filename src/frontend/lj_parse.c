@@ -1,30 +1,37 @@
 /*
-** Lua parser (source code -> bytecode).
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-**
-** Major portions taken verbatim or adapted from the Lua interpreter.
-** Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
-*/
-
-#define lj_parse_c
-#define LUA_CORE
+ * Lua parser (source code -> bytecode).
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ *
+ * Major portions taken verbatim or adapted from the Lua interpreter.
+ * Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
+ */
 
 #include "lj_obj.h"
+#include "uj_obj_immutable.h"
 #include "lj_gc.h"
-#include "lj_err.h"
-#include "lj_debug.h"
-#include "lj_str.h"
+#include "uj_mem.h"
+#include "uj_errmsg.h"
+#include "uj_str.h"
+#include "uj_sbuf.h"
+#include "uj_proto.h"
 #include "lj_tab.h"
-#include "lj_func.h"
-#include "lj_state.h"
+#include "uj_state.h"
 #include "lj_bc.h"
 #if LJ_HASFFI
-#include "lj_ctype.h"
-#endif
-#include "lj_lex.h"
-#include "lj_parse.h"
+#include "ffi/lj_ctype.h"
+#endif /* LJ_HASFFI */
+#include "frontend/lj_lex.h"
+#include "frontend/lj_parse.h"
 #include "lj_vm.h"
-#include "lj_vmevent.h"
+#include "utils/uj_math.h"
+#include "uj_hotcnt.h"
+#ifdef UJIT_COVERAGE
+#include "uj_coverage.h"
+#endif /* UJIT_COVERAGE */
+#include "uj_dispatch.h"
 
 /* -- Parser structures and definitions ----------------------------------- */
 
@@ -34,19 +41,19 @@ typedef enum {
   VKNIL,
   VKFALSE,
   VKTRUE,
-  VKSTR,	/* sval = string value */
-  VKNUM,	/* nval = number value */
+  VKSTR,        /* sval = string value */
+  VKNUM,        /* nval = number value */
   VKLAST = VKNUM,
-  VKCDATA,	/* nval = cdata value, not treated as a constant expression */
+  VKCDATA,      /* nval = cdata value, not treated as a constant expression */
   /* Non-constant expressions follow: */
-  VLOCAL,	/* info = local register, aux = vstack index */
-  VUPVAL,	/* info = upvalue index, aux = vstack index */
-  VGLOBAL,	/* sval = string value */
-  VINDEXED,	/* info = table register, aux = index reg/byte/string const */
-  VJMP,		/* info = instruction PC */
-  VRELOCABLE,	/* info = instruction PC */
-  VNONRELOC,	/* info = result register */
-  VCALL,	/* info = instruction PC, aux = base */
+  VLOCAL,       /* info = local register, aux = vstack index */
+  VUPVAL,       /* info = upvalue index, aux = vstack index */
+  VGLOBAL,      /* sval = string value */
+  VINDEXED,     /* info = table register, aux = index reg/byte/string const */
+  VJMP,         /* info = instruction PC */
+  VRELOCABLE,   /* info = instruction PC */
+  VNONRELOC,    /* info = result register */
+  VCALL,        /* info = instruction PC, aux = base */
   VVOID
 } ExpKind;
 
@@ -54,28 +61,28 @@ typedef enum {
 typedef struct ExpDesc {
   union {
     struct {
-      uint32_t info;	/* Primary info. */
-      uint32_t aux;	/* Secondary info. */
+      uint32_t info;    /* Primary info. */
+      uint32_t aux;     /* Secondary info. */
     } s;
-    TValue nval;	/* Number value. */
-    GCstr *sval;	/* String value. */
+    TValue nval;        /* Number value. */
+    GCstr *sval;        /* String value. */
   } u;
   ExpKind k;
-  BCPos t;		/* True condition jump list. */
-  BCPos f;		/* False condition jump list. */
+  BCPos t;              /* True condition jump list. */
+  BCPos f;              /* False condition jump list. */
 } ExpDesc;
 
 /* Macros for expressions. */
-#define expr_hasjump(e)		((e)->t != (e)->f)
+#define expr_hasjump(e)         ((e)->t != (e)->f)
 
-#define expr_isk(e)		((e)->k <= VKLAST)
-#define expr_isk_nojump(e)	(expr_isk(e) && !expr_hasjump(e))
-#define expr_isnumk(e)		((e)->k == VKNUM)
-#define expr_isnumk_nojump(e)	(expr_isnumk(e) && !expr_hasjump(e))
-#define expr_isstrk(e)		((e)->k == VKSTR)
+#define expr_isk(e)             ((e)->k <= VKLAST)
+#define expr_isk_nojump(e)      (expr_isk(e) && !expr_hasjump(e))
+#define expr_isnumk(e)          ((e)->k == VKNUM)
+#define expr_isnumk_nojump(e)   (expr_isnumk(e) && !expr_hasjump(e))
+#define expr_isstrk(e)          ((e)->k == VKSTR)
 
-#define expr_numtv(e)		check_exp(expr_isnumk((e)), &(e)->u.nval)
-#define expr_numberV(e)		numberVnum(expr_numtv((e)))
+#define expr_numtv(e)           lua_check(expr_isnumk((e)), &(e)->u.nval)
+#define expr_numberV(e)         numV(expr_numtv((e)))
 
 /* Initialize expression. */
 static LJ_AINLINE void expr_init(ExpDesc *e, ExpKind k, uint32_t info)
@@ -89,59 +96,18 @@ static LJ_AINLINE void expr_init(ExpDesc *e, ExpKind k, uint32_t info)
 static int expr_numiszero(ExpDesc *e)
 {
   TValue *o = expr_numtv(e);
-  return tvisint(o) ? (intV(o) == 0) : tviszero(o);
+  return tviszero(o);
 }
 
-/* Per-function linked list of scope blocks. */
-typedef struct FuncScope {
-  struct FuncScope *prev;	/* Link to outer scope. */
-  MSize vstart;			/* Start of block-local variables. */
-  uint8_t nactvar;		/* Number of active vars outside the scope. */
-  uint8_t flags;		/* Scope flags. */
-} FuncScope;
+#define FSCOPE_LOOP             0x01    /* Scope is a (breakable) loop. */
+#define FSCOPE_BREAK            0x02    /* Break used in scope. */
+#define FSCOPE_GOLA             0x04    /* Goto or label used in scope. */
+#define FSCOPE_UPVAL            0x08    /* Upvalue in scope. */
+#define FSCOPE_NOCLOSE          0x10    /* Do not close upvalues. */
 
-#define FSCOPE_LOOP		0x01	/* Scope is a (breakable) loop. */
-#define FSCOPE_BREAK		0x02	/* Break used in scope. */
-#define FSCOPE_GOLA		0x04	/* Goto or label used in scope. */
-#define FSCOPE_UPVAL		0x08	/* Upvalue in scope. */
-#define FSCOPE_NOCLOSE		0x10	/* Do not close upvalues. */
+#define NAME_BREAK              ((GCstr *)(uintptr_t)1)
 
-#define NAME_BREAK		((GCstr *)(uintptr_t)1)
-
-/* Index into variable stack. */
-typedef uint16_t VarIndex;
-#define LJ_MAX_VSTACK		(65536 - LJ_MAX_UPVAL)
-
-/* Variable/goto/label info. */
-#define VSTACK_VAR_RW		0x01	/* R/W variable. */
-#define VSTACK_GOTO		0x02	/* Pending goto. */
-#define VSTACK_LABEL		0x04	/* Label. */
-
-/* Per-function state. */
-typedef struct FuncState {
-  GCtab *kt;			/* Hash table for constants. */
-  LexState *ls;			/* Lexer state. */
-  lua_State *L;			/* Lua state. */
-  FuncScope *bl;		/* Current scope. */
-  struct FuncState *prev;	/* Enclosing function. */
-  BCPos pc;			/* Next bytecode position. */
-  BCPos lasttarget;		/* Bytecode position of last jump target. */
-  BCPos jpc;			/* Pending jump list to next bytecode. */
-  BCReg freereg;		/* First free register. */
-  BCReg nactvar;		/* Number of active local variables. */
-  BCReg nkn, nkgc;		/* Number of lua_Number/GCobj constants */
-  BCLine linedefined;		/* First line of the function definition. */
-  BCInsLine *bcbase;		/* Base of bytecode stack. */
-  BCPos bclim;			/* Limit of bytecode stack. */
-  MSize vbase;			/* Base of variable stack for this function. */
-  uint8_t flags;		/* Prototype flags. */
-  uint8_t numparams;		/* Number of parameters. */
-  uint8_t framesize;		/* Fixed frame size. */
-  uint8_t nuv;			/* Number of upvalues */
-  VarIndex varmap[LJ_MAX_LOCVAR];  /* Map from register to variable idx. */
-  VarIndex uvmap[LJ_MAX_UPVAL];	/* Map from upvalue to variable idx. */
-  VarIndex uvtmp[LJ_MAX_UPVAL];	/* Temporary upvalue map. */
-} FuncState;
+#define LJ_MAX_VSTACK           (65536 - LJ_MAX_UPVAL)
 
 /* Binary and unary operators. ORDER OPR */
 typedef enum BinOpr {
@@ -156,42 +122,47 @@ typedef enum BinOpr {
 LJ_STATIC_ASSERT((int)BC_ISGE-(int)BC_ISLT == (int)OPR_GE-(int)OPR_LT);
 LJ_STATIC_ASSERT((int)BC_ISLE-(int)BC_ISLT == (int)OPR_LE-(int)OPR_LT);
 LJ_STATIC_ASSERT((int)BC_ISGT-(int)BC_ISLT == (int)OPR_GT-(int)OPR_LT);
-LJ_STATIC_ASSERT((int)BC_SUBVV-(int)BC_ADDVV == (int)OPR_SUB-(int)OPR_ADD);
-LJ_STATIC_ASSERT((int)BC_MULVV-(int)BC_ADDVV == (int)OPR_MUL-(int)OPR_ADD);
-LJ_STATIC_ASSERT((int)BC_DIVVV-(int)BC_ADDVV == (int)OPR_DIV-(int)OPR_ADD);
-LJ_STATIC_ASSERT((int)BC_MODVV-(int)BC_ADDVV == (int)OPR_MOD-(int)OPR_ADD);
+LJ_STATIC_ASSERT((int)BC_SUB-(int)BC_ADD == (int)OPR_SUB-(int)OPR_ADD);
+LJ_STATIC_ASSERT((int)BC_MUL-(int)BC_ADD == (int)OPR_MUL-(int)OPR_ADD);
+LJ_STATIC_ASSERT((int)BC_DIV-(int)BC_ADD == (int)OPR_DIV-(int)OPR_ADD);
+LJ_STATIC_ASSERT((int)BC_MOD-(int)BC_ADD == (int)OPR_MOD-(int)OPR_ADD);
 
 /* -- Error handling ------------------------------------------------------ */
 
-LJ_NORET LJ_NOINLINE static void err_syntax(LexState *ls, ErrMsg em)
+LJ_NORET LJ_NOINLINE static void err_syntax(LexState *ls, enum err_msg em)
 {
-  lj_lex_error(ls, ls->token, em);
+  lj_lex_error(ls, ls->token, em, NULL);
 }
 
 LJ_NORET LJ_NOINLINE static void err_token(LexState *ls, LexToken token)
 {
-  lj_lex_error(ls, ls->token, LJ_ERR_XTOKEN, lj_lex_token2str(ls, token));
+  lj_lex_error(ls, ls->token, UJ_ERR_XTOKEN, lj_lex_token2str(ls, token));
 }
 
 LJ_NORET static void err_limit(FuncState *fs, uint32_t limit, const char *what)
 {
   if (fs->linedefined == 0)
-    lj_lex_error(fs->ls, 0, LJ_ERR_XLIMM, limit, what);
+    lj_lex_error(fs->ls, 0, UJ_ERR_XLIMM, limit, what);
   else
-    lj_lex_error(fs->ls, 0, LJ_ERR_XLIMF, fs->linedefined, limit, what);
+    lj_lex_error(fs->ls, 0, UJ_ERR_XLIMF, fs->linedefined, limit, what);
 }
 
-#define checklimit(fs, v, l, m)		if ((v) >= (l)) err_limit(fs, l, m)
-#define checklimitgt(fs, v, l, m)	if ((v) > (l)) err_limit(fs, l, m)
-#define checkcond(ls, c, em)		{ if (!(c)) err_syntax(ls, em); }
+#define checklimit(fs, v, l, m)         if ((v) >= (l)) err_limit(fs, l, m)
+#define checklimitgt(fs, v, l, m)       if ((v) > (l)) err_limit(fs, l, m)
+#define checkcond(ls, c, em)            { if (!(c)) err_syntax(ls, em); }
 
 /* -- Management of constants --------------------------------------------- */
 
 /* Return bytecode encoding for primitive constant. */
-#define const_pri(e)		check_exp((e)->k <= VKTRUE, (e)->k)
+#define const_pri(e)            lua_check((e)->k <= VKTRUE, (e)->k)
 
-#define tvhaskslot(o)	((o)->u32.hi == 0)
-#define tvkslot(o)	((o)->u32.lo)
+/* During parsing, constants are contained in a lua table. Constant
+** is a key, with the constant number as a corresponding value. If
+** constant slot is not filled yet, hash table value has nil type.
+** Otherwise, it is a plain integer with LJ_TNUMX type.
+*/
+#define tvhaskslot(o)   (tvisnum(o))
+#define tvkslot(o)      ((BCReg)rawV(o))
 
 /* Add a number constant. */
 static BCReg const_num(FuncState *fs, ExpDesc *e)
@@ -202,7 +173,7 @@ static BCReg const_num(FuncState *fs, ExpDesc *e)
   o = lj_tab_set(L, fs->kt, &e->u.nval);
   if (tvhaskslot(o))
     return tvkslot(o);
-  o->u64 = fs->nkn;
+  setrawV(o, fs->nkn);
   return fs->nkn++;
 }
 
@@ -216,7 +187,7 @@ static BCReg const_gc(FuncState *fs, GCobj *gc, uint32_t itype)
   o = lj_tab_set(L, fs->kt, &key);
   if (tvhaskslot(o))
     return tvkslot(o);
-  o->u64 = fs->nkgc;
+  setrawV(o, fs->nkgc);
   return fs->nkgc++;
 }
 
@@ -232,7 +203,7 @@ GCstr *lj_parse_keepstr(LexState *ls, const char *str, size_t len)
 {
   /* NOBARRIER: the key is new or kept alive. */
   lua_State *L = ls->L;
-  GCstr *s = lj_str_new(L, str, len);
+  GCstr *s = uj_str_new(L, str, len);
   TValue *tv = lj_tab_setstr(L, ls->fs->kt, s);
   if (tvisnil(tv)) setboolV(tv, 1);
   lj_gc_check(L);
@@ -291,7 +262,7 @@ static int jmp_patchtestreg(FuncState *fs, BCPos pc, BCReg reg)
     } else {
       setbc_a(&ilp->ins, reg);
       if (reg >= bc_a(ilp[1].ins))
-	setbc_a(&ilp[1].ins, reg+1);
+        setbc_a(&ilp[1].ins, reg+1);
     }
   } else {
     return 0;  /* Cannot patch other instructions. */
@@ -313,7 +284,7 @@ static void jmp_patchins(FuncState *fs, BCPos pc, BCPos dest)
   BCPos offset = dest-(pc+1)+BCBIAS_J;
   lua_assert(dest != NO_JMP);
   if (offset > BCMAX_D)
-    err_syntax(fs->ls, LJ_ERR_XJUMP);
+    err_syntax(fs->ls, UJ_ERR_XJUMP);
   setbc_d(jmp, offset);
 }
 
@@ -335,7 +306,7 @@ static void jmp_append(FuncState *fs, BCPos *l1, BCPos l2)
 
 /* Patch jump list and preserve produced values. */
 static void jmp_patchval(FuncState *fs, BCPos list, BCPos vtarget,
-			 BCReg reg, BCPos dtarget)
+                         BCReg reg, BCPos dtarget)
 {
   while (list != NO_JMP) {
     BCPos next = jmp_next(fs, list);
@@ -373,7 +344,7 @@ static void bcreg_bump(FuncState *fs, BCReg n)
   BCReg sz = fs->freereg + n;
   if (sz > fs->framesize) {
     if (sz >= LJ_MAX_SLOTS)
-      err_syntax(fs->ls, LJ_ERR_XSLOTS);
+      err_syntax(fs->ls, UJ_ERR_XSLOTS);
     fs->framesize = (uint8_t)sz;
   }
 }
@@ -404,7 +375,7 @@ static void expr_free(FuncState *fs, ExpDesc *e)
 /* -- Bytecode emitter ---------------------------------------------------- */
 
 /* Emit bytecode instruction. */
-static BCPos bcemit_INS(FuncState *fs, BCIns ins)
+BCPos lj_parse_bcemit(FuncState *fs, BCIns ins)
 {
   BCPos pc = fs->pc;
   LexState *ls = fs->ls;
@@ -413,7 +384,8 @@ static BCPos bcemit_INS(FuncState *fs, BCIns ins)
   if (LJ_UNLIKELY(pc >= fs->bclim)) {
     ptrdiff_t base = fs->bcbase - ls->bcstack;
     checklimit(fs, ls->sizebcstack, LJ_MAX_BCINS, "bytecode instructions");
-    lj_mem_growvec(fs->L, ls->bcstack, ls->sizebcstack, LJ_MAX_BCINS,BCInsLine);
+    ls->bcstack = (BCInsLine *)uj_mem_grow(fs->L, ls->bcstack,
+                          &(ls->sizebcstack), LJ_MAX_BCINS, sizeof(BCInsLine));
     fs->bclim = (BCPos)(ls->sizebcstack - base);
     fs->bcbase = ls->bcstack + base;
   }
@@ -423,11 +395,11 @@ static BCPos bcemit_INS(FuncState *fs, BCIns ins)
   return pc;
 }
 
-#define bcemit_ABC(fs, o, a, b, c)	bcemit_INS(fs, BCINS_ABC(o, a, b, c))
-#define bcemit_AD(fs, o, a, d)		bcemit_INS(fs, BCINS_AD(o, a, d))
-#define bcemit_AJ(fs, o, a, j)		bcemit_INS(fs, BCINS_AJ(o, a, j))
+#define bcemit_ABC(fs, o, a, b, c)    lj_parse_bcemit(fs, BCINS_ABC(o, a, b, c))
+#define bcemit_AD(fs, o, a, d)        lj_parse_bcemit(fs, BCINS_AD(o, a, d))
+#define bcemit_AJ(fs, o, a, j)        lj_parse_bcemit(fs, BCINS_AJ(o, a, j))
 
-#define bcptr(fs, e)			(&(fs)->bcbase[(e)->u.s.info].ins)
+#define bcptr(fs, e)                  (&(fs)->bcbase[(e)->u.s.info].ins)
 
 /* -- Bytecode emitter for expressions ------------------------------------ */
 
@@ -460,7 +432,7 @@ static void expr_discharge(FuncState *fs, ExpDesc *e)
   } else {
     return;
   }
-  e->u.s.info = bcemit_INS(fs, ins);
+  e->u.s.info = lj_parse_bcemit(fs, ins);
   e->k = VRELOCABLE;
 }
 
@@ -474,21 +446,21 @@ static void bcemit_nil(FuncState *fs, BCReg from, BCReg n)
     case BC_KPRI:
       if (bc_d(*ip) != ~LJ_TNIL) break;
       if (from == pfrom) {
-	if (n == 1) return;
+        if (n == 1) return;
       } else if (from == pfrom+1) {
-	from = pfrom;
-	n++;
+        from = pfrom;
+        n++;
       } else {
-	break;
+        break;
       }
       *ip = BCINS_AD(BC_KNIL, from, from+n-1);  /* Replace KPRI. */
       return;
     case BC_KNIL:
       pto = bc_d(*ip);
       if (pfrom <= from && from <= pto+1) {  /* Can we connect both ranges? */
-	if (from+n-1 > pto)
-	  setbc_d(ip, from+n-1);  /* Patch previous instruction range. */
-	return;
+        if (from+n-1 > pto)
+          setbc_d(ip, from+n-1);  /* Patch previous instruction range. */
+        return;
       }
       break;
     default:
@@ -496,8 +468,8 @@ static void bcemit_nil(FuncState *fs, BCReg from, BCReg n)
     }
   }
   /* Emit new instruction or replace old instruction. */
-  bcemit_INS(fs, n == 1 ? BCINS_AD(BC_KPRI, from, VKNIL) :
-			  BCINS_AD(BC_KNIL, from, from+n-1));
+  lj_parse_bcemit(fs, n == 1 ? BCINS_AD(BC_KPRI, from, VKNIL) :
+                               BCINS_AD(BC_KNIL, from, from+n-1));
 }
 
 /* Discharge an expression to a specific register. Ignore branches. */
@@ -508,24 +480,17 @@ static void expr_toreg_nobranch(FuncState *fs, ExpDesc *e, BCReg reg)
   if (e->k == VKSTR) {
     ins = BCINS_AD(BC_KSTR, reg, const_str(fs, e));
   } else if (e->k == VKNUM) {
-#if LJ_DUALNUM
-    cTValue *tv = expr_numtv(e);
-    if (tvisint(tv) && checki16(intV(tv)))
-      ins = BCINS_AD(BC_KSHORT, reg, (BCReg)(uint16_t)intV(tv));
-    else
-#else
     lua_Number n = expr_numberV(e);
     int32_t k = lj_num2int(n);
     if (checki16(k) && n == (lua_Number)k)
       ins = BCINS_AD(BC_KSHORT, reg, (BCReg)(uint16_t)k);
     else
-#endif
       ins = BCINS_AD(BC_KNUM, reg, const_num(fs, e));
 #if LJ_HASFFI
   } else if (e->k == VKCDATA) {
     fs->flags |= PROTO_FFI;
     ins = BCINS_AD(BC_KCDATA, reg,
-		   const_gc(fs, obj2gco(cdataV(&e->u.nval)), LJ_TCDATA));
+                   const_gc(fs, obj2gco(cdataV(&e->u.nval)), LJ_TCDATA));
 #endif
   } else if (e->k == VRELOCABLE) {
     setbc_a(bcptr(fs, e), reg);
@@ -543,7 +508,7 @@ static void expr_toreg_nobranch(FuncState *fs, ExpDesc *e, BCReg reg)
     lua_assert(e->k == VVOID || e->k == VJMP);
     return;
   }
-  bcemit_INS(fs, ins);
+  lj_parse_bcemit(fs, ins);
 noins:
   e->u.s.info = reg;
   e->k = VNONRELOC;
@@ -646,11 +611,11 @@ static void bcemit_store(FuncState *fs, ExpDesc *var, ExpDesc *e)
       /* Free late alloced key reg to avoid assert on free of value reg. */
       /* This can only happen when called from expr_table(). */
       lua_assert(e->k != VNONRELOC || ra < fs->nactvar ||
-		 rc < ra || (bcreg_free(fs, rc),1));
+                 rc < ra || (bcreg_free(fs, rc),1));
       ins = BCINS_ABC(BC_TSETV, ra, var->u.s.info, rc);
     }
   }
-  bcemit_INS(fs, ins);
+  lj_parse_bcemit(fs, ins);
   expr_free(fs, e);
 }
 
@@ -709,8 +674,13 @@ static BCPos bcemit_branch(FuncState *fs, ExpDesc *e, int cond)
   if (e->k == VRELOCABLE) {
     BCIns *ip = bcptr(fs, e);
     if (bc_op(*ip) == BC_NOT) {
+      BCPos jmp;
+
       *ip = BCINS_AD(cond ? BC_ISF : BC_IST, 0, bc_d(*ip));
-      return bcemit_jmp(fs);
+      jmp = bcemit_jmp(fs);
+      /* Fix line for condition */
+      fs->bcbase[(e)->u.s.info].line = fs->bcbase[jmp].line;
+      return jmp;
     }
   }
   if (e->k != VNONRELOC) {
@@ -767,16 +737,10 @@ static int foldarith(BinOpr opr, ExpDesc *e1, ExpDesc *e2)
   TValue o;
   lua_Number n;
   if (!expr_isnumk_nojump(e1) || !expr_isnumk_nojump(e2)) return 0;
-  n = lj_vm_foldarith(expr_numberV(e1), expr_numberV(e2), (int)opr-OPR_ADD);
+  n = uj_math_foldarith(expr_numberV(e1), expr_numberV(e2),
+                        (enum FoldarithOp)((int)opr-OPR_ADD));
   setnumV(&o, n);
   if (tvisnan(&o) || tvismzero(&o)) return 0;  /* Avoid NaN and -0 as consts. */
-  if (LJ_DUALNUM) {
-    int32_t k = lj_num2int(n);
-    if ((lua_Number)k == n) {
-      setintV(&e1->u.nval, k);
-      return 1;
-    }
-  }
   setnumV(&e1->u.nval, n);
   return 1;
 }
@@ -784,33 +748,17 @@ static int foldarith(BinOpr opr, ExpDesc *e1, ExpDesc *e2)
 /* Emit arithmetic operator. */
 static void bcemit_arith(FuncState *fs, BinOpr opr, ExpDesc *e1, ExpDesc *e2)
 {
-  BCReg rb, rc, t;
+  BCReg rb, rc;
   uint32_t op;
   if (foldarith(opr, e1, e2))
     return;
   if (opr == OPR_POW) {
     op = BC_POW;
-    rc = expr_toanyreg(fs, e2);
-    rb = expr_toanyreg(fs, e1);
   } else {
-    op = opr-OPR_ADD+BC_ADDVV;
-    /* Must discharge 2nd operand first since VINDEXED might free regs. */
-    expr_toval(fs, e2);
-    if (expr_isnumk(e2) && (rc = const_num(fs, e2)) <= BCMAX_C)
-      op -= BC_ADDVV-BC_ADDVN;
-    else
-      rc = expr_toanyreg(fs, e2);
-    /* 1st operand discharged by bcemit_binop_left, but need KNUM/KSHORT. */
-    lua_assert(expr_isnumk(e1) || e1->k == VNONRELOC);
-    expr_toval(fs, e1);
-    /* Avoid two consts to satisfy bytecode constraints. */
-    if (expr_isnumk(e1) && !expr_isnumk(e2) &&
-	(t = const_num(fs, e1)) <= BCMAX_B) {
-      rb = rc; rc = t; op -= BC_ADDVV-BC_ADDNV;
-    } else {
-      rb = expr_toanyreg(fs, e1);
-    }
+    op = opr - OPR_ADD + BC_ADD;
   }
+  rc = expr_toanyreg(fs, e2);
+  rb = expr_toanyreg(fs, e1);
   /* Using expr_free might cause asserts if the order is wrong. */
   if (e1->k == VNONRELOC && e1->u.s.info >= fs->nactvar) fs->freereg--;
   if (e2->k == VNONRELOC && e2->u.s.info >= fs->nactvar) fs->freereg--;
@@ -859,7 +807,7 @@ static void bcemit_comp(FuncState *fs, BinOpr opr, ExpDesc *e1, ExpDesc *e2)
   /* Using expr_free might cause asserts if the order is wrong. */
   if (e1->k == VNONRELOC && e1->u.s.info >= fs->nactvar) fs->freereg--;
   if (e2->k == VNONRELOC && e2->u.s.info >= fs->nactvar) fs->freereg--;
-  bcemit_INS(fs, ins);
+  lj_parse_bcemit(fs, ins);
   eret->u.s.info = bcemit_jmp(fs);
   eret->k = VJMP;
 }
@@ -911,7 +859,7 @@ static void bcemit_binop(FuncState *fs, BinOpr op, ExpDesc *e1, ExpDesc *e2)
     e1->k = VRELOCABLE;
   } else {
     lua_assert(op == OPR_NE || op == OPR_EQ ||
-	       op == OPR_LT || op == OPR_GE || op == OPR_LE || op == OPR_GT);
+               op == OPR_LT || op == OPR_GE || op == OPR_LE || op == OPR_GT);
     bcemit_comp(fs, op, e1, e2);
   }
 }
@@ -947,28 +895,19 @@ static void bcemit_unop(FuncState *fs, BCOp op, ExpDesc *e)
     if (op == BC_UNM && !expr_hasjump(e)) {  /* Constant-fold negations. */
 #if LJ_HASFFI
       if (e->k == VKCDATA) {  /* Fold in-place since cdata is not interned. */
-	GCcdata *cd = cdataV(&e->u.nval);
-	int64_t *p = (int64_t *)cdataptr(cd);
-	if (cd->ctypeid == CTID_COMPLEX_DOUBLE)
-	  p[1] ^= (int64_t)U64x(80000000,00000000);
-	else
-	  *p = -*p;
-	return;
+        GCcdata *cd = cdataV(&e->u.nval);
+        int64_t *p = (int64_t *)cdataptr(cd);
+        if (cd->ctypeid == CTID_COMPLEX_DOUBLE)
+          p[1] ^= (int64_t)U64x(80000000,00000000);
+        else
+          *p = -*p;
+        return;
       } else
 #endif
       if (expr_isnumk(e) && !expr_numiszero(e)) {  /* Avoid folding to -0. */
-	TValue *o = expr_numtv(e);
-	if (tvisint(o)) {
-	  int32_t k = intV(o);
-	  if (k == -k)
-	    setnumV(o, -(lua_Number)k);
-	  else
-	    setintV(o, -k);
-	  return;
-	} else {
-	  o->u64 ^= U64x(80000000,00000000);
-	  return;
-	}
+        TValue *o = expr_numtv(e);
+        setrawV(o, rawV(o) ^ U64x(80000000,00000000));
+        return;
       }
     }
     expr_toanyreg(fs, e);
@@ -1007,7 +946,7 @@ static void lex_match(LexState *ls, LexToken what, LexToken who, BCLine line)
     } else {
       const char *swhat = lj_lex_token2str(ls, what);
       const char *swho = lj_lex_token2str(ls, who);
-      lj_lex_error(ls, ls->token, LJ_ERR_XMATCH, swhat, swho, line);
+      lj_lex_error(ls, ls->token, UJ_ERR_XMATCH, swhat, swho, line);
     }
   }
 }
@@ -1025,23 +964,28 @@ static GCstr *lex_str(LexState *ls)
 
 /* -- Variable handling --------------------------------------------------- */
 
-#define var_get(ls, fs, i)	((ls)->vstack[(fs)->varmap[(i)]])
+#define var_get(ls, fs, i)      ((ls)->vstack[(fs)->varmap[(i)]])
+
+VarInfo *vstack_grow(LexState *ls) {
+  return (VarInfo *)uj_mem_grow(ls->L, ls->vstack,
+                            &(ls->sizevstack), LJ_MAX_VSTACK, sizeof(VarInfo));
+}
 
 /* Define a new local variable. */
 static void var_new(LexState *ls, BCReg n, GCstr *name)
 {
   FuncState *fs = ls->fs;
-  MSize vtop = ls->vtop;
+  size_t vtop = ls->vtop;
   checklimit(fs, fs->nactvar+n, LJ_MAX_LOCVAR, "local variables");
   if (LJ_UNLIKELY(vtop >= ls->sizevstack)) {
     if (ls->sizevstack >= LJ_MAX_VSTACK)
-      lj_lex_error(ls, 0, LJ_ERR_XLIMC, LJ_MAX_VSTACK);
-    lj_mem_growvec(ls->L, ls->vstack, ls->sizevstack, LJ_MAX_VSTACK, VarInfo);
+      lj_lex_error(ls, 0, UJ_ERR_XLIMC, LJ_MAX_VSTACK);
+    ls->vstack = vstack_grow(ls);
   }
   lua_assert((uintptr_t)name < VARNAME__MAX ||
-	     lj_tab_getstr(fs->kt, name) != NULL);
+             lj_tab_getstr(fs->kt, name) != NULL);
   /* NOBARRIER: name is anchored in fs->kt and ls->vstack is not a GCobj. */
-  setgcref(ls->vstack[vtop].name, obj2gco(name));
+  ls->vstack[vtop].name = name;
   fs->varmap[fs->nactvar+n] = (uint16_t)vtop;
   ls->vtop = vtop+1;
 }
@@ -1079,16 +1023,16 @@ static BCReg var_lookup_local(FuncState *fs, GCstr *n)
 {
   int i;
   for (i = fs->nactvar-1; i >= 0; i--) {
-    if (n == strref(var_get(fs->ls, fs, i).name))
+    if (n == var_get(fs->ls, fs, i).name)
       return (BCReg)i;
   }
   return (BCReg)-1;  /* Not found. */
 }
 
 /* Lookup or add upvalue index. */
-static MSize var_lookup_uv(FuncState *fs, MSize vidx, ExpDesc *e)
+static size_t var_lookup_uv(FuncState *fs, size_t vidx, ExpDesc *e)
 {
-  MSize i, n = fs->nuv;
+  size_t i, n = fs->nuv;
   for (i = 0; i < n; i++)
     if (fs->uvmap[i] == vidx)
       return i;  /* Already exists. */
@@ -1105,28 +1049,28 @@ static MSize var_lookup_uv(FuncState *fs, MSize vidx, ExpDesc *e)
 static void fscope_uvmark(FuncState *fs, BCReg level);
 
 /* Recursively lookup variables in enclosing functions. */
-static MSize var_lookup_(FuncState *fs, GCstr *name, ExpDesc *e, int first)
+static size_t var_lookup_(FuncState *fs, GCstr *name, ExpDesc *e, int first)
 {
   if (fs) {
     BCReg reg = var_lookup_local(fs, name);
     if ((int32_t)reg >= 0) {  /* Local in this function? */
       expr_init(e, VLOCAL, reg);
       if (!first)
-	fscope_uvmark(fs, reg);  /* Scope now has an upvalue. */
-      return (MSize)(e->u.s.aux = (uint32_t)fs->varmap[reg]);
+        fscope_uvmark(fs, reg);  /* Scope now has an upvalue. */
+      return (size_t)(e->u.s.aux = (uint32_t)fs->varmap[reg]);
     } else {
-      MSize vidx = var_lookup_(fs->prev, name, e, 0);  /* Var in outer func? */
+      size_t vidx = var_lookup_(fs->prev, name, e, 0);  /* Var in outer func? */
       if ((int32_t)vidx >= 0) {  /* Yes, make it an upvalue here. */
-	e->u.s.info = (uint8_t)var_lookup_uv(fs, vidx, e);
-	e->k = VUPVAL;
-	return vidx;
+        e->u.s.info = (uint8_t)var_lookup_uv(fs, vidx, e);
+        e->k = VUPVAL;
+        return vidx;
       }
     }
   } else {  /* Not found in any function, must be a global. */
     expr_init(e, VGLOBAL, 0);
     e->u.sval = name;
   }
-  return (MSize)-1;  /* Global. */
+  return (size_t)-1;  /* Global. */
 }
 
 /* Lookup variable name. */
@@ -1136,18 +1080,18 @@ static MSize var_lookup_(FuncState *fs, GCstr *name, ExpDesc *e, int first)
 /* -- Goto an label handling ---------------------------------------------- */
 
 /* Add a new goto or label. */
-static MSize gola_new(LexState *ls, GCstr *name, uint8_t info, BCPos pc)
+static size_t gola_new(LexState *ls, GCstr *name, uint8_t info, BCPos pc)
 {
   FuncState *fs = ls->fs;
-  MSize vtop = ls->vtop;
+  size_t vtop = ls->vtop;
   if (LJ_UNLIKELY(vtop >= ls->sizevstack)) {
     if (ls->sizevstack >= LJ_MAX_VSTACK)
-      lj_lex_error(ls, 0, LJ_ERR_XLIMC, LJ_MAX_VSTACK);
-    lj_mem_growvec(ls->L, ls->vstack, ls->sizevstack, LJ_MAX_VSTACK, VarInfo);
+      lj_lex_error(ls, 0, UJ_ERR_XLIMC, LJ_MAX_VSTACK);
+    ls->vstack = vstack_grow(ls);
   }
   lua_assert(name == NAME_BREAK || lj_tab_getstr(fs->kt, name) != NULL);
   /* NOBARRIER: name is anchored in fs->kt and ls->vstack is not a GCobj. */
-  setgcref(ls->vstack[vtop].name, obj2gco(name));
+  ls->vstack[vtop].name = name;
   ls->vstack[vtop].startpc = pc;
   ls->vstack[vtop].slot = (uint8_t)fs->nactvar;
   ls->vstack[vtop].info = info;
@@ -1155,16 +1099,12 @@ static MSize gola_new(LexState *ls, GCstr *name, uint8_t info, BCPos pc)
   return vtop;
 }
 
-#define gola_isgoto(v)		((v)->info & VSTACK_GOTO)
-#define gola_islabel(v)		((v)->info & VSTACK_LABEL)
-#define gola_isgotolabel(v)	((v)->info & (VSTACK_GOTO|VSTACK_LABEL))
-
 /* Patch goto to jump to label. */
 static void gola_patch(LexState *ls, VarInfo *vg, VarInfo *vl)
 {
   FuncState *fs = ls->fs;
   BCPos pc = vg->startpc;
-  setgcrefnull(vg->name);  /* Invalidate pending goto. */
+  vg->name = NULL;  /* Invalidate pending goto. */
   setbc_a(&fs->bcbase[pc].ins, vl->slot);
   jmp_patch(fs, pc, vl->startpc);
 }
@@ -1187,19 +1127,19 @@ static void gola_close(LexState *ls, VarInfo *vg)
 }
 
 /* Resolve pending forward gotos for label. */
-static void gola_resolve(LexState *ls, FuncScope *bl, MSize idx)
+static void gola_resolve(LexState *ls, FuncScope *bl, size_t idx)
 {
   VarInfo *vg = ls->vstack + bl->vstart;
   VarInfo *vl = ls->vstack + idx;
   for (; vg < vl; vg++)
-    if (gcrefeq(vg->name, vl->name) && gola_isgoto(vg)) {
+    if (vg->name == vl->name && gola_isgoto(vg)) {
       if (vg->slot < vl->slot) {
-	GCstr *name = strref(var_get(ls, ls->fs, vg->slot).name);
-	lua_assert((uintptr_t)name >= VARNAME__MAX);
-	ls->linenumber = ls->fs->bcbase[vg->startpc].line;
-	lua_assert(strref(vg->name) != NAME_BREAK);
-	lj_lex_error(ls, 0, LJ_ERR_XGSCOPE,
-		     strdata(strref(vg->name)), strdata(name));
+        GCstr *name = var_get(ls, ls->fs, vg->slot).name;
+        lua_assert((uintptr_t)name >= VARNAME__MAX);
+        ls->linenumber = ls->fs->bcbase[vg->startpc].line;
+        lua_assert(vg->name != NAME_BREAK);
+        lj_lex_error(ls, 0, UJ_ERR_XGSCOPE,
+                     strdata(vg->name), strdata(name));
       }
       gola_patch(ls, vg, vl);
     }
@@ -1211,30 +1151,30 @@ static void gola_fixup(LexState *ls, FuncScope *bl)
   VarInfo *v = ls->vstack + bl->vstart;
   VarInfo *ve = ls->vstack + ls->vtop;
   for (; v < ve; v++) {
-    GCstr *name = strref(v->name);
+    GCstr *name = v->name;
     if (name != NULL) {  /* Only consider remaining valid gotos/labels. */
       if (gola_islabel(v)) {
-	VarInfo *vg;
-	setgcrefnull(v->name);  /* Invalidate label that goes out of scope. */
-	for (vg = v+1; vg < ve; vg++)  /* Resolve pending backward gotos. */
-	  if (strref(vg->name) == name && gola_isgoto(vg)) {
-	    if ((bl->flags&FSCOPE_UPVAL) && vg->slot > v->slot)
-	      gola_close(ls, vg);
-	    gola_patch(ls, vg, v);
-	  }
+        VarInfo *vg;
+        v->name = NULL;  /* Invalidate label that goes out of scope. */
+        for (vg = v+1; vg < ve; vg++)  /* Resolve pending backward gotos. */
+          if (vg->name == name && gola_isgoto(vg)) {
+            if ((bl->flags&FSCOPE_UPVAL) && vg->slot > v->slot)
+              gola_close(ls, vg);
+            gola_patch(ls, vg, v);
+          }
       } else if (gola_isgoto(v)) {
-	if (bl->prev) {  /* Propagate goto or break to outer scope. */
-	  bl->prev->flags |= name == NAME_BREAK ? FSCOPE_BREAK : FSCOPE_GOLA;
-	  v->slot = bl->nactvar;
-	  if ((bl->flags & FSCOPE_UPVAL))
-	    gola_close(ls, v);
-	} else {  /* No outer scope: undefined goto label or no loop. */
-	  ls->linenumber = ls->fs->bcbase[v->startpc].line;
-	  if (name == NAME_BREAK)
-	    lj_lex_error(ls, 0, LJ_ERR_XBREAK);
-	  else
-	    lj_lex_error(ls, 0, LJ_ERR_XLUNDEF, strdata(name));
-	}
+        if (bl->prev) {  /* Propagate goto or break to outer scope. */
+          bl->prev->flags |= name == NAME_BREAK ? FSCOPE_BREAK : FSCOPE_GOLA;
+          v->slot = bl->nactvar;
+          if ((bl->flags & FSCOPE_UPVAL))
+            gola_close(ls, v);
+        } else {  /* No outer scope: undefined goto label or no loop. */
+          ls->linenumber = ls->fs->bcbase[v->startpc].line;
+          if (name == NAME_BREAK)
+            lj_lex_error(ls, 0, UJ_ERR_XBREAK, NULL);
+          else
+            lj_lex_error(ls, 0, UJ_ERR_XLUNDEF, strdata(name));
+        }
       }
     }
   }
@@ -1246,7 +1186,7 @@ static VarInfo *gola_findlabel(LexState *ls, GCstr *name)
   VarInfo *v = ls->vstack + ls->fs->bl->vstart;
   VarInfo *ve = ls->vstack + ls->vtop;
   for (; v < ve; v++)
-    if (strref(v->name) == name && gola_islabel(v))
+    if (v->name == name && gola_islabel(v))
       return v;
   return NULL;
 }
@@ -1277,7 +1217,7 @@ static void fscope_end(FuncState *fs)
     bcemit_AJ(fs, BC_UCLO, bl->nactvar, 0);
   if ((bl->flags & FSCOPE_BREAK)) {
     if ((bl->flags & FSCOPE_LOOP)) {
-      MSize idx = gola_new(ls, NAME_BREAK, VSTACK_LABEL, fs->pc);
+      size_t idx = gola_new(ls, NAME_BREAK, VSTACK_LABEL, fs->pc);
       ls->vtop = idx;  /* Drop break label immediately. */
       gola_resolve(ls, bl, idx);
     } else {  /* Need the fixup step to propagate the breaks. */
@@ -1303,13 +1243,13 @@ static void fscope_uvmark(FuncState *fs, BCReg level)
 /* -- Function state management ------------------------------------------- */
 
 /* Fixup bytecode for prototype. */
-static void fs_fixup_bc(FuncState *fs, GCproto *pt, BCIns *bc, MSize n)
+static void fs_fixup_bc(FuncState *fs, GCproto *pt, BCIns *bc, size_t n)
 {
   BCInsLine *base = fs->bcbase;
-  MSize i;
+  size_t i;
   pt->sizebc = n;
   bc[0] = BCINS_AD((fs->flags & PROTO_VARARG) ? BC_FUNCV : BC_FUNCF,
-		   fs->framesize, 0);
+                   fs->framesize, 0);
   for (i = 1; i < n; i++)
     bc[i] = base[i].ins;
 }
@@ -1319,7 +1259,7 @@ static void fs_fixup_uv2(FuncState *fs, GCproto *pt)
 {
   VarInfo *vstack = fs->ls->vstack;
   uint16_t *uv = proto_uv(pt);
-  MSize i, n = pt->sizeuv;
+  size_t i, n = pt->sizeuv;
   for (i = 0; i < n; i++) {
     VarIndex vidx = uv[i];
     if (vidx >= LJ_MAX_VSTACK)
@@ -1337,48 +1277,34 @@ static void fs_fixup_k(FuncState *fs, GCproto *pt, void *kptr)
   GCtab *kt;
   TValue *array;
   Node *node;
-  MSize i, hmask;
+  size_t i, hmask;
   checklimitgt(fs, fs->nkn, BCMAX_D+1, "constants");
   checklimitgt(fs, fs->nkgc, BCMAX_D+1, "constants");
-  setmref(pt->k, kptr);
+  pt->k = kptr;
   pt->sizekn = fs->nkn;
   pt->sizekgc = fs->nkgc;
   kt = fs->kt;
-  array = tvref(kt->array);
+  array = kt->array;
   for (i = 0; i < kt->asize; i++)
     if (tvhaskslot(&array[i])) {
       TValue *tv = &((TValue *)kptr)[tvkslot(&array[i])];
-      if (LJ_DUALNUM)
-	setintV(tv, (int32_t)i);
-      else
-	setnumV(tv, (lua_Number)i);
+      setnumV(tv, (lua_Number)i);
     }
-  node = noderef(kt->node);
+  node = kt->node;
   hmask = kt->hmask;
   for (i = 0; i <= hmask; i++) {
     Node *n = &node[i];
     if (tvhaskslot(&n->val)) {
       ptrdiff_t kidx = (ptrdiff_t)tvkslot(&n->val);
-      lua_assert(!tvisint(&n->key));
       if (tvisnum(&n->key)) {
-	TValue *tv = &((TValue *)kptr)[kidx];
-	if (LJ_DUALNUM) {
-	  lua_Number nn = numV(&n->key);
-	  int32_t k = lj_num2int(nn);
-	  lua_assert(!tvismzero(&n->key));
-	  if ((lua_Number)k == nn)
-	    setintV(tv, k);
-	  else
-	    *tv = n->key;
-	} else {
-	  *tv = n->key;
-	}
+        TValue *tv = &((TValue *)kptr)[kidx];
+        *tv = n->key;
       } else {
-	GCobj *o = gcV(&n->key);
-	setgcref(((GCRef *)kptr)[~kidx], o);
-	lj_gc_objbarrier(fs->L, pt, o);
-	if (tvisproto(&n->key))
-	  fs_fixup_uv2(fs, gco2pt(o));
+        GCobj *o = gcV(&n->key);
+        ((GCobj**)kptr)[~kidx] = o;
+        lj_gc_objbarrier(fs->L, pt, o);
+        if (tvisproto(&n->key))
+          fs_fixup_uv2(fs, gco2pt(o));
       }
     }
   }
@@ -1387,7 +1313,7 @@ static void fs_fixup_k(FuncState *fs, GCproto *pt, void *kptr)
 /* Fixup upvalues for prototype, step #1. */
 static void fs_fixup_uv1(FuncState *fs, GCproto *pt, uint16_t *uv)
 {
-  setmref(pt->uv, uv);
+  pt->uv = uv;
   pt->sizeuv = fs->nuv;
   memcpy(uv, fs->uvtmp, fs->nuv*sizeof(VarIndex));
 }
@@ -1401,14 +1327,14 @@ static size_t fs_prep_line(FuncState *fs, BCLine numline)
 
 /* Fixup lineinfo for prototype. */
 static void fs_fixup_line(FuncState *fs, GCproto *pt,
-			  void *lineinfo, BCLine numline)
+                          void *lineinfo, BCLine numline)
 {
   BCInsLine *base = fs->bcbase + 1;
   BCLine first = fs->linedefined;
-  MSize i = 0, n = fs->pc-1;
+  size_t i = 0, n = fs->pc-1;
   pt->firstline = fs->linedefined;
   pt->numline = numline;
-  setmref(pt->lineinfo, lineinfo);
+  pt->lineinfo = lineinfo;
   if (LJ_LIKELY(numline < 256)) {
     uint8_t *li = (uint8_t *)lineinfo;
     do {
@@ -1433,96 +1359,61 @@ static void fs_fixup_line(FuncState *fs, GCproto *pt,
   }
 }
 
-/* Resize buffer if needed. */
-static LJ_NOINLINE void fs_buf_resize(LexState *ls, MSize len)
-{
-  MSize sz = ls->sb.sz * 2;
-  while (ls->sb.n + len > sz) sz = sz * 2;
-  lj_str_resizebuf(ls->L, &ls->sb, sz);
-}
-
-static LJ_AINLINE void fs_buf_need(LexState *ls, MSize len)
-{
-  if (LJ_UNLIKELY(ls->sb.n + len > ls->sb.sz))
-    fs_buf_resize(ls, len);
-}
-
-/* Add string to buffer. */
-static void fs_buf_str(LexState *ls, const char *str, MSize len)
-{
-  char *p = ls->sb.buf + ls->sb.n;
-  MSize i;
-  ls->sb.n += len;
-  for (i = 0; i < len; i++) p[i] = str[i];
-}
-
-/* Add ULEB128 value to buffer. */
-static void fs_buf_uleb128(LexState *ls, uint32_t v)
-{
-  MSize n = ls->sb.n;
-  uint8_t *p = (uint8_t *)ls->sb.buf;
-  for (; v >= 0x80; v >>= 7)
-    p[n++] = (uint8_t)((v & 0x7f) | 0x80);
-  p[n++] = (uint8_t)v;
-  ls->sb.n = n;
-}
-
 /* Prepare variable info for prototype. */
 static size_t fs_prep_var(LexState *ls, FuncState *fs, size_t *ofsvar)
 {
+  struct sbuf *sb = &ls->sb;
   VarInfo *vs =ls->vstack, *ve;
-  MSize i, n;
+  size_t i, n;
   BCPos lastpc;
-  lj_str_resetbuf(&ls->sb);  /* Copy to temp. string buffer. */
+  uj_sbuf_reset(sb);  /* Copy to temp. string buffer. */
   /* Store upvalue names. */
   for (i = 0, n = fs->nuv; i < n; i++) {
-    GCstr *s = strref(vs[fs->uvmap[i]].name);
-    MSize len = s->len+1;
-    fs_buf_need(ls, len);
-    fs_buf_str(ls, strdata(s), len);
+    GCstr *s = vs[fs->uvmap[i]].name;
+    size_t len = s->len+1;
+    uj_sbuf_push_block(sb, strdata(s), len);
   }
-  *ofsvar = ls->sb.n;
+  *ofsvar = uj_sbuf_size(sb);
   lastpc = 0;
   /* Store local variable names and compressed ranges. */
   for (ve = vs + ls->vtop, vs += fs->vbase; vs < ve; vs++) {
     if (!gola_isgotolabel(vs)) {
-      GCstr *s = strref(vs->name);
+      GCstr *s = vs->name;
       BCPos startpc;
       if ((uintptr_t)s < VARNAME__MAX) {
-	fs_buf_need(ls, 1 + 2*5);
-	ls->sb.buf[ls->sb.n++] = (uint8_t)(uintptr_t)s;
+        uj_sbuf_push_char(sb, (uint8_t)(uintptr_t)s);
       } else {
-	MSize len = s->len+1;
-	fs_buf_need(ls, len + 2*5);
-	fs_buf_str(ls, strdata(s), len);
+        size_t len = s->len+1;
+        uj_sbuf_push_block(sb, strdata(s), len);
       }
       startpc = vs->startpc;
-      fs_buf_uleb128(ls, startpc-lastpc);
-      fs_buf_uleb128(ls, vs->endpc-startpc);
+      uj_sbuf_push_uleb128(sb, startpc-lastpc);
+      uj_sbuf_push_uleb128(sb, vs->endpc-startpc);
       lastpc = startpc;
     }
   }
-  fs_buf_need(ls, 1);
-  ls->sb.buf[ls->sb.n++] = '\0';  /* Terminator for varinfo. */
-  return ls->sb.n;
+  uj_sbuf_push_char(sb, '\0'); /* Terminator for varinfo. */
+  return uj_sbuf_size(sb);
 }
 
 /* Fixup variable info for prototype. */
 static void fs_fixup_var(LexState *ls, GCproto *pt, uint8_t *p, size_t ofsvar)
 {
-  setmref(pt->uvinfo, p);
-  setmref(pt->varinfo, (char *)p + ofsvar);
-  memcpy(p, ls->sb.buf, ls->sb.n);  /* Copy from temp. string buffer. */
+  struct sbuf *sb = &ls->sb;
+  pt->uvinfo = p;
+  pt->varinfo = (uint8_t *)((char *)p + ofsvar);
+  /* Copy from temp. string buffer. */
+  memcpy(p, uj_sbuf_front(sb), uj_sbuf_size(sb));
 }
 #else
 
 /* Initialize with empty debug info, if disabled. */
-#define fs_prep_line(fs, numline)		(UNUSED(numline), 0)
+#define fs_prep_line(fs, numline)               (UNUSED(numline), 0)
 #define fs_fixup_line(fs, pt, li, numline) \
-  pt->firstline = pt->numline = 0, setmref((pt)->lineinfo, NULL)
-#define fs_prep_var(ls, fs, ofsvar)		(UNUSED(ofsvar), 0)
+  pt->firstline = pt->numline = 0, (pt)->lineinfo = NULL
+#define fs_prep_var(ls, fs, ofsvar)             (UNUSED(ofsvar), 0)
 #define fs_fixup_var(ls, pt, p, ofsvar) \
-  setmref((pt)->uvinfo, NULL), setmref((pt)->varinfo, NULL)
+  ((pt)->uvinfo = NULL, (pt)->varinfo = NULL)
 
 #endif
 
@@ -1559,18 +1450,18 @@ static void fs_fixup_ret(FuncState *fs)
       switch (bc_op(ins)) {
       case BC_CALLMT: case BC_CALLT:
       case BC_RETM: case BC_RET: case BC_RET0: case BC_RET1:
-	offset = bcemit_INS(fs, ins);  /* Copy original instruction. */
-	fs->bcbase[offset].line = fs->bcbase[pc].line;
-	offset = offset-(pc+1)+BCBIAS_J;
-	if (offset > BCMAX_D)
-	  err_syntax(fs->ls, LJ_ERR_XFIXUP);
-	/* Replace with UCLO plus branch. */
-	fs->bcbase[pc].ins = BCINS_AD(BC_UCLO, 0, offset);
-	break;
+        offset = lj_parse_bcemit(fs, ins);  /* Copy original instruction. */
+        fs->bcbase[offset].line = fs->bcbase[pc].line;
+        offset = offset-(pc+1)+BCBIAS_J;
+        if (offset > BCMAX_D)
+          err_syntax(fs->ls, UJ_ERR_XFIXUP);
+        /* Replace with UCLO plus branch. */
+        fs->bcbase[pc].ins = BCINS_AD(BC_UCLO, 0, offset);
+        break;
       case BC_UCLO:
-	return;  /* We're done. */
+        return;  /* We're done. */
       default:
-	break;
+        break;
       }
     }
   }
@@ -1580,6 +1471,9 @@ static void fs_fixup_ret(FuncState *fs)
 static GCproto *fs_finish(LexState *ls, BCLine line)
 {
   lua_State *L = ls->L;
+#if LJ_HASJIT
+  jit_State *J = L2J(L);
+#endif /* LJ_HASJIT */
   FuncState *fs = ls->fs;
   BCLine numline = line - fs->linedefined;
   size_t sizept, ofsk, ofsuv, ofsli, ofsdbg, ofsvar;
@@ -1588,8 +1482,13 @@ static GCproto *fs_finish(LexState *ls, BCLine line)
   /* Apply final fixups. */
   fs_fixup_ret(fs);
 
+#ifdef UJIT_COVERAGE
+  if (uj_coverage_enabled(L))
+    uj_coverage_emit(fs);
+#endif /* UJIT_COVERAGE */
+
   /* Calculate total size of prototype including all colocated arrays. */
-  sizept = sizeof(GCproto) + fs->pc*sizeof(BCIns) + fs->nkgc*sizeof(GCRef);
+  sizept = sizeof(GCproto) + fs->pc*sizeof(BCIns) + fs->nkgc*sizeof(GCobj*);
   sizept = (sizept + sizeof(TValue)-1) & ~(sizeof(TValue)-1);
   ofsk = sizept; sizept += fs->nkn*sizeof(TValue);
   ofsuv = sizept; sizept += ((fs->nuv+1)&~1)*2;
@@ -1597,31 +1496,41 @@ static GCproto *fs_finish(LexState *ls, BCLine line)
   ofsdbg = sizept; sizept += fs_prep_var(ls, fs, &ofsvar);
 
   /* Allocate prototype and initialize its fields. */
-  pt = (GCproto *)lj_mem_newgco(L, (MSize)sizept);
+  pt = (GCproto *)uj_obj_new(L, sizept);
   pt->gct = ~LJ_TPROTO;
-  pt->sizept = (MSize)sizept;
+  pt->sizept = sizept;
   pt->trace = 0;
   pt->flags = (uint8_t)(fs->flags & ~(PROTO_HAS_RETURN|PROTO_FIXUP_RETURN));
   pt->numparams = fs->numparams;
   pt->framesize = fs->framesize;
-  setgcref(pt->chunkname, obj2gco(ls->chunkname));
+  pt->chunkname = ls->chunkname;
+#ifdef UJIT_PROFILER
+  pt->profcount = 0;
+#endif /* UJIT_PROFILER */
+  uj_obj_immutable_set_mark(obj2gco(pt));
 
   /* Close potentially uninitialized gap between bc and kgc. */
-  *(uint32_t *)((char *)pt + ofsk - sizeof(GCRef)*(fs->nkgc+1)) = 0;
+  *(uint32_t *)((char *)pt + ofsk - sizeof(GCobj*)*(fs->nkgc+1)) = 0;
   fs_fixup_bc(fs, pt, (BCIns *)((char *)pt + sizeof(GCproto)), fs->pc);
   fs_fixup_k(fs, pt, (void *)((char *)pt + ofsk));
   fs_fixup_uv1(fs, pt, (uint16_t *)((char *)pt + ofsuv));
   fs_fixup_line(fs, pt, (void *)((char *)pt + ofsli), numline);
   fs_fixup_var(ls, pt, (uint8_t *)((char *)pt + ofsdbg), ofsvar);
 
-  lj_vmevent_send(L, BC,
-    setprotoV(L, L->top++, pt);
-  );
-
   L->top--;  /* Pop table of constants. */
   ls->vtop = fs->vbase;  /* Reset variable stack. */
   ls->fs = fs->prev;
   lua_assert(ls->fs != NULL || ls->token == TK_eof);
+
+#if LJ_HASJIT
+  /*
+   * We must patch all HOTCNT instructions in each prototype, so let's do it
+   * here, since fs_finish is the last step of proto creation and JIT_P_hotloop
+   * is already initialized here.
+   */
+  uj_hotcnt_patch_bc(pt, (uint16_t)J->param[JIT_P_hotloop]);
+#endif /* LJ_HASJIT */
+
   return pt;
 }
 
@@ -1647,7 +1556,7 @@ static void fs_init(LexState *ls, FuncState *fs)
   fs->kt = lj_tab_new(L, 0, 0);
   /* Anchor table of constants in stack to avoid being collected. */
   settabV(L, L->top, fs->kt);
-  incr_top(L);
+  uj_state_stack_incr_top(L);
 }
 
 /* -- Expressions --------------------------------------------------------- */
@@ -1668,22 +1577,12 @@ static void expr_index(FuncState *fs, ExpDesc *t, ExpDesc *e)
   /* Already called: expr_toval(fs, e). */
   t->k = VINDEXED;
   if (expr_isnumk(e)) {
-#if LJ_DUALNUM
-    if (tvisint(expr_numtv(e))) {
-      int32_t k = intV(expr_numtv(e));
-      if (checku8(k)) {
-	t->u.s.aux = BCMAX_C+1+(uint32_t)k;  /* 256..511: const byte key */
-	return;
-      }
-    }
-#else
     lua_Number n = expr_numberV(e);
     int32_t k = lj_num2int(n);
     if (checku8(k) && n == (lua_Number)k) {
       t->u.s.aux = BCMAX_C+1+(uint32_t)k;  /* 256..511: const byte key */
       return;
     }
-#endif
   } else if (expr_isstrk(e)) {
     BCReg idx = const_str(fs, e);
     if (idx <= BCMAX_C) {
@@ -1718,12 +1617,11 @@ static void expr_bracket(LexState *ls, ExpDesc *v)
 static void expr_kvalue(TValue *v, ExpDesc *e)
 {
   if (e->k <= VKTRUE) {
-    setitype(v, ~(uint32_t)e->k);
+    settag(v, ~(uint32_t)e->k);
   } else if (e->k == VKSTR) {
-    setgcref(v->gcr, obj2gco(e->u.sval));
-    setitype(v, LJ_TSTR);
+    setstrV(NULL, v, e->u.sval);
   } else {
-    lua_assert(tvisnumber(expr_numtv(e)));
+    lua_assert(tvisnum(expr_numtv(e)));
     *v = *expr_numtv(e);
   }
 }
@@ -1752,7 +1650,7 @@ static void expr_table(LexState *ls, ExpDesc *e)
       if (expr_isnumk(&key) && expr_numiszero(&key)) needarr = 1; else nhash++;
       lex_check(ls, '=');
     } else if ((ls->token == TK_name || (!LJ_52 && ls->token == TK_goto)) &&
-	       lj_lex_lookahead(ls) == '=') {
+               lj_lex_lookahead(ls) == '=') {
       expr_str(ls, &key);
       lex_check(ls, '=');
       nhash++;
@@ -1764,24 +1662,24 @@ static void expr_table(LexState *ls, ExpDesc *e)
     }
     expr(ls, &val);
     if (expr_isk(&key) && key.k != VKNIL &&
-	(key.k == VKSTR || expr_isk_nojump(&val))) {
+        (key.k == VKSTR || expr_isk_nojump(&val))) {
       TValue k, *v;
       if (!t) {  /* Create template table on demand. */
-	BCReg kidx;
-	t = lj_tab_new(fs->L, needarr ? narr : 0, hsize2hbits(nhash));
-	kidx = const_gc(fs, obj2gco(t), LJ_TTAB);
-	fs->bcbase[pc].ins = BCINS_AD(BC_TDUP, freg-1, kidx);
+        BCReg kidx;
+        t = lj_tab_new(fs->L, needarr ? narr : 0, hsize2hbits(nhash));
+        kidx = const_gc(fs, obj2gco(t), LJ_TTAB);
+        fs->bcbase[pc].ins = BCINS_AD(BC_TDUP, freg-1, kidx);
       }
       vcall = 0;
       expr_kvalue(&k, &key);
       v = lj_tab_set(fs->L, t, &k);
       lj_gc_anybarriert(fs->L, t);
       if (expr_isk_nojump(&val)) {  /* Add const key/value to template table. */
-	expr_kvalue(v, &val);
+        expr_kvalue(v, &val);
       } else {  /* Otherwise create dummy string key (avoids lj_tab_newkey). */
-	settabV(fs->L, v, t);  /* Preserve key with table itself as value. */
-	fixt = 1;   /* Fix this later, after all resizes. */
-	goto nonconst;
+        settabV(fs->L, v, t);  /* Preserve key with table itself as value. */
+        fixt = 1;   /* Fix this later, after all resizes. */
+        goto nonconst;
       }
     } else {
     nonconst:
@@ -1797,10 +1695,18 @@ static void expr_table(LexState *ls, ExpDesc *e)
     BCInsLine *ilp = &fs->bcbase[fs->pc-1];
     ExpDesc en;
     lua_assert(bc_a(ilp->ins) == freg &&
-	       bc_op(ilp->ins) == (narr > 256 ? BC_TSETV : BC_TSETB));
+               bc_op(ilp->ins) == (narr > 256 ? BC_TSETV : BC_TSETB));
     expr_init(&en, VKNUM, 0);
+
+    /*
+     * Biasing with 2 ^ 52 is documented in fp.h, not sure why it is needed
+     * here, looks like there are no visible problems with denormals stored in
+     * the table of constants.
+     */
     en.u.nval.u32.lo = narr-1;
     en.u.nval.u32.hi = 0x43300000;  /* Biased integer to avoid denormals. */
+    settag(&en.u.nval, LJ_TNUMX);
+
     if (narr > 256) { fs->pc--; ilp--; }
     ilp->ins = BCINS_AD(BC_TSETM, freg, const_num(fs, &en));
     setbc_b(&ilp[-1].ins, 0);
@@ -1822,14 +1728,14 @@ static void expr_table(LexState *ls, ExpDesc *e)
     if (needarr && t->asize < narr)
       lj_tab_reasize(fs->L, t, narr-1);
     if (fixt) {  /* Fix value for dummy keys in template table. */
-      Node *node = noderef(t->node);
+      Node *node = t->node;
       uint32_t i, hmask = t->hmask;
       for (i = 0; i <= hmask; i++) {
-	Node *n = &node[i];
-	if (tvistab(&n->val)) {
-	  lua_assert(tabV(&n->val) == t);
-	  setnilV(&n->val);  /* Turn value into nil. */
-	}
+        Node *n = &node[i];
+        if (tvistab(&n->val)) {
+          lua_assert(tabV(&n->val) == t);
+          setnilV(&n->val);  /* Turn value into nil. */
+        }
       }
     }
     lj_gc_check(fs->L);
@@ -1847,13 +1753,13 @@ static BCReg parse_params(LexState *ls, int needself)
   if (ls->token != ')') {
     do {
       if (ls->token == TK_name || (!LJ_52 && ls->token == TK_goto)) {
-	var_new(ls, nparams++, lex_str(ls));
+        var_new(ls, nparams++, lex_str(ls));
       } else if (ls->token == TK_dots) {
-	lj_lex_next(ls);
-	fs->flags |= PROTO_VARARG;
-	break;
+        lj_lex_next(ls);
+        fs->flags |= PROTO_VARARG;
+        break;
       } else {
-	err_syntax(ls, LJ_ERR_XPARAM);
+        err_syntax(ls, UJ_ERR_XPARAM);
       }
     } while (lex_opt(ls, ','));
   }
@@ -1881,6 +1787,7 @@ static void parse_body(LexState *ls, ExpDesc *e, int needself, BCLine line)
   fs.bcbase = pfs->bcbase + pfs->pc;
   fs.bclim = pfs->bclim - pfs->pc;
   bcemit_AD(&fs, BC_FUNCF, 0, 0);  /* Placeholder. */
+  bcemit_AD(&fs, BC_HOTCNT, 0, 0);
   parse_chunk(ls);
   if (ls->token != TK_end) lex_match(ls, TK_end, TK_function, line);
   pt = fs_finish(ls, (ls->lastline = ls->linenumber));
@@ -1888,7 +1795,7 @@ static void parse_body(LexState *ls, ExpDesc *e, int needself, BCLine line)
   pfs->bclim = (BCPos)(ls->sizebcstack - oldbase);
   /* Store new prototype in the constant array of the parent. */
   expr_init(e, VRELOCABLE,
-	    bcemit_AD(pfs, BC_FNEW, 0, const_gc(pfs, obj2gco(pt), LJ_TPROTO)));
+            bcemit_AD(pfs, BC_FNEW, 0, const_gc(pfs, obj2gco(pt), LJ_TPROTO)));
 #if LJ_HASFFI
   pfs->flags |= (fs.flags & PROTO_FFI);
 #endif
@@ -1922,17 +1829,16 @@ static void parse_args(LexState *ls, ExpDesc *e)
   BCReg base;
   BCLine line = ls->linenumber;
   if (ls->token == '(') {
-#if !LJ_52
-    if (line != ls->lastline)
-      err_syntax(ls, LJ_ERR_XAMBIG);
-#endif
+    if (line != ls->lastline) {
+      err_syntax(ls, UJ_ERR_XAMBIG);
+    }
     lj_lex_next(ls);
     if (ls->token == ')') {  /* f(). */
       args.k = VVOID;
     } else {
       expr_list(ls, &args);
       if (args.k == VCALL)  /* f(a, b, g()) or f(a, b, ...). */
-	setbc_b(bcptr(fs, &args), 0);  /* Pass on multiple results. */
+        setbc_b(bcptr(fs, &args), 0);  /* Pass on multiple results. */
     }
     lex_match(ls, ')', '(', line);
   } else if (ls->token == '{') {
@@ -1942,7 +1848,7 @@ static void parse_args(LexState *ls, ExpDesc *e)
     args.u.sval = strV(&ls->tokenval);
     lj_lex_next(ls);
   } else {
-    err_syntax(ls, LJ_ERR_XFUNARG);
+    err_syntax(ls, UJ_ERR_XFUNARG);
     return;  /* Silence compiler. */
   }
   lua_assert(e->k == VNONRELOC);
@@ -1954,7 +1860,7 @@ static void parse_args(LexState *ls, ExpDesc *e)
       expr_tonextreg(fs, &args);
     ins = BCINS_ABC(BC_CALL, base, 2, fs->freereg - base);
   }
-  expr_init(e, VCALL, bcemit_INS(fs, ins));
+  expr_init(e, VCALL, lj_parse_bcemit(fs, ins));
   e->u.s.aux = base;
   fs->bcbase[fs->pc - 1].line = line;
   fs->freereg = base+1;  /* Leave one result by default. */
@@ -1974,7 +1880,7 @@ static void expr_primary(LexState *ls, ExpDesc *v)
   } else if (ls->token == TK_name || (!LJ_52 && ls->token == TK_goto)) {
     var_lookup(ls, v);
   } else {
-    err_syntax(ls, LJ_ERR_XSYMBOL);
+    err_syntax(ls, UJ_ERR_XSYMBOL);
   }
   for (;;) {  /* Parse multiple expression suffixes. */
     if (ls->token == '.') {
@@ -2023,7 +1929,7 @@ static void expr_simple(LexState *ls, ExpDesc *v)
   case TK_dots: {  /* Vararg. */
     FuncState *fs = ls->fs;
     BCReg base;
-    checkcond(ls, fs->flags & PROTO_VARARG, LJ_ERR_XDOTS);
+    checkcond(ls, fs->flags & PROTO_VARARG, UJ_ERR_XDOTS);
     bcreg_reserve(fs, 1);
     base = fs->freereg-1;
     expr_init(v, VCALL, bcemit_ABC(fs, BC_VARG, base, 2, fs->numparams));
@@ -2048,47 +1954,47 @@ static void expr_simple(LexState *ls, ExpDesc *v)
 static void synlevel_begin(LexState *ls)
 {
   if (++ls->level >= LJ_MAX_XLEVEL)
-    lj_lex_error(ls, 0, LJ_ERR_XLEVELS);
+    lj_lex_error(ls, 0, UJ_ERR_XLEVELS, NULL);
 }
 
-#define synlevel_end(ls)	((ls)->level--)
+#define synlevel_end(ls)        ((ls)->level--)
 
 /* Convert token to binary operator. */
 static BinOpr token2binop(LexToken tok)
 {
   switch (tok) {
-  case '+':	return OPR_ADD;
-  case '-':	return OPR_SUB;
-  case '*':	return OPR_MUL;
-  case '/':	return OPR_DIV;
-  case '%':	return OPR_MOD;
-  case '^':	return OPR_POW;
+  case '+':     return OPR_ADD;
+  case '-':     return OPR_SUB;
+  case '*':     return OPR_MUL;
+  case '/':     return OPR_DIV;
+  case '%':     return OPR_MOD;
+  case '^':     return OPR_POW;
   case TK_concat: return OPR_CONCAT;
-  case TK_ne:	return OPR_NE;
-  case TK_eq:	return OPR_EQ;
-  case '<':	return OPR_LT;
-  case TK_le:	return OPR_LE;
-  case '>':	return OPR_GT;
-  case TK_ge:	return OPR_GE;
-  case TK_and:	return OPR_AND;
-  case TK_or:	return OPR_OR;
-  default:	return OPR_NOBINOPR;
+  case TK_ne:   return OPR_NE;
+  case TK_eq:   return OPR_EQ;
+  case '<':     return OPR_LT;
+  case TK_le:   return OPR_LE;
+  case '>':     return OPR_GT;
+  case TK_ge:   return OPR_GE;
+  case TK_and:  return OPR_AND;
+  case TK_or:   return OPR_OR;
+  default:      return OPR_NOBINOPR;
   }
 }
 
 /* Priorities for each binary operator. ORDER OPR. */
 static const struct {
-  uint8_t left;		/* Left priority. */
-  uint8_t right;	/* Right priority. */
+  uint8_t left;         /* Left priority. */
+  uint8_t right;        /* Right priority. */
 } priority[] = {
-  {6,6}, {6,6}, {7,7}, {7,7}, {7,7},	/* ADD SUB MUL DIV MOD */
-  {10,9}, {5,4},			/* POW CONCAT (right associative) */
-  {3,3}, {3,3},				/* EQ NE */
-  {3,3}, {3,3}, {3,3}, {3,3},		/* LT GE GT LE */
-  {2,2}, {1,1}				/* AND OR */
+  {6,6}, {6,6}, {7,7}, {7,7}, {7,7},    /* ADD SUB MUL DIV MOD */
+  {10,9}, {5,4},                        /* POW CONCAT (right associative) */
+  {3,3}, {3,3},                         /* EQ NE */
+  {3,3}, {3,3}, {3,3}, {3,3},           /* LT GE GT LE */
+  {2,2}, {1,1}                          /* AND OR */
 };
 
-#define UNARY_PRIORITY		8  /* Priority for unary operators. */
+#define UNARY_PRIORITY          8  /* Priority for unary operators. */
 
 /* Forward declaration. */
 static BinOpr expr_binop(LexState *ls, ExpDesc *v, uint32_t limit);
@@ -2161,8 +2067,8 @@ static BCPos expr_cond(LexState *ls)
 
 /* List of LHS variables. */
 typedef struct LHSVarList {
-  ExpDesc v;			/* LHS variable. */
-  struct LHSVarList *prev;	/* Link to previous LHS variable. */
+  ExpDesc v;                    /* LHS variable. */
+  struct LHSVarList *prev;      /* Link to previous LHS variable. */
 } LHSVarList;
 
 /* Eliminate write-after-read hazards for local variable assignment. */
@@ -2175,12 +2081,12 @@ static void assign_hazard(LexState *ls, LHSVarList *lh, const ExpDesc *v)
   for (; lh; lh = lh->prev) {
     if (lh->v.k == VINDEXED) {
       if (lh->v.u.s.info == reg) {  /* t[i], t = 1, 2 */
-	hazard = 1;
-	lh->v.u.s.info = tmp;
+        hazard = 1;
+        lh->v.u.s.info = tmp;
       }
       if (lh->v.u.s.aux == reg) {  /* t[i], i = 1, 2 */
-	hazard = 1;
-	lh->v.u.s.aux = tmp;
+        hazard = 1;
+        lh->v.u.s.aux = tmp;
       }
     }
   }
@@ -2217,7 +2123,7 @@ static void assign_adjust(LexState *ls, BCReg nvars, BCReg nexps, ExpDesc *e)
 static void parse_assignment(LexState *ls, LHSVarList *lh, BCReg nvars)
 {
   ExpDesc e;
-  checkcond(ls, VLOCAL <= lh->v.k && lh->v.k <= VINDEXED, LJ_ERR_XSYNTAX);
+  checkcond(ls, VLOCAL <= lh->v.k && lh->v.k <= VINDEXED, UJ_ERR_XSYNTAX);
   if (lex_opt(ls, ',')) {  /* Collect LHS list and recurse upwards. */
     LHSVarList vl;
     vl.prev = lh;
@@ -2232,13 +2138,13 @@ static void parse_assignment(LexState *ls, LHSVarList *lh, BCReg nvars)
     nexps = expr_list(ls, &e);
     if (nexps == nvars) {
       if (e.k == VCALL) {
-	if (bc_op(*bcptr(ls->fs, &e)) == BC_VARG) {  /* Vararg assignment. */
-	  ls->fs->freereg--;
-	  e.k = VRELOCABLE;
-	} else {  /* Multiple call results. */
-	  e.u.s.info = e.u.s.aux;  /* Base of call is not relocatable. */
-	  e.k = VNONRELOC;
-	}
+        if (bc_op(*bcptr(ls->fs, &e)) == BC_VARG) {  /* Vararg assignment. */
+          ls->fs->freereg--;
+          e.k = VRELOCABLE;
+        } else {  /* Multiple call results. */
+          e.u.s.info = e.u.s.aux;  /* Base of call is not relocatable. */
+          e.k = VNONRELOC;
+        }
       }
       bcemit_store(ls->fs, &lh->v, &e);
       return;
@@ -2346,28 +2252,28 @@ static void parse_return(LexState *ls)
     BCReg nret = expr_list(ls, &e);
     if (nret == 1) {  /* Return one result. */
       if (e.k == VCALL) {  /* Check for tail call. */
-	BCIns *ip = bcptr(fs, &e);
-	/* It doesn't pay off to add BC_VARGT just for 'return ...'. */
-	if (bc_op(*ip) == BC_VARG) goto notailcall;
-	fs->pc--;
-	ins = BCINS_AD(bc_op(*ip)-BC_CALL+BC_CALLT, bc_a(*ip), bc_c(*ip));
+        BCIns *ip = bcptr(fs, &e);
+        /* It doesn't pay off to add BC_VARGT just for 'return ...'. */
+        if (bc_op(*ip) == BC_VARG) goto notailcall;
+        fs->pc--;
+        ins = BCINS_AD(bc_op(*ip)-BC_CALL+BC_CALLT, bc_a(*ip), bc_c(*ip));
       } else {  /* Can return the result from any register. */
-	ins = BCINS_AD(BC_RET1, expr_toanyreg(fs, &e), 2);
+        ins = BCINS_AD(BC_RET1, expr_toanyreg(fs, &e), 2);
       }
     } else {
       if (e.k == VCALL) {  /* Append all results from a call. */
       notailcall:
-	setbc_b(bcptr(fs, &e), 0);
-	ins = BCINS_AD(BC_RETM, fs->nactvar, e.u.s.aux - fs->nactvar);
+        setbc_b(bcptr(fs, &e), 0);
+        ins = BCINS_AD(BC_RETM, fs->nactvar, e.u.s.aux - fs->nactvar);
       } else {
-	expr_tonextreg(fs, &e);  /* Force contiguous registers. */
-	ins = BCINS_AD(BC_RET, fs->nactvar, nret+1);
+        expr_tonextreg(fs, &e);  /* Force contiguous registers. */
+        ins = BCINS_AD(BC_RET, fs->nactvar, nret+1);
       }
     }
   }
   if (fs->flags & PROTO_CHILD)
     bcemit_AJ(fs, BC_UCLO, 0, 0);  /* May need to close upvalues first. */
-  bcemit_INS(fs, ins);
+  lj_parse_bcemit(fs, ins);
 }
 
 /* Parse 'break' statement. */
@@ -2383,8 +2289,10 @@ static void parse_goto(LexState *ls)
   FuncState *fs = ls->fs;
   GCstr *name = lex_str(ls);
   VarInfo *vl = gola_findlabel(ls, name);
-  if (vl)  /* Treat backwards goto within same scope like a loop. */
+  if (vl) { /* Treat backwards goto within same scope like a loop. */
+    bcemit_AD(fs, BC_HOTCNT, 0, 0);
     bcemit_AJ(fs, BC_LOOP, vl->slot, -1);  /* No BC range check. */
+  }
   fs->bl->flags |= FSCOPE_GOLA;
   gola_new(ls, name, VSTACK_GOTO, bcemit_jmp(fs));
 }
@@ -2394,13 +2302,13 @@ static void parse_label(LexState *ls)
 {
   FuncState *fs = ls->fs;
   GCstr *name;
-  MSize idx;
+  size_t idx;
   fs->lasttarget = fs->pc;
   fs->bl->flags |= FSCOPE_GOLA;
   lj_lex_next(ls);  /* Skip '::'. */
   name = lex_str(ls);
   if (gola_findlabel(ls, name))
-    lj_lex_error(ls, 0, LJ_ERR_XLDUP, strdata(name));
+    lj_lex_error(ls, 0, UJ_ERR_XLDUP, strdata(name));
   idx = gola_new(ls, name, VSTACK_LABEL, fs->pc);
   lex_check(ls, TK_label);
   /* Recursively parse trailing statements: labels and ';' (Lua 5.2 only). */
@@ -2444,6 +2352,7 @@ static void parse_while(LexState *ls, BCLine line)
   condexit = expr_cond(ls);
   fscope_begin(fs, &bl, FSCOPE_LOOP);
   lex_check(ls, TK_do);
+  bcemit_AD(fs, BC_HOTCNT, 0, 0);
   loop = bcemit_AD(fs, BC_LOOP, fs->nactvar, 0);
   parse_block(ls);
   jmp_patch(fs, bcemit_jmp(fs), start);
@@ -2457,12 +2366,13 @@ static void parse_while(LexState *ls, BCLine line)
 static void parse_repeat(LexState *ls, BCLine line)
 {
   FuncState *fs = ls->fs;
-  BCPos loop = fs->lasttarget = fs->pc;
+  BCPos hotcnt = fs->lasttarget = fs->pc;
   BCPos condexit;
   FuncScope bl1, bl2;
   fscope_begin(fs, &bl1, FSCOPE_LOOP);  /* Breakable loop scope. */
   fscope_begin(fs, &bl2, 0);  /* Inner scope. */
   lj_lex_next(ls);  /* Skip 'repeat'. */
+  bcemit_AD(fs, BC_HOTCNT, 0, 0);
   bcemit_AD(fs, BC_LOOP, fs->nactvar, 0);
   parse_chunk(ls);
   lex_match(ls, TK_until, TK_repeat, line);
@@ -2475,8 +2385,12 @@ static void parse_repeat(LexState *ls, BCLine line)
     fscope_end(fs);  /* End inner scope and close upvalues. */
     condexit = bcemit_jmp(fs);
   }
-  jmp_patch(fs, condexit, loop);  /* Jump backwards if !cond. */
-  jmp_patchins(fs, loop, fs->pc);
+  jmp_patch(fs, condexit, hotcnt);  /* Jump backwards (to HOTCNT) if !cond. */
+  /*
+   * Patch LOOP (located after HOTCNT) bytecode. In D operand BC_LOOP holds
+   * offset where code jumps if cond becomes true.
+   */
+  jmp_patchins(fs, hotcnt + 1, fs->pc);
   fscope_end(fs);  /* End loop scope. */
 }
 
@@ -2486,7 +2400,7 @@ static void parse_for_num(LexState *ls, GCstr *varname, BCLine line)
   FuncState *fs = ls->fs;
   BCReg base = fs->freereg;
   FuncScope bl;
-  BCPos loop, loopend;
+  BCPos loop, loopend, hotcnt;
   /* Hidden control variables. */
   var_new_fixed(ls, FORL_IDX, VARNAME_FOR_IDX);
   var_new_fixed(ls, FORL_STOP, VARNAME_FOR_STOP);
@@ -2511,6 +2425,8 @@ static void parse_for_num(LexState *ls, GCstr *varname, BCLine line)
   bcreg_reserve(fs, 1);
   parse_block(ls);
   fscope_end(fs);
+  hotcnt = bcemit_AD(fs, BC_HOTCNT, 0, 0);
+  fs->bcbase[hotcnt].line = line;  /* Fix line for hotcnt */
   /* Perform loop inversion. Loop control instructions are at the end. */
   loopend = bcemit_AJ(fs, BC_FORL, base, NO_JMP);
   fs->bcbase[loopend].line = line;  /* Fix line for control ins. */
@@ -2526,20 +2442,20 @@ static int predict_next(LexState *ls, FuncState *fs, BCPos pc)
 {
   BCIns ins = fs->bcbase[pc].ins;
   GCstr *name;
-  cTValue *o;
+  const TValue *o;
   switch (bc_op(ins)) {
   case BC_MOV:
-    name = gco2str(gcref(var_get(ls, fs, bc_d(ins)).name));
+    name = var_get(ls, fs, bc_d(ins)).name;
     break;
   case BC_UGET:
-    name = gco2str(gcref(ls->vstack[fs->uvmap[bc_d(ins)]].name));
+    name = ls->vstack[fs->uvmap[bc_d(ins)]].name;
     break;
   case BC_GGET:
     /* There's no inverse index (yet), so lookup the strings. */
-    o = lj_tab_getstr(fs->kt, lj_str_newlit(ls->L, "pairs"));
+    o = lj_tab_getstr(fs->kt, uj_str_newz(ls->L, "pairs"));
     if (o && tvhaskslot(o) && tvkslot(o) == bc_d(ins))
       return 1;
-    o = lj_tab_getstr(fs->kt, lj_str_newlit(ls->L, "next"));
+    o = lj_tab_getstr(fs->kt, uj_str_newz(ls->L, "next"));
     if (o && tvhaskslot(o) && tvkslot(o) == bc_d(ins))
       return 1;
     return 0;
@@ -2547,7 +2463,7 @@ static int predict_next(LexState *ls, FuncState *fs, BCPos pc)
     return 0;
   }
   return (name->len == 5 && !strcmp(strdata(name), "pairs")) ||
-	 (name->len == 4 && !strcmp(strdata(name), "next"));
+         (name->len == 4 && !strcmp(strdata(name), "next"));
 }
 
 /* Parse 'for' iterator. */
@@ -2558,7 +2474,7 @@ static void parse_for_iter(LexState *ls, GCstr *indexname)
   BCReg nvars = 0;
   BCLine line;
   BCReg base = fs->freereg + 3;
-  BCPos loop, loopend, exprpc = fs->pc;
+  BCPos loop, loopend, hotcnt, exprpc = fs->pc;
   FuncScope bl;
   int isnext;
   /* Hidden control variables. */
@@ -2573,7 +2489,7 @@ static void parse_for_iter(LexState *ls, GCstr *indexname)
   line = ls->linenumber;
   assign_adjust(ls, 3, expr_list(ls, &e), &e);
   bcreg_bump(fs, 3);  /* The iterator needs another 3 slots (func + 2 args). */
-  isnext = (nvars <= 5 && predict_next(ls, fs, exprpc));
+  isnext = nvars <= 5 && predict_next(ls, fs, exprpc) && G(fs->L)->enable_itern;
   var_add(ls, 3);  /* Hidden control variables. */
   lex_check(ls, TK_do);
   loop = bcemit_AJ(fs, isnext ? BC_ISNEXT : BC_JMP, base, NO_JMP);
@@ -2583,9 +2499,11 @@ static void parse_for_iter(LexState *ls, GCstr *indexname)
   parse_block(ls);
   fscope_end(fs);
   /* Perform loop inversion. Loop control instructions are at the end. */
-  jmp_patchins(fs, loop, fs->pc);
+  jmp_patchins(fs, loop, fs->pc + 1);
+  hotcnt = bcemit_AD(fs, BC_HOTCNT, 0, 0);
+  fs->bcbase[hotcnt].line = line;  /* Fix line for hotcnt */
   bcemit_ABC(fs, isnext ? BC_ITERN : BC_ITERC, base, nvars-3+1, 2+1);
-  loopend = bcemit_AJ(fs, BC_ITERL, base, NO_JMP);
+  loopend = bcemit_AJ(fs, isnext ? BC_ITRNL : BC_ITERL, base, NO_JMP);
   fs->bcbase[loopend-1].line = line;  /* Fix line for control ins. */
   fs->bcbase[loopend].line = line;
   jmp_patchins(fs, loopend, loop+1);
@@ -2605,7 +2523,7 @@ static void parse_for(LexState *ls, BCLine line)
   else if (ls->token == ',' || ls->token == TK_in)
     parse_for_iter(ls, varname);
   else
-    err_syntax(ls, LJ_ERR_XFOR);
+    err_syntax(ls, UJ_ERR_XFOR);
   lex_match(ls, TK_end, TK_for, line);
   fscope_end(fs);  /* Resolve break list. */
 }
@@ -2713,7 +2631,7 @@ static void parse_chunk(LexState *ls)
     islast = parse_stmt(ls);
     lex_opt(ls, ';');
     lua_assert(ls->fs->framesize >= ls->fs->freereg &&
-	       ls->fs->freereg >= ls->fs->nactvar);
+               ls->fs->freereg >= ls->fs->nactvar);
     ls->fs->freereg = ls->fs->nactvar;  /* Free registers after each stmt. */
   }
   synlevel_end(ls);
@@ -2727,12 +2645,12 @@ GCproto *lj_parse(LexState *ls)
   GCproto *pt;
   lua_State *L = ls->L;
 #ifdef LUAJIT_DISABLE_DEBUGINFO
-  ls->chunkname = lj_str_newlit(L, "=");
+  ls->chunkname = uj_str_newz(L, "=");
 #else
-  ls->chunkname = lj_str_newz(L, ls->chunkarg);
+  ls->chunkname = uj_str_newz(L, ls->chunkarg);
 #endif
   setstrV(L, L->top, ls->chunkname);  /* Anchor chunkname string. */
-  incr_top(L);
+  uj_state_stack_incr_top(L);
   ls->level = 0;
   fs_init(ls, &fs);
   fs.linedefined = 0;

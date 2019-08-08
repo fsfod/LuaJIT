@@ -1,23 +1,23 @@
 /*
-** Table library.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-**
-** Major portions taken verbatim or adapted from the Lua interpreter.
-** Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
-*/
-
-#define lib_table_c
-#define LUA_LIB
+ * Table library.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ *
+ * Major portions taken verbatim or adapted from the Lua interpreter.
+ * Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
+ */
 
 #include "lua.h"
-#include "lauxlib.h"
 #include "lualib.h"
+#include "lauxlib.h"
 
 #include "lj_obj.h"
 #include "lj_gc.h"
-#include "lj_err.h"
+#include "uj_err.h"
 #include "lj_tab.h"
-#include "lj_lib.h"
+#include "uj_lib.h"
 
 /* ------------------------------------------------------------------------ */
 
@@ -25,11 +25,11 @@
 
 LJLIB_CF(table_foreachi)
 {
-  GCtab *t = lj_lib_checktab(L, 1);
-  GCfunc *func = lj_lib_checkfunc(L, 2);
-  MSize i, n = lj_tab_len(t);
+  GCtab *t = uj_lib_checktab(L, 1);
+  GCfunc *func = uj_lib_checkfunc(L, 2);
+  size_t i, n = lj_tab_len(t);
   for (i = 1; i <= n; i++) {
-    cTValue *val;
+    const TValue *val;
     setfuncV(L, L->top, func);
     setintV(L->top+1, i);
     val = lj_tab_getint(t, (int32_t)i);
@@ -45,8 +45,8 @@ LJLIB_CF(table_foreachi)
 
 LJLIB_CF(table_foreach)
 {
-  GCtab *t = lj_lib_checktab(L, 1);
-  GCfunc *func = lj_lib_checkfunc(L, 2);
+  GCtab *t = uj_lib_checktab(L, 1);
+  GCfunc *func = uj_lib_checkfunc(L, 2);
   L->top = L->base+3;
   setnilV(L->top-1);
   while (lj_tab_next(L, t, L->top-1)) {
@@ -62,16 +62,16 @@ LJLIB_CF(table_foreach)
   return 0;
 }
 
-LJLIB_ASM(table_getn)		LJLIB_REC(.)
+LJLIB_ASM(table_getn)           LJLIB_REC(.)
 {
-  lj_lib_checktab(L, 1);
+  uj_lib_checktab(L, 1);
   return FFH_UNREACHABLE;
 }
 
 LJLIB_CF(table_maxn)
 {
-  GCtab *t = lj_lib_checktab(L, 1);
-  TValue *array = tvref(t->array);
+  GCtab *t = uj_lib_checktab(L, 1);
+  TValue *array = t->array;
   Node *node;
   lua_Number m = 0;
   ptrdiff_t i;
@@ -80,33 +80,33 @@ LJLIB_CF(table_maxn)
       m = (lua_Number)(int32_t)i;
       break;
     }
-  node = noderef(t->node);
+  node = t->node;
   for (i = (ptrdiff_t)t->hmask; i >= 0; i--)
-    if (!tvisnil(&node[i].val) && tvisnumber(&node[i].key)) {
-      lua_Number n = numberVnum(&node[i].key);
+    if (!tvisnil(&node[i].val) && tvisnum(&node[i].key)) {
+      lua_Number n = numV(&node[i].key);
       if (n > m) m = n;
     }
   setnumV(L->top-1, m);
   return 1;
 }
 
-LJLIB_CF(table_insert)		LJLIB_REC(.)
+LJLIB_CF(table_insert)          LJLIB_REC(.)
 {
-  GCtab *t = lj_lib_checktab(L, 1);
+  GCtab *t = uj_lib_checktab(L, 1);
   int32_t n, i = (int32_t)lj_tab_len(t) + 1;
   int nargs = (int)((char *)L->top - (char *)L->base);
   if (nargs != 2*sizeof(TValue)) {
     if (nargs != 3*sizeof(TValue))
-      lj_err_caller(L, LJ_ERR_TABINS);
+      uj_err_caller(L, UJ_ERR_TABINS);
     /* NOBARRIER: This just moves existing elements around. */
-    for (n = lj_lib_checkint(L, 2); i > n; i--) {
+    for (n = uj_lib_checkint(L, 2); i > n; i--) {
       /* The set may invalidate the get pointer, so need to do it first! */
       TValue *dst = lj_tab_setint(L, t, i);
-      cTValue *src = lj_tab_getint(t, i-1);
+      const TValue *src = lj_tab_getint(t, i-1);
       if (src) {
-	copyTV(L, dst, src);
+        copyTV(L, dst, src);
       } else {
-	setnilV(dst);
+        setnilV(dst);
       }
     }
     i = n;
@@ -119,17 +119,17 @@ LJLIB_CF(table_insert)		LJLIB_REC(.)
   return 0;
 }
 
-LJLIB_CF(table_remove)		LJLIB_REC(.)
+LJLIB_CF(table_remove)          LJLIB_REC(.)
 {
-  GCtab *t = lj_lib_checktab(L, 1);
+  GCtab *t = uj_lib_checktab(L, 1);
   int32_t e = (int32_t)lj_tab_len(t);
-  int32_t pos = lj_lib_optint(L, 2, e);
+  int32_t pos = uj_lib_optint(L, 2, e);
   if (!(1 <= pos && pos <= e))  /* Nothing to remove? */
     return 0;
   lua_rawgeti(L, 1, pos);  /* Get previous value. */
   /* NOBARRIER: This just moves existing elements around. */
   for (; pos < e; pos++) {
-    cTValue *src = lj_tab_getint(t, pos+1);
+    const TValue *src = lj_tab_getint(t, pos+1);
     TValue *dst = lj_tab_setint(L, t, pos);
     if (src) {
       copyTV(L, dst, src);
@@ -141,30 +141,23 @@ LJLIB_CF(table_remove)		LJLIB_REC(.)
   return 1;  /* Return previous value. */
 }
 
-LJLIB_CF(table_concat)
+LJLIB_CF(table_concat)          LJLIB_REC(.)
 {
-  luaL_Buffer b;
-  GCtab *t = lj_lib_checktab(L, 1);
-  GCstr *sep = lj_lib_optstr(L, 2);
-  MSize seplen = sep ? sep->len : 0;
-  int32_t i = lj_lib_optint(L, 3, 1);
+  GCtab *t = uj_lib_checktab(L, 1);
+  GCstr *sep = uj_lib_optstr(L, 2);
+  int32_t i = uj_lib_optint(L, 3, 1);
   int32_t e = (L->base+3 < L->top && !tvisnil(L->base+3)) ?
-	      lj_lib_checkint(L, 4) : (int32_t)lj_tab_len(t);
-  luaL_buffinit(L, &b);
-  if (i <= e) {
-    for (;;) {
-      cTValue *o;
-      lua_rawgeti(L, 1, i);
-      o = L->top-1;
-      if (!(tvisstr(o) || tvisnumber(o)))
-	lj_err_callerv(L, LJ_ERR_TABCAT, lj_typename(o), i);
-      luaL_addvalue(&b);
-      if (i++ == e) break;
-      if (seplen)
-	luaL_addlstring(&b, strdata(sep), seplen);
-    }
+              uj_lib_checkint(L, 4) : (int32_t)lj_tab_len(t);
+  int32_t fail;
+
+  GCstr *concat = lj_tab_concat(L, t, sep, i, e, &fail);
+  if (LJ_UNLIKELY(!concat)) {
+    const TValue *tv = lj_tab_getint(t, fail);
+    uj_err_callerv(L, UJ_ERR_TABCAT,
+                   uj_obj_itypename[tv ? ~gettag(tv) : ~LJ_TNIL], fail);
   }
-  luaL_pushresult(&b);
+  setstrV(L, L->top - 1, concat);
+  lj_gc_check(L);
   return 1;
 }
 
@@ -213,9 +206,9 @@ static void auxsort(lua_State *L, int l, int u)
       lua_pop(L, 1);  /* remove a[l] */
       lua_rawgeti(L, 1, u);
       if (sort_comp(L, -1, -2))  /* a[u]<a[i]? */
-	set2(L, i, u);
+        set2(L, i, u);
       else
-	lua_pop(L, 2);
+        lua_pop(L, 2);
     }
     if (u-l == 2) break;  /* only 3 elements */
     lua_rawgeti(L, 1, i);  /* Pivot */
@@ -227,17 +220,17 @@ static void auxsort(lua_State *L, int l, int u)
     for (;;) {  /* invariant: a[l..i] <= P <= a[j..u] */
       /* repeat ++i until a[i] >= P */
       while (lua_rawgeti(L, 1, ++i), sort_comp(L, -1, -2)) {
-	if (i>=u) lj_err_caller(L, LJ_ERR_TABSORT);
-	lua_pop(L, 1);  /* remove a[i] */
+        if (i>=u) uj_err_caller(L, UJ_ERR_TABSORT);
+        lua_pop(L, 1);  /* remove a[i] */
       }
       /* repeat --j until a[j] <= P */
       while (lua_rawgeti(L, 1, --j), sort_comp(L, -3, -1)) {
-	if (j<=l) lj_err_caller(L, LJ_ERR_TABSORT);
-	lua_pop(L, 1);  /* remove a[j] */
+        if (j<=l) uj_err_caller(L, UJ_ERR_TABSORT);
+        lua_pop(L, 1);  /* remove a[j] */
       }
       if (j<i) {
-	lua_pop(L, 3);  /* pop pivot, a[i], a[j] */
-	break;
+        lua_pop(L, 3);  /* pop pivot, a[i], a[j] */
+        break;
       }
       set2(L, i, j);
     }
@@ -257,11 +250,11 @@ static void auxsort(lua_State *L, int l, int u)
 
 LJLIB_CF(table_sort)
 {
-  GCtab *t = lj_lib_checktab(L, 1);
+  GCtab *t = uj_lib_checktab(L, 1);
   int32_t n = (int32_t)lj_tab_len(t);
   lua_settop(L, 2);
   if (!tvisnil(L->base+1))
-    lj_lib_checkfunc(L, 2);
+    uj_lib_checkfunc(L, 2);
   auxsort(L, 1, n);
   return 0;
 }
@@ -271,11 +264,11 @@ LJLIB_PUSH("n")
 LJLIB_CF(table_pack)
 {
   TValue *array, *base = L->base;
-  MSize i, n = (uint32_t)(L->top - base);
+  size_t i, n = (uint32_t)(L->top - base);
   GCtab *t = lj_tab_new(L, n ? n+1 : 0, 1);
   /* NOBARRIER: The table is new (marked white). */
-  setintV(lj_tab_setstr(L, t, strV(lj_lib_upvalue(L, 1))), (int32_t)n);
-  for (array = tvref(t->array) + 1, i = 0; i < n; i++)
+  setintV(lj_tab_setstr(L, t, strV(uj_lib_upvalue(L, 1))), (int32_t)n);
+  for (array = t->array + 1, i = 0; i < n; i++)
     copyTV(L, &array[i], &base[i]);
   settabV(L, base, t);
   L->top = base+1;

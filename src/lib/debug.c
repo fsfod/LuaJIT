@@ -1,23 +1,34 @@
 /*
-** Debug library.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
-**
-** Major portions taken verbatim or adapted from the Lua interpreter.
-** Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
-*/
+ * Debug library.
+ * Copyright (C) 2015-2019 IPONWEB Ltd. See Copyright Notice in COPYRIGHT
+ *
+ * Portions taken verbatim or adapted from LuaJIT.
+ * Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+ *
+ * Major portions taken verbatim or adapted from the Lua interpreter.
+ * Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
+ */
 
-#define lib_debug_c
-#define LUA_LIB
+#include <fcntl.h>
+#include <stdio.h>
+#include <unistd.h>
 
 #include "lua.h"
-#include "lauxlib.h"
 #include "lualib.h"
+#include "lauxlib.h"
+#include "lextlib.h"
 
 #include "lj_obj.h"
+#include "lj_tab.h"
 #include "lj_gc.h"
-#include "lj_err.h"
+#include "uj_dispatch.h"
+#include "uj_err.h"
 #include "lj_debug.h"
-#include "lj_lib.h"
+#include "uj_lib.h"
+#include "uj_vmstate.h"
+
+#include "profile/uj_profile_iface.h"
+
 
 /* ------------------------------------------------------------------------ */
 
@@ -31,7 +42,7 @@ LJLIB_CF(debug_getregistry)
 
 LJLIB_CF(debug_getmetatable)
 {
-  lj_lib_checkany(L, 1);
+  uj_lib_checkany(L, 1);
   if (!lua_getmetatable(L, 1)) {
     setnilV(L->top-1);
   }
@@ -40,28 +51,26 @@ LJLIB_CF(debug_getmetatable)
 
 LJLIB_CF(debug_setmetatable)
 {
-  lj_lib_checktabornil(L, 2);
+  uj_lib_checktabornil(L, 2);
   L->top = L->base+2;
   lua_setmetatable(L, 1);
-#if !LJ_52
   setboolV(L->top-1, 1);
-#endif
   return 1;
 }
 
 LJLIB_CF(debug_getfenv)
 {
-  lj_lib_checkany(L, 1);
+  uj_lib_checkany(L, 1);
   lua_getfenv(L, 1);
   return 1;
 }
 
 LJLIB_CF(debug_setfenv)
 {
-  lj_lib_checktab(L, 2);
+  uj_lib_checktab(L, 2);
   L->top = L->base+2;
   if (!lua_setfenv(L, 1))
-    lj_err_caller(L, LJ_ERR_SETFENV);
+    uj_err_caller(L, UJ_ERR_SETFENV);
   return 1;
 }
 
@@ -122,10 +131,10 @@ LJLIB_CF(debug_getinfo)
     options = lua_pushfstring(L, ">%s", options);
     setfuncV(L1, L1->top++, funcV(L->base+arg));
   } else {
-    lj_err_arg(L, arg+1, LJ_ERR_NOFUNCL);
+    uj_err_arg(L, UJ_ERR_NOFUNCL, arg+1);
   }
   if (!lj_debug_getinfo(L1, options, &ar, 1))
-    lj_err_arg(L, arg+2, LJ_ERR_INVOPT);
+    uj_err_arg(L, UJ_ERR_INVOPT, arg+2);
   lua_createtable(L, 0, 16);  /* Create result table. */
   for (; *options; options++) {
     switch (*options) {
@@ -164,14 +173,14 @@ LJLIB_CF(debug_getlocal)
   lua_State *L1 = getthread(L, &arg);
   lua_Debug ar;
   const char *name;
-  int slot = lj_lib_checkint(L, arg+2);
+  int slot = uj_lib_checkint(L, arg+2);
   if (tvisfunc(L->base+arg)) {
     L->top = L->base+arg+1;
     lua_pushstring(L, lua_getlocal(L, NULL, slot));
     return 1;
   }
-  if (!lua_getstack(L1, lj_lib_checkint(L, arg+1), &ar))
-    lj_err_arg(L, arg+1, LJ_ERR_LVLRNG);
+  if (!lua_getstack(L1, uj_lib_checkint(L, arg+1), &ar))
+    uj_err_arg(L, UJ_ERR_LVLRNG, arg+1);
   name = lua_getlocal(L1, &ar, slot);
   if (name) {
     lua_xmove(L1, L, 1);
@@ -190,19 +199,19 @@ LJLIB_CF(debug_setlocal)
   lua_State *L1 = getthread(L, &arg);
   lua_Debug ar;
   TValue *tv;
-  if (!lua_getstack(L1, lj_lib_checkint(L, arg+1), &ar))
-    lj_err_arg(L, arg+1, LJ_ERR_LVLRNG);
-  tv = lj_lib_checkany(L, arg+3);
+  if (!lua_getstack(L1, uj_lib_checkint(L, arg+1), &ar))
+    uj_err_arg(L, UJ_ERR_LVLRNG, arg+1);
+  tv = uj_lib_checkany(L, arg+3);
   copyTV(L1, L1->top++, tv);
-  lua_pushstring(L, lua_setlocal(L1, &ar, lj_lib_checkint(L, arg+2)));
+  lua_pushstring(L, lua_setlocal(L1, &ar, uj_lib_checkint(L, arg+2)));
   return 1;
 }
 
 static int debug_getupvalue(lua_State *L, int get)
 {
-  int32_t n = lj_lib_checkint(L, 2);
+  int32_t n = uj_lib_checkint(L, 2);
   const char *name;
-  lj_lib_checkfunc(L, 1);
+  uj_lib_checkfunc(L, 1);
   name = get ? lua_getupvalue(L, 1, n) : lua_setupvalue(L, 1, n);
   if (name) {
     lua_pushstring(L, name);
@@ -221,38 +230,38 @@ LJLIB_CF(debug_getupvalue)
 
 LJLIB_CF(debug_setupvalue)
 {
-  lj_lib_checkany(L, 3);
+  uj_lib_checkany(L, 3);
   return debug_getupvalue(L, 0);
 }
 
 LJLIB_CF(debug_upvalueid)
 {
-  GCfunc *fn = lj_lib_checkfunc(L, 1);
-  int32_t n = lj_lib_checkint(L, 2) - 1;
+  GCfunc *fn = uj_lib_checkfunc(L, 1);
+  int32_t n = uj_lib_checkint(L, 2) - 1;
   if ((uint32_t)n >= fn->l.nupvalues)
-    lj_err_arg(L, 2, LJ_ERR_IDXRNG);
-  setlightudV(L->top-1, isluafunc(fn) ? (void *)gcref(fn->l.uvptr[n]) :
-					(void *)&fn->c.upvalue[n]);
+    uj_err_arg(L, UJ_ERR_IDXRNG, 2);
+  setlightudV(L->top-1, isluafunc(fn) ? (void *)(fn->l.uvptr[n]) :
+                                        (void *)&fn->c.upvalue[n]);
   return 1;
 }
 
 LJLIB_CF(debug_upvaluejoin)
 {
   GCfunc *fn[2];
-  GCRef *p[2];
+  GCupval **p[2];
   int i;
   for (i = 0; i < 2; i++) {
     int32_t n;
-    fn[i] = lj_lib_checkfunc(L, 2*i+1);
+    fn[i] = uj_lib_checkfunc(L, 2*i+1);
     if (!isluafunc(fn[i]))
-      lj_err_arg(L, 2*i+1, LJ_ERR_NOLFUNC);
-    n = lj_lib_checkint(L, 2*i+2) - 1;
+      uj_err_arg(L, UJ_ERR_NOLFUNC, 2*i+1);
+    n = uj_lib_checkint(L, 2*i+2) - 1;
     if ((uint32_t)n >= fn[i]->l.nupvalues)
-      lj_err_arg(L, 2*i+2, LJ_ERR_IDXRNG);
+      uj_err_arg(L, UJ_ERR_IDXRNG, 2*i+2);
     p[i] = &fn[i]->l.uvptr[n];
   }
-  setgcrefr(*p[0], *p[1]);
-  lj_gc_objbarrier(L, fn[0], gcref(*p[1]));
+  *p[0] = *p[1];
+  lj_gc_objbarrier(L, fn[0], *p[1]);
   return 0;
 }
 
@@ -261,7 +270,7 @@ LJLIB_CF(debug_getuservalue)
 {
   TValue *o = L->base;
   if (o < L->top && tvisudata(o))
-    settabV(L, o, tabref(udataV(o)->env));
+    settabV(L, o, udataV(o)->env);
   else
     setnilV(o);
   L->top = o+1;
@@ -272,9 +281,9 @@ LJLIB_CF(debug_setuservalue)
 {
   TValue *o = L->base;
   if (!(o < L->top && tvisudata(o)))
-    lj_err_argt(L, 1, LUA_TUSERDATA);
+    uj_err_argt(L, 1, LUA_TUSERDATA);
   if (!(o+1 < L->top && tvistab(o+1)))
-    lj_err_argt(L, 2, LUA_TTABLE);
+    uj_err_argt(L, 2, LUA_TTABLE);
   L->top = o+2;
   lua_setfenv(L, 1);
   return 1;
@@ -365,10 +374,10 @@ LJLIB_CF(debug_debug)
     char buffer[250];
     fputs("lua_debug> ", stderr);
     if (fgets(buffer, sizeof(buffer), stdin) == 0 ||
-	strcmp(buffer, "cont\n") == 0)
+        strcmp(buffer, "cont\n") == 0)
       return 0;
     if (luaL_loadbuffer(L, buffer, strlen(buffer), "=(debug command)") ||
-	lua_pcall(L, 0, 0, 0)) {
+        lua_pcall(L, 0, 0, 0)) {
       fputs(lua_tostring(L, -1), stderr);
       fputs("\n", stderr);
     }
@@ -378,8 +387,8 @@ LJLIB_CF(debug_debug)
 
 /* ------------------------------------------------------------------------ */
 
-#define LEVELS1	12	/* size of the first part of the stack */
-#define LEVELS2	10	/* size of the second part of the stack */
+#define LEVELS1 12      /* size of the first part of the stack */
+#define LEVELS2 10      /* size of the second part of the stack */
 
 LJLIB_CF(debug_traceback)
 {
@@ -389,17 +398,16 @@ LJLIB_CF(debug_traceback)
   if (msg == NULL && L->top > L->base+arg)
     L->top = L->base+arg+1;
   else
-    luaL_traceback(L, L1, msg, lj_lib_optint(L, arg+2, (L == L1)));
+    luaL_traceback(L, L1, msg, uj_lib_optint(L, arg+2, (L == L1)));
   return 1;
 }
-
-/* ------------------------------------------------------------------------ */
 
 #include "lj_libdef.h"
 
+/* ------------------------------------------------------------------------ */
+
 LUALIB_API int luaopen_debug(lua_State *L)
 {
-  LJ_LIB_REG(L, LUA_DBLIBNAME, debug);
+  LJ_LIB_REG(L, LUA_DBLIBNAME  , debug);
   return 1;
 }
-
