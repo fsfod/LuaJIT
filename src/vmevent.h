@@ -52,9 +52,11 @@ typedef enum GCAtomicStage {
 typedef struct VMEventData_TExit {
   int gprs_size;
   int fprs_size;
+  int vregs_size;
   int spill_size;
   void *gprs;
   void *fprs;
+  void *vregs;
   void *spill;
   char gcexit;
 } VMEventData_TExit;

@@ -867,6 +867,8 @@ int LJ_FASTCALL lj_trace_exit(jit_State *J, void *exptr)
     eventdata.fprs_size = sizeof(ex->fpr);
     eventdata.spill = &ex->spill;
     eventdata.spill_size = sizeof(ex->spill);
+    eventdata.vregs = NULL;
+    eventdata.vregs_size = 0;
   );
   exd.J = J;
   exd.exptr = exptr;
