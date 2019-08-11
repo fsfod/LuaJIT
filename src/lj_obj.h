@@ -625,6 +625,8 @@ typedef struct global_State {
 
   luaJIT_vmevent_callback vmevent_cb; /* User set VM event callback. */
   void *vmevent_data;                 /* VM event callback data. */
+  lua_ObjAlloc_cb objalloc_cb; /* Callback for allocation of GC object*/
+  void* objallocd;             /* GC object callback data */
 } global_State;
 
 #define mainthread(g)	(&gcref(g->mainthref)->th)

@@ -112,12 +112,22 @@ LJ_FUNC void * LJ_FASTCALL lj_mem_newgco(lua_State *L, GCSize size);
 LJ_FUNC void *lj_mem_grow(lua_State *L, void *p,
 			  MSize *szp, MSize lim, MSize esz);
 
+#define lj_mem_freecb(gs, o, size) if((gs)->objalloc_cb){(gs)->objalloc_cb((gs)->objallocd, (GCobj*)(o), ((GCobj*)(o))->gch.gct | 0x80, (size));}
+
 #define lj_mem_new(L, s)	lj_mem_realloc(L, NULL, 0, (s))
 
 static LJ_AINLINE void lj_mem_free(global_State *g, void *p, size_t osize)
 {
   g->gc.total -= (GCSize)osize;
   g->allocf(g->allocd, p, osize, 0);
+}
+
+static LJ_AINLINE void lj_mem_freegco(global_State *g, void *p, size_t osize)
+{
+  if (g->objalloc_cb) { 
+    g->objalloc_cb(g->objallocd, (GCobj*)(p), ((GCobj*)p)->gch.gct | 0x80, osize);
+  }
+  lj_mem_free(g, p, osize);
 }
 
 #define lj_mem_newvec(L, n, t)	((t *)lj_mem_new(L, (GCSize)((n)*sizeof(t))))
@@ -130,5 +140,7 @@ static LJ_AINLINE void lj_mem_free(global_State *g, void *p, size_t osize)
 #define lj_mem_newobj(L, t)	((t *)lj_mem_newgco(L, sizeof(t)))
 #define lj_mem_newt(L, s, t)	((t *)lj_mem_new(L, (s)))
 #define lj_mem_freet(g, p)	lj_mem_free(g, (p), sizeof(*(p)))
+
+#define lj_mem_createcb(L, o, size) if (G(L)->objalloc_cb) G(L)->objalloc_cb(G(L)->objallocd, ((GCobj*)o), ((GCobj*)o)->gch.gct, size)
 
 #endif
