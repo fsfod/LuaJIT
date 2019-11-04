@@ -174,3 +174,15 @@ UTEST_F(JITLog, marker) {
   jitlog_writemarker(JL, "12345", 0);
   ASSERT_EQ(jitlog_first_msgoffset(JL, MSGTYPE_stringmarker, 0), start);
 }
+
+UTEST_F(JITLog, setmode) {
+  ASSERT_EQ(jitlog_getmode(JL, 0xffffff), 0);
+
+  /* Check bad mode flag should return 0 as error */
+  ASSERT_EQ(jitlog_setmode(JL, 1 << 31, 1), 0);
+  ASSERT_EQ(jitlog_getmode(JL, 0xffffff), 0);
+
+  ASSERT_EQ(jitlog_setmode(JL, JITLogMode_AutoFlush, 1), 1);
+  ASSERT_NE(jitlog_getmode(JL, JITLogMode_AutoFlush), 0);
+}
+

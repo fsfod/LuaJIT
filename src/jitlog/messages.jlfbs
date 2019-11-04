@@ -78,3 +78,21 @@ message trace_exitsmall (no_vtable, mapto : trace_exit) {
   traceid : 14
   exit : 9
 }
+
+message trace_exitfull (mapto : trace_exit) {
+  time : timestamp
+  isgcexit : bool
+  traceid : uint16
+  exit : uint16
+  registers : register_state (optional)
+}
+
+table register_state{
+  source : uint8
+  gpr_count : uint8
+  fpr_count : uint8
+  vec_count : uint8
+  gprs : [uint8]
+  fprs : [uint8]
+  vregs : [uint8]
+}
