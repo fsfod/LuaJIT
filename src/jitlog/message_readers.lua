@@ -154,6 +154,9 @@ function readers:gcstate(msg)
     if oldstate == nil or newstate == 1 or (oldstate > newstate and newstate > 0)  then
       self.gccount = self.gccount + 1
     end
+    if self.gcstate == "atomic" then
+      self.atomicstage = nil
+    end
     self:log_msg("gcstate", "GCState(%s): changed from %s", self.gcstate, self.enums.gcstate[oldstate])
   end
   
@@ -161,6 +164,39 @@ function readers:gcstate(msg)
   self.peakstrnum = math.max(self.peakstrnum or 0, msg.strnum)
   self:log_msg("gcstate", "GCStateStats: MemTotal = %dMB, StrCount = %d", totalmem/(1024*1024), msg.strnum)
   return self.gcstate, self.enums.gcstate[prevstate]
+end
+
+local statekind = {
+  [0] = "VM",
+  [1] = "JIT",
+  [2] = "GCAtomic",
+}
+
+function readers:statechange(msg)
+  local system = msg:get_system()
+  local newstate = msg:get_state()
+  local statesystem = statekind[system]
+
+  if statesystem == "GCAtomic" then
+    local prevstage = self.atomicstage 
+    if prevstage then
+      assert(self.atomicstaage_start)
+      local time =  msg.time-self.atomicstaage_start
+      self.atomictime[prevstage] = (self.atomictime[prevstage] or 0) + time
+      self:log_msg("statechange", "Atomic stage '%s' took %d ticks", prevstage, tonumber(time))
+    end
+
+    newstate = self.enums.gcatomic_stages[newstate]
+    if newstate ~= "stage_end" then
+      self.atomicstage = newstate
+      self.atomicstaage_start = msg.time
+    else
+      self.atomicstage = nil
+      self.atomicstaage_start = nil
+    end
+  end
+  self:log_msg("statechange", "StateChanged(%s): newstate= %s", statesystem, newstate)
+  return statesystem, newstate
 end
 
 local function init(self)
@@ -174,6 +210,7 @@ local function init(self)
   self.flushes = {}
   self.gccount = 0 -- number GC full cycles that have been seen in the log
   self.gcstatecount = 0 -- number times the gcstate changed
+  self.atomictime = {}
 
   return t
 end

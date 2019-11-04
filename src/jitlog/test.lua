@@ -339,6 +339,32 @@ it("GC state", function()
   end
 end)
 
+it("GC atomic time", function()
+  --Make sure were not mid way though a GC
+  collectgarbage("collect")
+
+  jitlog.start()
+  collectgarbage("collect")
+  local t = {}
+  for i=1, 6000 do
+    t[i] = {1, 2, true, false, 5, 6, 7, 8, 10, 11, 12}
+    if i == 1000 then
+      collectgarbage("step", 100)
+    end
+  end
+  assert(#t == 6000)
+
+  local result = parselog(jitlog.savetostring())
+  assert(result.gccount > 1)
+  -- should get a state change event for every atomic stage
+  assert(result.msgcounts.statechange >= result.gccount*#result.enums.gcatomic_stages)
+
+  assert(next(result.atomictime))
+  for name, ticks in pairs(result.atomictime) do
+    assert(ticks > 0, name)
+  end
+end)
+
 local failed = false
 
 pcall(jitlog.shutdown)
