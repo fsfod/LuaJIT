@@ -262,6 +262,27 @@ it("id markers", function()
   end
 end)
 
+it("jitlog mode", function()
+  jitlog.start()
+  -- Check bad argument handling
+  assert(not pcall(jitlog.getmode))
+  assert(not pcall(jitlog.setmode))
+  
+  -- Non existant mode should error
+  assert(not pcall(jitlog.setmode, ""))
+  assert(not pcall(jitlog.getmode, ""))
+
+  -- Must pass a value to control the mode
+  assert(not pcall(jitlog.setmode, "texit_regs"))
+  
+  -- Check setting a mode takes effect
+  assert(not jitlog.getmode("texit_regs")) 
+  assert(jitlog.setmode("texit_regs", true))
+  assert(jitlog.getmode("texit_regs")) 
+  
+  local result = parselog(jitlog.savetostring())  
+end)
+
 if hasjit then
 
 it("trace exits", function()

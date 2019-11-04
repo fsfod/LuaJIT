@@ -106,6 +106,22 @@ module.messages = {
       exit : u16
     ]]
   },
+
+  {
+    name = "register_state",
+    fields = [[
+      source : u8
+      gpr_count : u8
+      fpr_count : u8
+      vec_count : u8
+      gprs_length : u16
+      fprs_length : u16 
+      vregs_length : u32
+      gprs : u8[gprs_length]
+      fprs : u8[fprs_length]
+      vregs : u8[vregs_length]
+    ]]
+  },
 }
 
 return module

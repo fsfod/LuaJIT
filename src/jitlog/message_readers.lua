@@ -112,6 +112,11 @@ end
 -- Reuse handler for compact trace exit messages since they both have the same field names but traceid and exit are smaller
 readers.traceexit_small = readers.traceexit
 
+function readers:register_state(msg)
+  local source = msg.source == 0 and "trace exit" or "other"
+  self:log_msg("register_state", "RegisterState: source = '%s', gpr_count = %d, fpr_count = %d", source, msg.gpr_count, msg.fpr_count)
+end
+
 local function init(self)
   self.markers = {}
   -- Record id marker messages in to table 

@@ -11,6 +11,7 @@
 #include "lj_debug.h"
 #include "luajit.h"
 #include "lauxlib.h"
+#include "lj_target.h"
 
 #include "lj_jitlog_def.h"
 #include "lj_jitlog_writers.h"
@@ -25,6 +26,7 @@ typedef struct jitlog_State {
   global_State *g;
   char loadstate;
   uint32_t traceexit;
+  JITLogMode mode;
 } jitlog_State;
 
 
@@ -86,6 +88,21 @@ static void jitlog_exit(jitlog_State *context, VMEventData_TExit *exitState)
     log_traceexit_small(&context->ub, exitState->gcexit, J->parent, J->exitno);
   } else {
     log_traceexit(&context->ub, exitState->gcexit, J->parent, J->exitno);
+  }
+  if (exitState && (context->mode & JITLogMode_TraceExitRegs)) {
+    register_state_Args args = {
+      .source = 0,
+      .gprs = exitState->gprs,
+      .gprs_length = exitState->gprs_size,
+      .gpr_count = RID_NUM_GPR,
+      .fprs = exitState->fprs,
+      .fprs_length = exitState->fprs_size,
+      .fpr_count = RID_NUM_FPR,
+      .vec_count = 0,
+      .vregs_length = exitState->vregs_size,
+      .vregs = exitState->vregs,
+    };
+    log_register_state(&context->ub, &args);
   }
 }
 
@@ -372,11 +389,37 @@ LUA_API int jitlog_setsink_mmap(JITLogUserContext *usrcontext, const char *path,
   return 1;
 }
 
-LUA_API void jitlog_writemarker(JITLogUserContext *usrcontext, const char *label, int flags)
+LUA_API void jitlog_writemarker(JITLogUserContext* usrcontext, const char* label, int flags)
 {
-  jitlog_State *context = usr2ctx(usrcontext);
+  jitlog_State* context = usr2ctx(usrcontext);
   int jited = context->g->vmstate > 0;
   log_stringmarker(&context->ub, jited, flags, label);
+}
+
+LUA_API int jitlog_setmode(JITLogUserContext *usrcontext, JITLogMode mode, int enabled)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+
+  switch (mode) {
+    case JITLogMode_TraceExitRegs:
+      break;
+    default:
+      /* Unknown mode return false */
+      return 0;
+  }
+
+  if (enabled) {
+    context->mode |= mode;
+  } else {
+    context->mode &= ~mode;
+  }
+  return 1;
+}
+
+LUA_API int jitlog_getmode(JITLogUserContext* usrcontext, JITLogMode mode)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+  return context->mode & mode;
 }
 
 /* -- Lua module to control the JITLog ------------------------------------ */
@@ -457,6 +500,60 @@ static int jlib_getsize(lua_State *L)
   return 1;
 }
 
+typedef struct ModeEntry {
+  const char *key;
+  JITLogMode mode;
+} ModeEntry;
+
+static const ModeEntry jitlog_modes[] = {
+  {"texit_regs", JITLogMode_TraceExitRegs},
+};
+
+static int jlib_setmode(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  const char *key = luaL_checkstring(L, 1);
+  TValue *enabled = lj_lib_checkany(L, 2);
+  MSize i = 0;
+  int mode = -1;
+
+  for (; i != (sizeof(jitlog_modes)/sizeof(ModeEntry)) ;i++) {
+    if (strcmp(key, jitlog_modes[i].key) == 0) {
+      mode = jitlog_modes[i].mode;
+      break;
+    }
+  }
+
+  if (mode == -1) {
+    luaL_error(L, "Unknown mode key '%s'", key);
+  }
+
+  setboolV(L->top-1, jitlog_setmode(ctx2usr(context), mode, tvistruecond(enabled)));
+  return 1;
+}
+
+static int jlib_getmode(lua_State *L)
+{
+  jitlog_State *context = jlib_getstate(L);
+  const char *key = luaL_checkstring(L, 1);
+  MSize i = 0;
+  int mode = -1;
+
+  for (; i != (sizeof(jitlog_modes)/sizeof(ModeEntry)); i++) {
+    if (strcmp(key, jitlog_modes[i].key) == 0) {
+      mode = jitlog_modes[i].mode;
+      break;
+    }
+  }
+
+  if (mode == -1) {
+    luaL_error(L, "Unknown mode key '%s'", key);
+  }
+
+  setboolV(L->top-1, context->mode & mode);
+  return 1;
+}
+
 static int jlib_writemarker(lua_State *L)
 {
   jitlog_State *context = jlib_getstate(L);
@@ -482,6 +579,8 @@ static const luaL_Reg jitlog_lib[] = {
   {"getsize", jlib_getsize},
   {"setlogsink", jlib_setlogsink},
   {"writemarker", jlib_writemarker},
+  {"setmode", jlib_setmode},
+  {"getmode", jlib_getmode},
   {NULL, NULL},
 };
 
