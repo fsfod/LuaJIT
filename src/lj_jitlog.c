@@ -116,6 +116,17 @@ static void jitlog_gcstate(jitlog_State* context, int newstate)
   log_gcstate(&context->ub, g->gc.state, &gcinfo);
 }
 
+enum StateKind{
+  STATEKIND_VM,
+  STATEKIND_JIT,
+  STATEKIND_GC_ATOMIC,
+};
+
+static void jitlog_gcatomic_stage(jitlog_State *context, int atomicstage)
+{
+  log_statechange(&context->ub, STATEKIND_GC_ATOMIC, atomicstage, 0);
+}
+
 static void free_context(jitlog_State *context);
 
 static void jitlog_loadstage2(lua_State *L, jitlog_State *context);
@@ -140,6 +151,9 @@ static void jitlog_gcevent(void *contextptr, lua_State *L, int eventid, void *ev
   switch (event) {
     case GCEVENT_STATECHANGE:
       jitlog_gcstate(context, (int)data);
+      break;
+    case GCEVENT_ATOMICSTAGE:
+      jitlog_gcatomic_stage(context, (int)data);
       break;
     default:
       break;
@@ -267,6 +281,16 @@ static const char *const gcstates[] = {
   "finalize",
 };
 
+static const char *const gcatomic_stages[] = {
+  "stage_end",
+  "mark_upvalues",
+  "mark_roots",
+  "mark_grayagain",
+  "separate_udata",
+  "mark_udata",
+  "clearweak",
+};
+
 #define enum_entry(enumname, strarray) {.name = enumname, .valuenames = strarray, .valuenames_length = (sizeof(strarray)/sizeof(strarray[0]))}
 #define array_length(arr) (sizeof(arr)/sizeof((arr)[0]))
 
@@ -281,6 +305,7 @@ VMDef_Args vmdef = {
   vmdef_array(flushreason, flushreason),
   vmdef_array(jitparams, jitparams),
   vmdef_array(gcstates, gcstates),
+  vmdef_array(gcatomic_stages, gcatomic_stages),
 };
 
 static void write_header(jitlog_State *context)

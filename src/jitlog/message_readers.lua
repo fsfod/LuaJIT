@@ -184,6 +184,7 @@ function fbreaders:VMDef(msg)
     flushreason = util.make_enum(msg:get_flushreason()),
     jitparams = util.make_enum(msg:get_jitparams()),
     gcstate = util.make_enum(msg:get_gcstates()),
+    gcatomic_stages = util.make_enum(msg:get_gcatomic_stages()),
   }
   return vmdef
 end
@@ -232,6 +233,39 @@ function api:update_gcinfo(info, source)
   self:log_msg("gcinfo", "GCInfo: MemTotal = %dMB, StrCount = %d", totalmem/(1024*1024), info.strnum)
 end
 
+local statekind = {
+  [0] = "VM",
+  [1] = "JIT",
+  [2] = "GCAtomic",
+}
+
+function readers:statechange(msg)
+  local system = msg:get_system()
+  local newstate = msg:get_state()
+  local statesystem = statekind[system]
+
+  if statesystem == "GCAtomic" then
+    local prevstage = self.atomicstage 
+    if prevstage then
+      assert(self.atomicstaage_start)
+      local time =  msg.time-self.atomicstaage_start
+      self.atomictime[prevstage] = (self.atomictime[prevstage] or 0) + time
+      self:log_msg("statechange", "Atomic stage '%s' took %d ticks", prevstage, tonumber(time))
+    end
+
+    newstate = self.vmdef.gcatomic_stages[newstate]
+    if newstate ~= "stage_end" then
+      self.atomicstage = newstate
+      self.atomicstaage_start = msg.time
+    else
+      self.atomicstage = nil
+      self.atomicstaage_start = nil
+    end
+  end
+  self:log_msg("statechange", "StateChanged(%s): newstate= %s", statesystem, newstate)
+  return statesystem, newstate
+end
+
 local function init(self)
   self.markers = {}
   -- Record id marker messages in to table 
@@ -243,6 +277,7 @@ local function init(self)
   self.flushes = {}
   self.gccount = 0 -- number GC full cycles that have been seen in the log
   self.gcstatecount = 0 -- number times the gcstate changed
+  self.atomictime = {}
 
   return t
 end

@@ -126,6 +126,7 @@ table VMDef{
   flushreason : stringlist
   jitparams : stringlist
   gcstates : stringlist
+  gcatomic_stages : stringlist
 }
 
 message gcstate {
@@ -138,4 +139,11 @@ table gc_info{
   totalmem : GCSize
   strnum : uint32
   state : uint8 (enum : gcstate)
+}
+
+message statechange (no_vtable) {
+  time : timestamp
+  system : 8
+  state : 8
+  flags : 8
 }

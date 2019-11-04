@@ -155,6 +155,16 @@ module.messages = {
       strnum : u32
     ]]
   },
+
+  {
+    name = "statechange",
+    fields = [[
+      time : timestamp
+      system : 8
+      state : 8
+      flags : 8
+    ]]
+  },
 }
 
 module.structs = {
