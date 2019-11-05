@@ -391,6 +391,8 @@ end
 
 parser.builtin_msgorder = {
   header = 0,
+  idmarker4b = 2,
+  idmarker = 3,
 }
 
 local function sortmsglist(msglist, msgorder)

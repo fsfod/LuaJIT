@@ -25,9 +25,49 @@ function readers:stringmarker(msg)
   return marker
 end
 
+function readers:idmarker4b(msg)
+  local id = msg.id
+  local flags = msg.flags
+  local jitted = msg.jited
+  local marker
+  if self.track_idmarkers then
+    local marker = {
+      eventid = self.eventid,
+      id = id,
+      flags = flags,
+      jitted = jitted,
+      type = "id"
+    }
+    tinsert(self.markers, marker)
+  end
+  self:log_msg("idmarker", "IdMarker4b: id = %d flags = %d, jitted = %s", id, flags, jitted)
+  return id, flags, nil, marker
+end
+
+function readers:idmarker(msg)
+  local id = msg.id
+  local flags = msg.flags
+  local jitted = msg.jited
+  local marker
+  if self.track_idmarkers then
+    marker = {
+      eventid = self.eventid,
+      id = id,
+      flags = flags,
+      jitted = jitted,
+      time = msg.time,
+      type = "id"
+    }
+    tinsert(self.markers, marker)
+  end
+  self:log_msg("idmarker", "IdMarker: id: %d, flags: %d, jitted = %s", id, flags, jitted)
+  return id, flags, msg.time, marker
+end
+
 local function init(self)
   self.markers = {}
-
+  -- Record id marker messages in to table 
+  self.track_idmarkers = true
   return t
 end
 

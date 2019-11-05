@@ -209,6 +209,39 @@ it("string marker", function()
   assert(result.markers[2].flags == 0xbeef)
 end)
 
+it("id markers", function()
+  local writemarker = jitlog.writemarker
+  jitlog.start()
+  writemarker(0xff00)
+  for i=1, 200 do
+    writemarker(i, 1)
+    writemarker(0xbeef, 7)
+    writemarker(0x0fff)
+  end
+  
+  local result = parselog(jitlog.savetostring())
+  assert(#result.markers >= 201, #result.markers)
+  --assert(result.msgcounts.smallmarker == 601, result.msgcounts.smallmarker)
+  assert(not result.markers[1].label)
+  assert(not result.markers[2].label)
+  assert(result.markers[1].eventid < result.markers[2].eventid)
+  assert(result.markers[1].id == 0xff00, result.markers[1].id)
+
+  -- Check the markers are still written correctly in JIT'ed code
+  local currid = 1
+  local markers = result.markers 
+  for i=1, 600,3 do
+    assert(markers[i+1].id == currid, markers[i+1].id )
+    assert(markers[i+1].flags == 1, markers[i+1].flags)
+    assert(markers[i+2].id == 0xbeef, markers[i+2].id)
+    assert(markers[i+2].flags == 7, markers[i+2].flags)
+    
+    assert(markers[i+3].id == 0x0fff)
+    assert(markers[i+3].flags == 0)
+    currid = currid + 1
+  end
+end)
+
 local failed = false
 
 pcall(jitlog.shutdown)

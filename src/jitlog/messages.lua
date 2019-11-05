@@ -57,6 +57,25 @@ module.messages = {
     ]],
     use_msgsize = "label",
   },
+
+  {
+    name = "idmarker4b",
+    fields = [[
+      jited : bool
+      flags : 7
+      id : 16
+    ]]
+  },
+
+  {
+    name = "idmarker",
+    fields = [[
+      time : timestamp
+      jited : bool
+      flags : 7
+      id : 16
+    ]]
+  },
 }
 
 return module

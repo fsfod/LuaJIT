@@ -138,6 +138,30 @@ static void write_header(jitlog_State *context)
   free(msgnamelist);
 }
 
+const uint32_t smallidsz = 20;
+#define USE_SMALLMARKER (1 << 31)
+
+static void writemarker(jitlog_State *context, uint32_t id, uint32_t flags)
+{
+  int jited = context->g->vmstate > 0;
+  if (flags & USE_SMALLMARKER) {
+    flags &= ~USE_SMALLMARKER;
+    lua_assert(id < (uint32_t)((1 << smallidsz)-1) && flags < 16);
+    log_idmarker4b(&context->ub, jited, flags, id);
+  } else {
+    log_idmarker(&context->ub, jited, flags, id);
+  }
+}
+
+void lj_writemarker(lua_State *L, uint32_t id, uint32_t flags)
+{
+  jitlog_State *context = (jitlog_State *)(G(L)->vmevent_data);
+  if (context == NULL) {
+    return;
+  }
+  writemarker(context, id, flags);
+}
+
 static int jitlog_isrunning(lua_State *L)
 {
   void* current_context = NULL;
@@ -373,9 +397,15 @@ static int jlib_writemarker(lua_State *L)
 {
   jitlog_State *context = jlib_getstate(L);
   size_t size = 0;
-  const char *label = luaL_checklstring(L, 1, &size);
-  int flags = luaL_optint(L, 2, 0);
-  jitlog_writemarker(ctx2usr(context), label, flags);
+  if (tvisstr(L->base)) {
+    const char* label = luaL_checklstring(L, 1, &size);
+    int flags = luaL_optint(L, 2, 0);
+    jitlog_writemarker(ctx2usr(context), label, flags);
+  } else {
+    lua_Integer id = lua_tointeger(L, 1);
+    int flags = luaL_optint(L, 2, 0);
+    writemarker(context, (uint32_t)id, flags);
+  }
   return 0;
 }
 
