@@ -45,3 +45,16 @@ message stringmarker{
   flags : 16
   label : string
 }
+
+message idmarker4b (no_vtable){
+  jited : bool
+  flags : 7
+  id : 16
+}
+
+message idmarker (no_vtable, mapto : idmarker4b){
+  time : timestamp
+  jited : bool
+  flags : 7
+  id : 16
+}
