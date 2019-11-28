@@ -5,10 +5,10 @@
 #include "lj_gc.h"
 #include "lj_buf.h"
 #include "lj_vmevent.h"
-#include "lj_vmevent_printer.h"
 #include "lj_debug.h"
 #include "luajit.h"
 #include "lauxlib.h"
+#include "vmevent_printer.h"
 
 typedef struct VMPrintContext {
   VMPrintUserContext user;
