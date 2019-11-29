@@ -370,6 +370,7 @@ end
     vpaths { ["libs"] = "src/lib_*.c" }
     vpaths { ["headers"] = "src/lj_*.h" }
     vpaths { ["src"] = "src/lj_*.c" }
+    vpaths { ["jitlog"] = "src/jitlog/*" }
     vpaths { [""] = "lua.natvis" }
     vpaths { [""] = "lua64.natvis" }
 
@@ -423,6 +424,13 @@ end
       }
       files {
         "src/jitlog/messages.lua",
+        "src/jitlog/build.lua",
+        "src/jitlog/messages.lua",
+        "src/message_readers.lua",
+        "src/jitlog/generator.lua",
+        "src/jitlog/c_generator.lua",
+        "src/jitlog/lua_generator.lua",
+        "src/jitlog/cs_generator.lua",
         "%{cfg.bindir}/jitlog/lj_jitlog_def.h",
         "%{cfg.bindir}/jitlog/lj_jitlog_decl.h", 
         "%{cfg.objdir}/lj_jitlog_writers.h",
