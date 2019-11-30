@@ -139,7 +139,7 @@ function logreader:readheader(buff, buffsize, info)
   info.timerfreq = header.timerfreq
   self:log_msg("header", "LogHeader: Version %d, OS %s, CPU %s", info.version, info.os, info.cpumodel)
 
-  local msgtype_count = header:get_msgtype_count()
+  local msgtype_count = header.msgtype_count
   info.msgtype_count = msgtype_count
   
   local file_msgnames = header:get_msgnames()
@@ -157,7 +157,25 @@ function logreader:readheader(buff, buffsize, info)
   if msgtype_count ~= MsgType.MAX then
     self:log_msg("header", "Warning: Message type count differs from known types")
   end
-    
+
+  info.vtables = self:read_array("uint16_t", header:get_vtables())
+  local vtables = info.vtables
+
+  local i = 0
+  local index, limit = 0, vtables.length-1
+  while index < limit do
+    local vtsize = vtables:get(index)/2
+    local objsize = vtables:get(index +2)
+    if vtsize < 2 or (index +vtsize-1) > limit then
+      error(format("Bad vtable size %d in msg %s", vtsize, file_msgnames[i]))
+    end
+    if objsize < 4 then
+      error(format("Bad vtable object size %d for msg %s", objsize, file_msgnames[i]))
+    end
+    index = index + vtsize
+    i = i + 1
+  end
+
   return true
 end
 

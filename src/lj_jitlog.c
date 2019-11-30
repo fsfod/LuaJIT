@@ -271,15 +271,15 @@ static void write_gcproto(jitlog_State *context, UserBuf* ub, GCproto* pt)
     .kgc = mref(pt->k, GCRef) - pt->sizekgc,
     .knum = mref(pt->k, double),
     .lineinfo = lineinfo,
-    .lineinfosize = linesize,
+    .lineinfo_length = linesize,
     .uvnames = (char *)proto_uvinfo(pt),
-    .uvnames_size = uvinfo_size(pt),
+    .uvnames_length = uvinfo_size(pt),
   };
   if (varinfo) {
     args.varinfo = varinfo;
     args.varinfo_length = count;
     args.varnames = ubufB(&varnames);
-    args.varnames_size = (uint32_t)ubuflen(&varnames);
+    args.varnames_length = (uint32_t)ubuflen(&varnames);
   }
   log_obj_proto(ub, &args);
 
@@ -478,7 +478,7 @@ void write_rawstack(jitlog_State *context, lua_State *L, int maxslots)
     .base = -1,
     .top = -1,
     .slots = mref(L->stack, TValue),
-    .slotcount = maxslots != -1 ? maxslots : L->stacksize,
+    .slots_length = maxslots != -1 ? maxslots : L->stacksize,
   };
   log_stacksnapshot(&context->ub, &args);
   context->events_written |= JITLOGEVENT_STACK;
@@ -534,7 +534,7 @@ static void write_stacksnapshot(jitlog_State *context, lua_State *L, int frameso
     .base = base,
     .top = top,
     .slots = stack,
-    .slotcount = size,
+    .slots_length = size,
   };
 
   log_stacksnapshot(&context->ub, &args);
@@ -724,6 +724,7 @@ static void jitlog_writetrace(jitlog_State *context, GCtrace *T, int abort)
     .stopfunc = context->lastfunc,
     .abortcode = (uint16_t)abortreason,
     .abortinfo = (uint16_t)abortinfo,
+    .mcode = T->mcode,
     .mcode_length = mcodesize,
     .ir = T->ir + REF_BIAS,
     .irlen = irsize,
@@ -1490,21 +1491,30 @@ static void write_header(jitlog_State *context)
   MSize msgnamessz = 0;
   char *msgnamelist = strlist_concat(jitlog_msgnames, MSGTYPE_MAX, &msgnamessz);
   header_Args args = {
+    .fileheader = 0x474c4a,
+    .headersize = sizeof(MSG_header),
     .version = JITLOG_FILE_VERSION,
     .flags = 0,
-    .headersize = sizeof(MSG_header),
     .msgsizes = jitlog_msgsizes,
     .msgtype_count = MSGTYPE_MAX,
     .msgnames = msgnamelist,
     .msgnames_length = msgnamessz,
     .cpumodel = cpumodel,
-    .cpumodel_length = model_length,
     .os = LJ_OS_NAME,
     .ggaddress = (uintptr_t)G2GG(g),
     .timerfreq = lj_perf_ticksfreq,
+    .vtables_length = sizeof(fb_vtables)/sizeof(short),
+    .vtables = fb_vtables,
+    .vtable_offsets = fb_vtoffsets,
+    .vtable_offsets_length = sizeof(fb_vtoffsets)/sizeof(int),
   };
   log_header(&context->ub, &args);
   free(msgnamelist);
+
+  MSG_header* header = ((MSG_header*)ubufB(&context->ub));
+  
+  ptrdiff_t diff = offsetof(MSG_header, vtables_offset) - offsetof(MSG_header, vtable);
+  header->vtable = (int32_t)-(header->vtables_offset + diff + 4);
 
   write_note(&context->ub, "msgdefs", msgdefstr);
   write_bnote(&context->ub, "bc_mode", lj_bc_mode, (BC__MAX+GG_NUM_ASMFF) * sizeof(uint16_t));
@@ -2121,13 +2131,13 @@ LUA_API int jitlog_write_gcsnapshot(JITLogUserContext *usrcontext, const char *l
     lua_assert(0 && "NYI snapshots larger than 4GB");
     return 0;
   }
-  
+
   gcsnapshot_Args args = {
     .label = label,
     .objs = (SnapObj *)snap->objects,
-    .objcount = snap->count,
+    .objs_length = snap->count,
     .objmem = (uint8_t*)snap->gcmem,
-    .objmemsz = (uint32_t)snap->gcmem_size,
+    .objmem_length = (uint32_t)snap->gcmem_size,
     .registry = tabV(&g->registrytv),
     .globalenv = gcrefp(G2GG(g)->L.env, GCtab),
   };

@@ -406,8 +406,9 @@ function readers:obj_proto(msg)
   end
   proto.bc = bcarray
 
-  local lineinfo, lisize, listtype
-  if bclen == 0 or msg.lineinfosize == 0 then
+  local lisize, listtype
+  local lineinfo, length = msg:get_lineinfo()
+  if bclen == 0 or not lineinfo then
     -- We won't have any line info for internal functions or if the debug info is stripped
     lineinfo = false
   elseif proto.numline < 256 then
@@ -421,8 +422,8 @@ function readers:obj_proto(msg)
     listtype = "uint32_t"
   end
   if listtype then
-    assert(msg.lineinfosize == bclen * lisize)
-    lineinfo = self:read_array(listtype, msg:get_lineinfo(), bclen)
+    assert(length == bclen * lisize)
+    lineinfo = self:read_array(listtype, lineinfo, bclen)
   end
   proto.lineinfo = lineinfo
 
@@ -1280,16 +1281,16 @@ function readers:stacksnapshot(msg)
   stack.slots = self:read_array("TValue", msg:get_slots())
   setmetatable(stack, self.msgobj_mt.stacksnapshot)
   self.laststack = stack
-  self:log_msg("stacksnapshot", "StackSnapshot: slots = %d, base = %d",  msg.slotcount, msg.base)
+  self:log_msg("stacksnapshot", "StackSnapshot: slots = %d, base = %d", stack.slots.length, msg.base)
   return stack
 end
 
 function readers:perf_counters(msg)
   local counterdef = self.enums.CounterId
   local counts, length = msg:get_counts()
-  local ids = msg.ids_length ~= 0 and msg.ids
+  local ids, idcount = msg:get_ids()
   assert(length <= #counterdef.names)
-  assert(msg.ids_length == 0 or msg.ids_length == length)
+  assert(idcount == 0 or idcount == length)
   
   for i=0, length-1 do
     local key
@@ -1305,21 +1306,23 @@ end
 function readers:perf_timers(msg)
   local timerdef = self.enums.TimerId
   local timers, length = msg:get_timers()
-  local ids = msg.ids_length ~= 0 and msg.ids
+  local ids, idcount = msg:get_ids()
   assert(length <= #timerdef.names)
-  assert(msg.ids_length == 0 or idcount == length)
+  assert(idcount == 0 or idcount == length)
   
   for i = 0, length-1 do
     local key
     if ids then
-      key = timerdef[ids[i]]
+      local id = ids[i]
+      assert(id < length, id)
+      key = timerdef[id]
     else
       key = timerdef[i]
     end
     self.timers[key] = timers[i].time
     self.counters[key] = timers[i].count
   end
-  self:log_msg("perf_timers", "PerfTimers: timers = %d, ids = %d", length, msg.ids_length)
+  self:log_msg("perf_timers", "PerfTimers: timers = %d, ids = %d", length, idcount)
 end
 
 function readers:perf_section(msg)
@@ -1379,19 +1382,18 @@ end
 
 function readers:obj_raw(msg)
   local address = addrtonum(msg.address)
-  local memsize = msg.objmem_length
-  local extrasize = msg.extra_length
+  local objmem, memsize = msg:get_objmem()
   local type = objtypes[msg.objtype]
   local object = {
     eventid = self.eventid,
     address = address,
     type = kind,
     size = memsize,
-    objmem = self:read_array("char", msg:get_objmem()),
+    objmem = self:read_array("char", objmem, memsize),
     extramem = self:read_array("char", msg:get_extra()),
   }
   table.insert(self.rawobjs, object)
-  self:log_msg("obj_raw", "RawObj(%s): size = %d, extra = %d, address = 0x%x", type, memsize, extrasize, address)
+  self:log_msg("obj_raw", "RawObj(%s): size = %d, extra = %d, address = 0x%x", type, memsize, object.extramem.length, address)
   return object
 end
 
@@ -1469,10 +1471,8 @@ msgobj_mt.gcsnapshot = {
 }
 
 function readers:gcsnapshot(msg)
-  local objcount = msg.objcount
-  local objmemsz = msg.objmemsz 
-  local objs = self:read_array("SnapObj", msg:get_objs(), objcount) 
-  local objmem = self:read_array("char", msg:get_objmem(), objmemsz)
+  local objs = self:read_array("SnapObj", msg:get_objs()) 
+  local objmem = self:read_array("char", msg:get_objmem())
 
   local snap = {
     id = #self.gcsnapshots + 1,
@@ -1480,13 +1480,13 @@ function readers:gcsnapshot(msg)
     label = msg.label,
     time = msg.time,
     objs = objs,
-    objcount = objcount,
+    objcount = objs.length,
     objmem = objmem,
-    objmemsz = objmemsz,
+    objmemsz = objmem.length,
   }
   setmetatable(snap, self.msgobj_mt.gcsnapshot)
   
-  self:log_msg("gcsnapshot", "GCSnapshot: label = '%s' objects = %d, total object mem = %s", snap.label,  objcount, objmemsz)
+  self:log_msg("gcsnapshot", "GCSnapshot: label = '%s' objects = %d, total object mem = %s", snap.label,  objs.length, objmem.length)
   tinsert(self.gcsnapshots, snap)
   return snap
 end

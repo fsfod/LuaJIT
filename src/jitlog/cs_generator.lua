@@ -66,13 +66,18 @@ public struct Msg_{{name}}{  {{fields}}
 
 
   public void Check(ulong limit) {
-    ulong offset = {{msgsize}};
 {{checks :%s}}  }]],
 
   boundscheck_line = [[
-    offset = offset + (ulong)({{field}} * {{element_size}});
-    if(offset > limit) {
-      throw new Exception("Bad field length for {{name}}");
+    if({{field}} != 0) {
+      if({{field}} < 0 ||  (ulong)({{field}} + {{offset}}) > (limit-4)) {
+        throw new Exception("Bad field offset for {{name}}");
+      }
+
+      var offset = (ulong)({{field}}) + 4 + MsgInfo.GetArrayLength(ref {{field}}) * (ulong){{element_size}};
+      if(offset > limit) {
+        throw new Exception("Bad field length for {{name}}");
+      }
     }
 ]],
 
@@ -129,17 +134,9 @@ function generator:fmt_accessor_get(struct, f, msgvar)
 end
 
 local vprop_array = [[
-public unsafe {{ret}} {{name}} {
+public unsafe ReadOnlySpan<{{element}}> {{name}} {
     get {
-      {{element}}[] array = new {{element}}[{{buflen}}];
-      fixed (Msg_{{msgname}}* self = &this) {
-        byte* p = (byte *)self;
-        fixed({{element}}* arrayptr = array) {
-          long arraySize = {{buflen}} * sizeof({{element}});
-          Buffer.MemoryCopy({{body}}, arrayptr, arraySize, arraySize);
-        }
-      }
-      return array;
+      return MsgInfo.GetArraySpan<{{element}}>(ref {{name}}_offset);
     }
   }
 ]]
@@ -148,8 +145,13 @@ local vprop_string = [[
 public unsafe string {{name}} {
     get {
       fixed (Msg_{{msgname}}* self = &this) {
-        byte* p = (byte *)self;
-        return new string((sbyte*){{body}}, 0, (int){{buflen}});
+        var span = MsgInfo.GetArraySpan<sbyte>(ref {{name}}_offset);
+        if(span.IsEmpty) {
+          return null;
+        }
+        fixed (sbyte* p = span) {
+          return new string(p, 0, span.Length);
+        }
       }
     }
   }
@@ -159,8 +161,7 @@ local vprop_stringlist = [[
 public unsafe string[] {{name}} {
     get {
       fixed (Msg_{{msgname}}* self = &this) {
-        byte* p = (byte *)self;
-        return MsgInfo.ParseStringList({{body}}, {{buflen}});
+        return MsgInfo.ParseStringList(MsgInfo.GetArraySpan<byte>(ref {{name}}_offset));
       }
     }
   }
@@ -181,15 +182,9 @@ function generator:fmt_accessor_def(struct, f, voffset)
       first_cast = "byte*"
       second_cast = self.types[f.type].c
     end
-    
+
     ret = self.types[f.type].element_type
-    
-    if f.vindex == 1 then
-      body = format("(p + %d)", struct.size)
-    else
-      body = format([[((p + %d) + (%s))]], struct.size, voffset)
-    end
-    
+
     if struct.use_msgsize then
       buflen = "msgsize - " .. struct.size
     elseif f.buflen then

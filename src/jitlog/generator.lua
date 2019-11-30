@@ -2,6 +2,7 @@ local util = require"jitlog.util"
 local buildtemplate, trim = util.buildtemplate, util.trim
 local format = string.format
 local tinsert = table.insert
+local bor, rshift = bit.bor, bit.rshift
 
 local builtin_types = {
   char = {size = 1, signed = true, printf = "%i", c = "char",  argtype = "char"},
@@ -366,7 +367,7 @@ function parser:parse_msg(def)
       t.bitsize = bitsize
       -- bools are stored as bitfields so also keep track if a bitfield is a bool
       t.bool = typeinfo.bool
-    elseif typeinfo.vsize or length then
+    elseif typeinfo.vsize or length ~= nil then
       table.insert(vlen_fields, t)
       t.vindex = #vlen_fields
       t.vlen = true
@@ -379,14 +380,24 @@ function parser:parse_msg(def)
         t.type = arraytype
       end
 
+      -- Implicitly generate arg for the length but don't create a field for it
+      if length == "" or (length == nil and ftype == "stringlist") then
+        length = t.name.."_length"
+        assert(not fieldlookup[length], "cannot add automatic field length because the name is already taken")
+        t.buflen = length
+        t.argonly_length = true
+        -- Add a dummy field for the length but don't add it to our fieldlist
+        fieldlookup[length] = {name = length, argonly = true, type = "u32"}
+      end
+
       -- If no length field name was specified make sure its one of the special cases it can be inferred
       if not length then
         if def.use_msgsize == t.name then
           t.buflen = "msgsize"
         elseif ftype == "string" then
-          length = t.name.. "_length"
+          length = t.name.."_length"
           assert(not fieldlookup[length], "cannot add automatic field length because the name is already taken")
-          add_field({name = length, noarg = true, type = "u32"})
+          fieldlookup[length] = {name = length, noarg = true, type = "u32"}
           t.buflen = length
           t.implicitlen = true
         else
@@ -430,6 +441,7 @@ function parser:parse_msg(def)
 
     --Add the implicit message size field thats always after the message header
     add_field({name = "msgsize", sizefield = true, noarg = true, type = "u32", writer = "vtotal"}, 2)
+    add_field({name = "vtable", vtable = true, noarg = true, type = "i32", writer = "vtable"}, 3)
   end
 
   local msgsize = 0
@@ -442,7 +454,7 @@ function parser:parse_msg(def)
       assert(fieldlookup[f.bitstorage], "bad bitstorage field specified for bitfield")
     elseif f.vlen then
       assert(f.buflen, "no length specified for vlength field")
-      assert(fieldlookup[f.buflen], "could not find length field specified for vlength a field")
+      assert(f.argonly_length or fieldlookup[f.buflen], "could not find length field specified for vlength a field")
       assert(not f.bitstorage)
       assert(not f.bitsize)
     else
@@ -457,6 +469,14 @@ function parser:parse_msg(def)
     end
     f.order = i
     msgsize = msgsize + size
+  end
+
+  msgtype.fixedsize = msgsize
+
+  -- Offsets to variable length fields are placed at the end of the struct
+  for _, f in ipairs(vlen_fields) do
+    f.offset = msgsize
+    msgsize = msgsize + 4
   end
 
   msgtype.idsize = idsize
@@ -486,6 +506,58 @@ function parser:parse_structlist(structs)
     self.types[name] = struct
     table.insert(self.structlist, struct)
   end
+end
+
+function parser:build_vtable(def, kind)
+  local fields = def.fields
+  local firstfield, baseoffset = 1, 0
+  assert(kind == "struct" or fields[1].name == "header", fields[1].name)
+
+  local offsets = { 0, def.size}
+  local vtable_names = {}
+  if def.vsize then
+    assert(kind ~= "struct")
+    assert(fields[2].name == "msgsize", fields[2].nam)
+    assert(fields[3].name == "vtable", fields[3].nam)
+    firstfield = 4
+    baseoffset = -8
+  else
+    firstfield = 2
+    baseoffset = 0
+  end
+
+  for i = firstfield, #fields do
+    local f = fields[i]
+
+    local offset
+    if f.offset then
+      offset = f.offset + baseoffset
+    elseif f.vlen then
+      -- Variable length fields offsets are placed at the end of the message
+      offset = f.vindex*4 + def.size
+    elseif f.bitstorage and not def.vsize  then
+      local bitfield = def.fieldlookup[f.bitstorage]
+      -- Set MSB to signify a bitfield
+      offset = bit.bor(0x8000, bit.rshift(bitfield.offset, 5))
+
+      -- Header bitfields start effectively at byte 1 and offset 0 means the field is not present in flatbuffers
+      if offset == 0 then
+        offset = 1
+      end
+    end
+
+    if offset then
+      local slot = #offsets
+      f.vtslot = slot
+      tinsert(offsets, offset)
+      tinsert(vtable_names, f.name)
+    end
+  end
+
+  -- Update vtable size to the number of fields that have valid offsets
+  offsets[1] = #offsets * 2
+  def.vtable_names = vtable_names
+  def.vtable = offsets
 end
 
 local filecache = {}
@@ -650,6 +722,14 @@ function parser:complete()
   assert(self.msglookup["header"], "a header message must be defined")
   self.sorted_msgnames = sortmsglist(self.msglist, self.builtin_msgorder)
 
+  for _, def in ipairs(self.msglist) do
+    self:build_vtable(def, "message")
+  end
+
+  for _, def in ipairs(self.structlist) do
+    self:build_vtable(def, "struct")
+  end
+
   local data = util.copyfields(self, {}, copyfields)
   return data
 end
@@ -755,6 +835,16 @@ function generator:write_struct(name, def)
     end
   end
 
+  -- Write offsets of vlength fields at the end of the struct treated as always present in the flatbuffers vtable
+  -- created for the message.
+  if def.vlen_fields then
+    local offset_type = self.typerename.i32 or self.types.i32.c
+
+    for _, f in ipairs(def.vlen_fields) do
+      fieldstr = fieldstr..format(self.templates.structfield, offset_type, f.name.."_offset")
+    end
+  end
+
   local template
   if not def.struct and self.templates.msgstruct then
     template = "msgstruct"
@@ -793,6 +883,8 @@ function generator:write_vlenfield(msgdef, f, vtotal, vwrite)
   local tmpldata = {
     name = logfunc_getfieldvar(msgdef, self.argprefix, f),
     sizename = f.name.."_size",
+    msgfield = f.name,
+    msgname = msgdef.name,
   }
 
   local vtype = self.types[f.type]
@@ -814,7 +906,8 @@ function generator:write_vlenfield(msgdef, f, vtotal, vwrite)
    -- tmpldata.sizename = self.argprefix..tmpldata.sizename
   end
   tinsert(vtotal, buildtemplate("vtotal += {{sizename}} * {{element_size}};", tmpldata))
-  tinsert(vwrite, buildtemplate("ubuf_putmem(ub, {{name}}, (MSize)({{sizename}} * {{element_size}}));", tmpldata))
+  tinsert(vwrite, buildtemplate("msg->{{msgfield}}_offset = (int32_t)((ubufP(ub)-msgstart) - offsetof(MSG_{{msgname}}, {{msgfield}}_offset));", tmpldata))
+  tinsert(vwrite, buildtemplate("ubuf_putarray(ub, {{name}}, {{sizename}}, {{element_size}});", tmpldata))
 end
 
 local funcdef_fixed = [[
@@ -823,7 +916,7 @@ LJ_STATIC_ASSERT(sizeof(MSG_{{name}}) == {{msgsize}});
 static LJ_AINLINE void log_{{name}}({{args}})
 {
   MSG_{{name}} *msg = (MSG_{{name}} *)ubufP(ub);
-{{fields:  %s\n}}  setubufP(ub, ubufP(ub) + {{msgsize}});
+{{fields:  %s\n}}  setubufP(ub, ubufP(ub) + sizeof(MSG_{{name}}));
   ubuf_more(ub, {{minbuffspace}});
 }
 
@@ -835,8 +928,11 @@ LJ_STATIC_ASSERT(sizeof(MSG_{{name}}) == {{msgsize}});
 static LJ_AINLINE void log_{{name}}({{args}})
 {
   MSG_{{name}} *msg;
-{{vtotal:  %s\n}}  msg = (MSG_{{name}} *)ubuf_more(ub, (MSize)(vtotal + {{minbuffspace}}));
-{{fields:  %s\n}}  setubufP(ub, ubufP(ub) + {{msgsize}});
+{{vtotal:  %s\n}}
+  msg = (MSG_{{name}} *)ubuf_more(ub, (MSize)(vtotal + {{minbuffspace}}));
+  char *msgstart = ubufP(ub);
+{{fields:  %s\n}}  setubufP(ub, ubufP(ub) + sizeof(MSG_{{name}}));
+
 {{vwrite:  %s\n}}
 }
 
@@ -863,26 +959,28 @@ generator.custom_field_writers = {
   widenptr = function(self, msgdef, f, valuestr)
     return format("msg->%s = (uint64_t)(uintptr_t)(%s);", f.name, valuestr)
   end,
+  vtable = function(self, msgdef, f, valuestr)
+    return format("msg->%s = (int32_t)(-fb_vtoffsets[MSGTYPE_%s]);", f.name, msgdef.name)
+  end,
 }
 
 function generator:write_logfunc(def)
   local fields = {}
   local vtotal, vwrite = {}, {}
   if def.vsize then
-    tinsert(vtotal, format("size_t vtotal = sizeof(MSG_%s);", def.name))
+    tinsert(vtotal, format("size_t vtotal = sizeof(MSG_%s) + %d;", def.name, def.vcount*4))
   end
 
   local argcount = 0
   for _, f in ipairs(def.fields) do
     local typename = f.type
-    local argtype
     local typedef = self.types[typename]
 
     if not typedef.noarg and not f.noarg and (not f.lengthof or def.fieldlookup[f.lengthof].noarg) then
       argcount = argcount + 1
       
       local length = f.buflen and def.fieldlookup[f.buflen]
-      if length and not length.noarg then
+      if f.buflen == false or (length and not length.noarg) then
         argcount = argcount + 1
       end
     end
@@ -931,11 +1029,14 @@ function generator:write_logfunc(def)
 
       table.insert(args, format("%s %s", (argtype or typename), f.name))
       if f.buflen then
-        local length = def.fieldlookup[f.buflen]
-        if not length.noarg and not added[length.name] then
+        local leninfo = def.fieldlookup[f.buflen]
+        local buflen = f.buflen
+        assert(not leninfo or buflen == leninfo.name)
+
+        if not added[buflen] and (not leninfo or not leninfo.noarg) then
           -- More than one buffer could be using this field as length so only include in the args once
-          added[length.name] = true
-          table.insert(args, "uint32_t " .. length.name)
+          added[buflen] = true
+          table.insert(args, "uint32_t "..buflen)
         end
       end
     end
@@ -1017,8 +1118,13 @@ function generator:build_boundscheck(msgdef)
   local checks = {}
 
   for _, field in ipairs(msgdef.vlen_fields) do
-    local len = self:fmt_fieldget(msgdef,  msgdef.fieldlookup[field.buflen])
-    table.insert(checks, buildtemplate(self.templates.boundscheck_line, {field = len, name = field.name, element_size = field.element_size}))
+    local tvalues = {
+      field = field.name.."_offset",
+      name = field.name,
+      offset = field.offset,
+      element_size = field.element_size,
+    }
+    table.insert(checks, buildtemplate(self.templates.boundscheck_line, tvalues))
   end
   return buildtemplate(self.templates.boundscheck_func, {name = msgdef.name, msgsize = msgdef.size, checks = checks})
 end
@@ -1061,6 +1167,15 @@ function generator:write_msgsizes(dispatch_table)
   end
 
   self:writetemplate(template, {list = sizes, count = #self.sorted_msgnames})
+end
+
+function generator:write_vtable(msgdef)
+  self:writetemplate("vtable", {
+    name = msgdef.name,
+    offsets = util.concatf(msgdef.vtable, "0x%X, "):sub(1, -3)
+  })
+
+  return #msgdef.vtable*2
 end
 
 function generator:write_enums()

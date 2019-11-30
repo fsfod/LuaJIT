@@ -47,6 +47,10 @@ typedef struct MSG_{{name}} {
 {{bitfields:%s\n}}
 ]],
   structfield = "  %s %s;\n",
+  vtable = [[
+  /* {{name}} */
+  {{offsets}},
+]],
 }
 
 function generator:fmt_fieldget(def, f)
@@ -115,6 +119,8 @@ function generator:write_header_logwriters(options)
 #include "lj_jitlog_def.h"
 #include "lj_usrbuf.h"
 
+extern const int fb_vtoffsets[];
+
 ]])
   for _, def in ipairs(self.msglist) do
     self:write_logfunc(def)
@@ -147,6 +153,31 @@ function generator:write_msginfo()
     }
     self:write(util.buildtemplate(defentry, template_args))
   end
+  self:write("\n};\n")
+end
+
+function generator:write_flatbuffer_vtable()
+  self:write("const short fb_vtables[] = {\n")
+
+  local vtoffset = 0
+  local vtstarts = {}
+
+  for _, msgdef in ipairs(self.msglist) do
+    local vtsize = self:write_vtable(msgdef, "message")
+    vtstarts[#vtstarts + 1] = vtoffset
+    vtoffset = vtoffset + vtsize
+  end
+
+  for _, structdef in ipairs(self.structlist) do
+    local vtsize = self:write_vtable(structdef, "struct")
+    vtstarts[#vtstarts + 1] = vtoffset
+    vtoffset = vtoffset + vtsize
+  end
+
+  self:write("};\n")
+
+  self:write("const int fb_vtoffsets[] = {\n")
+  self:write(table.concat(vtstarts, ",\n  "))
   self:write("\n};\n")
 end
 
@@ -194,8 +225,9 @@ LUA_API const int32_t jitlog_msgsizes[];
   self:write_msgsizes()
   self:write_msgsizes(true)
   self:write_namelists()
-  self:write_enuminfo()
+  self:write_flatbuffer_vtable()
 
+  self:write_enuminfo()
   self:write_msginfo()
 
   self:write("#endif\n")

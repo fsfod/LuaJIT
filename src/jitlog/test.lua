@@ -144,14 +144,23 @@ it("field offsets", function()
 
     for _, f in ipairs(def.fields) do
       local name = f.name
-      if not f.bitstorage and not f.vlen then
+      if not f.bitstorage then
         if not f.offset then
           error(format("Field '%s' in message %s is missing an offset", name, msgname))
         end
         if f.offset >= msgsize then
           error(format("Field '%s' in message %s has a offset %d larger than message size of %d", name, msgname, f.offset, msgsize))
         end
-        local offset = ffi.offsetof(msgname, f.name)
+        local name = f.name
+        if f.vlen then
+          local offset = ffi.offsetof(msgname, f.name)
+          -- We only store an offset to the vlen fields
+          if offset then
+            error(format("Special field '%s' in message %s has a offset %d when it should have none", name, msgname, f.offset))
+          end
+          name = name.."_offset"
+        end
+        local offset = ffi.offsetof(msgname, name)
         if not offset  then
           error(format("Field '%s' is missing in message %s", name, msgname))
         end
@@ -182,7 +191,11 @@ local function parselog(log, verbose, mixins)
   if verbose then
     result.verbose = true
   end
-  assert(result:parse_buffer(log, #log))
+  local sucess, offset, msg = result:parse_buffer(log, #log)
+  if not sucess then
+    print(msg, offset)
+    error("failed to parse")
+  end
   checkheader(result.header)
   return result
 end
@@ -1266,7 +1279,7 @@ pcall(jitlog.shutdown)
 for name, test in pairs(tests) do
   io.stdout:write("Running: "..name.."\n")
   local success, err
-  if decoda_output then
+  if decoda_output or emmy then
     test()
     success = true
   else

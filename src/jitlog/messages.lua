@@ -32,19 +32,21 @@ module.messages = {
   {
     name = "header",
     fields = [[
+      fileheader : 24
       version : u32
-      flags : u32
       headersize: u32
-      msgtype_count :  u8
+      flags : u32
+      vtables : u16[]
+      vtable_offsets : u32[]
       msgsizes : i32[msgtype_count]
-      msgnames_length : u32
-      msgnames : stringlist[msgnames_length]
-      cpumodel_length : u8
-      cpumodel : string[cpumodel_length]
+      msgnames : stringlist
+      cpumodel : string
       os : string
       starttime : timestamp
       ggaddress : u64
       timerfreq : u64
+      msgtype_count : u8
+      struct_count : u16
     ]]
   },
 
@@ -66,8 +68,7 @@ module.messages = {
       isbitflags : bool
       name : string
       namecount : u32
-      valuenames_length : u32
-      valuenames : stringlist[valuenames_length]
+      valuenames : stringlist
     ]]
   },
 
@@ -150,14 +151,10 @@ module.messages = {
       knum : double[sizeknum]
       sizekgc : u16
       kgc : GCRef[sizekgc]
-      lineinfosize : u32
-      lineinfo : u8[lineinfosize]
-      varnames_size : u32
-      varnames : stringlist[varnames_size]
-      varinfo_length : u32
-      varinfo : VarRecord[varinfo_length]
-      uvnames_size : u32
-      uvnames : stringlist[uvnames_size]
+      lineinfo : u8[]
+      varnames : stringlist
+      varinfo : VarRecord[]
+      uvnames : stringlist
     ]],
     structcopy = {
       fields = {
@@ -253,20 +250,16 @@ module.messages = {
       startpc : u32 @argtype(BCPos)
       mcodesize : u32
       mcodeaddr : ptr
-      mcode_length : u32 // Will be 0 unlike mcodesize when mcode data is filtered
-      mcode : u8[mcode_length] 
+      mcode : u8[]
       constants : u64[constant_count] @argtype(IRIns *)
       irlen : u32
       ir : u64[irlen] @argtype(IRIns *)
       snapshots : u8[snapshots_length]
       snapshots_length : u32
       snapmap : u32[nsnapmap]
-      tracedfuncs_length : u32
-      tracedfuncs : TracedFunc[tracedfuncs_length]
-      tracedbc_length : u32
-      tracedbc : TracedBC[tracedbc_length]
-      iroffsets_length : u32
-      iroffsets : u32[iroffsets_length]
+      tracedfuncs : TracedFunc[]
+      tracedbc : TracedBC[]
+      iroffsets : u32[]
     ]],
     structcopy = {
       fields = {
@@ -279,7 +272,6 @@ module.messages = {
         "spadjust",
         "link",
         mcodeaddr = "mcode",
-        "mcode",
         mcodesize = "szmcode",
         "snapmap",
       },
@@ -312,12 +304,9 @@ module.messages = {
       gpr_count : u8
       fpr_count : u8
       vec_count : u8
-      gprs_length : u16
-      fprs_length : u16 
-      vregs_length : u32
-      gprs : u8[gprs_length]
-      fprs : u8[fprs_length]
-      vregs : u8[vregs_length]
+      gprs : u8[]
+      fprs : u8[]
+      vregs : u8[]
     ]]
   },
 
@@ -380,8 +369,7 @@ module.messages = {
       flags :  15
       base :  i32
       top :  i32
-      slotcount :  u32
-      slots : TValue[slotcount]
+      slots : TValue[]
     ]]
   },
   
@@ -391,20 +379,16 @@ module.messages = {
       objtype : 4
       flags : 16
       address : GCRefPtr
-      objmem_length : u32
-      objmem : u8[objmem_length]
-      extra_length : u32
-      extra : u8[extra_length]
+      objmem : u8[]
+      extra : u8[]
     ]],
   },
 
   {
     name = "perf_counters",
     fields = [[
-      counts_length :  u16
-      ids_length :  u16
-      counts : u32[counts_length]
-      ids : u16[ids_length]
+      counts : u32[]
+      ids : u16[]
     ]]
   },
 
@@ -412,10 +396,8 @@ module.messages = {
     name = "perf_timers",
     fields = [[
       flags : 8
-      timers_length :  u16
-      ids_length :  u16
-      timers : TimerEntry[timers_length]
-      ids : u16[ids_length]
+      timers : TimerEntry[]
+      ids : u16[]
     ]]
   },
 
@@ -434,14 +416,10 @@ module.messages = {
   {
     name = "reflect_info",
     fields = [[
-      typenames_length : u32
-      typenames : stringlist[typenames_length]
-      typesizes_length :  u8
-      typesizes : u32[typesizes_length]
-      fieldnames_length : u32
-      fieldnames : stringlist[fieldnames_length]
-      fieldoffsets_length :  u8
-      fieldoffsets : u32[fieldoffsets_length]
+      typenames : stringlist
+      typesizes : u32[]
+      fieldnames : stringlist
+      fieldoffsets : u32[]
     ]]
   },
 
@@ -452,10 +430,8 @@ module.messages = {
       label: string
       registry : GCRefPtr
       globalenv : GCRefPtr
-      objcount :  u32
-      objs : SnapObj[objcount]
-      objmemsz :  u64
-      objmem : u8[objmemsz]
+      objs : SnapObj[]
+      objmem : u8[]
     ]]
   },
 
