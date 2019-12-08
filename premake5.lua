@@ -269,6 +269,9 @@ workspace "LuaJit"
   filter "tags:GC64"
     defines { "LUAJIT_ENABLE_GC64" }
 
+  filter "NOT tags:GC64"
+    defines { "LUAJIT_DISABLE_GC64" }
+
   filter "tags:DUALNUM"
     defines {"LUAJIT_NUMMODE=2"}
 
