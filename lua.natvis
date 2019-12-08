@@ -448,6 +448,7 @@
   <DisplayString>C, UpValues = {(unsigned int)nupvalues,i}, func = {f}</DisplayString>
   <Expand>
     <Item Name="func">f</Item>
+    <Item Name="env">env</Item>
     <Item Name="[UpValues]">nupvalues,i</Item>
     <ArrayItems>
       <Size>nupvalues</Size>
