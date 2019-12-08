@@ -5,6 +5,7 @@
 
 #include "lj_buf.h"
 #include "lj_arch.h"
+
 #ifdef LJ_ENABLESTATS
 #include "lj_jitlog_def.h"
 #endif
@@ -82,6 +83,8 @@ LJ_AINLINE uint64_t start_getticks_b()
     // "memory" avoids reordering. rdx = TSC >> 32.
     // "cc" = flags modified by SHL.
     : "rdx", "memory", "cc");
+#elif LJ_TARGET_ARM64
+  asm volatile("mrs %0, cntvct_el0" : "=r"(t));
 #elif LJ_TARGET_X86ORX64 && _MSC_VER
   _mm_lfence();
   _ReadWriteBarrier();

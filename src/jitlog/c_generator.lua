@@ -115,10 +115,6 @@ function generator:write_header_logwriters(options)
 #include "lj_jitlog_def.h"
 #include "lj_usrbuf.h"
 
-#if LJ_TARGET_LINUX || LJ_TARGET_OSX
-#include <x86intrin.h>
-#endif
-
 ]])
   for _, def in ipairs(self.msglist) do
     self:write_logfunc(def)

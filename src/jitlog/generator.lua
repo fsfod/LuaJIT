@@ -843,9 +843,9 @@ static LJ_AINLINE void log_{{name}}({{args}})
 ]]
 
 generator.custom_field_writers = {
-  timestamp_highres = "__rdtsc();",
-  timestamp = "__rdtsc();",
-  gettime = "__rdtsc();",
+  timestamp_highres = "start_getticks();",
+  timestamp = "start_getticks();",
+  gettime = "start_getticks();",
   setref = function(self, msgdef, f, valuestr)
     local setref = (f.type == "MRef" and "setmref") or "setgcrefp"
     local type = self.types[f.type]

@@ -43,7 +43,9 @@ static int tcmp(const void *a, const void *b) {
 static uint64_t do_sample() {
   uint64_t osfreq = getticks_os_freq();
   uint64_t delay = (uint64_t)(osfreq * 0.00001);
+#if LJ_TARGET_X86ORX64
   _mm_lfence();
+#endif
   uint64_t osbefore = getticks_os();
   uint64_t tscbefore = start_getticks_b();
   while (osbefore + delay > getticks_os())
@@ -188,9 +190,10 @@ static uint64_t get_tscfreq(int *isestifreq) {
 
 #elif LJ_TARGET_ARM64 
 
-static uint64_t get_tscfrequency()
+static uint64_t get_tscfreq(int* isestifreq)
 {
   uint64_t t = 0;
+  *isestifreq = 0;
   asm volatile("mrs %0, cntfrq_el0" : "=r"(t));
   return t;
 }

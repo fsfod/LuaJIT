@@ -18,9 +18,11 @@
 #include "lj_ctype.h"
 
 #include "lj_jitlog_def.h"
-#include "lj_jitlog_writers.h"
 #include "lj_jitlog_decl.h"
 #include "lj_vmperf.h"
+
+#include "lj_jitlog_writers.h"
+
 #include "jitlog.h"
 
 #define JITLOG_FILE_VERSION 2
