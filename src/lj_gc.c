@@ -753,6 +753,7 @@ void lj_gc_fullgc(lua_State *L)
 {
   global_State *g = G(L);
   int32_t ostate = g->vmstate;
+  lj_vmevent_callback(mainthread(g), VMEVENT_GC_FULL, (void*)(uintptr_t)1);
   setvmstate(g, GC);
   if (g->gc.state <= GCSatomic) {  /* Caught somewhere in the middle. */
     setmref(g->gc.sweep, &g->gc.root);  /* Sweep everything (preserving it). */
@@ -770,6 +771,7 @@ void lj_gc_fullgc(lua_State *L)
   do { gc_onestep(L); } while (g->gc.state != GCSpause);
   g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
   g->vmstate = ostate;
+  lj_vmevent_callback(mainthread(g), VMEVENT_GC_FULL, NULL);
 }
 
 /* -- Write barriers ------------------------------------------------------ */
