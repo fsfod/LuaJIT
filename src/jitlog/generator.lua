@@ -8,17 +8,17 @@ local builtin_types = {
   char = {size = 1, signed = true, printf = "%i", c = "char",  argtype = "char"},
   bool = {bitsize = 1, bool = true, bitfield = true, signed = false, printf = "%u", c = "uint32_t", argtype = "int"},
 
-  i8  = {size = 1, signed = true,  printf = "%i",   c = "int8_t",   argtype = "int32_t"},
-  u8  = {size = 1, signed = false, printf = "%i",   c = "uint8_t",  argtype = "uint32_t"},
-  i16 = {size = 2, signed = true,  printf = "%i",   c = "int16_t",  argtype = "int32_t"},
-  u16 = {size = 2, signed = false, printf = "%i",   c = "uint16_t", argtype = "uint32_t"},
-  i32 = {size = 4, signed = true,  printf = "%i",   c = "int32_t",  argtype = "int32_t"},
-  u32 = {size = 4, signed = false, printf = "%u",   c = "uint32_t", argtype = "uint32_t"},
-  i64 = {size = 8, signed = true,  printf = "%lli", c = "int64_t",  argtype = "int64_t"},
-  u64 = {size = 8, signed = false, printf = "%llu", c = "uint64_t", argtype = "uint64_t"},
+  i8  = {size = 1, signed = true,  printf = "%i",   c = "int8_t",   argtype = "int32_t",  typeid = 1},
+  u8  = {size = 1, signed = false, printf = "%i",   c = "uint8_t",  argtype = "uint32_t", typeid = 2},
+  i16 = {size = 2, signed = true,  printf = "%i",   c = "int16_t",  argtype = "int32_t",  typeid = 3},
+  u16 = {size = 2, signed = false, printf = "%i",   c = "uint16_t", argtype = "uint32_t", typeid = 4},
+  i32 = {size = 4, signed = true,  printf = "%i",   c = "int32_t",  argtype = "int32_t",  typeid = 5},
+  u32 = {size = 4, signed = false, printf = "%u",   c = "uint32_t", argtype = "uint32_t", typeid = 6},
+  i64 = {size = 8, signed = true,  printf = "%lli", c = "int64_t",  argtype = "int64_t",  typeid = 7},
+  u64 = {size = 8, signed = false, printf = "%llu", c = "uint64_t", argtype = "uint64_t", typeid = 8},
 
-  float  = {size = 4, signed = false, printf = "%f", c = "float", argtype = "float"},
-  double = {size = 8, signed = false, printf = "%g", c = "double", argtype = "double"},
+  float  = {size = 4, signed = false, printf = "%f", c = "float",  argtype = "float",  typeid = 10},
+  double = {size = 8, signed = false, printf = "%g", c = "double", argtype = "double", typeid = 11},
 
   MSize  = {size = 4, signed = false,  printf = "%u", c = "uint32_t", argtype = "MSize"},
   GCSize = {size = 4, signed = false,  printf = "%u", c = "GCSize", argtype = "GCSize"},
@@ -43,6 +43,27 @@ local aliases = {
   int16_t = "i16", uint16_t = "u16",
   int32_t = "i32", uint32_t = "u32",
   int64_t = "i64", uint64_t = "u64",
+}
+
+local fbtypes = {
+  {fbtype = "None",   type = ""},
+  {fbtype = "UType",  type = ""},
+  {fbtype = "Bool",   type = "bool"},
+  {fbtype = "Byte",   type = "i8"},
+  {fbtype = "UByte",  type = "u8"},
+  {fbtype = "Short",  type = "i16"},
+  {fbtype = "UShort", type = "u16"},
+  {fbtype = "Int",    type = "i32"},
+  {fbtype = "UInt",   type = "u32"},
+  {fbtype = "Long",   type = "i64"},
+  {fbtype = "ULong",  type = "u64"},
+  {fbtype = "Float",  type = "float"},
+  {fbtype = "Double", type = "double"},
+  {fbtype = "String", type = "string"},
+  {fbtype = "Vector", type = "", vsize = true},
+  {fbtype = "Obj", },     -- Used for tables & structs.
+  {fbtype = "Union", type = "", vsize = true},
+  {fbtype = "Array", type = "", vsize = true},
 }
 
 for i = 1, 31 do
