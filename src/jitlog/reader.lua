@@ -1,21 +1,23 @@
 local ffi = require"ffi"
 local util = require("jitlog.util")
-require("table.new")
+local message_readers = require("jitlog.message_readers")
 local format = string.format
 local tinsert = table.insert
 local band = bit.band
-
-local logdef = require("jitlog.reader_def")
-local MsgType = logdef.MsgType
-local msgnames = MsgType.names
-local msgsizes = logdef.msgsizes
-local message_readers = require("jitlog.message_readers")
+require("table.new")
 
 local defaults = {
   msgreaders = message_readers.readers,
-  msgnames = MsgType.names,
-  msgsizes = logdef.msgsizes
+  msgnames = {},
+  msgsizes = {},
 }
+
+local haslogdef, default_logdef --= pcall(require, "jitlog.reader_def")
+
+if haslogdef then
+  defaults.msgnames = default_logdef.MsgType.names
+  defaults.msgsizes = default_logdef.msgsizes
+end
 
 local function array_index(self, index)
   if index < 0 or index >= self.length then
@@ -110,9 +112,21 @@ function logreader:log_msg(msgname, fmt, ...)
   end
 end
 
+ffi.cdef[[
+  typedef struct JITLogHeader {
+    uint32_t header;
+    uint32_t msgsize;
+    int32_t vtable;
+  } JITLogHeader;
+]]
+
 function logreader:readheader(buff, buffsize, info)
-  local header = ffi.cast("MSG_header*", buff)
-  
+  local header = ffi.cast("JITLogHeader*", buff)
+
+  if buffsize < 16 then
+    return false, "buffer too small to contain header"
+  end
+
   local msgtype = band(header.header, 0xff)  
   if msgtype ~= 0 then
     return false, "bad header msg type"
@@ -121,15 +135,26 @@ function logreader:readheader(buff, buffsize, info)
   if header.msgsize > buffsize then
     return false, "bad header vsize"
   end
-  
+
+  if header.vtable >= 0 or (-header.vtable + 8 + 4) > buffsize then
+    return false, "bad vtable offset"
+  end
+
+  local logdef = self.logdef
+  local MsgType = logdef.MsgType
+
+  header = ffi.cast(ffi.typeof("$ *", logdef.msgtypes.header), buff)
+
   if header.headersize > header.msgsize then
     return false, "bad fixed header size"
   end
   
-  if header.headersize ~= -msgsizes[MsgType.header + 1] then
+  if header.headersize ~= -logdef.msgsizes[MsgType.header + 1] then
     self:log_msg("header", "Warning: Message header fixed size does not match our size")
   end
-  
+
+  header:check(header.msgsize)
+
   info.version = header.version
   info.size = header.msgsize
   info.fixedsize = header.headersize
@@ -159,19 +184,30 @@ function logreader:readheader(buff, buffsize, info)
   end
 
   info.vtables = self:read_array("uint16_t", header:get_vtables())
+  info.vtablelookup = {}
   local vtables = info.vtables
 
   local i = 0
   local index, limit = 0, vtables.length-1
   while index < limit do
+    local name
+    if i < #file_msgnames then
+      name = file_msgnames[i+1]
+    else
+      name = tostring(i)
+    end
+
     local vtsize = vtables:get(index)/2
     local objsize = vtables:get(index +2)
     if vtsize < 2 or (index +vtsize-1) > limit then
-      error(format("Bad vtable size %d in msg %s", vtsize, file_msgnames[i]))
+      error(format("Bad vtable size %d in msg %s", vtsize, name))
     end
     if objsize < 4 then
-      error(format("Bad vtable object size %d for msg %s", objsize, file_msgnames[i]))
+      error(format("Bad vtable object size %d for msg %s", objsize, name))
     end
+
+    info.vtablelookup[name] = vtables
+
     index = index + vtsize
     i = i + 1
   end
@@ -259,12 +295,12 @@ end
 
 local function nop() end
 
-local function make_msghandler(msgname, base, funcs)
-  msgname = msgname.."*"
+local function make_msghandler(reader, base, funcs)
+
   -- See if we can go for the simple case with no extra funcs call first
   if not funcs or (type(funcs) == "table" and #funcs == 0) then
     return function(self, buff, limit)
-      local msg = ffi.cast(msgname, buff)
+      local msg = reader(buff, limit)
       msg:check(limit)
       base(self, msg, limit)
       return
@@ -272,14 +308,14 @@ local function make_msghandler(msgname, base, funcs)
   elseif type(funcs) == "function" or #funcs == 1 then
     local f = (type(funcs) == "function" and funcs) or funcs[1]
     return function(self, buff, limit)
-      local msg = ffi.cast(msgname, buff)
+      local msg = reader(buff, limit)
       msg:check(limit)
       f(self, msg, base(self, msg, limit))
       return
     end
   else
     return function(self, buff, limit)
-      local msg = ffi.cast(msgname, buff)
+      local msg = reader(buff, limit)
       msg:check(limit)
       local ret1, ret2, ret3, ret4, ret5 = base(self, msg, limit)
       for _, f in ipairs(funcs) do
@@ -290,6 +326,7 @@ local function make_msghandler(msgname, base, funcs)
 end
 
 function logreader:processheader(header)
+  local logdef = self.logdef
   self.starttime = header.starttime
   self.tscfreq = header.timerfreq
   self.msgtype_count = header.msgtype_count
@@ -299,7 +336,7 @@ function logreader:processheader(header)
   self.msgtype = msgtype
   self.msgnames = header.msgnames
   
-  for _, name in ipairs(msgnames) do
+  for _, name in ipairs(logdef.msgnames) do
     if not msgtype[name] and name ~= "MAX" then
        self:log_msg("header", "Warning: Log is missing message type ".. name)
     end
@@ -308,9 +345,9 @@ function logreader:processheader(header)
   self.msgsizes = header.msgsizes
   for i, size in ipairs(header.msgsizes) do
     local name = header.msgnames[i]
-    local id = MsgType[name]
-    if id and msgsizes[id + 1] ~= size then
-      local oursize = math.abs(msgsizes[id + 1])
+    local id = logdef.MsgType[name]
+    if id and logdef.msgsizes[id + 1] ~= size then
+      local oursize = math.abs(logdef.msgsizes[id + 1])
       local logs_size = math.abs(size)
       if logs_size < oursize then
         error(format("Message type %s size %d is smaller than an expected size of %d", name, logs_size, oursize))
@@ -326,16 +363,19 @@ function logreader:processheader(header)
     end
   end
 
+  local fbreaders = logdef.gen_fbreaders(header.vtablelookup)
+
   -- Map message functions associated with a message name to this files message types
   local dispatch = table.new(255, 0)
   for i = 0, 254 do
     dispatch[i] = nop
   end
-  local msgreaders = self.msgreaders or defaults.msgreaders
+  local msgreaders = self.msgreaders or message_readers.readers
   for i, name in ipairs(header.msgnames) do
     local action = self.actions[name]
-    if msgreaders[name] or action then
-      dispatch[i-1] = make_msghandler("MSG_"..name, msgreaders[name], action)
+    local fbreader = fbreaders[name]
+    if fbreader and (msgreaders[name] or action) then
+      dispatch[i-1] = make_msghandler(fbreader, msgreaders[name], action)
     end
   end
   self.dispatch = dispatch
@@ -487,6 +527,7 @@ function lib.makereader(mixins, msgreaders)
       --header = true,
     },
     msgobj_mt = msgreaders.msgobj_mt,
+    logdef = default_logdef,
   }
   msgreaders.init(t)
 

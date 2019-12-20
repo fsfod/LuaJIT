@@ -561,8 +561,9 @@ function parser:build_vtable(def, kind)
       -- Set MSB to signify a bitfield
       offset = bit.bor(0x8000, bit.rshift(bitfield.offset, 5))
 
-      -- Header bitfields start effectively at byte 1 and offset 0 means the field is not present in flatbuffers
+      -- we can't use offset 0 because it means the field is not present when written into the vtable
       if offset == 0 then
+        assert(fields[2].name == "msgsize", fields[2].nam)
         offset = 1
       end
     end
@@ -762,6 +763,10 @@ local generator = {
 
 function generator:write(s)
   self.outputfile:write(s)
+end
+
+function generator:writeline(s)
+  self.outputfile:write(s or "", "\n")
 end
 
 function generator:writef(s, ...)
@@ -1114,6 +1119,7 @@ function generator:write_logfunc(def)
     template = funcdef_fixed
   end
 
+  -- Pass all the arguments in through a struct if we have too many
   if argcount > 4 then
     self:writetemplate("struct", {
       name = def.name.."_Args", 

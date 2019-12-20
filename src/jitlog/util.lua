@@ -158,4 +158,24 @@ function lib.buildtemplate(tmpl, values)
   end))
 end
 
+if ffi then
+  local charptr = ffi.typeof("char*")
+
+  function lib.get_fbarray(base, offset, adjustment, type)
+    base = ffi_cast(charptr, base)
+
+    if offset == 0 then
+      return false, 0
+    end
+
+    local array = base + adjustment + offset + 4
+    local size = ffi_cast("uint32_t*", array)[-1]
+    if size == 0 then
+      return false, 0
+    end
+
+    return ffi.cast(type, array), size
+  end
+end
+
 return lib

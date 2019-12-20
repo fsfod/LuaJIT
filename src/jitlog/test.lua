@@ -139,8 +139,9 @@ end)
 
 it("field offsets", function()
   for _, def in ipairs(msginfo_vm.msglist) do
-    local msgname = "MSG_"..def.name
+    local msgname = def.name
     local msgsize = def.size
+    local ctype = reader_def.msgtypes[def.name]
 
     for _, f in ipairs(def.fields) do
       local name = f.name
@@ -153,14 +154,14 @@ it("field offsets", function()
         end
         local name = f.name
         if f.vlen then
-          local offset = ffi.offsetof(msgname, f.name)
+          local offset = ffi.offsetof(ctype, f.name)
           -- We only store an offset to the vlen fields
           if offset then
             error(format("Special field '%s' in message %s has a offset %d when it should have none", name, msgname, f.offset))
           end
           name = name.."_offset"
         end
-        local offset = ffi.offsetof(msgname, name)
+        local offset = ffi.offsetof(ctype, name)
         if not offset  then
           error(format("Field '%s' is missing in message %s", name, msgname))
         end

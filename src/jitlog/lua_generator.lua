@@ -16,7 +16,7 @@ local {{name}} = {
 ]],
 
   enum = [[
-local {{name}} = make_enum{
+local {{name}} = util.make_enum{
 {{list}}}
 lib.{{name}} = {{name}}
 
@@ -33,11 +33,13 @@ typedef struct {{name}}{
 }__attribute__((packed)) {{name}};
 
 ]],
-  msgstruct = [[
-typedef struct MSG_{{name}}{ {{fields}}
-}__attribute__((packed))  MSG_{{name}};
+  msgstruct = [=[
+  {{name}} = ffi.typeof([[
+  struct { {{fields}}
+  }__attribute__((packed))
+]]),
 
-]],
+]=],
   structfield = "\n  %s %s;",
   struct_comment = "// %s",
 
@@ -69,7 +71,7 @@ do
     funcs = {{name}},
   }
   
-  ffi.metatype("MSG_{{name}}", {{name}}_mt)
+  ffi.metatype(msgtypes.{{name}}, {{name}}_mt)
 end
 
 ]],
@@ -85,11 +87,7 @@ end
   msg_vgetter = [[
   function {{msgname}}:get_{{name}}()
     assert(self, "Expected a '{{msgname}}' message as first parameter")
-
-    local array, size = getarray(ffi_cast("char*", self), self.{{name}}_offset, {{offset}})
-    if not array then
-      return {{default}}, 0
-    end
+    local array, size = get_fbarray(self, self.{{name}}_offset, {{offset}}, {{type}})
     return {{body}}
   end
 ]],
@@ -132,6 +130,7 @@ function generator:fmt_accessor_def(struct, f, voffset)
     name = f.name,
     offset = f.offset,
     default = "false",
+    type = "nil",
   }
 
   if f.vlen then
@@ -143,8 +142,9 @@ function generator:fmt_accessor_def(struct, f, voffset)
       tvalues.default = "{}"
       body = format("(parse_strlist(array, size))", body)
     else
+      tvalues.type = '"'..self.types[f.type].c..'"'
       -- Add the buffer element count and element size as extra return values
-      body = format([[ffi_cast("%s", array), size]], self.types[f.type].c)
+      body = "array, size"
     end
   elseif f.bitfield or f.bitstorage then
     body = format("(band(rshift(%s, %d), 0x%x))", "self." .. f.bitstorage, f.bitofs, bit.lshift(1, f.bitsize)-1)
@@ -194,21 +194,13 @@ end
 
 function generator:writefile(options)
   self:write([=[
+local util = require("jitlog.util")
 local ffi = require("ffi")
 local ffi_cast = ffi.cast
 local ffi_string = ffi.string
-local band = bit.band
-local rshift = bit.rshift
-local lib = {}
+local band, rshift = bit.band, bit.rshift
 
-local function make_enum(names)
-  local t = {}
-  for i, name in ipairs(names)do
-      t[name] = i-1
-  end
-  t.names = names
-  return t
-end
+local lib = {}
 
 local function parse_strlist(strlist, bufsize)
   local buf = ffi.cast("const char *", strlist)
@@ -224,18 +216,6 @@ local function parse_strlist(strlist, bufsize)
     end
   end
   return t
-end
-
-local function getarray(msg, offset, adjustment)
-   if offset == 0 then
-    return false, 0
-  end
-  local array = msg + adjustment + offset + 4
-  local size = ffi_cast("uint32_t*", array)[-1]
-  if size == 0 then
-    return false, 0
-  end
-  return array, size
 end
 
 local function getarray_count(msg, offset, adjustment)
@@ -268,20 +248,28 @@ ffi.cdef("typedef uint32_t GCRef, MRef, GCSize;")]])
 ffi.cdef[[
 ]=])
   local struct_getters = {}
-  for _, list in ipairs({self.structlist, self.msglist}) do
-    for _, def in ipairs(list) do
-      local field_getters = self:write_struct(def.name, def)
-      if field_getters then
-        struct_getters[def.name] = field_getters
-      end
+  for _, def in ipairs(self.structlist) do
+    local field_getters = self:write_struct(def.name, def)
+    if field_getters then
+      struct_getters[def.name] = field_getters
     end
   end
-  self:write("]]\n")
+  self:writeline("]]")
+
+  self:writeline("local msgtypes = {")
+  for _, def in ipairs(self.msglist) do
+    local field_getters = self:write_struct(def.name, def)
+    if field_getters then
+      struct_getters[def.name] = field_getters
+    end
+  end
+  self:writeline("}")
+  self:write("lib.msgtypes = msgtypes\n\n")
 
   for _, def in ipairs(self.msglist) do
-    self:writef("assert(ffi.sizeof('MSG_%s') == %d)\n", def.name, def.size)
+    self:writef("assert(ffi.sizeof(msgtypes.%s) == %d)\n", def.name, def.size)
   end
-  self:write("\n")
+  self:writeline()
   
   for _, def in ipairs(self.msglist) do
     local funclist = struct_getters[def.name]
@@ -307,7 +295,16 @@ ffi.cdef[[
   end
 
   self:write([[
-
+  function lib.gen_fbreaders(vtables)
+    assert(type(vtables) == "table")
+    local readers = {}
+    for i = 1, MsgType.MAX do
+      local name = MsgType.names[i]
+      local type = ffi.typeof("$ *", msgtypes[name])
+      readers[name] = function(ptr) return (ffi_cast(type, ptr)) end
+    end
+    return readers
+  end
 return lib
 ]])
 end
