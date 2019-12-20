@@ -198,6 +198,7 @@ end
 
 local function reportstats()
   print("Events:", reader.eventid)
+  print("GCs:",  reader.gccount)
   print("Traces:", #reader.traces)
   print("Aborts:", #reader.aborts)
   print("Flushes:", #reader.flushes)
