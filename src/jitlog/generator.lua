@@ -75,18 +75,6 @@ for name, def in pairs(aliases) do
   builtin_types[name] = builtin_types[def]
 end
 
-if GC64 then
-  builtin_types.GCSize.size = 8
-
-  builtin_types.GCRef.size = 8
-  builtin_types.GCRef.ref = "gcptr64"
-  builtin_types.GCRefPtr.size = 8
-  builtin_types.GCRefPtr.ref = "gcptr64"
-
-  builtin_types.MRef.size = 8
-  builtin_types.MRef.ref = "ptr64"
-end
-
 local function make_arraytype(element_type)
   local element_typeinfo = builtin_types[element_type]
   assert(element_typeinfo, "bad element type for array")
@@ -1292,5 +1280,26 @@ local api = {
     end
   end,
 }
+
+function api.SetGC64Mode(enable)
+  local size = 0
+  local types = {"GCSize", "GCRef", "GCRefPtr", "MRef"}
+
+  if enable then
+    size = 8
+    builtin_types.GCRef.ref = "gcptr64"
+    builtin_types.GCRefPtr.ref = "gcptr64"
+    builtin_types.MRef.ref = "ptr64"
+  else
+    size = 4
+    builtin_types.GCRef.ref = "gcptr32"
+    builtin_types.GCRefPtr.ref = "gcptr32"
+    builtin_types.MRef.ref = "ptr32"
+  end
+
+  for _, name in ipairs(types) do
+    builtin_types[name].size = size
+  end
+end
 
 return api

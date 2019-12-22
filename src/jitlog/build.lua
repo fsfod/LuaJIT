@@ -84,6 +84,8 @@ local msgdef = dofile(msglist)
 outpath = outpath or ""
 
 local apigen = require"jitlog.generator"
+apigen.SetGC64Mode(GC64)
+
 local parser = apigen.create_parser()
 parser:parse_structlist(msgdef.structs)
 parser:parse_msglist(msgdef.messages)
