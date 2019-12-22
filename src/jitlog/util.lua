@@ -158,10 +158,12 @@ function lib.buildtemplate(tmpl, values)
   end))
 end
 
-if ffi then
+if pcall(require, "ffi") then
+  local ffi = require("ffi")
+  local ffi_cast = ffi.cast
   local charptr = ffi.typeof("char*")
 
-  function lib.get_fbarray(base, offset, adjustment, type)
+  local function get_fbarray(base, offset, adjustment, type)
     base = ffi_cast(charptr, base)
 
     if offset == 0 then
@@ -174,7 +176,16 @@ if ffi then
       return false, 0
     end
 
-    return ffi.cast(type, array), size
+    return ffi_cast(type or charptr, array), size
+  end
+  lib.get_fbarray = get_fbarray
+
+  function lib.get_fbstring(base, offset, adjustment)
+    local array, size = get_fbarray(base, offset, adjustment)
+    if not array then
+      return nil
+    end
+    return (ffi.string(array, size))
   end
 end
 

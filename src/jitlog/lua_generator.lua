@@ -92,6 +92,13 @@ end
   end
 ]],
 
+  msg_strgetter = [[
+  function {{msgname}}:get_{{name}}()
+    assert(self, "Expected a '{{msgname}}' message as first parameter")
+    return (get_fbstring(self, self.{{name}}_offset, {{offset}}))
+  end
+]],
+
   boundscheck_func = [[
   function {{name}}:check(limit)
     local offset = {{msgsize}}
@@ -137,7 +144,7 @@ function generator:fmt_accessor_def(struct, f, voffset)
     template = self.templates.msg_vgetter
 
     if f.type == "string" then
-      body = format("(ffi.string(array, size))", body)
+      template = self.templates.msg_strgetter
     elseif f.type == "stringlist" then
       tvalues.default = "{}"
       body = format("(parse_strlist(array, size))", body)
@@ -199,13 +206,18 @@ local ffi = require("ffi")
 local ffi_cast = ffi.cast
 local ffi_string = ffi.string
 local band, rshift = bit.band, bit.rshift
-
+local get_fbarray, get_fbstring = util.get_fbarray, util.get_fbstring
 local lib = {}
 
 local function parse_strlist(strlist, bufsize)
+  local t = {}  
+  if not strlist then
+    -- Varible was not present so return an empty list
+    return t
+  end
+  
   local buf = ffi.cast("const char *", strlist)
   local prev = 0
-  local t = {}
   
   for i =0, bufsize-1 do
     if buf[i] == 0 then
