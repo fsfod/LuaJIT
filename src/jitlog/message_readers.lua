@@ -42,7 +42,10 @@ typedef struct SnapShotV2 {
   uint8_t count;	/* Count of taken exits for this snapshot. */
 } SnapShotV2;
 
-typedef union IRIns {
+]]
+
+local IRIns = [[
+union {
   struct {
     uint16_t op1;	/* IR operand 1. */
     uint16_t op2;	/* IR operand 2. */
@@ -57,12 +60,16 @@ typedef union IRIns {
     uint8_t s;	/* Spill slot allocation (overlaps prev). */
   };
   int32_t i;		/* 32 bit signed integer literal (overlaps op12). */
-  GCRef gcr;		/* GCobj constant (overlaps op12 or entire slot). */
-  MRef ptr;		/* Pointer constant (overlaps op12 or entire slot). */
+  $ gcr;		/* GCobj constant (overlaps op12 or entire slot). */
+  $ ptr;		/* Pointer constant (overlaps op12 or entire slot). */
   TValue tv;		/* TValue constant (overlaps entire slot). */
-} IRIns;
-
+}
 ]]
+
+local uint32_t = ffi.typeof("uint32_t")
+local uint64_t = ffi.typeof("uint64_t")
+local IRIns32 = ffi.typeof(IRIns, uint32_t, uint32_t)
+local IRIns64 = ffi.typeof(IRIns, uint64_t, uint64_t)
 
 ffi.cdef[[
 typedef struct protobc {
@@ -938,8 +945,8 @@ function readers:trace(msg)
     trace.snapshots = self:read_array("SnapShotV1", msg:get_snapshots())
   end
   trace.snapmap = self:read_array("uint32_t", msg:get_snapmap())
-  trace.ir = self:read_array("IRIns", msg:get_ir())
-  trace.constants = self:read_array("IRIns", msg:get_constants())
+  trace.ir = self:read_array(self.IRIns, msg:get_ir())
+  trace.constants = self:read_array(self.IRIns, msg:get_constants())
   trace.tracedfuncs = self:read_array("TracedFunc", msg:get_tracedfuncs())
   trace.tracedbc = self:read_array("TracedBC", msg:get_tracedbc())
   trace.iroffsets = self:read_array("uint32_t", msg:get_iroffsets())
@@ -1613,7 +1620,7 @@ function readers:trace_bc(msg)
   local k_count = msg.ir_k_length
   
   if ins_count > 0 then
-    local ir_ins = self:read_array("IRIns", msg:get_ir_ins())
+    local ir_ins = self:read_array(self.IRIns, msg:get_ir_ins())
     local irname = self.enums.ir
 
     for i=0, ins_count-1 do
@@ -1632,9 +1639,9 @@ function readers:trace_snap(msg)
   self.snapnum = self.snapnum + 1
 end
 
-local fold_ins = ffi.new("IRIns")
 
 function readers:ir_emit(msg)
+  local fold_ins = ffi.new(self.IRIns)
   fold_ins.tv.u64 = msg.ins
   local op, irt, op1, op2 = self:decode_irins(fold_ins)
   
@@ -1712,6 +1719,12 @@ local function init(self)
   self.obj_allocs = {}
   self.objects = {} -- Address to object Id that indexes in to obj_allocs
   self.objectid = 1
+  
+  if self.GC64 then
+    self.IRIns = IRIns64
+  else
+    self.IRIns = IRIns32
+  end
 
   return t
 end

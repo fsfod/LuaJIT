@@ -50,17 +50,24 @@ local arraytypes = {}
 local arraytemplate = [[
   typedef struct %s {
     int length;
-    %s array[?];
+    $ array[?];
   } %s;
 ]]
 
 local function define_arraytype(eletype, structname, mt)
-  assert(type(eletype) == "string", "bad element type for array")
+  assert(type(eletype) == "string" or type(eletype) == "cdata", "bad element type for array")
   local size = ffi.sizeof(ffi.typeof(eletype))
-  structname = structname or eletype.."_array"
-  ffi.cdef(string.format(arraytemplate, structname, eletype, structname))
-  local ctype = ffi.typeof(structname)
-  
+  local ctype
+
+  if type(eletype) == "string" then
+    structname = structname or eletype.."_array"
+    eletype = ffi.typeof(eletype)
+    ffi.cdef(string.format(arraytemplate, structname, structname), eletype)
+    ctype = ffi.typeof(structname)
+  else
+    ctype = ffi.typeof([[struct { int length; $ array[?];} ]], eletype)
+  end
+
   local index
   if not mt then
     mt = {
