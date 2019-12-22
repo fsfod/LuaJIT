@@ -533,6 +533,7 @@ function lib.makereader(mixins, msgreaders, logdef)
     logdef = default_logdef
   else
     assert(logdef.MsgType, "JITLog reader definition is missing message type enum")
+    assert(logdef.GC64 ~= nil, "JITLog reader definition does not declare if its for GC64")
   end
 
   local t = {
@@ -544,6 +545,7 @@ function lib.makereader(mixins, msgreaders, logdef)
     },
     msgobj_mt = msgreaders.msgobj_mt,
     logdef = logdef,
+    GC64 = logdef.GC64,
   }
   msgreaders.init(t)
 

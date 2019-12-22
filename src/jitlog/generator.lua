@@ -92,8 +92,6 @@ local function make_arraytype(element_type)
   return typeinfo
 end
 
-make_arraytype("GCRef")
-
 -- Build array types
 for _, i in ipairs({1, 2, 4, 8}) do
   for _, sign in pairs({"i", "u"}) do
@@ -132,6 +130,9 @@ function parser:get_arraytype(element_type)
     element_type = element_type,
     element_size = element_typeinfo.size,
   }
+  if element_typeinfo.ref and self.GC64 then
+    typeinfo.element_size = 8
+  end
   self.types[arraytype] = typeinfo
   self.types[ctype.."[]"] = typeinfo
   return arraytype, typeinfo
@@ -382,11 +383,14 @@ function parser:parse_msg(def)
       t.vlen = true
       t.ptrarg = true
       t.buflen = length
-      t.element_size = typeinfo.element_size or typeinfo.size
-      -- Adjust the typename for primitive types to be an array
+       -- Adjust the typename for primitive types to be an array
       if not typeinfo.element_size  then
-        local arraytype, typeinfo = self:get_arraytype(ftype)
-        t.type = arraytype
+        local typename, arraytype = self:get_arraytype(ftype)
+        t.type = typename
+        assert(arraytype.element_size >= typeinfo.size, "array element size missmatch")
+        t.element_size = arraytype.element_size
+      else
+        t.element_size = typeinfo.element_size
       end
 
       -- Implicitly generate arg for the length but don't create a field for it
@@ -473,6 +477,9 @@ function parser:parse_msg(def)
       assert(not f.buflen)
       
       size = type.size
+      if type.ref and self.GC64 then
+        size = 8
+      end
       assert(size == 1 or size == 2 or size == 4 or size == 8)
       f.offset = msgsize
     end
@@ -725,6 +732,7 @@ local copyfields = {
   "sorted_msgnames",
   "types",
   "namescans",
+  "GC64",
 }
 
 function parser:complete()
@@ -1248,13 +1256,14 @@ end
 local c_generator = require("jitlog.c_generator")
 
 local api = {
-  create_parser = function()
+  create_parser = function(GC64)
     local t = {
       msglist = {},
       structlist = {},
       msglookup = {},
       enums = {},
-      types = setmetatable({}, {__index = builtin_types})
+      types = setmetatable({}, {__index = builtin_types}),
+      GC64 = GC64,
     }
     t.data = t
     return setmetatable(t, {__index = parser})

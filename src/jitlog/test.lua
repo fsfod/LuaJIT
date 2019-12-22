@@ -14,8 +14,7 @@ local reader_def = require("jitlog.reader_def")
 
 
 local function mkparser(msgdefs, GC64)
-  apigen.SetGC64Mode(GC64)
-  local parser = apigen.create_parser()
+  local parser = apigen.create_parser(GC64)
   parser:parse_structlist(msgdefs.structs)
   parser:parse_msglist(msgdefs.messages)
   return parser:complete()
@@ -26,7 +25,7 @@ msginfo_vm = mkparser(msgdef, reader_def.GC64)
 assert(readerlib.makereader(nil, nil, reader_def))
 
 local function buildmsginfo(msgdefs)
-  local parser = apigen.create_parser()
+  local parser = apigen.create_parser(reader_def.GC64)
   parser:parse_msglist(msgdefs)
   return parser:complete()
 end
@@ -905,9 +904,9 @@ it("stack snapshot", function()
   f1(1, 2, 3, true, false, nil, "test")
   f2(1, 2, 3, true, false, nil, "test")
   local result = parselog(jitlog.savetostring(), false, stack_mixin)
-  local framesz = GC64 and 2 or 1
- -- result.stacksnaps[3]:printframes(GC64)
-  local frames = result.stacksnaps[2]:get_framelist(GC64)
+  local framesz = result.GC64 and 2 or 1
+  -- result.stacksnaps[3]:printframes(result.GC64)
+  local frames = result.stacksnaps[2]:get_framelist()
   assert(#frames == 8, #frames)
   assert((result.stacksnaps[2].slots.length - #frames*framesz) > 14)
   -- First frame should be a call to a Lua C function
@@ -922,7 +921,7 @@ it("stack snapshot", function()
   assert(frames[4].kind == "PCALL")
 
   -- Check call frames only stack snapshot works
-  frames = result.stacksnaps[3]:get_framelist(GC64)
+  frames = result.stacksnaps[3]:get_framelist()
   assert(result.stacksnaps[3].slots.length == #frames*framesz,  #frames)
   assert(frames[1].kind == "LUA", frames[1].kind)
   assert(frames[1].func.cfunc)
