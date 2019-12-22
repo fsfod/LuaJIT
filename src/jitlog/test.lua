@@ -2,20 +2,28 @@ local ffi = require("ffi")
 local util = require("jitlog.util")
 local hasjit = pcall(require, "jit.opt")
 local format = string.format
-local reader_def = require("jitlog.reader_def")
-GC64 = reader_def.GC64
 local msgdef = require("jitlog.messages")
 local structdefs = require("jitlog.messages").structs
 local apigen = require"jitlog.generator"
 local readerlib = require("jitlog.reader")
-assert(readerlib.makereader())
 local jitlog = require("jitlog")
 local fun = require("jitlog.fun")
 
-local parser = apigen.create_parser()
-parser:parse_structlist(msgdef.structs)
-parser:parse_msglist(msgdef.messages)
-local msginfo_vm = parser:complete()
+local msginfo_vm
+local reader_def = require("jitlog.reader_def")
+
+
+local function mkparser(msgdefs, GC64)
+  apigen.SetGC64Mode(GC64)
+  local parser = apigen.create_parser()
+  parser:parse_structlist(msgdefs.structs)
+  parser:parse_msglist(msgdefs.messages)
+  return parser:complete()
+end
+
+msginfo_vm = mkparser(msgdef, reader_def.GC64)
+
+assert(readerlib.makereader(nil, nil, reader_def))
 
 local function buildmsginfo(msgdefs)
   local parser = apigen.create_parser()
@@ -188,7 +196,7 @@ local testmixins = {
 }
 
 local function parselog(log, verbose, mixins)
-  local result = readerlib.makereader(mixins or testmixins)
+  local result = readerlib.makereader(mixins or testmixins, nil, reader_def)
   if verbose then
     result.verbose = true
   end

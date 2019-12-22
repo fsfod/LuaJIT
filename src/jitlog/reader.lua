@@ -12,11 +12,13 @@ local defaults = {
   msgsizes = {},
 }
 
-local haslogdef, default_logdef --= pcall(require, "jitlog.reader_def")
+local haslogdef, default_logdef = pcall(require, "jitlog.reader_def")
 
 if haslogdef then
   defaults.msgnames = default_logdef.MsgType.names
   defaults.msgsizes = default_logdef.msgsizes
+else
+  default_logdef = nil
 end
 
 local function array_index(self, index)
@@ -343,7 +345,7 @@ function logreader:processheader(header)
   self.msgtype = msgtype
   self.msgnames = header.msgnames
   
-  for _, name in ipairs(logdef.msgnames) do
+  for _, name in ipairs(logdef.MsgType.names) do
     if not msgtype[name] and name ~= "MAX" then
        self:log_msg("header", "Warning: Log is missing message type ".. name)
     end
@@ -524,8 +526,15 @@ local lib = {
 
 local mt = {__index = logreader}
 
-function lib.makereader(mixins, msgreaders)
+function lib.makereader(mixins, msgreaders, logdef)
   msgreaders = msgreaders or message_readers
+  if not logdef then
+    assert(default_logdef, "Must pass in a JITLog reader definition file")
+    logdef = default_logdef
+  else
+    assert(logdef.MsgType, "JITLog reader definition is missing message type enum")
+  end
+
   local t = {
     eventid = 0,
     actions = {},
@@ -534,7 +543,7 @@ function lib.makereader(mixins, msgreaders)
       --header = true,
     },
     msgobj_mt = msgreaders.msgobj_mt,
-    logdef = default_logdef,
+    logdef = logdef,
   }
   msgreaders.init(t)
 
