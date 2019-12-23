@@ -277,18 +277,69 @@ function parser:parse_struct(def)
     
     local f = {name = name, type = ftype, offset = msgsize}
     fieldlookup[name] = f
-    table.insert(fieldlist, f)  
-    msgsize = msgsize + typeinfo.size
+    table.insert(fieldlist, f)
   end
   
   local result = {
     name = def.name, 
     fields = fieldlist, 
     fieldlookup = fieldlookup, 
-    size = msgsize,
+    size = 0,
     struct = true,
   }
+  self:build_recordlayout(result)
+
   return result
+end
+
+-- Compute the size of a struct or message and the layout\offset its fields
+function parser:build_recordlayout(def)
+  local fieldlookup = def.fieldlookup
+  local msgsize = 0
+
+  for i, f in ipairs(def.fields) do
+    local size = 0
+    local type = self.types[f.type]
+    if f.bitsize or type.bitfield then
+      assert(f.bitsize > 0 and f.bitsize < 32, "bad bitsize for bitfield")
+      assert(f.bitstorage, "no bad bitstorage field specified for bitfield")
+      assert(fieldlookup[f.bitstorage], "bad bitstorage field specified for bitfield")
+    elseif f.vlen then
+      assert(f.buflen, "no length specified for vlength field")
+      assert(f.argonly_length or fieldlookup[f.buflen], "could not find length field specified for vlength a field")
+      assert(not f.bitstorage)
+      assert(not f.bitsize)
+    else
+      assert(type, "unexpected type")
+      assert(not f.bitstorage)
+      assert(not f.bitsize)
+      assert(not f.buflen)
+
+      size = type.size
+      -- GC object pointers\GCrefs\GCSize double in size for GC64 mode
+      if self.GC64 and type.GC64 then
+        size = 8
+      end
+      --TODO: allow structs as fields of messages
+      assert(size == 1 or size == 2 or size == 4 or size == 8)
+      f.offset = msgsize
+    end
+    f.order = i
+    msgsize = msgsize + size
+  end
+
+  def.fixedsize = msgsize
+
+  if def.vlen_fields then
+    -- Offsets to variable length fields are placed at the end of the struct
+    for _, f in ipairs(def.vlen_fields) do
+      f.offset = msgsize
+      msgsize = msgsize + 4
+    end
+  end
+
+  def.size = msgsize
+  return msgsize
 end
 
 --[[
@@ -457,46 +508,9 @@ function parser:parse_msg(def)
     add_field({name = "vtable", vtable = true, noarg = true, type = "i32", writer = "vtable"}, 3)
   end
 
-  local msgsize = 0
-  for i, f in ipairs(msgtype.fields) do
-    local size = 0
-    local type = self.types[f.type]
-    if f.bitsize or type.bitfield then
-      assert(f.bitsize > 0 and f.bitsize < 32, "bad bitsize for bitfield")
-      assert(f.bitstorage, "no bad bitstorage field specified for bitfield")
-      assert(fieldlookup[f.bitstorage], "bad bitstorage field specified for bitfield")
-    elseif f.vlen then
-      assert(f.buflen, "no length specified for vlength field")
-      assert(f.argonly_length or fieldlookup[f.buflen], "could not find length field specified for vlength a field")
-      assert(not f.bitstorage)
-      assert(not f.bitsize)
-    else
-      assert(type, "unexpected type")
-      assert(not f.bitstorage)
-      assert(not f.bitsize)
-      assert(not f.buflen)
-      
-      size = type.size
-      if type.ref and self.GC64 then
-        size = 8
-      end
-      assert(size == 1 or size == 2 or size == 4 or size == 8)
-      f.offset = msgsize
-    end
-    f.order = i
-    msgsize = msgsize + size
-  end
-
-  msgtype.fixedsize = msgsize
-
-  -- Offsets to variable length fields are placed at the end of the struct
-  for _, f in ipairs(vlen_fields) do
-    f.offset = msgsize
-    msgsize = msgsize + 4
-  end
+  self:build_recordlayout(msgtype)
 
   msgtype.idsize = idsize
-  msgtype.size = msgsize
   msgtype.vsize = #vlen_fields > 0
   msgtype.vcount = #vlen_fields
   msgtype.struct_args = struct_args or {}
