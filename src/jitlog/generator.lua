@@ -1290,25 +1290,4 @@ local api = {
   end,
 }
 
-function api.SetGC64Mode(enable)
-  local size = 0
-  local types = {"GCSize", "GCRef", "GCRefPtr", "MRef"}
-
-  if enable then
-    size = 8
-    builtin_types.GCRef.ref = "gcptr64"
-    builtin_types.GCRefPtr.ref = "gcptr64"
-    builtin_types.MRef.ref = "ptr64"
-  else
-    size = 4
-    builtin_types.GCRef.ref = "gcptr32"
-    builtin_types.GCRefPtr.ref = "gcptr32"
-    builtin_types.MRef.ref = "ptr32"
-  end
-
-  for _, name in ipairs(types) do
-    builtin_types[name].size = size
-  end
-end
-
 return api

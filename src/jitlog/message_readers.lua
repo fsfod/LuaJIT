@@ -1100,8 +1100,8 @@ local frametypes = util.make_enum{
   "PCALLH",
 }
 
-function stacksnapshot:get_frametype(slot, gc64)
-  if gc64 then
+function stacksnapshot:get_frametype(slot)
+  if self.GC64 then
     return tonumber(band(self.slots:get(slot).u64, 7))
   else
     return band(self.slots:get(slot).it, 7)
@@ -1111,30 +1111,30 @@ end
 local pcmask = bit.bnot(3)
 local pcmask64 = bit.bnot(3llu)
 
-function stacksnapshot:get_framepc(slot, gc64)
-  if gc64 then
+function stacksnapshot:get_framepc(slot)
+  if self.GC64 then
     return band(self.slots:get(slot).u64, pcmask64)
   else
     return band(self.slots:get(slot).frame, pcmask)
   end
 end
 
-function stacksnapshot:get_framegc(slot, gc64)
-  if gc64 then
+function stacksnapshot:get_framegc(slot)
+  if self.GC64 then
     return addrtonum(self.slots:get(slot-1).u64)
   else
     return addrtonum(self.slots:get(slot).gcr)
   end
 end
 
-function stacksnapshot:get_frameinfo(slot, gc64)
+function stacksnapshot:get_frameinfo(slot)
   if slot < 0 or slot >= self.slots.length then
     error("Frame index "..slot.." is out of range of "..(self.slots.length-1))
   end
 
-  local frametype = frametypes[self:get_frametype(slot, gc64)]
-  local pc = self:get_framepc(slot, gc64)
-  local func = self.owner.func_lookup[self:get_framegc(slot, gc64)]
+  local frametype = frametypes[self:get_frametype(slot)]
+  local pc = self:get_framepc(slot)
+  local func = self.owner.func_lookup[self:get_framegc(slot)]
   local pt, line, bcindex, nextframe
 
   if not frametype then
@@ -1154,7 +1154,7 @@ function stacksnapshot:get_frameinfo(slot, gc64)
         error("PC in stackframe did not point to a CALL bytecode was "..bcop)
       end
       nextframe = slot - (callbase + 1)
-      if gc64 then
+      if self.GC64 then
         nextframe = nextframe - 1
       end
     end
@@ -1167,11 +1167,11 @@ function stacksnapshot:get_frameinfo(slot, gc64)
   return frametype or self:get_frametype(slot), nextframe, func, pt, line, bcindex
 end
 
-function stacksnapshot:visitframes(callback, usrarg, gc64)
+function stacksnapshot:visitframes(callback, usrarg)
   if self.base == -1 then
     assert(false, "stack has no base index")
   end
-  local framesz = gc64 and 2 or 1
+  local framesz = self.GC64 and 2 or 1
   local limit = framesz
   local slot = self.base-1
   if self.framesonly then
@@ -1179,7 +1179,7 @@ function stacksnapshot:visitframes(callback, usrarg, gc64)
   end
   -- Skip the dummy frame at the base of the stack
   while(slot >= limit) do
-    local frametype, nextframe, func, pt, line, bcindex = self:get_frameinfo(slot, gc64)
+    local frametype, nextframe, func, pt, line, bcindex = self:get_frameinfo(slot)
     
     if usrarg then
       callback(usrarg, frametype, slot, nextframe, func, pt, line, bcindex)
@@ -1200,16 +1200,16 @@ function stacksnapshot:visitframes(callback, usrarg, gc64)
   return true
 end
 
-function stacksnapshot:get_framelist(gc64)
+function stacksnapshot:get_framelist()
   local t = {}
   self:visitframes(function(frames, kind, slot, nextframe, func, pt, line, bcindex)
     table.insert(frames, {kind = kind, slot = slot, func = func, nextframe = nextframe, pt = pt, line = line, bcindex = bcindex})
-  end, t, gc64)
+  end, t)
   return t
 end
 
-function stacksnapshot:frame_print(slot, gc64)
-  local frametype, nextframe, func, pt, line, bcindex = self:get_frameinfo(slot, gc64)
+function stacksnapshot:frame_print(slot)
+  local frametype, nextframe, func, pt, line, bcindex = self:get_frameinfo(slot)
   print(string.format("Frame(%s): slot = %d", frametype or "?", slot))
 
   if func then
@@ -1226,15 +1226,15 @@ function stacksnapshot:frame_print(slot, gc64)
   return nextframe
 end
 
-function stacksnapshot:printframes(gc64)
-  local slot = self.base-1
-  local framesz = gc64 and 2 or 1
+function stacksnapshot:printframes()
+   local slot = self.base-1
+  local framesz = self.GC64 and 2 or 1
   local limit = framesz
   if self.framesonly then
     limit = 0
   end
   while slot and slot >= limit do
-    local nextframe = self:frame_print(slot, gc64)
+    local nextframe = self:frame_print(slot)
     if self.framesonly then
       slot = slot - framesz
     else
@@ -1243,12 +1243,12 @@ function stacksnapshot:printframes(gc64)
   end
 end
 
-function stacksnapshot:tostring(gc64)
+function stacksnapshot:tostring()
   if self.base == -1 then
     assert(false, "stack has no base index")
   end
   local slot = self.base-1
-  local limit = gc64 and 1 or 0
+  local limit = self.GC64 and 1 or 0
   local result = ""
   while(slot and slot > limit) do
     local frametype, nextframe, func, pt, line, bcindex = self:get_frameinfo(slot)
@@ -1284,6 +1284,7 @@ function readers:stacksnapshot(msg)
     base = msg.base,
     top =  msg.top,
     vmstate = msg.vmstate,
+    GC64 = self.GC64,
   }
   stack.slots = self:read_array("TValue", msg:get_slots())
   setmetatable(stack, self.msgobj_mt.stacksnapshot)
