@@ -547,13 +547,20 @@ function parser:build_vtable(def, kind)
   local vtable_names = {}
   if def.vsize then
     assert(kind ~= "struct")
-    assert(fields[2].name == "msgsize", fields[2].nam)
-    assert(fields[3].name == "vtable", fields[3].nam)
+    assert(fields[2].name == "msgsize", fields[2].name)
+    assert(fields[3].name == "vtable", fields[3].name)
+    -- Skip the header, size and vtable_offset fields at the start
     firstfield = 4
     baseoffset = -8
-  else
+  elseif kind == "message" then
+    -- Skip the header field
     firstfield = 2
     baseoffset = 0
+  elseif kind == "struct" then
+    firstfield = 1
+    baseoffset = 1 -- can't start at zero
+  else
+    assert(false, "unknown object type to create vtable")
   end
 
   for i = firstfield, #fields do
