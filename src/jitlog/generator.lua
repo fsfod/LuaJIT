@@ -21,16 +21,16 @@ local builtin_types = {
   double = {size = 8, signed = false, printf = "%g", c = "double", argtype = "double", typeid = 11},
 
   MSize  = {size = 4, signed = false,  printf = "%u", c = "uint32_t", argtype = "MSize"},
-  GCSize = {size = 4, signed = false,  printf = "%u", c = "GCSize", argtype = "GCSize"},
+  GCSize = {size = 4, signed = false,  printf = "%u", c = "GCSize", argtype = "GCSize", GC64 = true},
 
   timestamp  = {size = 8, signed = false,  printf = "%llu", c = "uint64_t", writer = "timestamp_highres", noarg = true},
   smallticks = {size = 4, signed = false,  printf = "%u",   c = "uint32_t", argtype = "uint64_t"},
 
   TValue     = {size = 8, signed = false, c = "TValue", printf = "0x%llx", argtype = "TValue"},
-  GCRef      = {size = 4, signed = false, c = "GCRef", printf = "0x%llx", writer = "setref", ref = "gcptr32", ref64 = "gcptr64", argtype = "GCRef"},
+  GCRef      = {size = 4, signed = false, c = "GCRef", printf = "0x%llx", writer = "setref", ref = "gcptr32", ref64 = "gcptr64", argtype = "GCRef", GC64 = true},
   --GCRef field with the value passed in as a pointer
-  GCRefPtr   = {size = 4, signed = false, c = "GCRef", printf = "0x%llx", writer = "setref", ref = "gcptr32", ref64 = "gcptr64", ptrarg = true, argtype = "void *"},
-  MRef       = {size = 4, signed = false, c = "MRef", printf = "0x%llx",  writer = "setref", ref = "ptr32", ref64 = "ptr64", ptrarg = true, argtype = "void *"},
+  GCRefPtr   = {size = 4, signed = false, c = "GCRef", printf = "0x%llx", writer = "setref", ref = "gcptr32", ref64 = "gcptr64", ptrarg = true, argtype = "void *", GC64 = true},
+  MRef       = {size = 4, signed = false, c = "MRef", printf = "0x%llx",  writer = "setref", ref = "ptr32", ref64 = "ptr64", ptrarg = true, argtype = "void *", GC64 = true},
   -- Always gets widen to 64 bit since this is assumed not to be a gc pointer
   ptr        = {size = 8, signed = false, c = "uint64_t", printf = "0x%llx", writer = "widenptr", ptrarg = true, argtype = "void *"},
 
@@ -130,7 +130,7 @@ function parser:get_arraytype(element_type)
     element_type = element_type,
     element_size = element_typeinfo.size,
   }
-  if element_typeinfo.ref and self.GC64 then
+  if element_typeinfo.GC64 and self.GC64 then
     typeinfo.element_size = 8
   end
   self.types[arraytype] = typeinfo
