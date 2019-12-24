@@ -187,7 +187,20 @@ function generator:write_vtables()
   end
 
   self:write("};\n")
-  self:write("lib.vtables = vtables\n")
+  self:write("lib.vtables = vtables\n\n")
+
+  self:writeline("local vt_types = {")
+
+  for _, msgdef in ipairs(self.msglist) do
+    self:write_fieldtypes(msgdef)
+  end
+
+  for _, structdef in ipairs(self.structlist) do
+    self:write_fieldtypes(structdef)
+  end
+
+  self:writeline("};")
+  self:write("lib.vt_types = vt_types\n\n")
 
   self:write("local vtable_names = {\n")
 

@@ -4,21 +4,42 @@ local format = string.format
 local tinsert = table.insert
 local bor, rshift = bit.bor, bit.rshift
 
+local fbtype = util.make_enum{
+  "None",
+  "UType",
+  "Bool",
+  "Byte",
+  "UByte",
+  "Short",
+  "UShort",
+  "Int",
+  "UInt",
+  "Long",
+  "ULong",
+  "Float",
+  "Double",
+  "String",
+  "Vector",
+  "Obj",
+  "Union",
+  "Array",
+}
+
 local builtin_types = {
   char = {size = 1, signed = true, printf = "%i", c = "char",  argtype = "char"},
   bool = {bitsize = 1, bool = true, bitfield = true, signed = false, printf = "%u", c = "uint32_t", argtype = "int"},
 
-  i8  = {size = 1, signed = true,  printf = "%i",   c = "int8_t",   argtype = "int32_t",  typeid = 1},
-  u8  = {size = 1, signed = false, printf = "%i",   c = "uint8_t",  argtype = "uint32_t", typeid = 2},
-  i16 = {size = 2, signed = true,  printf = "%i",   c = "int16_t",  argtype = "int32_t",  typeid = 3},
-  u16 = {size = 2, signed = false, printf = "%i",   c = "uint16_t", argtype = "uint32_t", typeid = 4},
-  i32 = {size = 4, signed = true,  printf = "%i",   c = "int32_t",  argtype = "int32_t",  typeid = 5},
-  u32 = {size = 4, signed = false, printf = "%u",   c = "uint32_t", argtype = "uint32_t", typeid = 6},
-  i64 = {size = 8, signed = true,  printf = "%lli", c = "int64_t",  argtype = "int64_t",  typeid = 7},
-  u64 = {size = 8, signed = false, printf = "%llu", c = "uint64_t", argtype = "uint64_t", typeid = 8},
+  i8  = {size = 1, signed = true,  printf = "%i",   c = "int8_t",   argtype = "int32_t",  typeid = fbtype.Byte},
+  u8  = {size = 1, signed = false, printf = "%i",   c = "uint8_t",  argtype = "uint32_t", typeid = fbtype.UByte},
+  i16 = {size = 2, signed = true,  printf = "%i",   c = "int16_t",  argtype = "int32_t",  typeid = fbtype.Short},
+  u16 = {size = 2, signed = false, printf = "%i",   c = "uint16_t", argtype = "uint32_t", typeid = fbtype.UShort},
+  i32 = {size = 4, signed = true,  printf = "%i",   c = "int32_t",  argtype = "int32_t",  typeid = fbtype.Int},
+  u32 = {size = 4, signed = false, printf = "%u",   c = "uint32_t", argtype = "uint32_t", typeid = fbtype.UInt},
+  i64 = {size = 8, signed = true,  printf = "%lli", c = "int64_t",  argtype = "int64_t",  typeid = fbtype.Long},
+  u64 = {size = 8, signed = false, printf = "%llu", c = "uint64_t", argtype = "uint64_t", typeid = fbtype.ULong},
 
-  float  = {size = 4, signed = false, printf = "%f", c = "float",  argtype = "float",  typeid = 10},
-  double = {size = 8, signed = false, printf = "%g", c = "double", argtype = "double", typeid = 11},
+  float  = {size = 4, signed = false, printf = "%f", c = "float",  argtype = "float",  typeid = fbtype.Float},
+  double = {size = 8, signed = false, printf = "%g", c = "double", argtype = "double", typeid = fbtype.Double},
 
   MSize  = {size = 4, signed = false,  printf = "%u", c = "uint32_t", argtype = "MSize"},
   GCSize = {size = 4, signed = false,  printf = "%u", c = "GCSize", argtype = "GCSize", GC64 = true},
@@ -34,8 +55,8 @@ local builtin_types = {
   -- Always gets widen to 64 bit since this is assumed not to be a gc pointer
   ptr        = {size = 8, signed = false, c = "uint64_t", printf = "0x%llx", writer = "widenptr", ptrarg = true, argtype = "void *"},
 
-  string     = {vsize = true, printf = "%s", string = true,     c = "const char*", argtype = "const char *",  element_type = "char", element_size = 1},
-  stringlist = {vsize = true, printf = "%s", stringlist = true, c = "const char*", argtype = "const char *",  element_type = "char", element_size = 1},
+  string     = {vsize = true, printf = "%s", string = true,     c = "const char*", argtype = "const char *",  element_type = "char", element_size = 1, typeid = fbtype.String},
+  stringlist = {vsize = true, printf = "%s", stringlist = true, c = "const char*", argtype = "const char *",  element_type = "char", element_size = 1, typeid = fbtype.Array+1},
 }
 
 local aliases = {
@@ -66,8 +87,10 @@ local fbtypes = {
   {fbtype = "Array", type = "", vsize = true},
 }
 
+local bit_fbstart = fbtype.Array + 1
+
 for i = 1, 31 do
-  builtin_types[i..""] = {bitsize = i, bitfield = true, signed = false, printf = "%u", c = "uint32_t", argtype = "uint32_t"}
+  builtin_types[i..""] = {bitsize = i, bitfield = true, signed = false, printf = "%u", c = "uint32_t", argtype = "uint32_t", typeid = bit_fbstart+i}
 end
 
 for name, def in pairs(aliases) do
@@ -86,6 +109,7 @@ local function make_arraytype(element_type)
     argtype = format("const %s *", ctype),
     element_type = element_type,
     element_size = element_typeinfo.size,
+    typeid = bor(bit.lshift(16, element_typeinfo.typeid), fbtype.Vector),
   }
   builtin_types[key] = typeinfo
   builtin_types[ctype.."[]"] = typeinfo
@@ -585,7 +609,7 @@ function parser:build_vtable(def, kind)
     end
 
     if offset then
-      local slot = #offsets
+      local slot = #offsets - 2
       f.vtslot = slot
       tinsert(offsets, offset)
       tinsert(vtable_names, f.name)
@@ -1220,6 +1244,28 @@ function generator:write_vtable(msgdef)
   })
 
   return #msgdef.vtable*2
+end
+
+function generator:write_fieldtypes(msgdef)
+  local typeids = {}
+
+  for i, f in ipairs(msgdef.fields) do
+    if f.vtslot then
+      local type =  self.types[f.type]
+      local typeid = type.typeid or 0
+      if type.element_type then
+
+      end
+      typeids[f.vtslot+1] = typeid
+    end
+  end
+  assert(typeids[1])
+
+  self:writetemplate("vtable", {
+    name = msgdef.name,
+    offsets = util.concatf(typeids, "%d, "):sub(1, -3)
+  })
+
 end
 
 function generator:write_enums()
