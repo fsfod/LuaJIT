@@ -195,6 +195,7 @@ function logreader:readheader(buff, buffsize, info)
   info.vtables = self:read_array("uint16_t", header:get_vtables())
   info.vtablelookup = {}
   local vtables = info.vtables
+  local defvts = logdef.vtables
 
   local i = 0
   local index, limit = 0, vtables.length-1
@@ -207,7 +208,7 @@ function logreader:readheader(buff, buffsize, info)
     end
 
     local vtsize = vtables:get(index)/2
-    local objsize = vtables:get(index +2)
+    local objsize = vtables:get(index +1)
     if vtsize < 2 or (index +vtsize-1) > limit then
       error(format("Bad vtable size %d in msg %s", vtsize, name))
     end
@@ -215,6 +216,38 @@ function logreader:readheader(buff, buffsize, info)
       error(format("Bad vtable object size %d for msg %s", objsize, name))
     end
 
+    local our_vt = defvts[name]
+
+    if our_vt then
+      local our_vtsize = defvts[name][1]
+      local limit = 0
+      if vtsize > our_vtsize then
+        limit = our_vtsize
+        self:log_msg("header", "Warning: vtable size of %s was larger expected %d > %d", name, our_vtsize, vtsize)
+      elseif vtsize < our_vtsize then
+        limit = vtsize
+        self:log_msg("header", "Warning: vtable size of %s was smaller than expected %d < %d, fields will be missing", name, our_vtsize, vtsize)
+      else
+        limit = vtsize
+      end
+
+      local our_objsize = defvts[name][2]
+
+      if vtsize == our_vtsize and objsize ~= our_objsize then
+        
+      end
+
+      local names = logdef.vtable_names[name]
+
+      for i = 1, limit do
+        local offset = vtables:get(index + 1 + i)
+        -- check for not present fields in the vtable
+        if our_vt[i] ~= 0 and offset == 0 then
+          self:log_msg("header", "Warning: field %s not present in vtable for %s", names[i], name)
+        end
+      end
+    end
+    
     info.vtablelookup[name] = vtables
 
     index = index + vtsize
@@ -372,7 +405,7 @@ function logreader:processheader(header)
     end
   end
 
-  local fbreaders = logdef.gen_fbreaders(header.vtablelookup)
+  local fbreaders = logdef.gen_fbreaders(header.vtablelookup, header.msgnames)
 
   -- Map message functions associated with a message name to this files message types
   local dispatch = table.new(255, 0)
