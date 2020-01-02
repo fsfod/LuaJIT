@@ -61,6 +61,7 @@ typedef struct jitlog_State {
   IRRef last_nins;
   IRIns last_ins;
   uint16_t last_snap;
+  uint64_t gcstart;
 } jitlog_State;
 
 
@@ -1140,6 +1141,36 @@ static void jitlog_iremit(jitlog_State* context, uint32_t data)
   }
 }
 
+static void jitlog_gcevent(void* contextptr, lua_State* L, int eventid, void* eventdata)
+{
+  VMEvent2 event = (VMEvent2)eventid;
+  jitlog_State *context = contextptr;
+  void *bufpos = ubufP(&context->ub);
+
+  if (context->loadstate == 1) {
+    return;
+  }
+
+  uintptr_t data = (uintptr_t)eventdata;
+
+  switch (event) {
+    case GCEVENT_STATECHANGE:
+      jitlog_gcstate(context, (int)data);
+      break;
+    case GCEVENT_ATOMICSTAGE:
+      jitlog_gcatomic_stage(context, (int)data);
+      break;
+    case GCEVENT_STEP:
+      jitlog_gcstep(context, data);
+      break;
+    case GCEVENT_FULLGC:
+      jitlog_fullgc(context, data);
+      break;
+    default:
+      break;
+  }
+}
+
 static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *eventdata)
 {
   VMEvent2 event = (VMEvent2)eventid;
@@ -1148,7 +1179,7 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
 
   TIMER_START(jitlog_vmevent);
 
-  if (context->loadstate == 1 && event != VMEVENT_DETACH && event != VMEVENT_STATE_CLOSING && event !=  VMEVENT_GC_STATECHANGE) {
+  if (context->loadstate == 1 && event != VMEVENT_DETACH && event != VMEVENT_STATE_CLOSING) {
     jitlog_loadstage2(L, context);
   }
 
@@ -1187,12 +1218,6 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
       break;
     case VMEVENT_BC:
       jitlog_protoloaded(context, (GCproto*)eventdata);
-      break;
-    case VMEVENT_GC_STATECHANGE:
-      jitlog_gcstate(context, (int)(uintptr_t)eventdata);
-      break;
-    case VMEVENT_GC_ATOMICSTAGE:
-      jitlog_gcatomic_stage(context, (int)(uintptr_t)eventdata);
       break;
     case VMEVENT_DETACH:
       free_context(context);
@@ -1670,6 +1695,13 @@ static void jitlog_loadstage2(lua_State *L, jitlog_State *context)
 #endif
 
   lj_lib_prereg(L, "jitlog", luaopen_jitlog, tabref(L->env));
+  
+  /* Don't enable the gcevent if all the GC log filters have been set */
+  if ((context->user.logfilter & LOGFILTER_GC) != LOGFILTER_GC) {
+    /* Only register for GC events after we've created our tables */
+    luaJIT_gcevent_sethook(L, jitlog_gcevent, context);
+  }
+  
   context->loadstate = 3;
 }
 
@@ -1720,6 +1752,8 @@ static void jitlog_shutdown(jitlog_State *context)
     lua_assert(current_context == context);
     luaJIT_vmevent_sethook(L, NULL, NULL);
   }
+
+  luaJIT_gcevent_sethook(L, NULL, NULL);
 
   clear_objalloc_callback(context);
 
