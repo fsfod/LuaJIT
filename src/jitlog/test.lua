@@ -144,6 +144,84 @@ it("message sizes", function()
   end
 end)
 
+it("message flatbuffers", function()
+  local msginfo = buildmsginfo({
+    {
+      name = "header",
+      fields = [[
+        version : u32
+        os : string
+      ]]
+    },
+  })
+
+  assert(#msginfo.msglist == 1)
+  local header = msginfo.msglist[1]
+  local fields = header.fields
+  assert(#header.fields == 5, #header.fields)
+
+  assert(not fields[1].vtslot)
+  assert(not fields[2].vtslot)
+  assert(not fields[3].vtslot)
+  assert(fields[4].vtslot == 0, fields[4].vtslot)
+  assert(fields[5].vtslot == 1)
+
+  local headervt = header.vtable
+  assert(#headervt == 4)
+  assert(headervt[1] == 4*2)
+  assert(headervt[2] == 12, headervt[2])
+
+  local fields_start = 2 * 4 -- fixed fields that are always present: header, size. vtables treat the vtable offset field as part of the struct
+  assert(headervt[3] == 4, headervt[3])
+  assert(fields[4].offset-fields_start == 4)
+  assert(headervt[4] == 8, headervt[4])
+  assert(fields[5].offset-fields_start == 8)
+end)
+
+it("message flatbuffers fixedsize", function()
+  local msginfo = buildmsginfo({
+    {
+      name = "header",
+      fields = [[
+        version : u32
+        os : string
+      ]]
+    },
+    {
+      name = "obj",
+      fields = [[
+        address : GCRef
+        data : u64
+        data2 : u32
+      ]]
+    }
+  })
+
+  assert(#msginfo.msglist == 2)
+
+  local obj = msginfo.msglist[2]
+  assert(obj.name == "obj")
+  assert(#obj.fields == 4, #obj.fields)
+
+  local fields = obj.fields
+  assert(not fields[1].vtslot)
+  assert(fields[2].vtslot == 0, fields[2].vtslot)
+  assert(fields[3].vtslot == 1, fields[3].vtslot)
+  assert(fields[4].vtslot == 2, fields[4].vtslot)
+
+  local objvt = obj.vtable
+  assert(#objvt == 5)
+  assert(objvt[1] == 5*2)
+  assert(objvt[2] == 20, objvt[2])
+
+  assert(objvt[3] == 4, objvt[3])
+  assert(fields[2].offset == 4)
+  assert(objvt[4] == 8, objvt[4])
+  assert(fields[3].offset == 8)
+  assert(objvt[5] == 16, objvt[5])
+  assert(fields[4].offset == 16)
+end)
+
 it("field offsets", function()
   for _, def in ipairs(msginfo_vm.msglist) do
     local msgname = def.name
