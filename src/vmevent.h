@@ -21,8 +21,6 @@ typedef enum VMEvent2 {
   VMEVENT_TRACE_FLUSH,
   VMEVENT_RECORD,
   VMEVENT_PROTO_BLACKLISTED,
-  VMEVENT_GC_STATECHANGE,
-  VMEVENT_GC_ATOMICSTAGE,
   VMEVENT_GC_FULL,
   VMEVENT_JIT_FOLD,
   VMEVENT_JIT_IREMIT,
@@ -39,6 +37,14 @@ typedef enum FlushReason {
   FLUSHREASON_SET_IMMUTABLEUV,
   FLUSHREASON__MAX
 } FlushReason;
+
+typedef enum GCEvent {
+  GCEVENT_STATECHANGE,
+  GCEVENT_ATOMICSTAGE,
+  GCEVENT_STEP,
+  GCEVENT_FULLGC,
+  GCEVENT__MAX
+} GCEvent;
 
 /* The stages of the atomic GC phase that all happen in one GC step */
 typedef enum GCAtomicStage {
