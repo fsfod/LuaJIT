@@ -2,7 +2,7 @@ local util = require"jitlog.util"
 local buildtemplate, trim = util.buildtemplate, util.trim
 local format = string.format
 local tinsert = table.insert
-local bor, rshift = bit.bor, bit.rshift
+local bor, lshift, rshift = bit.bor, bit.lshift,  bit.rshift
 
 local fbtype = util.make_enum{
   "None",
@@ -109,7 +109,7 @@ local function make_arraytype(element_type)
     argtype = format("const %s *", ctype),
     element_type = element_type,
     element_size = element_typeinfo.size,
-    typeid = bor(bit.lshift(16, element_typeinfo.typeid), fbtype.Vector),
+    typeid = bor(lshift(element_typeinfo.typeid, 16), fbtype.Vector),
   }
   builtin_types[key] = typeinfo
   builtin_types[ctype.."[]"] = typeinfo
@@ -567,7 +567,7 @@ function parser:build_vtable(def, kind)
   local firstfield, baseoffset = 1, 0
   assert(kind == "struct" or fields[1].name == "header", fields[1].name)
 
-  local offsets = { 0, def.size}
+  local offsets = { 0, 0}
   local vtable_names = {}
   if def.vsize then
     assert(kind ~= "struct")
@@ -576,13 +576,17 @@ function parser:build_vtable(def, kind)
     -- Skip the header, size and vtable_offset fields at the start
     firstfield = 4
     baseoffset = -8
+    -- Exclude header and size
+    offsets[2] = def.size - 8
   elseif kind == "message" then
     -- Skip the header field
     firstfield = 2
     baseoffset = 0
+    offsets[2] = def.size
   elseif kind == "struct" then
     firstfield = 1
     baseoffset = 1 -- can't start at zero
+    offsets[2] = def.size
   else
     assert(false, "unknown object type to create vtable")
   end
@@ -599,7 +603,7 @@ function parser:build_vtable(def, kind)
     elseif f.bitstorage and not def.vsize  then
       local bitfield = def.fieldlookup[f.bitstorage]
       -- Set MSB to signify a bitfield
-      offset = bit.bor(0x8000, bit.rshift(bitfield.offset, 5))
+      offset = bor(bor(0x8000, lshift(bitfield.offset, 5)), f.bitofs)
 
       -- we can't use offset 0 because it means the field is not present when written into the vtable
       if offset == 0 then
