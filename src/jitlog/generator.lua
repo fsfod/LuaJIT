@@ -602,14 +602,16 @@ function parser:build_vtable(def, kind)
       offset = f.vindex*4 + def.size
     elseif f.bitstorage and not def.vsize  then
       local bitfield = def.fieldlookup[f.bitstorage]
-      -- Set MSB to signify a bitfield
-      offset = bor(bor(0x8000, lshift(bitfield.offset, 5)), f.bitofs)
 
+      offset = bitfield.offset
       -- we can't use offset 0 because it means the field is not present when written into the vtable
       if offset == 0 then
-        assert(fields[2].name == "msgsize", fields[2].nam)
+        assert(fields[2].name ~= "msgsize")
         offset = 1
       end
+      offset = lshift(offset, 5)
+      -- Set MSB to signify a bitfield
+      offset = bor(bor(0x8000, offset), f.bitofs)
     end
 
     if offset then
