@@ -162,8 +162,8 @@ function generator:write_flatbuffer_vtable()
   local vtoffset = 0
   local vtstarts = {}
 
-  for _, msgdef in ipairs(self.msglist) do
-    local vtsize = self:write_vtable(msgdef, "message")
+  for _, name in ipairs(self.sorted_msgnames) do
+    local vtsize = self:write_vtable(self.msglookup[name], "message")
     vtstarts[#vtstarts + 1] = vtoffset
     vtoffset = vtoffset + vtsize
   end
