@@ -3,7 +3,7 @@ local util = require("jitlog.util")
 local message_readers = require("jitlog.message_readers")
 local format = string.format
 local tinsert = table.insert
-local band = bit.band
+local band, rshift = bit.band, bit.rshift
 require("table.new")
 
 local defaults = {
@@ -193,18 +193,26 @@ function logreader:readheader(buff, buffsize, info)
   end
 
   info.vtables = self:read_array("uint16_t", header:get_vtables())
-  info.vtablelookup = {}
-  local vtables = info.vtables
-  local defvts = logdef.vtables
 
-  local i = 0
+  local vtables = self:parse_vtables(info.vtables, file_msgnames, logdef.vtables, logdef.vtable_names)
+
+  info.vtablelookup  = vtables
+
+  return true
+end
+
+function logreader:parse_vtables(vtables, msgnames, our_vtables, vt_fieldnames)
+  local vtablelookup = {}
+  local defvts = our_vtables
+
+  local vti = 0
   local index, limit = 0, vtables.length-1
   while index < limit do
     local name
-    if i < #file_msgnames then
-      name = file_msgnames[i+1]
+    if vti < #msgnames then
+      name = msgnames[vti+1]
     else
-      name = tostring(i)
+      name = tostring(vti)
     end
 
     local vtsize = vtables:get(index)/2
@@ -219,11 +227,11 @@ function logreader:readheader(buff, buffsize, info)
     local our_vt = defvts[name]
 
     if our_vt then
-      local our_vtsize = defvts[name][1]
+      local our_vtsize = defvts[name][1]/2
       local limit = 0
       if vtsize > our_vtsize then
         limit = our_vtsize
-        self:log_msg("header", "Warning: vtable size of %s was larger expected %d > %d", name, our_vtsize, vtsize)
+        self:log_msg("header", "Warning: vtable for %s had %d extra field entries expected %d", name, vtsize-our_vtsize, our_vtsize)
       elseif vtsize < our_vtsize then
         limit = vtsize
         self:log_msg("header", "Warning: vtable size of %s was smaller than expected %d < %d, fields will be missing", name, our_vtsize, vtsize)
@@ -233,28 +241,43 @@ function logreader:readheader(buff, buffsize, info)
 
       local our_objsize = defvts[name][2]
 
-      if vtsize == our_vtsize and objsize ~= our_objsize then
-        
+      if objsize ~= our_objsize then
+        self:log_msg("header", "Warning: vtable object size of %s was smaller than expected %d < %d, fields will be missing", name, objsize, our_objsize)
       end
 
-      local names = logdef.vtable_names[name]
+      local names = vt_fieldnames[name]
+      local firstdiff = -1
 
-      for i = 1, limit do
+      for i = 1, limit-2 do
         local offset = vtables:get(index + 1 + i)
+        local our_offset = our_vt[i + 2]
+
+        if offset ~= our_offset and firstdiff == -1 then
+          firstdiff = i
+        end
+
         -- check for not present fields in the vtable
-        if our_vt[i] ~= 0 and offset == 0 then
+        if our_offset ~= 0 and offset == 0 then
           self:log_msg("header", "Warning: field %s not present in vtable for %s", names[i], name)
+        elseif offset == 0 then
+        else
+          if band(0x8000, offset) ~= 0 then
+            offset = rshift(band(offset, 0x7fff), 5)
+          end
+          if offset >= objsize then
+            error(format("Bad vtable offset %d should be smaller than object size %d for msg %s",  offset, objsize, name))
+          end
         end
       end
     end
     
-    info.vtablelookup[name] = vtables
+    vtablelookup[name] = vtables.array + index
 
     index = index + vtsize
-    i = i + 1
+    vti = vti+ 1
   end
 
-  return true
+  return vtablelookup
 end
 
 function logreader:read_array(eletype, ptr, length)
