@@ -409,12 +409,13 @@ it("perf_section", function()
   local result = parselog(jitlog.savetostring())
   local section_time, section_counts = result.section_time, result.section_counts
   assert(#util.keys(section_time) == 3, #util.keys(section_time))
-  assert(section_counts[0] == 1)
-  assert(section_counts[1] == 300)
-  assert(section_counts[2] == 200)
+  local userid_start = result.maxsection
+  assert(section_counts[userid_start + 0] == 1)
+  assert(section_counts[userid_start + 1] == 300)
+  assert(section_counts[userid_start + 2] == 200)
   -- Check accumulated time matches the scope nesting
-  assert(section_time[0] > section_time[1])
-  assert(section_time[1] > section_time[2])
+  assert(section_time[userid_start + 0] > section_time[userid_start + 1])
+  assert(section_time[userid_start + 1] > section_time[userid_start + 2])
 end)
 
 if hasjit then
