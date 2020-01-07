@@ -61,7 +61,8 @@ typedef struct jitlog_State {
   IRRef last_nins;
   IRIns last_ins;
   uint16_t last_snap;
-  uint64_t gcstart;
+  uint64_t gcstart;    /* when the current GC step or fullgc started */
+  uint64_t gcstep_max; /* Maximum time a GC step took to run */
 } jitlog_State;
 
 
@@ -936,6 +937,7 @@ static void jitlog_gcstate(jitlog_State *context, int newstate)
     return;
   }
   log_gcstate(&context->ub, newstate, g->gc.state, g->gc.total, g->strnum);
+  context->gcstep_max = 0;
   context->events_written |= JITLOGEVENT_GCSTATE;
 }
 
@@ -1139,6 +1141,65 @@ static void jitlog_iremit(jitlog_State* context, uint32_t data)
     int depth = data >> 16;
     log_ir_emit(&context->ub, ref, depth, J->cur.ir[ref].tv.u64);
   }
+}
+
+static void jitlog_gcstep(jitlog_State* context, uintptr_t steps)
+{
+  global_State* g = context->g;
+  lua_State* L = mainthread(g);
+  lua_assert(steps || context->gcstart);
+
+  if (!steps && !context->gcstart) {
+    /* We didn't see the start of this step probably because we attached after 
+    ** it started so skip collecting incomplete data. 
+    */
+    return;
+  }
+
+  if (steps) {
+    context->gcstart = start_getticks();
+  } else {
+    uint64_t steptime = stop_getticks() - context->gcstart;
+    context->gcstep_max = steptime > context->gcstep_max ? steptime : context->gcstep_max;
+    context->gcstart = 0;
+    TIMER_ADD(gc_step, steptime);
+  }
+
+  if (!jitlog_isfiltered(context, LOGFILTER_GC_STEP)) {
+    if (steps) {
+      SECTION_START(gc_step);
+    } else {
+      SECTION_END(gc_step);
+    }
+    context->events_written |= JITLOGEVENT_GCSTATE;
+  }
+}
+
+static void jitlog_fullgc(jitlog_State* context, uintptr_t start)
+{
+  global_State* g = context->g;
+  lua_State* L = mainthread(g);
+  lua_assert((context->gcstart && !start) || (!context->gcstart && start));
+
+  if (start) {
+    context->gcstart = start_getticks();
+  } else {
+    TIMER_ADD(gc_fullgc, stop_getticks()- context->gcstart);
+    context->gcstart = 0;
+  }
+
+  if (jitlog_isfiltered(context, LOGFILTER_GC_STATE)) {
+    return;
+  }
+
+  if (!jitlog_isfiltered(context, LOGFILTER_GC_FULLGC)) {
+    if (start) {
+      SECTION_START(gc_fullgc);
+    } else {
+      SECTION_END(gc_fullgc);
+    }
+  }
+  context->events_written |= JITLOGEVENT_GCSTATE;
 }
 
 static void jitlog_gcevent(void* contextptr, lua_State* L, int eventid, void* eventdata)

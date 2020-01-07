@@ -21,6 +21,10 @@ typedef enum JITLogFilter {
   /* Only try to memorize GCproto's when there first loaded */
   LOGFILTER_PROTO_LOADONLY    = 0x200,
   LOGFILTER_SCRIPT_SOURCE     = LOGFILTER_LOADSTRING_SOURCE | LOGFILTER_FILE_SOURCE,
+
+  LOGFILTER_GC_STEP = 0x400, /* Don't write a perf section each time gcstep is entered and exited */
+  LOGFILTER_GC_FULLGC = 0x800, /* Don't write a perf section for a fullgc from lj_gc_fullgc*/
+  LOGFILTER_GC = LOGFILTER_GC_STATE | LOGFILTER_GC_STEP | LOGFILTER_GC_FULLGC,
 } JITLogFilter;
 
 typedef enum JITLogEventTypes {
