@@ -709,7 +709,9 @@ function parser:scan_instrumented_files()
         end
       end
     end
-    collectmatches(self.files_to_scan, def.patten, search_dirs, matcher)
+    for i, patten in ipairs(def.pattens) do
+      collectmatches(self.files_to_scan, patten, search_dirs, matcher)
+    end
   end
 end
 

@@ -92,19 +92,19 @@ parser:parse_msglist(msgdef.messages)
 parser.srcdir = modulepath
 parser.namescans = {
   timer = {
-    patten = "TIMER_START%(([^%,)]+)",
+    pattens = {"TIMER_START%(([^%,)]+)", "TIMER_ADD%(([^%,)]+)"},
     enumname = "TimerId",
     enumprefix = "Timer",
   },
 
   counter = {
-    patten = "PERF_COUNTER%(([^%,)]+)",
+    pattens = {"PERF_COUNTER%(([^%,)]+)", "PERF_COUNTER_ADD%(([^%,)]+)"},
     enumname = "CounterId",
     enumprefix = "Counter",
   },
 
   section = {
-    patten = "SECTION_START%(([^%,)]+)",
+    pattens = {"SECTION_START%(([^%,)]+)"},
     enumname = "SectionId",
     enumprefix = "Section",
   },
