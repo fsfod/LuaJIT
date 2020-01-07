@@ -22,7 +22,7 @@ end
 
 msginfo_vm = mkparser(msgdef, reader_def.GC64)
 
-assert(readerlib.makereader(nil, nil, reader_def))
+assert(readerlib.makereader({readerdef = reader_def}))
 
 local function buildmsginfo(msgdefs)
   local parser = apigen.create_parser(reader_def.GC64)
@@ -273,7 +273,7 @@ local testmixins = {
 }
 
 local function parselog(log, verbose, mixins)
-  local result = readerlib.makereader(mixins or testmixins, nil, reader_def)
+  local result = readerlib.makereader({mixins = mixins or testmixins, readerdef = reader_def})
   if verbose then
     result.verbose = true
   end
@@ -295,7 +295,7 @@ end)
 it("save to file", function()
   jitlog.start()
   jitlog.save("jitlog.bin")
-  local result = readerlib.parsefile("jitlog.bin")
+  local result = readerlib.parsefile("jitlog.bin", {readerdef = reader_def})
   checkheader(result.header)
 end)
 

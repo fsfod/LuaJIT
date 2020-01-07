@@ -92,7 +92,7 @@ function parse_options()
       print(msg)
       return nil
     end
-    package.loaded["jitlog.reader_def"] = f()
+    options.readerdef = f()
   end
   
   return options
@@ -142,18 +142,23 @@ end
 
 function create_reader(mixins)
   local readerlib = require("jitlog.reader")
-  local reader = readerlib.makereader(mixins)
+  local reader_options = {
+    mixins = mixins,
+    readerdef = options.readerdef,
+    verbose = false,
+  }
 
   if options.verbose then
-    if type(options.verbose) == "table" and #options.verbose > 0 then
-      for _, name in ipairs(options.verbose) do
-        reader.logfilter[name] = true
-      end
+    if type(options.verbose) ~= "table" or #options.verbose == 0 then
+      reader_options.verbose = true
     else
-      reader.verbose = true
+      -- Pass in a table message types that verbose printing is enabled
+      reader_options.verbose = options.verbose
     end
   end
-  
+
+  local reader = readerlib.makereader(reader_options)
+
   return reader
 end
 

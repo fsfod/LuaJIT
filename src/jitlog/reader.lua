@@ -582,8 +582,10 @@ local lib = {
 
 local mt = {__index = logreader}
 
-function lib.makereader(mixins, msgreaders, logdef)
-  msgreaders = msgreaders or message_readers
+function lib.makereader(options)
+  local msgreaders = options.msgreaders or message_readers
+  local logdef = options.readerdef
+
   if not logdef then
     assert(default_logdef, "Must pass in a JITLog reader definition file")
     logdef = default_logdef
@@ -605,13 +607,21 @@ function lib.makereader(mixins, msgreaders, logdef)
   }
   msgreaders.init(t)
 
+  if type(options.verbose) == "table" then
+    for _, name in ipairs(options.verbose) do
+      t.logfilter[name] = true
+    end
+  elseif options.verbose then
+    t.verbose = true
+  end
+
   for name, value in pairs(msgreaders.api) do
     assert(type(name) == "string")
     t[name] = value
   end
 
-  if mixins then
-    for _, mixin in ipairs(mixins) do
+  if options.mixins then
+    for _, mixin in ipairs(options.mixins) do
       applymixin(t, mixin)
     end
   end
@@ -638,9 +648,9 @@ function lib.parsebuffer(buff, length, partial)
   end
   return reader
 end
-  
-function lib.parsefile(filepath)
-  local reader = lib.makereader()
+
+function lib.parsefile(filepath, options)
+  local reader = lib.makereader(options)
   reader:parsefile(filepath)
   return reader
 end
