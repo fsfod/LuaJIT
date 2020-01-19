@@ -10,8 +10,14 @@ local jitlog = require("jitlog")
 local fun = require("jitlog.fun")
 
 local msginfo_vm
-local reader_def = require("jitlog.reader_def")
+local reader_def
 
+if arg[1] then
+  print("Using custom jitlog reader definition", arg[1])
+  reader_def = dofile(arg[1])
+else
+  reader_def = require("jitlog.reader_def")
+end
 
 local function mkparser(msgdefs, GC64)
   local parser = apigen.create_parser(GC64)
