@@ -654,6 +654,38 @@ end
         "{MKDIR} %{cfg.targetdir}/jitlog",
       }
 
+if os.isfile("test/c/main.c") then
+  project "test"
+    kind "ConsoleApp"
+    targetdir "%{cfg.bindir}"
+    dependson { "lua" }
+    vectorextensions "SSE2"
+    location(BuildDir)
+    language "C"
+
+    links {
+      "lua"
+    }
+
+    files {
+      "test/c/*.c",
+      "test/c/*.h",
+      "src/lj_usrbuf.h",
+      "src/lj_usrbuf.c",
+    }
+    includedirs{
+      "%{cfg.bindir}",
+      "src"
+    }
+    
+    filter "Debug*"
+      defines { "DEBUG"}
+
+    filter "Release*"
+      optimize "Speed"
+      defines { "NDEBUG"}
+end
+
 local rootignors = {
   "*.opensdf",
   "*.sdf",
