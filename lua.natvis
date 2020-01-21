@@ -142,10 +142,10 @@
     <Synthetic Name="Array" Condition="hmask != 0 &amp;&amp; asize != 0">
       <DisplayString>asize</DisplayString>
       <Expand>
-        <IndexListItems>
+        <ArrayItems>
           <Size>asize</Size>
-          <ValueNode>(Node*)(node.ptr32)</ValueNode>
-        </IndexListItems>
+          <ValuePointer>(Node*)(array.ptr32)</ValuePointer>
+        </ArrayItems>
       </Expand>
     </Synthetic>
     <Synthetic Name="Hash" Condition="hmask != 0">
