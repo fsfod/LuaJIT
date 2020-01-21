@@ -1887,6 +1887,19 @@ LUA_API int jitlog_flush(JITLogUserContext* usrcontext) {
   return ubuf_flush(&context->ub);
 }
 
+/* Trigger a flush if required for event types just written should be only used from explicit user called JITLog apis */
+static int jitlog_checkflush(jitlog_State* context, JITLogEventTypes events)
+{
+  context->events_written |= events;
+  /* TODO: Allow restricting auto flushing to only some types of events */
+  if (context->mode & JITLogMode_AutoFlush) {
+    ubuf_flush(&context->ub);
+    context->events_written = 0;
+    return 1;
+  }
+  return 0;
+}
+
 LUA_API int jitlog_save(JITLogUserContext *usrcontext, const char *path)
 {
   jitlog_State *context = usr2ctx(usrcontext);
@@ -1946,7 +1959,7 @@ LUA_API void jitlog_writemarker(JITLogUserContext* usrcontext, const char* label
   jitlog_State* context = usr2ctx(usrcontext);
   int jited = context->g->vmstate > 0;
   log_stringmarker(&context->ub, jited, flags, label);
-  context->events_written |= JITLOGEVENT_MARKER;
+  jitlog_checkflush(context, JITLOGEVENT_MARKER);
 }
 
 LUA_API void jitlog_writestack(JITLogUserContext *usrcontext, lua_State *L)
@@ -1954,7 +1967,7 @@ LUA_API void jitlog_writestack(JITLogUserContext *usrcontext, lua_State *L)
   jitlog_State *context = usr2ctx(usrcontext);
   int framesonly = (L->base+1) <= L->top ? tvistruecond(L->base) : 0;
   write_stacksnapshot(context, L, framesonly);
-  context->events_written |= JITLOGEVENT_STACK;
+  jitlog_checkflush(context, JITLOGEVENT_STACK);
 }
 
 LUA_API void jitlog_setresetpoint(JITLogUserContext *usrcontext)
@@ -2148,7 +2161,7 @@ LUA_API void jitlog_saveperfcounts(JITLogUserContext *usrcontext, uint16_t *ids,
   if (idcount != 0) {
     free(counters);
   }
-  context->events_written |= JITLOGEVENT_PERFINFO;
+  jitlog_checkflush(context, JITLOGEVENT_PERFINFO);
 }
 
 LUA_API void jitlog_saveperftimers(JITLogUserContext *usrcontext, uint16_t *ids, int idcount)
@@ -2176,7 +2189,7 @@ LUA_API void jitlog_saveperftimers(JITLogUserContext *usrcontext, uint16_t *ids,
     .ids_length = idcount,
   };
   log_perf_timers(&context->ub, &args);
-  context->events_written |= JITLOGEVENT_PERFINFO;
+  jitlog_checkflush(context, JITLOGEVENT_PERFINFO);
 }
 
 #endif
@@ -2273,7 +2286,7 @@ LUA_API int jitlog_write_gcsnapshot(JITLogUserContext *usrcontext, const char *l
   };
   log_gcsnapshot(&context->ub, &args);
   gcsnapshot_free(snap);
-  context->events_written |= JITLOGEVENT_GCSNAPSHOT;
+  jitlog_checkflush(context, JITLOGEVENT_GCSNAPSHOT);
   return 1;
 }
 
@@ -2285,7 +2298,7 @@ LUA_API int jitlog_write_gcstats(JITLogUserContext *usrcontext)
     return 0;
   }
   log_gcstats(&context->ub, (ObjStat *)context->gcstats->stats, sizeof(context->gcstats->stats)/sizeof(context->gcstats->stats[0]));
-  context->events_written |= JITLOGEVENT_GCSTATS;
+  jitlog_checkflush(context, JITLOGEVENT_GCSTATS);
   return 1;
 }
 
@@ -2443,6 +2456,7 @@ static int jlib_writemarker(lua_State *L)
     lua_Integer id = lua_tointeger(L, 1);
     int flags = luaL_optint(L, 2, 0);
     writemarker(context, (uint32_t)id, flags);
+    jitlog_checkflush(context, JITLOGEVENT_MARKER);
   }
   return 0;
 }
