@@ -1876,6 +1876,17 @@ LUA_API void jitlog_reset(JITLogUserContext *usrcontext)
   write_header(context);
 }
 
+LUA_API uint64_t jitlog_size(JITLogUserContext* usrcontext)
+{
+  jitlog_State* context = usr2ctx(usrcontext);
+  return ubuf_getoffset(&context->ub);
+}
+
+LUA_API int jitlog_flush(JITLogUserContext* usrcontext) {
+  jitlog_State* context = usr2ctx(usrcontext);
+  return ubuf_flush(&context->ub);
+}
+
 LUA_API int jitlog_save(JITLogUserContext *usrcontext, const char *path)
 {
   jitlog_State *context = usr2ctx(usrcontext);

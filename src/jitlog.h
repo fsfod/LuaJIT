@@ -86,6 +86,8 @@ LUA_API JITLogUserContext* jitlog_startasync(lua_State* L, UserBuf *sink);
 LUA_API void jitlog_close(JITLogUserContext *usrcontext);
 LUA_API int jitlog_save(JITLogUserContext *usrcontext, const char *path);
 LUA_API void jitlog_reset(JITLogUserContext *usrcontext);
+LUA_API uint64_t jitlog_size(JITLogUserContext* usrcontext);
+LUA_API int jitlog_flush(JITLogUserContext* usrcontext);
 LUA_API int jitlog_setmode(JITLogUserContext *usrcontext, JITLogMode mode, int enabled);
 LUA_API int jitlog_getmode(JITLogUserContext* usrcontext, JITLogMode mode);
 
