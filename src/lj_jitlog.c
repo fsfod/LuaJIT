@@ -1719,7 +1719,7 @@ LUA_API int luaopen_jitlog(lua_State *L);
 ** setting the VM event hook. The second state of loading is done when we get 
 ** our first VM event is not from the GC.
 */
-static jitlog_State *jitlog_start_safe(lua_State *L)
+static jitlog_State *jitlog_start_safe(lua_State *L, UserBuf *ub)
 {
   jitlog_State *context;
   lua_assert(!jitlog_isrunning(L));
@@ -1729,8 +1729,13 @@ static jitlog_State *jitlog_start_safe(lua_State *L)
   context->g = G(L);
   context->loadstate = 1;
 
-  /* Default to a memory buffer */
-  ubuf_init_mem(&context->ub, 0);
+  if (ub != NULL) {
+    memcpy(&context->ub, ub, sizeof(UserBuf));
+  } else { 
+    /* Default to a memory buffer to store events */
+    ubuf_init_mem(&context->ub, 0);
+  }
+
   write_header(context);
 
   /* If there is an existing VMEvent hook set save its function away so we can forward events to it */
@@ -1780,7 +1785,16 @@ LUA_API JITLogUserContext* jitlog_start(lua_State *L)
 {
   jitlog_State *context;
   lua_assert(!jitlog_isrunning(L));
-  context = jitlog_start_safe(L);
+  context = jitlog_start_safe(L, NULL);
+  jitlog_loadstage2(L, context);
+  return &context->user;
+}
+
+LUA_API JITLogUserContext* jitlog_startasync(lua_State* L, UserBuf* sink) 
+{
+  jitlog_State* context;
+  lua_assert(!jitlog_isrunning(L));
+  context = jitlog_start_safe(L, NULL);
   return &context->user;
 }
 
