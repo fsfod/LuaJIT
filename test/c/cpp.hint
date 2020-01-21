@@ -1,0 +1,7 @@
+
+#define UTEST_F_SETUP(FIXTURE)   static void utest_f_setup_##FIXTURE(int *utest_result, struct FIXTURE *utest_fixture)
+
+#define L utest_fixture->L
+#define ctx utest_fixture->ctx
+
+#define UTEST_F(FIXTURE, NAME) void utest_run_##FIXTURE##_##NAME(int *utest_result,  struct FIXTURE *utest_fixture)
