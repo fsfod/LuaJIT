@@ -936,9 +936,19 @@ static void jitlog_gcstate(jitlog_State *context, int newstate)
   if (jitlog_isfiltered(context, LOGFILTER_GC_STATE)) {
     return;
   }
-  log_gcstate(&context->ub, newstate, g->gc.state, g->gc.total, g->strnum);
-  context->gcstep_max = 0;
+  
+  VMPerfTimer *step_timer = TIMERS_POINTER(mainthread(context->g)) + Timer_gc_step;
+  gcstate_Args args = {
+    .state = newstate,
+    .prevstate = g->gc.state,
+    .totalmem = g->gc.total,
+    .strnum = g->strnum,
+    .steptime = step_timer->time,
+    .maxpause = context->gcstep_max,
+  };
+  log_gcstate(&context->ub, &args);
   context->events_written |= JITLOGEVENT_GCSTATE;
+  context->gcstep_max = 0;
 }
 
 enum StateKind{
