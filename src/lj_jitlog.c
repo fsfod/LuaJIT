@@ -1943,6 +1943,7 @@ LUA_API int jitlog_setsink(JITLogUserContext *usrcontext, UserBuf *ub)
   ubuf_putmem(ub, ubufB(&context->ub), ubuflen(&context->ub));
   ubuf_free(&context->ub);
   memcpy(&context->ub, ub, sizeof(UserBuf));
+  ubuf_flush(&context->ub);
   return 1;
 }
 
