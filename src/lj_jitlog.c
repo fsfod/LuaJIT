@@ -1240,6 +1240,14 @@ static void jitlog_gcevent(void* contextptr, lua_State* L, int eventid, void* ev
     default:
       break;
   }
+
+  /* Check if new messages were written to the buffer */
+  if (ubufP(&context->ub) != bufpos) {
+    ubuf_msgcomplete(&context->ub);
+    if (context->mode & JITLogMode_AutoFlush) {
+      ubuf_flush(&context->ub);
+    }
+  }
 }
 
 static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *eventdata)
