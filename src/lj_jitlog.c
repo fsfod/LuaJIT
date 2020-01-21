@@ -1842,9 +1842,12 @@ static void jitlog_shutdown(jitlog_State *context)
 
   clear_objalloc_callback(context);
 
-  free_pinnedtab(L, context->strings);
-  free_pinnedtab(L, context->protos);
-  free_pinnedtab(L, context->funcs);
+  if (context->loadstate > 1) {
+    free_pinnedtab(L, context->strings);
+    free_pinnedtab(L, context->protos);
+    free_pinnedtab(L, context->funcs);
+  }
+
   free_context(context);
 
 }
