@@ -541,7 +541,7 @@ end
     vpaths { ["libs"] = "src/lib_*.h" }
     vpaths { ["libs"] = "src/lib_*.c" }
     debugenvs {
-      "LUA_PATH=%{cfg.bindir}/?.lua;%{sln.location}src/?.lua;%{sln.location}tests/?.lua"..DEBUG_LUA_PATH..";%LUA_PATH%;./?.lua",
+      "LUA_PATH=%{sln.location}/bin/%{cfg.name}/?.lua;%{sln.location}src/?.lua;%{sln.location}tests/?.lua"..DEBUG_LUA_PATH..";%LUA_PATH%;./?.lua",
     }
 
     debugdir(DebugDir)
