@@ -614,6 +614,8 @@ typedef struct GCState {
 #if LJ_64
   MRef lightudseg;	/* Upper bits of lightuserdata segments. */
 #endif
+  luaJIT_vmevent_callback gcevent_cb;
+  void *gcevent_data;
 } GCState;
 
 /* String interning state. */

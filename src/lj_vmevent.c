@@ -85,3 +85,32 @@ LUA_API luaJIT_vmevent_callback luaJIT_vmevent_gethook(lua_State *L, void **data
 #endif
 }
 
+LUA_API int luaJIT_gcevent_sethook(lua_State* L, luaJIT_vmevent_callback cb, void* data)
+{
+#ifdef LUAJIT_DISABLE_VMEVENT
+  return 0;
+#else
+  if (cb) {
+    G(L)->gc.gcevent_cb = cb;
+    G(L)->gc.gcevent_data = data;
+  }
+  else {
+    lua_assert(data == NULL);
+    G(L)->gc.gcevent_cb = NULL;
+    G(L)->gc.gcevent_data = NULL;
+  }
+  return 1;
+#endif
+}
+
+LUA_API luaJIT_vmevent_callback luaJIT_gcevent_gethook(lua_State* L, void** data)
+{
+#ifdef LUAJIT_DISABLE_VMEVENT
+  * data = NULL;
+  return NULL;
+#else
+  *data = G(L)->gc.gcevent_cb;
+  return G(L)->gc.gcevent_data;
+#endif
+}
+
