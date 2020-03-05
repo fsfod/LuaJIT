@@ -130,10 +130,12 @@ int membuf_doaction(UserBuf *ub, UBufAction action, void *arg)
 
 int filebuf_doaction(UserBuf *ub, UBufAction action, void *arg)
 {
+  FILE* file = (FILE*)ub->state;
+
   if (action == UBUF_INIT) {
     UBufInitArgs *args = (UBufInitArgs *)arg;
-    int fd = open(args->path, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
-    FILE *file = fdopen(fd, "w");
+    int fd = open(args->path, O_CREAT | O_WRONLY | O_BINARY, S_IRUSR | S_IWUSR);
+    file = fdopen(fd, "wb");
     if (file == NULL) {
       return 0;
     }
@@ -141,19 +143,26 @@ int filebuf_doaction(UserBuf *ub, UBufAction action, void *arg)
     return membuff_init(ub, args->minbufspace > 0 ? args->minbufspace : (32 * 1024 * 1024));
   } else if (action == UBUF_FLUSH || action == UBUF_GROW_OR_FLUSH) {
     uintptr_t extra = (uintptr_t)arg;
-    size_t result = fwrite(ubufB(ub), 1, ubufsz(ub), (FILE *)ub->state);
+    size_t result = fwrite(ubufB(ub), 1, ubuflen(ub), file);
     if (result == 0) {
       return report_error(ub, errno);
     }
-    lua_assert(result == ubufsz(ub));
+    lua_assert(result == ubuflen(ub));
     setubufP(ub, ubufB(ub));
 
-    if (action == UBUF_GROW_OR_FLUSH && extra >= ubufsz(ub)) {
+    if (action == UBUF_FLUSH) {
+      if (fflush(file) != 0) {
+        return report_error(ub, errno);
+      }
+    } else if (action == UBUF_GROW_OR_FLUSH && extra >= ubufsz(ub)) {
+      /* Ensure theres enough space to contain the requested buffer size */
       return membuff_grow(ub, extra);
     }
   } else if (action == UBUF_CLOSE) {
     fclose((FILE *)ub->state);
     membuff_free(ub);
+  } else if (action == UBUF_GET_OFFSET) {
+    *(uint64_t*)arg = ftell(file) + ubuflen(ub);
   } else {
     /* Unsupported action return an error */
     return 0;
