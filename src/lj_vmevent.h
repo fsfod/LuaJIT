@@ -66,6 +66,11 @@ typedef enum {
     G(L)->vmevent_cb(G(L)->vmevent_data, L, ev, args);\
   }
 
+#define lj_gcevent(g, ev, args) \
+  if((g)->gc.gcevent_cb != NULL) {\
+    (g)->gc.gcevent_cb(g->vmevent_data, mainthread(g), ev, (void*)(uintptr_t)(args));\
+  }
+
 /* Special version where the event data struct declared in the macro. Avoids
 ** the need for a G(L)->vmevent_cb != NULL check outside the macro and cleanly disables
 ** when VM events are compiled out.

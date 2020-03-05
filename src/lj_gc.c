@@ -33,11 +33,11 @@
 #define GCSWEEPCOST	10
 #define GCFINALIZECOST	100
 
-#define lj_vmevent_atomicstage(g, substate) lj_vmevent_callback(mainthread(g), VMEVENT_GC_ATOMICSTAGE, (void*)(uintptr_t)(substate))
+#define lj_vmevent_atomicstage(g, substate) lj_gcevent(g, GCEVENT_ATOMICSTAGE, (void*)(uintptr_t)(substate))
 
 static void gc_setstate(global_State *g, int newstate)
 {
-  lj_vmevent_callback(mainthread(g), VMEVENT_GC_STATECHANGE, (void*)(uintptr_t)newstate);
+  lj_gcevent(g, GCEVENT_STATECHANGE, newstate);
   g->gc.state = newstate;
 }
 
@@ -737,7 +737,9 @@ int LJ_FASTCALL lj_gc_step_jit(global_State *g, MSize steps)
   lua_State *L = gco2th(gcref(g->cur_L));
   L->base = tvref(G(L)->jit_base);
   L->top = curr_topL(L);
+  lj_gcevent(g, GCEVENT_STEP, steps);
   while (steps-- > 0 && lj_gc_step(L) == 0) {}
+  lj_gcevent(g, GCEVENT_STEP, 0);
   if ((G(L)->gc.state == GCSatomic || G(L)->gc.state == GCSfinalize)) {
     G(L)->gc.gcexit = 1;
     /* Return 1 to force a trace exit. */
@@ -753,6 +755,7 @@ void lj_gc_fullgc(lua_State *L)
 {
   global_State *g = G(L);
   int32_t ostate = g->vmstate;
+  lj_gcevent(g, GCEVENT_FULLGC, 1);
   setvmstate(g, GC);
   if (g->gc.state <= GCSatomic) {  /* Caught somewhere in the middle. */
     setmref(g->gc.sweep, &g->gc.root);  /* Sweep everything (preserving it). */
@@ -770,6 +773,7 @@ void lj_gc_fullgc(lua_State *L)
   do { gc_onestep(L); } while (g->gc.state != GCSpause);
   g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
   g->vmstate = ostate;
+  lj_gcevent(g, GCEVENT_FULLGC, 0);
 }
 
 /* -- Write barriers ------------------------------------------------------ */
