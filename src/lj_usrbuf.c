@@ -20,6 +20,8 @@
 #include <windows.h>
 
 #define S_IRGRP 0
+#define S_IWUSR S_IWRITE
+#define S_IRUSR S_IREAD
 #include <io.h>
 #else
 #include <sys/mman.h>
@@ -130,7 +132,7 @@ int filebuf_doaction(UserBuf *ub, UBufAction action, void *arg)
 {
   if (action == UBUF_INIT) {
     UBufInitArgs *args = (UBufInitArgs *)arg;
-    int fd = open(args->path, O_CREAT | O_WRONLY, S_IREAD | S_IWRITE);
+    int fd = open(args->path, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
     FILE *file = fdopen(fd, "w");
     if (file == NULL) {
       return 0;
@@ -295,7 +297,7 @@ static int mmapbuf_init(UserBuf *ub, UBufInitArgs *args)
   size_t winsize = args->minbufspace ? args->minbufspace : (10 * 1024 * 1024);
   MMapBuf *state = calloc(1, sizeof(MMapBuf));
   ub->state = state;
-  state->fd = open(args->path, O_CREAT | O_RDWR, S_IREAD | S_IWRITE | S_IRGRP);
+  state->fd = open(args->path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP);
   if (state->fd == -1) {
     return report_error(ub, errno);
   }
