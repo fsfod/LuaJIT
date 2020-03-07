@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+    <ItemGroup>
+        <ProjectToBuild Include="LuaJit.sln">
+            <Properties>Configuration=Release;Platform=Win32</Properties>
+        </ProjectToBuild>
+        <ProjectToBuild Include="LuaJit.sln">
+            <Properties>Configuration=Release;Platform=x64</Properties>
+        </ProjectToBuild>
+    </ItemGroup>
+ 
+    <Target Name="BuildAll">
+        <MSBuild Projects="@(ProjectToBuild)" BuildInParallel="true" />
+    </Target>
+    
+    <Target Name="Clean">
+        <MSBuild Projects="LuaJit.sln" Targets="Clean" BuildInParallel="true"/>
+    </Target>
+</Project>

@@ -1,0 +1,638 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+
+<Type Name="GCstr">
+    <DisplayString Condition="len != 0">{(char*)(this+1),s}</DisplayString>
+    <DisplayString Condition="len == 0">""</DisplayString>
+    <StringView>(char*)(this+1)</StringView>
+    <Expand>
+       <Item Name="[size]">len,i</Item>
+       <Item Name="raw">(char*)(this+1),s</Item>
+    </Expand>
+</Type>
+
+<Type Name="GCRef">
+  <DisplayString Condition="gcptr64 != 0">{(GCobj*)(gcptr64 &amp; 0x7FFFFFFFFFFF)}</DisplayString>
+  <DisplayString Condition="gcptr64 == 0">nil</DisplayString>
+  <Expand>
+     <ExpandedItem Condition="gcptr64 != 0">(GCobj*)(gcptr64 &amp; 0x7FFFFFFFFFFF)</ExpandedItem>
+  </Expand>
+</Type>
+
+<Type Name="SBuf">
+  <DisplayString>size: {((char*)p.ptr64) - (char*)b.ptr64} buff: {(char*)b.ptr64}</DisplayString>
+  <Expand>
+    <Item Name="size">((char*)p.ptr64) - (char*)b.ptr64</Item>
+    <Item Name="capacity">((char*)e.ptr64) - (char*)b.ptr64</Item>
+    <Item Name="buff">(char*)b.ptr64,s</Item>
+    <Item Name="pos">(char*)p.ptr64</Item>
+    <Item Name="end">(char*)e.ptr64</Item>
+  </Expand>
+</Type>
+  
+<Type Name="BCTrace">
+  <DisplayString>start: {pt}:{pt->firstline} }</DisplayString>
+  <Expand>
+    <Item Name="size">bcsz</Item>
+    <ArrayItems>
+      <Size>bcsz</Size>
+      <ValuePointer>bc</ValuePointer>
+    </ArrayItems>
+  </Expand>
+</Type>
+
+<Type Name="TracedBC">
+  <DisplayString Condition="op &lt; BC_FUNCF">op: {op} pc: {pc}</DisplayString>
+  <DisplayString Condition="op &gt;= BC_FUNCF">op: {op} func: {func}</DisplayString>
+  <Expand>
+    <Item Name="func" Condition="op &gt;= BC_FUNCF">func</Item>
+  </Expand>
+</Type>
+
+<Type Name="GCobj">
+  <DisplayString Condition="gch.gct == 4">{str}</DisplayString>
+  <DisplayString Condition="gch.gct == 5">{{upvalue: {uv}}}</DisplayString>
+  <DisplayString Condition="gch.gct == 6">{{thread: {th}}}</DisplayString>
+  <DisplayString Condition="gch.gct == 7">{{proto: {pt}}}</DisplayString>
+  <DisplayString Condition="gch.gct == 8">{{function: {fn}}}</DisplayString>
+  <DisplayString Condition="gch.gct == 9" Optional="true">{{trace: {(GCtrace*)this}}}</DisplayString>
+  <DisplayString Condition="gch.gct == 10">{{cdata: {cd}}}</DisplayString>
+  <DisplayString Condition="gch.gct == 11">{{table: {tab}}}</DisplayString>
+  <DisplayString Condition="gch.gct == 12">{{userdata: {ud}}}</DisplayString>
+  
+  <Expand>
+    <ExpandedItem Condition="gch.gct == 4">str</ExpandedItem>
+    <ExpandedItem Condition="gch.gct == 5">uv</ExpandedItem>
+    <ExpandedItem Condition="gch.gct == 6">th</ExpandedItem>
+    <ExpandedItem Condition="gch.gct == 7">pt</ExpandedItem>
+    <ExpandedItem Condition="gch.gct == 8">fn</ExpandedItem>
+    <ExpandedItem Condition="gch.gct == 9" Optional="true">(GCtrace*)this</ExpandedItem>
+    <ExpandedItem Condition="gch.gct == 10">cd</ExpandedItem>
+    <ExpandedItem Condition="gch.gct == 11">tab</ExpandedItem>
+    <ExpandedItem Condition="gch.gct == 12">ud</ExpandedItem>
+  </Expand>
+</Type>
+
+<Type Name="TValue">
+  <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == ~0u">nil</DisplayString>
+  <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == ~1u">false</DisplayString>
+  <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == ~2u">true</DisplayString>
+  <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == ~3u">lightuserdata: {gcr.gcptr64,x}</DisplayString>
+  
+  <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == ~4u">{*((GCstr*)gcr.gcptr64)}</DisplayString>
+  <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == ~5u">{gcr,na}</DisplayString>
+  <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == ~6u">{gcr,na}</DisplayString>
+  <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == ~7u">{gcr,na}</DisplayString>
+  <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == ~8u">{gcr,na}</DisplayString>
+  <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == ~9u" Optional="true">{*((GCtrace*)(gcr.gcptr64 &amp; 0x7FFFFFFFFFFF))}</DisplayString>
+  <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == ~10u">{gcr,na}</DisplayString>
+  <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == ~11u">table: {(GCtab*)(gcr.gcptr64 &amp; 0x7FFFFFFFFFFF),na}</DisplayString>
+  <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == ~12u">{gcr}</DisplayString>
+  <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) == 0xfffeffff">{i}</DisplayString>
+  <DisplayString Condition="(gcr.gcptr64 &amp; 0xFFFF800000000000) &lt; ~13u">{n}</DisplayString>
+    
+  
+  <Expand>
+    <ExpandedItem Condition="it == ~4u">gcr</ExpandedItem>
+    <ExpandedItem Condition="it == ~5u">gcr</ExpandedItem>
+    <ExpandedItem Condition="it == ~6u">gcr</ExpandedItem>
+    <ExpandedItem Condition="it == ~7u">gcr</ExpandedItem>
+    <ExpandedItem Condition="it == ~8u">gcr</ExpandedItem>
+    <ExpandedItem Condition="it == ~9u" Optional="true">*((GCtrace*)gcr.gcptr64)</ExpandedItem>
+    <ExpandedItem Condition="it == ~10u">gcr</ExpandedItem>
+    <ExpandedItem Condition="it == ~11u">gcr</ExpandedItem>
+    <ExpandedItem Condition="it == ~12u">gcr</ExpandedItem>
+    
+    <ExpandedItem Condition="it &lt; ~13u">n</ExpandedItem>
+    
+    <Item Name="GCObj" Condition="it &lt; ~13u">gcr</Item>
+    <Item Name="Function Frame" Condition="it &lt; ~13u">(gcr.gcptr64 &amp; 0xFFFF800000000000)</Item>
+  </Expand>
+</Type>   
+
+<Type Name="GCudata">
+  <DisplayString>size = {len,i}, first int = {*(unsigned int*)(this+1)}, mt = {metatable}, env = {env}</DisplayString>
+  <Expand>
+    <Item Name="Metatable">metatable</Item>
+    <Item Name="Enviroment Table">env</Item>
+    <Item Name="Size">len,i</Item>
+    <Item Name="Ptr">((void**)(this+1))[0]</Item>
+    <Item Name="Data[0]">((unsigned int*)(this+1))[0]</Item>
+  </Expand>
+</Type>
+
+<Type Name="Node">
+  <DisplayString>key = {key} val = {val}</DisplayString>
+</Type>
+
+<Type Name="GCtab">
+  <DisplayString>{{asize = {asize,i}, hsize = {hmask,i}}}</DisplayString>
+  <Expand>
+    <Item Name="metatable" Condition="metatable.gcptr64 != 0">metatable</Item>
+    <Item Name="[asize]" Condition="hmask == 0 &amp;&amp; asize != 0">asize</Item>
+    <Item Name="[hsize]">hmask</Item>
+    <ArrayItems Condition="hmask == 0">
+      <Size>asize</Size>
+      <ValuePointer>(TValue*)(array.ptr64)</ValuePointer>
+    </ArrayItems>
+    <ArrayItems Condition="asize == 0">
+      <Size>hmask+1</Size>
+      <ValuePointer>(Node*)(node.ptr64)</ValuePointer>
+    </ArrayItems>
+     
+    <Synthetic Name="Array" Condition="hmask != 0 &amp;&amp; asize != 0">
+      <DisplayString>asize</DisplayString>
+      <Expand>
+        <IndexListItems>
+          <Size>asize</Size>
+          <ValueNode>(Node*)(node.ptr64)</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
+    <Synthetic Name="Hash" Condition="hmask != 0">
+      <DisplayString>{hmask+1}</DisplayString>
+      <Expand>
+        <ArrayItems>
+          <Size>hmask+1</Size>
+          <ValuePointer>(Node*)(node.ptr64)</ValuePointer>
+        </ArrayItems>
+      </Expand>
+    </Synthetic>
+  </Expand>
+</Type>
+
+<Type Name="BCEntry">
+  <DisplayString>{(BCOp)op} a:{(int)a,i}, b:{(int)b,i}, c:{(int)c,i}</DisplayString>
+</Type>
+
+<Type Name="GCproto">
+  <DisplayString>{chunkname,na}:{firstline,i}</DisplayString>
+  <Expand>
+    <Item Name="Chunk">chunkname,na</Item>
+    <Item Name="Starting Line">firstline,i</Item>
+    <Item Name="Number of Lines">numline,i</Item>
+    <Item Name="Param Count">numparams,i</Item>
+    <Item Name="Trace">trace,i</Item>
+    <Item Name="Total Size">sizept,i</Item>
+    <Item Name="Hot Count" Optional="true">hotcount,i</Item>
+    <Item Name="CallCount" Optional="true">callcount,i</Item>
+    <Item Name="Loop Count" Optional="true">loopcount,i</Item>
+    <Item Name="PC Addr">(uint64_t)(this+1),p</Item>
+
+    <Synthetic Name="Byte Code">
+      <DisplayString>Header {(BCOp)(((BCIns*)(this+1))[0]&amp;0xff)}</DisplayString>
+      <Expand>
+        <IndexListItems>
+          <Size>sizebc</Size>
+          <ValueNode>(BCOp)(((BCIns*)(this+1))[$i]&amp;0xff)</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
+
+    <Synthetic Name="GC Constants">
+      <DisplayString>[size] = {sizekgc}</DisplayString>
+      <Expand>
+        <IndexListItems>
+          <Size>sizekgc</Size>
+          <ValueNode>((GCRef*)k.ptr64)[-$i],na</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
+
+    <Synthetic Name="PC Line Numbers">
+      <DisplayString>{sizebc}</DisplayString>
+      <Expand>
+        <IndexListItems Condition="numline &lt; 256">
+          <Size>sizebc</Size>
+          <ValueNode>(int)(((uint8_t*)lineinfo.ptr64)[$i])</ValueNode>
+        </IndexListItems>
+        <IndexListItems Condition="numline &lt; 65536 &amp;&amp; numline &gt; 256">
+          <Size>sizebc</Size>
+          <ValueNode>(((uint16_t*)lineinfo.ptr64)[$i]),d</ValueNode>
+        </IndexListItems>
+        <IndexListItems Condition="numline &gt; 65536">
+            <Size>sizebc</Size>
+            <ValueNode>(((uint32_t*)lineinfo.ptr64)[$i]),d</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
+  </Expand>
+</Type>
+
+<Type Name="IRType1">
+  <DisplayString Condition="(irt&amp;0xc0) == 0xc0">{(IRType)(irt&amp;31)} GUARD,PHI</DisplayString>
+  <DisplayString Condition="(irt&amp;0x80) != 0">{(IRType)(irt&amp;31)} GUARD</DisplayString>
+  <DisplayString Condition="(irt&amp;0x40) != 0">{(IRType)(irt&amp;31)} PHI</DisplayString>
+  <DisplayString>{(IRType)(irt&amp;31)}</DisplayString>
+  
+  <Expand>
+    <Item Name="Type">(IRType)(irt&amp;31)</Item>
+  </Expand>
+</Type>
+
+<Type Name="IRIns">
+  <DisplayString Condition="o == IR_KGC">{(IROp)o,en} {t,en} {((IRIns*)this)[1].gcr}</DisplayString>
+  <DisplayString Condition="o == IR_KINT">{(IROp)o,en} {i}</DisplayString>
+  <DisplayString Condition="o == IR_KINT64">{(IROp)o,en} {*((long long*)((IRIns*)this)[1].ptr.ptr64)}</DisplayString>
+  <DisplayString Condition="o == IR_KPTR">{(IROp)o,en}({t,en}) {((IRIns*)this)[1].ptr.ptr64,x}</DisplayString>
+  <DisplayString Condition="o == IR_KNUM">{(IROp)o,en} {((double*)this)[1]}</DisplayString>
+  <DisplayString Condition="o == IR_KPRI">{(IROp)o,en}({t,en})</DisplayString>
+  <DisplayString Condition="o == IR_SLOAD || o == IR_BASE || o == IR_LOOP">{(IROp)o,en}({t,en}) op1:{op1,i} op2:{op2,i}</DisplayString>
+  <DisplayString>{(IROp)o,en}({t,en}) op1:{op1-REF_BIAS,i} op2:{op2-REF_BIAS,i}</DisplayString>
+  
+  <Expand>
+    <Item Name="op">(IROp)o</Item>
+    <ExpandedItem>t</ExpandedItem>
+    
+    <Item Name="Constant" Condition="o == IR_KGC">((IRIns*)this)[1].gcr</Item><!--IR_KGC-->
+    <Item Name="Constant" Condition="o == IR_KINT">i</Item><!--IR_KINT-->   
+    <Item Name="Constant" Condition="o == 24">((IRIns*)this)[1].ptr.ptr64</Item><!--IR_KPTR-->
+    <Item Name="Constant" Condition="o == IR_KINT64">*((long long*)((IRIns*)this)[1].ptr.ptr64)</Item>
+    <!--IR_KPTR-->
+    <Item Name="Constant" Condition="o == IR_KNUM">this[1].tv.n</Item><!--IR_KNUM-->
+    
+    <Item Name="Op 1">op1,i</Item>
+    <Item Name="Op 2">op2,i</Item>
+    <Item Name="prev">prev-REF_BIAS,i</Item>
+  </Expand>
+</Type>
+
+<Type Name="ASMState">
+  <DisplayString>{T}</DisplayString>
+  <Expand>
+    <Synthetic Name="curins">
+      <DisplayString>{curins-0x8000,i}:{ir[curins]}</DisplayString>
+    </Synthetic>
+    <Item Name="Trace">T</Item>
+
+    <Synthetic Name="IR Byte Code">
+      <DisplayString>[size] = {T->nins-0x8000,i}</DisplayString>
+      <Expand>
+        <ArrayItems>
+          <Size>T->nins-0x8000</Size>
+          <ValuePointer>ir+0x8000</ValuePointer>
+        </ArrayItems>
+      </Expand>
+    </Synthetic>
+    <Synthetic Name="IR Constants">
+      <DisplayString>[size] = {(0x8000-T->nk)+1,i}</DisplayString>
+      <Expand>
+        <IndexListItems>
+          <Size>(0x8000-T->nk)+1</Size>
+          <ValueNode>ir[0x8000-$i]</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
+
+   </Expand>
+</Type>
+
+<Type Name="GCtrace">
+  <DisplayString>trace({traceno,i}), {startpt}, {(TraceLink)linktype}</DisplayString>
+  <Expand>
+    <Item Name="Trace Number">traceno,i</Item>
+    <Item Name="Root Trace" Condition="root != 0">root,i</Item>
+    <Item Name="Starting Function">startpt</Item>
+    <Item Name="Start Bytecode">(BCOp)(startins&amp;0xff)</Item>
+    <Item Name="Link Type">(TraceLink)linktype</Item>
+    <Item Name="MCode">mcode</Item>
+    
+    <Synthetic Name="IR Byte Code">
+      <DisplayString>[size] = {nins-0x8000,i}</DisplayString>
+      <Expand>
+        <ArrayItems>
+          <Size>nins-0x8000</Size>
+          <ValuePointer>ir+0x8000</ValuePointer>
+        </ArrayItems>
+      </Expand>
+    </Synthetic>
+    <Synthetic Name="IR Constants">
+      <DisplayString>[size] = {(0x8000-nk)+1,i}</DisplayString>
+      <Expand>
+        <IndexListItems>
+          <Size>(0x8000-nk)+1</Size>
+          <ValueNode>ir[0x8000-$i]</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
+  
+    <Synthetic Name="Snapshots">
+     <DisplayString>[size] = {nsnap,i}</DisplayString>
+      <Expand>
+        <ArrayItems>
+          <Size>nsnap</Size>
+          <ValuePointer>snap</ValuePointer>
+        </ArrayItems>
+      </Expand>
+    </Synthetic> 
+      
+    <Synthetic Name="Snapshot Map">
+     <DisplayString>[size] = {nsnapmap,i}</DisplayString>
+      <Expand>
+        <IndexListItems>
+          <Size>nsnapmap</Size>
+          <ValueNode>(int)(snapmap[$i] &gt;&gt; 24)</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
+    
+    <Synthetic Name="Snapshot Map raw">
+      <DisplayString>[size] = {nsnapmap,i}</DisplayString>
+      <Expand>
+        <IndexListItems>
+          <Size>nsnapmap</Size>
+          <ValueNode>snapmap[$i]</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
+  </Expand>
+</Type>
+
+<Type Name="SnapShot">
+  <DisplayString>IR: {ref-0x8000,i} , Exits {count,i}</DisplayString>
+</Type>
+
+<Type Name="jit_State">
+  <DisplayString>trace({cur})</DisplayString>
+  <Expand>
+    <Item Name="Trace Number">cur.traceno,i</Item>
+    <Item Name="Current Function">fn</Item>
+    <Item Name="Current Instruction">*pc</Item>
+    <Item Name="Current Trace">cur</Item>
+    <Item Name="Root Trace">((GCtrace**)trace)[cur.root]</Item>
+    <Item Name="Exit or Parent Trace">((GCtrace**)trace)[parent]</Item>
+    <Item Name="Exit Number">exitno,i</Item>
+    <Item Name="Start Trace" Optional="true">((GCRef*)trace)[starttrace]</Item>
+    <Item Name="Last Exit" Optional="true">((GCRef*)trace)[lastexit &gt;&gt; 16]</Item>
+    <Item Name="Last Exit ID" Optional="true">(lastexit &amp; 0xffff)</Item>
+    <Item Name="Last Trace" Optional="true">((GCRef*)trace)[lasttrace]</Item>
+    <Item Name="Start Instruction">(BCOp)(cur.startins&amp;0xff)</Item>
+    <Item Name="Lua State">L</Item>
+    <Item Name="Fold Ins">fold.ins</Item>
+    <Item Name="Fold Left">fold.left</Item>
+    <Item Name="Fold Right">fold.right</Item>
+    
+    <Synthetic Name="IR Byte Code">
+      <DisplayString>[size] = {cur.nins-0x8000,i}</DisplayString>
+      <Expand>
+        <ArrayItems>
+          <Size>cur.nins-0x8000</Size>
+          <ValuePointer>irbuf+0x8000</ValuePointer>
+        </ArrayItems>
+      </Expand>
+    </Synthetic>
+    <Synthetic Name="IR Constants">
+      <DisplayString>[size] = {0x8000-cur.nk,i}</DisplayString>
+      <Expand>
+        <IndexListItems>
+          <Size>0x8000-cur.nk</Size>
+          <ValueNode>irbuf[0x8000-$i]</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
+    
+    <Synthetic Name="IR Slots">
+      <DisplayString>[size] = {baseslot+maxslot,i}</DisplayString>
+      <Expand>
+        <IndexListItems>
+          <Size>baseslot+maxslot</Size>
+          <ValueNode>(IRType)((slot[$i] &gt;&gt; 24) &amp; IRT_TYPE)</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
+
+    <Synthetic Name="Traces">
+      <DisplayString>[size] = {sizetrace,i}</DisplayString>
+      <Expand>
+        <ArrayItems>
+          <Size>sizetrace</Size>
+          <ValuePointer>(GCRef*)trace</ValuePointer>
+        </ArrayItems>
+      </Expand>
+    </Synthetic>
+  </Expand>
+</Type>
+
+<Type Name="GCupval">
+  <DisplayString Condition="closed == 1">Closed, {tv}</DisplayString>
+  <DisplayString Condition="closed == 0">Open, {*(TValue*)v.ptr64}</DisplayString>
+  
+  <Expand>
+    <Item Name="v" Condition="closed == 1">tv</Item>
+    <Item Name="v" Condition="closed == 0">(TValue*)v.ptr64</Item>
+    <Item Name="Immutable">immutable</Item>
+    <Item Name="Prev" Condition="closed == 0">(GCupval*)prev.gcptr64</Item>
+    <Item Name="Next" Condition="closed == 0">(GCupval*)next.gcptr64</Item>
+  </Expand>
+</Type>
+
+<Type Name="GCfuncL">
+  <DisplayString>Lua, UpValues = {(unsigned int)nupvalues,i}, {((GCproto*)pc.ptr64)[-1]}</DisplayString>
+  <Expand>
+    <Item Name="Proto">((GCproto*)pc.ptr64)[-1],na</Item>
+    <Synthetic Name="Byte Code">
+      <DisplayString>{pc.ptr64,x} Header: {(BCOp)(((BCIns*)pc.ptr64)[0]&amp;0xff)}</DisplayString>
+      <Expand>
+        <IndexListItems>
+          <Size>((GCproto*)pc.ptr64)[-1].sizebc</Size>
+          <ValueNode>(BCOp)(((BCIns*)pc.ptr64)[$i]&amp;0xff)</ValueNode>
+        </IndexListItems>
+      </Expand>
+    </Synthetic>
+    <Item Name="[UpValues]">nupvalues,i</Item>
+    <ArrayItems>
+      <Size>nupvalues</Size>
+      <ValuePointer>uvptr</ValuePointer>
+    </ArrayItems>
+  </Expand>
+</Type>
+
+<Type Name="GCfuncC">
+  <DisplayString>C, UpValues = {(unsigned int)nupvalues,i}, func = {f}</DisplayString>
+  <Expand>
+    <Item Name="func">f</Item>
+    <Item Name="env">env</Item>
+    <Item Name="[UpValues]">nupvalues,i</Item>
+    <ArrayItems>
+      <Size>nupvalues</Size>
+      <ValuePointer>upvalue</ValuePointer>
+    </ArrayItems>
+  </Expand>
+</Type>
+
+<Type Name="GCfunc">
+  <DisplayString Condition="c.ffid == 0">{l}</DisplayString>
+  <DisplayString Condition="c.ffid != 0">{c}</DisplayString>
+  <Expand>
+    <ExpandedItem Condition="c.ffid == 0">l</ExpandedItem>
+    <ExpandedItem Condition="c.ffid != 0">c</ExpandedItem>
+  </Expand>
+</Type>
+
+<Type Name="FrameLink">
+  <DisplayString Condition="(ftsz &amp; 7) == 0">Lua</DisplayString>
+  <DisplayString Condition="(ftsz &amp; 7) == 1">C</DisplayString>
+  <DisplayString Condition="(ftsz &amp; 7) == 2">Continuation</DisplayString>
+  <DisplayString Condition="(ftsz &amp; 7) == 3">VarArg</DisplayString>
+  <DisplayString Condition="(ftsz &amp; 7) == 4">Protected Lua</DisplayString>
+  <DisplayString Condition="(ftsz &amp; 7) == 5">Protected C Frame</DisplayString>
+  <DisplayString Condition="(ftsz &amp; 7) == 6">Lua PCALL</DisplayString>
+  <DisplayString Condition="(ftsz &amp; 7) == 7">Lua PCALL in hook</DisplayString>
+  <Expand>
+      <Item Name="PC Address" Condition="pcr.ptr64 &gt; 65000">pcr.ptr64&amp;~3</Item>
+      <Item Name="Call Base" Condition="pcr.ptr64 &gt; 65000">(uint8_t)(((BCIns*)(pcr.ptr64&amp;~3))[-1]&gt;&gt; 8)</Item>
+      <Item Name="Stack offset" Condition="pcr.ptr64 &lt; 65000">pcr.ptr64&gt;&gt;3</Item>
+  </Expand>
+</Type>  
+
+<Type Name="CType">
+    <DisplayString Condition="((info &gt;&gt; 28) == 0) &amp;&amp; ((info &amp; 0x04000000u) == 0)">int: {size} {name}</DisplayString>
+    
+    <DisplayString Condition="((info &gt;&gt; 28) == 0) &amp;&amp; ((info &amp; 0x04000000u) != 0)">float: {size} {name}</DisplayString>
+    <DisplayString Condition="(info &gt;&gt; 28) == 1">struct: size={size} {name}</DisplayString>
+    <DisplayString Condition="(info &gt;&gt; 28) == 2">ptr: {size} {name} cid: {info&amp;0xffff}</DisplayString>
+    <DisplayString Condition="((info &gt;&gt; 28) == 3) &amp;&amp; ((info &amp; 0x08000000u) != 0)"> vector &lt;{size,i}, cid:{info&amp;0xffff,i} &gt; {name}</DisplayString>
+    <DisplayString Condition="(info &gt;&gt; 28) == 3">array: size={size} {name} cid: {info&amp;0xffff}</DisplayString>
+    <DisplayString Condition="(info &gt;&gt; 28) == 4">void: {size} {name}</DisplayString>
+    <DisplayString Condition="(info &gt;&gt; 28) == 5">enum: {name} {size}</DisplayString>
+    <DisplayString Condition="(info &gt;&gt; 28) == 6">function: {size} {name}</DisplayString>
+    <DisplayString Condition="(info &gt;&gt; 28) == 7">typedef: {name} cid: {info&amp;0xffff} {size} </DisplayString>
+    <DisplayString Condition="(info &gt;&gt; 28) == 8">attribute: {size} {name}</DisplayString>
+    <DisplayString Condition="(info &gt;&gt; 28) == 9">field: {name} {size} cid: {info&amp;0xffff}</DisplayString>
+    <DisplayString Condition="(info &gt;&gt; 28) == 10">BITFIELD: {size} {name}</DisplayString>
+    <DisplayString Condition="(info &gt;&gt; 28) == 11">CONSTVAL: {name} = {size} cid: {info&amp;0xffff}</DisplayString>
+    <DisplayString Condition="(info &gt;&gt; 28) == 12">extern: {size} {name}</DisplayString>
+    <DisplayString Condition="(info &gt;&gt; 28) == 13">keyword: {name} {size}</DisplayString>
+    
+    <Expand>
+      <Item Name="name" Condition="name.gcptr64 != 0">name</Item>
+      <Item Name="cid">info&amp;0xffff,i</Item>
+      <Item Name="size">size,i</Item>
+      <Item Name="info">info&amp;0xfff0000</Item>
+      <Item Name="sib" Condition="sib != 0">sib,i</Item>
+    </Expand>
+</Type>
+
+<Type Name="GCcdata">
+  <DisplayString Condition="((marked &amp; 0x80) != 0)">{ctypeid,i} VLA</DisplayString>
+  <DisplayString>{ctypeid,i}</DisplayString>
+  <Expand>
+    <Item Name="Ptr">((void**)(this+1))[0]</Item>
+    <Item Name="Data[0]">((unsigned int*)(this+1))[0]</Item>
+    <Item Name="Data">((unsigned char*)(this+1))</Item>
+  </Expand>
+</Type>
+
+<Type Name="CTState">
+  <Expand>
+    <Item Name="Misc Table">miscmap</Item>
+    <Item Name="Finalizers">finalizer</Item>
+    <Item Name="Callback state">cb</Item>
+    <ArrayItems>
+      <Size>top</Size>
+      <ValuePointer>tab</ValuePointer>
+    </ArrayItems>
+  </Expand>
+</Type>
+
+<Type Name="global_State">
+  <DisplayString Condition="vmstate == ~0">VMState: Interpreter</DisplayString>
+  <DisplayString Condition="vmstate == ~1">VMState: C Function</DisplayString>
+  <DisplayString Condition="vmstate == ~2">VMState: GC</DisplayString>
+  <DisplayString Condition="vmstate == ~3">VMState: Trace Exit</DisplayString>
+  <DisplayString Condition="vmstate == ~4">VMState: Trace Record</DisplayString>
+  <DisplayString Condition="vmstate == ~5">VMState: Trace Optimizer</DisplayString>
+  <DisplayString Condition="vmstate == ~6">VMState: Assembler</DisplayString>
+  <DisplayString>VMState: {vmstate}</DisplayString>
+
+  <Expand>
+    <Item Name="CType State">(CTState*)ctype_state.ptr64</Item>
+    <Item Name="GC State">gc</Item>
+    <Item Name="JIT State" Optional="true">*(jit_State *)(this+1)</Item>
+    <Item Name="Registry">registrytv</Item>
+    <Item Name="GG State">*(GG_State *)(((char*)this)-(int)(((lua_State*)0)+1))</Item>
+    <Synthetic Name="Open Upvalues">
+      <Expand>
+        <LinkedListItems>
+          <HeadPointer>&amp;uvhead</HeadPointer>
+          <NextPointer>(GCupval*)next.gcptr64</NextPointer>
+          <ValueNode>this</ValueNode>
+        </LinkedListItems>
+      </Expand>
+    </Synthetic>
+    <Item Name="Hook function">hookf</Item>
+    <Item Name="Hook mask">hookmask</Item>
+  </Expand>
+</Type>
+
+<Type Name="GCState">
+  <DisplayString Condition="state == 0">GCState: Pause</DisplayString>
+  <DisplayString Condition="state == 1">GCState: Propagate</DisplayString>
+  <DisplayString Condition="state == 2">GCState: Atomic</DisplayString>
+  <DisplayString Condition="state == 3">GCState: Sweep Strings</DisplayString>
+  <DisplayString Condition="state == 4">GCState: Sweep</DisplayString>
+  <DisplayString Condition="state == 5">GCState: Finalize</DisplayString>
+  <Expand>
+	  <Item Name="Total Memory">total,i</Item>
+	  <Item Name="GC Threshold">threshold,i</Item>
+	  <Item Name="Heap Size Pause">pause,i</Item>
+	  <Item Name="Step Rate Multiplier">stepmul,i</Item>
+	  <Item Name="GC Rate Debt">debt,i</Item>
+  
+    <Synthetic Name="GC Objects1">
+      <Expand>
+        <CustomListItems>
+          <Variable Name="orig_head" InitialValue="((GCobj*)root.gcptr64)"/>
+          <Variable Name="iter" InitialValue="((GCobj*)root.gcptr64)"/>
+          <Loop>
+            <Break Condition="iter == 0"/>
+            <Item>*iter</Item>
+            <Exec>iter = (GCobj*)(iter-&gt;gch.nextgc.gcptr64)</Exec>
+          </Loop>
+        </CustomListItems>
+      </Expand>
+    </Synthetic>
+    
+    <Synthetic Name="GC Objects2">
+      <Expand>        
+        <LinkedListItems>
+          <HeadPointer>((GCobj*)root.gcptr64)</HeadPointer>
+          <NextPointer>(GCobj*)gch.nextgc.gcptr64</NextPointer>
+          <ValueNode>this</ValueNode>
+        </LinkedListItems>
+      </Expand>
+    </Synthetic>
+  </Expand>
+</Type>
+
+<Type Name="lua_State">
+  <DisplayString>Lua State {(GCobj*)(base[-2].u64 &amp; 0x7FFFFFFFFFFF),na}</DisplayString>
+  <Expand>
+    <Item Name="Current Function">(GCobj*)(base[-2].u64 &amp; 0x7FFFFFFFFFFF),na</Item>  
+    <Item Name="Global State">*(global_State*)glref.ptr64</Item>
+    <Item Name="GG State">*(GG_State *)(((char*)glref.ptr64)-(int)(((lua_State*)0)+1))</Item>
+    <Item Name="JIT State" Optional="true">*(jit_State *)(((global_State*)glref.ptr64)+1)</Item>
+    <Item Name="Globals">env</Item>
+    <Item Name="Registry">(*(global_State*)glref.ptr64).registrytv</Item>
+    
+    <Synthetic Name="[full stack]">
+      <DisplayString>{top-((TValue*)stack.ptr64),i}</DisplayString>
+      <Expand>
+        <ArrayItems>
+          <Size>top-((TValue*)stack.ptr64)</Size>
+          <ValuePointer>(TValue*)stack.ptr64</ValuePointer>
+        </ArrayItems>
+      </Expand>
+    </Synthetic>
+    <Item Name="[stack top]">*(top-1)</Item>
+    <Item Name="[stack size]">top-base</Item>  
+    <ArrayItems>
+      <Size>top-base</Size>
+      <ValuePointer>base</ValuePointer>
+    </ArrayItems>
+  </Expand>
+</Type>
+
+
+</AutoVisualizer>
