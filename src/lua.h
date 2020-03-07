@@ -205,6 +205,10 @@ LUA_API int   (lua_cpcall) (lua_State *L, lua_CFunction func, void *ud);
 LUA_API int   (lua_load) (lua_State *L, lua_Reader reader, void *dt,
                                         const char *chunkname);
 
+typedef int(*lua_Loadfile_Hook) (lua_State *L, const char *filename, const char *mode);
+LUA_API lua_Loadfile_Hook lua_getloadhook(lua_State *L);
+LUA_API void lua_setloadhook(lua_State *L, lua_Loadfile_Hook f);
+
 LUA_API int (lua_dump) (lua_State *L, lua_Writer writer, void *data);
 
 

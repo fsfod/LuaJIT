@@ -81,6 +81,9 @@ LUALIB_API int luaL_fileresult(lua_State *L, int stat, const char *fname);
 LUALIB_API int luaL_execresult(lua_State *L, int stat);
 LUALIB_API int (luaL_loadfilex) (lua_State *L, const char *filename,
 				 const char *mode);
+LUALIB_API int (luaL_loadfilex_nohook)(lua_State *L, const char *filename,
+				 const char *mode);
+
 LUALIB_API int (luaL_loadbufferx) (lua_State *L, const char *buff, size_t sz,
 				   const char *name, const char *mode);
 LUALIB_API void luaL_traceback (lua_State *L, lua_State *L1, const char *msg,

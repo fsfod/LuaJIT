@@ -614,6 +614,7 @@ typedef struct global_State {
   int32_t hookcstart;	/* Start count for instruction hook counter. */
   lua_Hook hookf;	/* Hook function. */
   lua_CFunction wrapf;	/* Wrapper for C function calls. */
+  lua_Loadfile_Hook loadhook;/* Hook for Lua file loading. */
   lua_CFunction panic;	/* Called as a last resort for errors. */
   BCIns bc_cfunc_int;	/* Bytecode for internal C function calls. */
   BCIns bc_cfunc_ext;	/* Bytecode for external C function calls. */

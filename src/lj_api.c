@@ -1290,3 +1290,14 @@ LUA_API void lua_setallocf(lua_State *L, lua_Alloc f, void *ud)
   g->allocf = f;
 }
 
+LUA_API lua_Loadfile_Hook lua_getloadhook(lua_State *L)
+{
+  global_State *g = G(L);
+  return g->loadhook;
+}
+
+LUA_API void lua_setloadhook(lua_State *L, lua_Loadfile_Hook f)
+{
+  global_State *g = G(L);
+  g->loadhook = f;
+}

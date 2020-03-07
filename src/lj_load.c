@@ -81,12 +81,13 @@ static const char *reader_file(lua_State *L, void *ud, size_t *size)
   return *size > 0 ? ctx->buf : NULL;
 }
 
-LUALIB_API int luaL_loadfilex(lua_State *L, const char *filename,
+LUALIB_API int luaL_loadfilex_nohook(lua_State *L, const char *filename,
 			      const char *mode)
 {
   FileReaderCtx ctx;
   int status;
   const char *chunkname;
+
   if (filename) {
     ctx.fp = fopen(filename, "rb");
     if (ctx.fp == NULL) {
@@ -112,6 +113,19 @@ LUALIB_API int luaL_loadfilex(lua_State *L, const char *filename,
     fclose(ctx.fp);
   }
   return status;
+}
+
+LUALIB_API int luaL_loadfilex(lua_State *L, const char *filename,
+                              const char *mode)
+{
+  global_State * g = G(L);
+  if (g->loadhook) {
+    int result = g->loadhook(L, filename, mode);
+    if (result != 1) {
+      return result;
+    }
+  }
+  return luaL_loadfilex_nohook(L, filename, mode);
 }
 
 LUALIB_API int luaL_loadfile(lua_State *L, const char *filename)
