@@ -1,10 +1,8 @@
 local p = premake
 
 local flaglist = {
-    --"LUA_USE_ASSERT",
-    --"LUA_USE_APICHECK",
     --"LUAJIT_NUMMODE", --1 all number are stored doubles, 2 dual number mode
-    --"LUAJIT_ENABLE_LUA52COMPAT",
+    "LUAJIT_ENABLE_LUA52COMPAT",
     --"LUAJIT_ENABLE_CHECKHOOK", -- check if any Lua hook is set while in jitted code
     --"LUAJIT_USE_SYSMALLOC",
 
@@ -26,12 +24,6 @@ premake.api.register {
   name = "dynasmflags",
   scope = "config",
   kind = "list:string",
-}
-
-premake.api.register {
-  name = "bindir",
-  scope = "config",
-  kind = "path",
 }
 
 require('vstudio')
@@ -56,35 +48,6 @@ premake.override(premake.vstudio.sln2005, "projects", function(base, wks)
   base(wks)
 end)
 
-p.api.register {
-    name = "custombuildcommands",
-    scope = "config",
-    kind = "list:string",
-    tokens = true,
-    pathVars = true,
-}
-
-p.api.register {
-    name = "custombuildinputs",
-    scope = "config",
-    kind = "list:file",
-    tokens = true,
-    pathVars = true,
-}
-
-p.api.register {
-    name = "custombuildoutputs",
-    scope = "config",
-    kind = "list:file",
-    tokens = true,
-    pathVars = true,
-}
-
-newoption {
-    trigger = "builddir",
-    description = "override the build directory"
-}
-
 newoption {
    trigger     = "host_lua",
    value       = "path",
@@ -101,6 +64,11 @@ newoption {
    description = "Build LuaJIT with both a integer and floating point number type"
 }
 
+newoption {
+   trigger     = "build_luadll",
+   description = "Build LuaJIT as a DLL instead of statically linking"
+}
+
 TagList = {}
 
 if _OPTIONS.amalg then
@@ -112,6 +80,10 @@ if _OPTIONS.dualnum then
   table.insert(TagList, "DUALNUM") 
 end
 
+if _OPTIONS.build_luadll then
+  table.insert(TagList, "SHARED_LUA")
+end
+
 if os.isfile("src/jitlog/build.lua") and os.isfile("src/jitlog/messages.lua") then
   table.insert(TagList, "JITLOG")
 end
@@ -119,20 +91,7 @@ end
 DebugDir = ""
 DebugArgs = ""
 
--- Default to running LuaJIT's unit tests if there folder exists
-if os.isfile("test/test.lua") then
-  DebugDir = "test"
-  DebugArgs = "test.lua"
-end
-
 BuildDir = _OPTIONS["builddir"] or "build"
-DEBUG_LUA_PATH = _OPTIONS["DEBUG_LUA_PATH"] or ""
-DebugDir = _OPTIONS["debugdir"] or DebugDir
-DebugArgs = _OPTIONS["debugargs"] or DebugArgs
-
-if os.isfile("user.lua") then
-  dofile("user.lua")
-end
 
 local HostExt = ""
 
@@ -166,7 +125,7 @@ function BuildVmCommand(cmd, outputfile, addLibList, outputDir)
 
     outputDir = outputDir or "%{cfg.objdir}/"
     
-    local result = '"obj/%{cfg.buildcfg}%{cfg.platform}/buildvm/buildvm%{cfg.system == "windows" and ".exe" or ""}" '..cmd..' -o "'..outputDir..outputfile..'" '
+    local result = '"bin/%{cfg.platform}/%{cfg.buildcfg}/buildvm%{cfg.system == "windows" and ".exe" or ""}" '..cmd..' -o "'..outputDir..outputfile..'" '
 
     if addLibList then
         result = result..liblistString
@@ -199,31 +158,20 @@ if HOST_LUA then
 end
 
 if not HOST_LUA then
-  minilua = '"obj/%{cfg.buildcfg}%{cfg.platform}/minilua/minilua%{cfg.system == "windows" and ".exe" or ""}"'
+  minilua = '"bin/%{cfg.platform}/%{cfg.buildcfg}/minilua%{cfg.system == "windows" and ".exe" or ""}"'
 else
   minilua = HOST_LUA
 end
 
-if not SlnFileName then
-  SlnFileName = "LuaJit"
-else
-  SlnFileName = "LuaJit_"..SlnFileName
-end
-
-workspace "LuaJit"
-  filename(SlnFileName)
+project "*"
   editorintegration "On"
-  configurations { "Debug", "Release",  "DebugGC64", "ReleaseGC64", "DebugStatic", "ReleaseStatic"}
-  platforms { "x64", "x86" }
-  objdir "%{wks.location}/%{BuildDir}/obj/%{cfg.buildcfg}%{cfg.platform}/%{prj.name}"
-  targetdir "%{cfg.objdir}/"
-  bindir "%{wks.location}/bin/%{cfg.buildcfg}/%{cfg.platform}"
-  startproject "luajit"
   workspace_files {
     "lua.natvis",
     ".editorconfig",
   }
   tags(TagList)
+  defines(flaglist)
+  
   filter "platforms:x86"
     architecture "x86"
     defines {
@@ -257,7 +205,7 @@ workspace "LuaJit"
   filter { "system:windows", "Release*" }
     buildoptions { "/Zo" } -- Ask MSVC for improved debug info for optimized code
 
-  filter { "system:windows", "NOT *Static" }
+  filter { "system:windows", "tags:SHARED_LUA" }
     defines {  "LUA_BUILD_AS_DLL" }
 
   filter { "tags:NOJIT" }
@@ -276,12 +224,12 @@ workspace "LuaJit"
     defines {"LUAJIT_NUMMODE=2"}
 
 if not HOST_LUA then
-  project "minilua"
+project "minilua"
     kind "ConsoleApp"
-    location(BuildDir)
     defines { "NDEBUG" }
     optimize "Speed"
     language "C"
+    warnings "off"
     vpaths { ["Sources"] = "src/host" }
     files {
       "src/host/minilua.c",
@@ -292,14 +240,15 @@ if not HOST_LUA then
       }
 end
 
-  project "buildvm"
+project "buildvm"
     kind "ConsoleApp"
 if not HOST_LUA then
     dependson { "minilua" }
 end
     vectorextensions "SSE2"
-    location(BuildDir)
     language "C"
+    warnings "off"
+	defines(flaglist)
 
     files {
       "src/host/buildvm*.c",
@@ -353,22 +302,25 @@ end
     filter {"Release*"}
       optimize "Speed"
 
-  project "lua"
-    filter { "*Static" }
-      kind "StaticLib"
-    filter { "NOT *Static" }
+project "lua"
+if _OPTIONS.build_luadll then
       kind "SharedLib"
+	  targetdir "%{wks.location}/bin/%{cfg.buildcfg}"
+else
+	kind "StaticLib"
+end
+
+	filter { "system:windows" }
+	  disablewarnings { "4201", "4127", "4244", "4702", "4706" }
     filter {}
 
-    targetdir "%{cfg.bindir}"
-    location(BuildDir)
     symbols "On"
     targetname "lua51"
     vectorextensions "SSE2"
     language "c"
-
     defines(flaglist)
     dependson "buildvm"
+	
     vpaths { ["libs"] = "src/lib_*.h" }
     vpaths { ["libs"] = "src/lib_*.c" }
     vpaths { ["headers"] = "src/lj_*.h" }
@@ -410,12 +362,12 @@ end
     
     filter "system:windows"
       files {
-        "%{wks.location}/build/obj/%{cfg.buildcfg}%{cfg.platform}/buildvm/buildvm.exe"
+        "bin/%{cfg.platform}/%{cfg.buildcfg}/buildvm.exe"
       }
       
     filter "system:linux"
       files {
-        "%{wks.location}/build/obj/%{cfg.buildcfg}%{cfg.platform}/buildvm/buildvm"
+        "bin/%{cfg.platform}/%{cfg.buildcfg}/buildvm"
       }
       links {
         "dl",
@@ -462,15 +414,15 @@ end
         "%{cfg.objdir}/lj_jitlog_writers.h",
       }
 
-    filter { "files:**/buildvm/buildvm OR files:**/buildvm/buildvm.exe" }
+    filter { "files:bin/**/buildvm OR files:bin/**/buildvm.exe" }
       buildcommands {
-        '{MKDIR} %{cfg.targetdir}/jit/',
+        '{MKDIR} %{wks.location}/bin/%{cfg.buildcfg}/jit/',
         BuildVmCommand("-m bcdef",   "lj_bcdef.h",   true),
         BuildVmCommand("-m ffdef",   "lj_ffdef.h",   true),
         BuildVmCommand("-m libdef",  "lj_libdef.h",  true),
         BuildVmCommand("-m recdef",  "lj_recdef.h",  true),
         BuildVmCommand("-m folddef", "lj_folddef.h", false).. '%[src/lj_opt_fold.c]',
-        BuildVmCommand("-m vmdef",   "vmdef.lua",    true, '%{cfg.targetdir}/jit/'),
+        BuildVmCommand("-m vmdef",   "vmdef.lua",    true, '%{wks.location}/bin/%{cfg.buildcfg}/jit/'),
       }
       buildoutputs {
         '%{cfg.objdir}/lj_bcdef.h',
@@ -496,17 +448,17 @@ end
         "src/vm_x86.dasc",
       }
       
-    filter { "files:**/buildvm/buildvm.exe",  "system:windows" }
+    filter { "files:**/buildvm.exe",  "system:windows" }
       buildcommands {
-        '"obj/%{cfg.buildcfg}%{cfg.platform}/buildvm/buildvm.exe" -m peobj -o %{cfg.objdir}lj_vm.obj'
+        '"bin/%{cfg.platform}/%{cfg.buildcfg}/buildvm.exe" -m peobj -o %{cfg.objdir}lj_vm.obj'
       }
       buildoutputs {
         "%{cfg.objdir}/lj_vm.obj",
       }
     
-    filter { "files:**/buildvm/buildvm",  "system:linux" }
+    filter { "files:**/buildvm",  "system:linux" }
       buildcommands {
-        '"obj/%{cfg.buildcfg}%{cfg.platform}/buildvm/buildvm" -m elfasm -o %{cfg.objdir}/lj_vm.S'
+        '"bin/%{cfg.platform}/%{cfg.buildcfg}/buildvm" -m elfasm -o %{cfg.objdir}/lj_vm.S'
       }
       buildoutputs {
         "%{cfg.objdir}/lj_vm.S",
@@ -518,190 +470,9 @@ end
     filter "tags:GC64"
       files { "lua64.natvis" }
 
-    filter { "system:windows", "Debug*", "tags:FixedAddr" }
-      linkoptions { "/FIXED", "/DEBUG", '/BASE:"0x00440000', "/DYNAMICBASE:NO" }
-
     filter "Debug*"
       defines { "DEBUG", "LUA_USE_ASSERT" }
 
     filter  "Release*"
       optimize "Speed"
       defines { "NDEBUG"}
-
-
-  project "luajit"
-    kind "ConsoleApp"
-    location(BuildDir)
-    targetdir "%{cfg.bindir}"
-    vectorextensions "SSE2"
-    symbols "On"
-    language "C++"
-
-    defines(flaglist)
-    vpaths { ["libs"] = "src/lib_*.h" }
-    vpaths { ["libs"] = "src/lib_*.c" }
-    debugenvs {
-      "LUA_PATH=%{sln.location}/bin/%{cfg.name}/?.lua;%{sln.location}src/?.lua;%{sln.location}tests/?.lua"..DEBUG_LUA_PATH..";%LUA_PATH%;./?.lua",
-    }
-
-    debugdir(DebugDir)
-    debugargs(DebugArgs)
-
-    files {
-      "src/luajit.c"
-    }
-
-    links {
-      "lua"
-    }
-
-    filter "Debug*"
-      defines { "DEBUG", "LUA_USE_ASSERT" }
-
-    filter "Release*"
-      optimize "Speed"
-      defines { "NDEBUG"}
-
-    filter { "system:windows", "Debug*", "tags:FixedAddr" }
-      linkoptions { "/FIXED", "/DEBUG", '/BASE:"0x00400000',  "/DYNAMICBASE:NO" }
-
-  project "CreateRelease"
-    kind "Utility"
-    location "build"
-    targetdir "output"
-    dependson "luajit"
-
-    files {
-      "src/lauxlib.h",
-      "src/lua.h",
-      "src/lua.hpp",
-      "src/luaconf.h",
-      "src/luajit.h",
-      "src/lualib.h",
-      "src/jit/*.lua",
-      "%{cfg.bindir}/jit/vmdef.lua",
-    }
-    
-    filter { "system:windows" }
-      files {
-        "%{cfg.bindir}/luajit.exe",
-        "%{cfg.bindir}/luajit.pdb",
-        "%{cfg.bindir}/lua51.dll",
-        "%{cfg.bindir}/lua51.pdb",
-        "%{cfg.bindir}/lua51.lib",
-      }
-    filter { "system:linux" }
-      files {
-        "%{cfg.bindir}/luajit",
-        "%{cfg.bindir}/libluajit.so",
-        "%{cfg.bindir}/libluajit.a",
-      }
-    
-    filter {'files:**.h*'}
-      buildcommands {
-        '{COPY} %[%{file.relpath}] %{cfg.targetdir}/include/',
-      }
-      buildoutputs { 
-        "%{cfg.targetdir}/include/%{file.name}",
-      }
-      buildmessage ""
-      
-    filter {'files:**.exe or files:**.pdb or files:**.dll or files:**.lib'}
-      buildcommands {
-        '{COPY} %[%{file.relpath}] %{cfg.targetdir}/',
-      }
-      buildoutputs { 
-        "%{cfg.targetdir}/%{file.name}",
-      }
-      buildmessage "Copying %{file.path}"
-    
-    filter {'files:**/jit/*.lua'}
-      buildcommands {
-        '{COPY} %[%{file.relpath}] %{cfg.targetdir}/jit/',
-      }
-      buildoutputs { 
-        "%{cfg.targetdir}/jit/%{file.name}",
-      }
-      buildmessage ""
-    
-    filter {'files:**/jitlog/*.lua'}
-      buildcommands {
-        '{COPY} %[%{file.relpath}] %{cfg.targetdir}/jitlog/',
-      }
-      buildoutputs { 
-        "%{cfg.targetdir}/jitlog/%{file.name}",
-      }
-      buildmessage ""
-    
-    prebuildmessage "Copying files"
-    prebuildcommands {
-      "{MKDIR} %{cfg.targetdir}/",
-      "{MKDIR} %{cfg.targetdir}/include",
-      "{MKDIR} %{cfg.targetdir}/jit",
-    }
-
-    filter { "tags:JITLOG" }
-      files {
-        "src/jitlog.h",
-        "src/vmevent.h",
-        "src/lj_usrbuf.h",
-        "src/jitlog/**.lua",
-        "%{cfg.bindir}/jitlog/lj_jitlog_def.h",
-        "%{cfg.bindir}/jitlog/lj_jitlog_decl.h", 
-        "%{cfg.bindir}/jitlog/reader_def.lua",
-      }
-      prebuildcommands {
-        "{MKDIR} %{cfg.targetdir}/jitlog",
-      }
-
-if os.isfile("test/c/main.c") then
-  project "test"
-    kind "ConsoleApp"
-    targetdir "%{cfg.bindir}"
-    dependson { "lua" }
-    vectorextensions "SSE2"
-    location(BuildDir)
-    language "C"
-
-    links {
-      "lua"
-    }
-
-    files {
-      "test/c/*.c",
-      "test/c/*.h",
-      "src/lj_usrbuf.h",
-      "src/lj_usrbuf.c",
-    }
-    includedirs{
-      "%{cfg.bindir}",
-      "src"
-    }
-    
-    filter "Debug*"
-      defines { "DEBUG"}
-
-    filter "Release*"
-      optimize "Speed"
-      defines { "NDEBUG"}
-end
-
-local rootignors = {
-  "*.opensdf",
-  "*.sdf",
-  "*.suo",
-  "*.sln",
-}
-
-local function mkdir_and_gitignore(dir)
-  --Create directorys first so writing the .gitignore doesn't fail
-  os.mkdir(dir)
-  os.writefile_ifnotequal("*.*", path.join(dir, ".gitignore"))
-end
-
-local bin = os.realpath(path.join(os.realpath(BuildDir), "../bin"))
-local dotvs = os.realpath(path.join(os.realpath(BuildDir), "../.vs"))
---Write .gitignore to directorys that contain just contain generated files
-mkdir_and_gitignore(os.realpath(BuildDir))
-mkdir_and_gitignore(bin)
-mkdir_and_gitignore(dotvs)
