@@ -858,7 +858,7 @@ static void *direct_alloc(mstate m, size_t nb)
 
     if (m->pagealloc)
     {
-      mm = m->pagealloc(m->pagealloc, NULL, mmsize);
+      mm = m->pagealloc(m->pagealloc_ud, NULL, mmsize);
     }
     else
     {
@@ -1036,7 +1036,7 @@ static void *alloc_sys(mstate m, size_t nb)
       char *mp;
 
       if(m->pagealloc) {
-        mp = m->pagealloc(m->pagealloc, NULL, rsize);
+        mp = m->pagealloc(m->pagealloc_ud, NULL, rsize);
       } else {
         mp = (char *)(CALL_MMAP(rsize));
       }
