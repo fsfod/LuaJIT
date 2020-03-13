@@ -26,6 +26,7 @@
 #else
 #include <sys/mman.h>
 #include <unistd.h>
+#define O_BINARY 0
 #endif
 
 #include <fcntl.h>
