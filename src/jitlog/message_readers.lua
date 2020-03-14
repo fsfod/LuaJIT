@@ -209,6 +209,7 @@ function readers:gcstate(msg)
       self.atomicstage = nil
     end
     self:log_msg("gcstate", "GCState(%s): changed from %s", phase, self.vmdef.gcstate[laststate])
+    self.gctime[prev_phase] = (self.gctime[prev_phase] or 0) + info.steptime
   end
 
   self:update_gcinfo(info, "gcstate")
@@ -224,13 +225,25 @@ function api:update_gcinfo(info, source)
     self.gcstateid = info.state
     self.gcstate = gcstate
   elseif source == "shutdown" then
+    -- We won't see another gcstate message so record the current time spent stepping in this phase
+    self.gctime[gcstate] = (self.gctime[gcstate] or 0) + info.steptime
     self:log_msg("gcstate", "GCState: got state closing gc state %s", self.gcstate)
   end
+  self.gcmaxpause = math.max(self.gcmaxpause, tonumber(info.maxpause))
 
   local totalmem = tonumber(info.totalmem)
   self.peakmem = math.max(self.peakmem or 0, totalmem)
   self.peakstrnum = math.max(self.peakstrnum or 0, info.strnum)
   self:log_msg("gcinfo", "GCInfo: MemTotal = %dMB, StrCount = %d", totalmem/(1024*1024), info.strnum)
+end
+
+function api:get_total_gctime()
+  local total = 0
+  for _, time in pairs(self.gctime) do
+    total = total + time
+  end
+  
+  return tonumber(total)/tonumber(self.timerfreq)
 end
 
 local statekind = {
@@ -278,6 +291,8 @@ local function init(self)
   self.gccount = 0 -- number GC full cycles that have been seen in the log
   self.gcstatecount = 0 -- number times the gcstate changed
   self.atomictime = {}
+  self.gctime = {}
+  self.gcmaxpause = 0
 
   return t
 end

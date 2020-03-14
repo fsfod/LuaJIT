@@ -35,6 +35,10 @@ typedef struct jitlog_State {
   char loadstate;
   uint32_t traceexit;
   JITLogMode mode;
+  uint64_t gcstart;    /* when the current GC step or fullgc started */
+  uint64_t gcstep_max; /* Maximum time a GC step took to run */
+  uint64_t gcstep_time;
+  uint64_t lastgcs_time;
 } jitlog_State;
 
 
@@ -104,6 +108,8 @@ static gc_info_Args build_gcinfo(jitlog_State* context) {
     .state = g->gc.state,
     .totalmem = g->gc.total,
     .strnum = g->str.num,
+    .steptime = context->gcstep_time,
+    .maxpause = context->gcstep_max,
   };
   return args;
 }
@@ -112,8 +118,24 @@ static void jitlog_gcstate(jitlog_State* context, int newstate)
 {
   global_State* g = context->g;
   gc_info_Args gcinfo = build_gcinfo(context);
-  gcinfo.state = newstate != -1 ? newstate : g->gc.state,
-  log_gcstate(&context->ub, g->gc.state, &gcinfo);
+  uint64_t steptime = stop_getticks() - context->gcstart;
+
+  uint64_t time = stop_getticks();
+
+  /* Check if we had a gcstate change already in this gcstep call */
+  if (context->lastgcs_time != 0) {
+    gcinfo.steptime += time - context->lastgcs_time;
+  } else {
+    gcinfo.steptime += time - context->gcstart;
+  }
+  context->lastgcs_time = time;
+
+  gcinfo.state = newstate != -1 ? newstate : g->gc.state;
+  
+  log_gcstate(&context->ub, g->gc.state, context->gcstart, &gcinfo);
+
+  context->gcstep_max = 0;
+  context->gcstep_time = 0;
 }
 
 enum StateKind{
@@ -125,6 +147,31 @@ enum StateKind{
 static void jitlog_gcatomic_stage(jitlog_State *context, int atomicstage)
 {
   log_statechange(&context->ub, STATEKIND_GC_ATOMIC, atomicstage, 0);
+}
+
+static void jitlog_gcstep(jitlog_State* context, uintptr_t steps)
+{
+  global_State* g = context->g;
+  lua_State* L = mainthread(g);
+  lua_assert(steps || context->gcstart);
+
+  if (!steps && !context->gcstart) {
+    /* We didn't see the start of this step probably because we attached after
+    ** it started so skip collecting incomplete data.
+    */
+    return;
+  }
+
+  if (steps) {
+    context->gcstart = start_getticks();
+  } else {
+    uint64_t time = stop_getticks();
+    uint64_t steptime = time - context->gcstart;
+    context->lastgcs_time = 0;
+    context->gcstep_max = steptime > context->gcstep_max ? steptime : context->gcstep_max;
+    context->gcstart = 0;
+    context->gcstep_time += steptime;
+  }
 }
 
 static void free_context(jitlog_State *context);
@@ -154,6 +201,9 @@ static void jitlog_gcevent(void *contextptr, lua_State *L, int eventid, void *ev
       break;
     case GCEVENT_ATOMICSTAGE:
       jitlog_gcatomic_stage(context, (int)data);
+      break;
+    case GCEVENT_STEP:
+      jitlog_gcstep(context, data);
       break;
     default:
       break;

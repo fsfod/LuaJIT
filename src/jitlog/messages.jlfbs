@@ -131,6 +131,7 @@ table VMDef{
 
 message gcstate {
   time : timestamp
+  stepstart : uint64
   prevstate : uint8
   gcinfo : gc_info 
 }
@@ -139,6 +140,8 @@ table gc_info{
   totalmem : GCSize
   strnum : uint32
   state : uint8 (enum : gcstate)
+  steptime : uint64
+  maxpause : uint64
 }
 
 message statechange (no_vtable) {

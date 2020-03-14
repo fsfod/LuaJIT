@@ -153,6 +153,8 @@ module.messages = {
       prevstate : 8
       totalmem : GCSize
       strnum : u32
+      steptime : u64
+      maxpause : u64
     ]]
   },
 
