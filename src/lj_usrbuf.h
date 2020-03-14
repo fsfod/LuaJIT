@@ -3,6 +3,11 @@
 
 #include "lua.h"
 #include "stdint.h"
+#include <memory.h>
+
+#ifndef lua_assert
+#define lua_assert(check)
+#endif
 
 typedef enum UBufAction {
   UBUF_CLOSE,
