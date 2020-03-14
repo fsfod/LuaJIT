@@ -153,6 +153,7 @@ table gc_info{
   totalmem : GCSize
   strnum : uint32
   state : uint8 (enum : gcstate)
+  infullgc : bool
   steptime : uint64
   maxpause : uint64
 }

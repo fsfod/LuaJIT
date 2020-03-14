@@ -66,6 +66,7 @@ typedef struct jitlog_State {
   uint32_t traced_bc_capacity;
   uint64_t resetpoint;
   JITLogEventTypes events_written;
+  char infullgc;
 } jitlog_State;
 
 
@@ -997,6 +998,7 @@ static gc_info_Args build_gcinfo(jitlog_State* context) {
   global_State* g = context->g;
   gc_info_Args args = {
     .state = g->gc.state,
+    .infullgc = context->infullgc,
     .totalmem = g->gc.total,
     .strnum = g->str.num,
     .steptime = context->gcstep_time,
@@ -1070,6 +1072,41 @@ static void jitlog_gcstep(jitlog_State* context, uintptr_t steps)
     context->gcstep_max = steptime > context->gcstep_max ? steptime : context->gcstep_max;
     context->gcstart = 0;
     context->gcstep_time += steptime;
+    TIMER_ADD(gc_step, steptime);
+  }
+
+  if (!jitlog_isfiltered(context, LOGFILTER_GC_STEP)) {
+    if (steps) {
+      SECTION_START(gc_step);
+    } else {
+      SECTION_END(gc_step);
+    }
+    context->events_written |= JITLOGEVENT_GCSTATE;
+  }
+}
+
+static void jitlog_fullgc(jitlog_State* context, uintptr_t start)
+{
+  global_State* g = context->g;
+  lua_State* L = mainthread(g);
+  lua_assert((context->gcstart && !start) || (!context->gcstart && start));
+
+  if (start) {
+    context->gcstart = start_getticks();
+    context->infullgc = 1;
+  } else {
+    TIMER_ADD(gc_fullgc, stop_getticks() - context->gcstart);
+    context->gcstart = 0;
+    context->infullgc = 0;
+  }
+
+  if (!jitlog_isfiltered(context, LOGFILTER_GC_FULLGC)) {
+    if (start) {
+      SECTION_START(gc_fullgc);
+    } else {
+      SECTION_END(gc_fullgc);
+    }
+    context->events_written |= JITLOGEVENT_FULLGC;
   }
 }
 
@@ -1103,6 +1140,9 @@ static void jitlog_gcevent(void *contextptr, lua_State *L, int eventid, void *ev
       break;
     case GCEVENT_STEP:
       jitlog_gcstep(context, data);
+      break;
+    case GCEVENT_FULLGC:
+      jitlog_fullgc(context, data);
       break;
     default:
       break;
