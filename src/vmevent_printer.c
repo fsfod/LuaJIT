@@ -241,16 +241,6 @@ static const char *getgcsname(int gcs)
   }
 }
 
-static void vmevent_gcstate(VMPrintContext *context, jit_State *J, int newstate)
-{
-  if (context->user.filter & EVENT_CLASS_GC) {
-    return;
-  }
-  global_State *g = context->G;
-  vmevent_log(context, "GCSTATE: %s, totalmem %llukb, strings %d\n", getgcsname(newstate), 
-              (long long int)(g->gc.total/1024), g->strnum);
-}
-
 static void vmevent_protoloaded(VMPrintContext *context, jit_State *J, GCproto *pt)
 {
   if (context->user.filter & EVENT_CLASS_PROTO_LOADED) {
@@ -310,9 +300,6 @@ static void vmevent_callback(void *contextptr, lua_State *L, int eventid, void *
     case VMEVENT_LOADSCRIPT:
       vmevent_loadscript(context, J, (VMEventData_LoadScript*)eventdata);
       break;
-    case VMEVENT_GC_STATECHANGE:
-      vmevent_gcstate(context, J, (int)(uintptr_t)eventdata);
-      break;
     case VMEVENT_DETACH:
       vmevent_log(context, "DETACH\n");
       free_context(context);
@@ -327,6 +314,62 @@ static void vmevent_callback(void *contextptr, lua_State *L, int eventid, void *
     default:
       vmevent_log(context, "UknownEvent(%d)\n", event);
       break;
+  }
+}
+
+static void vmevent_gcstate(VMPrintContext* context, lua_State* J, int newstate)
+{
+  if (context->user.filter & EVENT_CLASS_GC) {
+    return;
+  }
+  global_State* g = context->G;
+  vmevent_log(context, "GCSTATE: %s, totalmem %llukb, strings %d\n", getgcsname(newstate),
+    (long long int)(g->gc.total / 1024), g->strnum);
+}
+
+void gcevent_atomicstage(VMPrintContext* context, lua_State* J, int stage)
+{
+  vmevent_log(context, "GC Atomic Stage: %d\n", stage);
+}
+
+void gcevent_step(VMPrintContext* context, lua_State* L, int steps)
+{
+  if (steps > 0) {
+    vmevent_log(context, "GC Step: Begin steps = %d\n", steps);
+  } else {
+    vmevent_log(context, "GC Step: End\n", steps);
+  }
+}
+
+void gcevent_fullgc(VMPrintContext* context, lua_State* L, int info)
+{
+  if (info) {
+    vmevent_log(context, "Full GC: Begin\n");
+  } else {
+    vmevent_log(context, "Full GC: End\n");
+  }
+}
+
+
+static void gcevent_callback(void* contextptr, lua_State* L, int eventid, void* eventdata)
+{
+  VMEvent2 event = (VMEvent2)eventid;
+  VMPrintContext* context = contextptr;
+  int info = (int)(uintptr_t)eventdata;
+
+  switch (event) {
+  case GCEVENT_STATECHANGE:
+    vmevent_gcstate(context, L, info);
+    break;
+  case GCEVENT_ATOMICSTAGE:
+    gcevent_atomicstage(context, L, info);
+    break;
+  case GCEVENT_STEP:
+    gcevent_step(context, L, info);
+    break;
+  case GCEVENT_FULLGC:
+    gcevent_fullgc(context, L, info);
+    break;
   }
 }
 
