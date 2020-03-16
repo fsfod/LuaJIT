@@ -1,3 +1,5 @@
+local stacktraceplus = require("jitlog.libs.StackTracePlus")
+
 local ffi = require("ffi")
 local hasjit = pcall(require, "jit.opt")
 local format = string.format
@@ -783,7 +785,7 @@ for name, test in pairs(tests) do
     test()
     success = true
   else
-    success, err = xpcall(test, debug.traceback)
+    success, err = xpcall(test, stacktraceplus.stacktrace)
   end
   if not success then
     failed = true

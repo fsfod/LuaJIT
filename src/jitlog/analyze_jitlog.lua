@@ -1,5 +1,6 @@
 local format = string.format
 local debugger_attached = decoda_output ~= nil
+local stacktraceplus = require("jitlog.libs.StackTracePlus")
 
 local argparse = require("jitlog.argparse")
 local cmdparser = argparse("script", "An example.")
@@ -185,7 +186,7 @@ function parselog(buffer, size)
   if debugger_attached then
     success, msg = reader:parse_buffer(buffer, size)
   else
-    success, msg = xpcall(reader.parse_buffer, debug.traceback, reader, buffer, size)
+    success, msg = xpcall(reader.parse_buffer, stacktraceplus.stacktrace, reader, buffer, size)
   end
   local stop = os.clock()
   print("Log parsing took", stop - start)
