@@ -16,7 +16,8 @@ local string_sub = string.sub
 local table_concat = table.concat
 
 local _M = {
-	max_tb_output_len = 70	-- controls the maximum length of the 'stringified' table before cutting with ' (more...)'
+	max_tb_output_len = 70,	-- controls the maximum length of the 'stringified' table before cutting with ' (more...)'
+	max_string_len = 100,
 }
 
 -- this tables should be weak so the elements in them won't become uncollectable
@@ -240,16 +241,23 @@ function Dumper:DumpLocals (level)
 		elseif type(value) == "boolean" then
 			self:add_f("%s%s = boolean: %s\r\n", prefix, name, tostring(value))
 		elseif type(value) == "string" then
-			self:add_f("%s%s = string: %q\r\n", prefix, name, value)
+			if #value < _M.max_string_len then
+				self:add_f("%s%s = string: %q\r\n", prefix, name, value)
+			else
+				self:add_f("%s%s = string: %q\r\n", prefix, name, string.sub(value, 1, _M.max_string_len))
+			end
 		elseif type(value) == "userdata" then
 			self:add_f("%s%s = %s\r\n", prefix, name, safe_tostring(value))
 		elseif type(value) == "nil" then
 			self:add_f("%s%s = nil\r\n", prefix, name)
 		elseif type(value) == "table" then
+			local mt = getmetatable(value)
 			if m_known_tables[value] then
 				self:add_f("%s%s = %s\r\n", prefix, name, m_known_tables[value])
 			elseif m_user_known_tables[value] then
 				self:add_f("%s%s = %s\r\n", prefix, name, m_user_known_tables[value])
+			elseif mt and mt.__tostring then
+				self:add_f("%s%s = %s\r\n", prefix, name, safe_tostring(value))
 			else
 				local txt = "{"
 				for k,v in pairs(value) do
