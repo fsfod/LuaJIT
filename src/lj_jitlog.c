@@ -1652,6 +1652,19 @@ LUA_API uint64_t jitlog_getsize(JITLogUserContext* usrcontext)
   return ubuf_getoffset(&context->ub);
 }
 
+/* Trigger a flush if required for event types just written should be only used from explicit user called JITLog apis */
+static int jitlog_checkflush(jitlog_State* context, JITLogEventTypes events)
+{
+  context->events_written |= events;
+  /* TODO: Allow restricting auto flushing to only some types of events */
+  if (context->mode & JITLogMode_AutoFlush) {
+    ubuf_flush(&context->ub);
+    context->events_written = 0;
+    return 1;
+  }
+  return 0;
+}
+
 LUA_API int jitlog_save(JITLogUserContext *usrcontext, const char *path)
 {
   jitlog_State *context = usr2ctx(usrcontext);
@@ -1728,7 +1741,7 @@ LUA_API void jitlog_writemarker(JITLogUserContext* usrcontext, const char* label
   flags &= 0xffff;
 
   log_stringmarker(&context->ub, jited, flags, label, capturestack ? &stack : NULL);
-  context->events_written |= JITLOGEVENT_MARKER;
+  jitlog_checkflush(context, JITLOGEVENT_MARKER);
 }
 
 LUA_API void jitlog_setresetpoint(JITLogUserContext *usrcontext)
@@ -2052,6 +2065,7 @@ static int jlib_writemarker(lua_State *L)
     lua_Integer id = lua_tointeger(L, 1);
     int flags = luaL_optint(L, 2, 0);
     writemarker(context, (uint32_t)id, flags);
+    jitlog_checkflush(context, JITLOGEVENT_MARKER);
   }
   return 0;
 }
