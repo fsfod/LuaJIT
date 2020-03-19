@@ -34,4 +34,6 @@ message header {
   ggaddress : uint64
   msgtype_count : uint8
   struct_count : uint16
+  starttime: timestamp
+  timerfreq : uint64
 }

@@ -13,6 +13,7 @@
 
 #include "lj_jitlog_def.h"
 #include "lj_jitlog_decl.h"
+#include "lj_vmperf.h"
 #include "lj_jitlog_writers.h"
 
 #include "jitlog.h"
@@ -100,6 +101,7 @@ static void write_header(jitlog_State *context)
     .cpumodel = cpumodel,
     .os = LJ_OS_NAME,
     .ggaddress = (uintptr_t)G2GG(g),
+    .timerfreq = lj_perf_ticksfreq,
   };
   log_header(&context->ub, &args);
 

@@ -43,6 +43,8 @@ module.messages = {
       cpumodel : string[cpumodel_length]
       os : string
       ggaddress : u64
+      starttime : timestamp
+      timerfreq : u64
     ]]
   },
 }
