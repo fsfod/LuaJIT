@@ -45,6 +45,7 @@ LJ_FUNC int lj_debug_getbcpos(GCproto* pt, BCLine lineNumber);
 LJ_FUNC int lj_debug_setlinebp(lua_State *L, GCproto *pt, int line);
 LJ_FUNC int lj_debug_setbp(lua_State *L, GCproto *pt, BCPos pc);
 LJ_FUNC int lj_debug_clearbp(lua_State *L, int id);
+LJ_FUNC BCIns lj_debug_realins(global_State * g, GCproto* p, int offset);
 
 #if LJ_HASPROFILE
 LJ_FUNC void lj_debug_dumpstack(lua_State *L, SBuf *sb, const char *fmt,

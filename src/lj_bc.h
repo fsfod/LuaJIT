@@ -37,6 +37,7 @@
 #define bc_c(i)		((BCReg)(((i)>>16)&0xff))
 #define bc_d(i)		((BCReg)((i)>>16))
 #define bc_j(i)		((ptrdiff_t)bc_d(i)-BCBIAS_J)
+#define bc_realins(g, ins) bc_op(*(ins)) == BC_BP ? (g)->breakpoints[bc_d(*(ins))].orig : *(ins)
 
 /* Macros to set instruction fields. */
 #define setbc_byte(p, x, ofs) \

@@ -407,6 +407,7 @@ typedef struct jit_State {
   GCfunc *fn;		/* Current function. */
   GCproto *pt;		/* Current prototype. */
   TRef *base;		/* Current frame base, points into J->slots. */
+  int bpbase;           /* the stack base from where the current breakpoint is executing from */
 
   uint32_t flags;	/* JIT engine flags. */
   BCReg maxslot;	/* Relative to baseslot. */

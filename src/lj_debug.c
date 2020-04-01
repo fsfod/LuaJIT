@@ -704,19 +704,18 @@ LUALIB_API void luaL_traceback (lua_State *L, lua_State *L1, const char *msg,
 
 /* -- breakpoint API ---------------------------------------------------- */
 
-static int isvalidoffset(lua_State *L, GCproto *pt, int bcpos)
+static int isvalidoffset(GCproto *pt, int bcpos)
 {
   return bcpos >= 0 && bcpos < pt->sizebc;
 }
 
-static int findbp(lua_State *L, GCproto *p, int offset)
+static int findbp(global_State *g, GCproto *p, int offset)
 {
   BCIns bc;
-  lua_assert(isvalidoffset(L, p, offset));
+  lua_assert(isvalidoffset(p, offset));
 
   bc = proto_bc(p)[offset];
   if (bc_op(bc) == BC_BP) {
-    global_State *g = G(L);
     int bpid = bc >> 8;
     lua_assert(offset == g->breakpoints[bpid].offset);
     return bpid;
@@ -725,15 +724,16 @@ static int findbp(lua_State *L, GCproto *p, int offset)
   }
 }
 
-static BCIns realinstr(lua_State *L, GCproto *p, int offset)
+BCIns lj_debug_realins(global_State *g, GCproto *p, int offset)
 {
-  int id = findbp(L, p, offset);
+  int id = findbp(g, p, offset);
   if (id < 0) {
     return proto_bc(p)[offset];
   } else {
-    return G(L)->breakpoints[id].orig;
+    return g->breakpoints[id].orig;
   }
 }
+
 
 int lj_debug_getbcpos(GCproto* pt, BCLine lineNumber)
 {
@@ -816,7 +816,7 @@ static int avoidpseudo(lua_State *L, GCproto *p, int bcpos)
 
   i = proto_bc(p)[bcpos];
 
-  pr = realinstr(L, p, bcpos);
+  pr = lj_debug_realins(G(L), p, bcpos);
 
   if (bc_op(i) == BC_JMP) {
     // a JMP opcode following a conditional is a pseudo instruction that
@@ -906,7 +906,7 @@ int lj_debug_setbp(lua_State *L, GCproto *pt, BCPos pc)
   int id;
 
   pc = avoidpseudo(L, pt, pc);
-  id = findbp(L, pt, pc);
+  id = findbp(g, pt, pc);
 
   if (id == -1) {
     id = create_breakpoint(L, pt, pc);
@@ -949,7 +949,7 @@ static GCproto *getproto(lua_State *L, int index)
 LUA_API int lua_sethalt(lua_State *L, int line, lua_Hook hook)
 {
   GCproto *p = getproto(L, 1);
-  if (p != NULL && isvalidoffset(L, p, line)) {
+  if (p != NULL && isvalidoffset(p, line)) {
     int id = lj_debug_setlinebp(L, p, line);
     return id;
   } else {
@@ -980,7 +980,7 @@ LUA_API int lua_clearprotohalt(lua_State *L, void *pv, const char *chunkName, in
 LUA_API int lua_clearhalt(lua_State *L, int lineno)
 {
   GCproto *pt = getproto(L, 1);
-  if (pt != NULL && isvalidoffset(L, pt, lineno)) {
+  if (pt != NULL && isvalidoffset(pt, lineno)) {
     int id = getlinebp(L, pt, lineno);
     return lj_debug_clearbp(L, id);
   }

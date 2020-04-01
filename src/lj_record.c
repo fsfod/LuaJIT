@@ -954,7 +954,11 @@ void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
       }  /* Otherwise continue with another __concat call. */
     } else if(frame_contv(frame) == LJ_CONT_BREAKPOINT) {
       global_State *g = J2G(J);
-      setmref(g->bpcontinue, frame_pc(frame));
+      /* Tell BC_BP that the action has been already run so when the breakpoint
+      ** instruction is executed the second time it doesn't run the action again.
+      */
+      setmref(g->bpcontinue, frame_contpc(frame));
+      J->bpbase = frame_prev(frame) - mref(J->L->stack, TValue);
     } else {
       /* Result type already specialized. */
       lua_assert(cont == lj_cont_condf || cont == lj_cont_condt);
@@ -2103,7 +2107,18 @@ void lj_record_ins(jit_State *J)
 #define rcv	(&ix.keyv)
 
   lbase = J->L->base;
-  ins = *pc;
+  /* When the breakpoint bytecode instruction executes a second time fixup the instruction to the one it patched */
+  if (bc_op(*pc) == BC_BP && J->bpbase) {
+    int basen = lbase - mref(J->L->stack, TValue);
+    lua_assert(J->bpbase == (basen-1));
+    J->bpbase = 0;
+    ins = bc_realins(J2G(J), pc);
+    /* Skip over this instruction the next time we execute it */
+    J->bcskip++;
+  } else {
+     ins = *pc;
+  }
+ 
   op = bc_op(ins);
   ra = bc_a(ins);
   ix.val = 0;
