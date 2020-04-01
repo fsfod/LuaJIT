@@ -1,0 +1,10 @@
+-- sets a breakpoint in the target function on the specified line with some restrictions on unsupported bytecode instrunctions  
+-- the return value is breakpoint id on success or nil if the breakpoint can't be set on that line or bytecode index
+bool debug.setbp(target : function, line : number, callback : function(bpid : number)) 
+
+-- Remove all breakpoints set for a function
+bool debugremove all breakpoints set for a function.clearbp(target : function) 
+
+-- Removes the breakpoint with the specified id
+bool debug.clearbp(breakpoint_id : number)
+
