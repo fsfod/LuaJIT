@@ -116,6 +116,18 @@ static LJ_AINLINE UserBuf *ubuf_putmem(UserBuf *ub, const void *q, size_t len)
   return ub;
 }
 
+/* write an array prefixed with element count */
+static LJ_AINLINE UserBuf* ubuf_putarray(UserBuf* ub, const void* q, uint32_t count, size_t elesz)
+{
+  size_t len = count * elesz;
+  char* p = ubuf_more(ub, len+4);
+  lua_assert(count == 0 || q != NULL);
+  *((uint32_t*)p) = (uint32_t)count;
+  p = (char*)memcpy(p+sizeof(uint32_t), q, len) + len;
+  setubufP(ub, p);
+  return ub;
+}
+
 static LJ_INLINE uint64_t ubuf_getoffset(UserBuf *ub)
 {
   lua_assert(ubufB(ub));
