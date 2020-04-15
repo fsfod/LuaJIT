@@ -900,6 +900,65 @@ function gctrace:print_tracedfuncs()
   end
 end
 
+local bad_irins = {
+  BASE = true,
+  PRI = true,
+  KINT = true,
+  KGC = true, 
+  KPTR = true,
+  KKPTR = true,
+  KNULL = true,
+  KNUM  = true,  
+  KINT64KSLOT = true,
+}
+
+function gctrace:check_ir(start)
+  start = start or 1
+  
+  local count = self.ins_count
+  local enums = self.owner.enums
+  local irname = enums.ir
+  local maxop = #irname.names
+  
+  for i=start, count-2 do
+    local ins = self.ir:get(i) 
+    
+    if ins.o > maxop then
+      return false, string.format("Bad IR op type %d at IR instruction %d", ins.o, i)
+    end
+    
+    local op = irname[ins.o]
+    local op1, op2 = ins.op1, ins.op2
+    local m1, m2 = get_irmode(ins.o, self.owner.ir_mode)
+    
+    if bad_irins[op] then
+      return false, string.format("Found IR constant %s at IR instruction %d", op, i)
+    end
+    
+    if m1 == "ref" then
+      op1 = op1-REF_BIAS
+      
+      if op1 > 0 and op1 > i then
+        return false, string.format("Bad op1 IR reference %d at IR instruction %d %s", op1, i, op)
+      elseif op1 < 0 and -op1 > self.constant_count then
+        return false, string.format("Bad op1 IR constant reference %d(max %d) at IR instruction %d %s", op1, self.constant_count, i, op)
+      end 
+    end
+    
+    if m2 == "ref" then
+      op2 = op2-REF_BIAS
+      
+      if op2 > 0 and op2 > i then
+        return false, string.format("Bad op2 IR reference %d at IR instruction %d:%s", op2, i, op)
+      elseif op2 < 0 and -op2 > self.constant_count then
+        return false, string.format("Bad op2 IR constant reference %d at IR instruction %d:%s", op2, i, op)
+      end 
+    end
+  end
+  
+  return true
+end
+
 msgobj_mt.trace = {
   __index = gctrace
 }
