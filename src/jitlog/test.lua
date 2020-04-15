@@ -1130,6 +1130,10 @@ local perf_mixin = {
 
 it("perf_counters", function()
   jitlog.start()
+  local result = parselog(jitlog.savetostring(), false, perf_mixin)
+  assert(#result.perf_sets == 2, #result.perf_sets)
+
+  jitlog.start()
   jitlog.write_perfcounts()
   loadstring[[
     local function f1() end
@@ -1138,11 +1142,11 @@ it("perf_counters", function()
   ]]
   jitlog.write_perfcounts()
 
-  local result = parselog(jitlog.savetostring(), false, perf_mixin)
+  result = parselog(jitlog.savetostring(), false, perf_mixin)
   local CounterId = result.enums.CounterId
   assert(CounterId and #CounterId)
   local perf_sets = result.perf_sets
-  assert(#perf_sets == 2)
+  assert(#perf_sets == 4)
 end)
 
 it("perf_timers", function()
@@ -1158,11 +1162,15 @@ it("perf_timers", function()
 
   local result = parselog(jitlog.savetostring(), false, perf_mixin)
   local perf_sets = result.perf_sets
-  assert(#perf_sets == 2)
+  assert(#perf_sets == 4, #perf_sets)
+  -- First set is from JITLog automatically writing the current values of both timers and counter when its started
   assert(perf_sets[1].counters.jitlog_vmevent == 0)
-  assert(perf_sets[2].counters.jitlog_vmevent >= 4)
+  assert(perf_sets[2].counters.jitlog_vmevent == 0)
+  assert(perf_sets[3].counters.jitlog_vmevent >= 4, perf_sets[2].counters.jitlog_vmevent)
+
   assert(perf_sets[1].timers.jitlog_vmevent == 0)
-  assert(perf_sets[2].timers.jitlog_vmevent > 0)
+  assert(perf_sets[2].timers.jitlog_vmevent < perf_sets[3].timers.jitlog_vmevent)
+  assert(perf_sets[3].timers.jitlog_vmevent > 0)
 end)
 
 it("write raw GC object", function()

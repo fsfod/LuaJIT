@@ -532,3 +532,8 @@ message ir_fold (no_vtable){
   orig_ins : uint64
   ins : uint64
 }
+
+message jitlogend{
+  vmsettings : VMSettings
+  gcinfo : gc_info
+}

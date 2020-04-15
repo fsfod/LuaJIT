@@ -31,6 +31,7 @@ typedef enum LoadState {
   /* Memorization tables and Lua API are being created */
   LoadState_Starting,
   LoadState_Running,
+  LoadState_PreShutdown,
 } LoadState;
 
 typedef struct jitlog_State {
@@ -1395,6 +1396,8 @@ static void jitlog_iremit(jitlog_State* context, uint32_t data)
   }
 }
 
+static void jitlog_shutdown(jitlog_State* context, int stateexit);
+
 static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *eventdata)
 {
   VMEvent2 event = (VMEvent2)eventid;
@@ -1444,7 +1447,6 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
       jitlog_protoloaded(context, (GCproto*)eventdata);
       break;
     case VMEVENT_DETACH:
-      free_context(context);
       break;
     case VMEVENT_STATE_CLOSING:
       if (G(L)->vmevent_cb == jitlog_callback) {
@@ -1462,8 +1464,8 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
   }
 
   /* Only free our context after we've done callbacks */
-  if (event == VMEVENT_STATE_CLOSING) {
-    free_context(context);
+  if (event == VMEVENT_STATE_CLOSING || event == VMEVENT_DETACH) {
+    jitlog_shutdown(context, event == VMEVENT_STATE_CLOSING);
     /* The UserBuf is now destroyed so return early instead of trying to call ubuf_msgcomplete */
     return;
   }
@@ -1756,6 +1758,8 @@ VMDef_Args vmdef = {
   vmdef_array(trace_link, trlink_names),
 };
 
+static void write_current_states(jitlog_State *context, UserBuf *ub);
+
 static void write_header(jitlog_State *context)
 {
   global_State *g = context->g;
@@ -1810,6 +1814,8 @@ static void write_header(jitlog_State *context)
 
   write_note(&context->ub, "msgdefs", msgdefstr);
 
+
+  write_current_states(context, &context->ub);
 }
 
 const uint32_t smallidsz = 20;
@@ -2040,9 +2046,33 @@ static void free_context(jitlog_State *context)
   free(context);
 }
 
-static void jitlog_shutdown(jitlog_State *context)
+static void jitlog_preshutdown(jitlog_State* context)
+{
+  global_State* g = context->g;
+  if (context->loadstate == LoadState_PreShutdown) {
+    return;
+  }
+  context->loadstate = LoadState_PreShutdown;
+  write_current_states(context, &context->ub);
+  VMSettings_Args vmsettings = {
+    .jitparams = G2J(g)->param,
+    .jitparams_length = JIT_P__MAX,
+    .gc_stepmul = g->gc.stepmul,
+    .gc_pause = g->gc.pause,
+  };
+  gc_info_Args gc_info = build_gcinfo(context);
+  log_jitlogend(&context->ub, &vmsettings, &gc_info);
+}
+
+static void jitlog_shutdown(jitlog_State *context, int stateexit)
 {
   lua_State *L = mainthread(context->g);
+  int loadstate = context->loadstate;
+
+  if (loadstate < LoadState_PreShutdown) {
+    jitlog_preshutdown(context);
+  }
+
   void* current_context = NULL;
   luaJIT_vmevent_callback cb = luaJIT_vmevent_gethook(L, (void**)&current_context);
   if (cb == jitlog_callback) {
@@ -2060,7 +2090,7 @@ static void jitlog_shutdown(jitlog_State *context)
 
   clear_objalloc_callback(context);
 
-  if (context->loadstate > 1) {
+  if (!stateexit && loadstate > LoadState_SafeStart) {
     free_pinnedtab(L, context->strings);
     free_pinnedtab(L, context->protos);
     free_pinnedtab(L, context->funcs);
@@ -2073,7 +2103,7 @@ static void jitlog_shutdown(jitlog_State *context)
 LUA_API void jitlog_close(JITLogUserContext *usrcontext)
 {
   jitlog_State *context = usr2ctx(usrcontext);
-  jitlog_shutdown(context);
+  jitlog_shutdown(context, 0);
 }
 
 static void reset_memoization(jitlog_State *context)
@@ -2423,9 +2453,8 @@ LUA_API void jitlog_saveperftimers(JITLogUserContext *usrcontext, uint16_t *ids,
   jitlog_checkflush(context, JITLOGEVENT_PERF_SNAPSHOT);
 }
 
-LUA_API void jitlog_write_perfsnapshot(JITLogUserContext* usrcontext)
+static void write_perfsnapshot(jitlog_State* context, UserBuf *ub)
 {
-  jitlog_State* context = usr2ctx(usrcontext);
   lua_State* L = mainthread(context->g);
   VMPerfTimer timer_values[Timer_MAX];
 
@@ -2447,7 +2476,13 @@ LUA_API void jitlog_write_perfsnapshot(JITLogUserContext* usrcontext)
     .ids_length = 0,
   };
 
-  log_perf_snapshot(&context->ub, &counters, &timers);
+  log_perf_snapshot(ub, &counters, &timers);
+}
+
+LUA_API void jitlog_write_perfsnapshot(JITLogUserContext* usrcontext)
+{
+  jitlog_State* context = usr2ctx(usrcontext);
+  write_perfsnapshot(context, &context->ub);
   jitlog_checkflush(context, JITLOGEVENT_PERF_SNAPSHOT);
 }
 
@@ -2558,22 +2593,39 @@ LUA_API int jitlog_write_gcsnapshot(JITLogUserContext *usrcontext, const char *l
   return 1;
 }
 
-LUA_API int jitlog_write_gcstats(JITLogUserContext *usrcontext, const char *note)
+static int write_gcstats(jitlog_State *context, UserBuf *ub, const char *note)
 {
-  jitlog_State *context = usr2ctx(usrcontext);
-  global_State* g = context->g;
-
   if (!context->gcstats) {
     return 0;
   }
   gc_stats_Args args = {
-    .totalmem = g->gc.total,
+    .totalmem = context->g->gc.total,
     .objstats = (ObjStat*)context->gcstats->stats,
     .objstats_length = sizeof(context->gcstats->stats) / sizeof(context->gcstats->stats[0]),
   };
-  log_gc_stats_snapshot(&context->ub, note, &args);
-  jitlog_checkflush(context, JITLOGEVENT_GCSTATS);
+  log_gc_stats_snapshot(ub, note, &args);  
   return 1;
+}
+
+LUA_API int jitlog_write_gcstats(JITLogUserContext *usrcontext, const char *note)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+  if (write_gcstats(context, &context->ub, note)) {
+    jitlog_checkflush(context, JITLOGEVENT_GCSTATS);
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+static void write_current_states(jitlog_State* context, UserBuf* ub)
+{
+#ifdef LJ_ENABLESTATS
+  write_perfsnapshot(context, ub);
+#endif
+  if (context->gcstats) {
+    write_gcstats(context, ub, NULL);
+  }
 }
 
 /* -- Lua module to control the JITLog ------------------------------------ */
@@ -2600,7 +2652,7 @@ static int jlib_start(lua_State *L)
 static int jlib_shutdown(lua_State *L)
 {
   jitlog_State *context = jlib_getstate(L);
-  jitlog_shutdown(context);
+  jitlog_shutdown(context, 0);
   return 0;
 }
 
@@ -2649,7 +2701,20 @@ static int jlib_savetostring(lua_State *L)
 {
   jitlog_State *context = jlib_getstate(L);
   UserBuf *ub = &context->ub;
-  lua_pushlstring(L, ubufB(ub), ubuflen(ub));
+  int skip_exitstates = (L->top - L->base) > 0 && tvistruecond(L->base);
+  
+  if (!skip_exitstates) {
+    UserBuf temp = { 0 };
+    ubuf_init_mem(&temp, ubuflen(ub));
+    ubuf_putmem(&temp, ubufB(ub), ubuflen(ub));
+    write_current_states(context, &temp);
+
+    lua_pushlstring(L, ubufB(&temp), ubuflen(&temp));
+
+    ubuf_free(&temp);
+  } else {
+    lua_pushlstring(L, ubufB(ub), ubuflen(ub));
+  }
 
   return 1;
 }
