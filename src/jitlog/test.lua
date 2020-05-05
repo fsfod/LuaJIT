@@ -473,7 +473,8 @@ it("perf_section", function()
 
   local result = parselog(jitlog.savetostring())
   local section_time, section_counts = result.section_time, result.section_counts
-  assert(#util.keys(section_time) == 3, #util.keys(section_time))
+  assert(#util.keys(section_time) >= 3, #util.keys(section_time))
+
   local userid_start = result.maxsection
   assert(section_counts[userid_start + 0] == 1)
   assert(section_counts[userid_start + 1] == 300)

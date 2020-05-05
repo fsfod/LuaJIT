@@ -482,6 +482,10 @@ LJLIB_CF(writemarker) LJLIB_REC(.)
   return 0;
 }
 
+LJLIB_CF(writesection)		LJLIB_REC(writesection)
+{
+  return 0;
+}
 /* -- Base library: miscellaneous functions ------------------------------- */
 
 LJLIB_PUSH(top-2)  /* Upvalue holds weak table. */

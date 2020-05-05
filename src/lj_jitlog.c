@@ -3355,5 +3355,15 @@ LUALIB_API int luaopen_jitlog(lua_State *L)
   funcV(L->top - 1)->c.ffid = FF_writemarker;
   lua_setfield(L, -2, "writemarker");
 
+  lua_pushboolean(L, 1);
+  lua_pushcclosure(L, jlib_section_start, 1);
+  funcV(L->top-1)->c.ffid = FF_writesection;
+  lua_setfield(L, -2, "section_start");
+  
+  lua_pushboolean(L, 0);
+  lua_pushcclosure(L, jlib_section_end, 1);
+  funcV(L->top - 1)->c.ffid = FF_writesection;
+  lua_setfield(L, -2, "section_end");
+
   return 1;
 }

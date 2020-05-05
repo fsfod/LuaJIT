@@ -30,6 +30,7 @@
 #include "lj_strscan.h"
 #include "lj_strfmt.h"
 #include "lj_serialize.h"
+#include "lj_jitlog_def.h"
 
 /* Some local macros to save typing. Undef'd at the end. */
 #define IR(ref)			(&J->cur.ir[(ref)])
@@ -1538,6 +1539,24 @@ static void LJ_FASTCALL recff_debug_getmetatable(jit_State *J, RecordFFData *rd)
   }
   emitir(IRTG(mt ? IR_NE : IR_EQ, IRT_TAB), mtref, lj_ir_knull(J, IRT_TAB));
   J->base[0] = mt ? mtref : TREF_NIL;
+}
+
+static void LJ_FASTCALL recff_writesection(jit_State *J, RecordFFData *rd)
+{
+  TRef id = J->base[0];
+  TRef isstart = J->base[1];
+  if (!tref_isnumber(id) || !tref_isk(isstart)) {
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
+  }
+  // User section Ids start after C code sections which is Section_MAX
+  id = emitir(IRT(IR_ADD, IRT_INT), lj_opt_narrow_toint(J, id), lj_ir_kint(J, Section_MAX));
+
+  int flags = MARKERFLAG_KIND_SECTION | MARKERFLAG_TIMESTAMP;
+  if (tvistrue(J->fn->c.upvalue)) {
+    flags |= MARKERFLAG_ISSTART;
+  }
+  emitir(IRT(IR_JLMARK, IRT_NIL), id, flags >> 8);
+  J->needsnap = 1;
 }
 
 static void LJ_FASTCALL recff_writemarker(jit_State *J, RecordFFData *rd)
