@@ -3302,8 +3302,15 @@ static const luaL_Reg jitlog_lib[] = {
   {NULL, NULL},
 };
 
+#include "lj_ff.h"
+
 LUALIB_API int luaopen_jitlog(lua_State *L)
 {
   luaL_register(L, "jitlog", jitlog_lib);
+
+  lua_pushcclosure(L, jlib_writemarker, 0);
+  funcV(L->top - 1)->c.ffid = FF_writemarker;
+  lua_setfield(L, -2, "writemarker");
+
   return 1;
 }

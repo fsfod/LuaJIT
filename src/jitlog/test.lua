@@ -423,6 +423,11 @@ it("id markers", function()
     assert(markers[i+3].flags == 0)
     currid = currid + 1
   end
+  
+  local last = #result.markers-3
+  assert(markers[last].jitted)
+  assert(markers[last+1].jitted)
+  assert(markers[last+2].jitted)
 end)
 
 it("jitlog mode", function()
