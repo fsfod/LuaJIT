@@ -2969,6 +2969,12 @@ static int jlib_getmode(lua_State *L)
   return 1;
 }
 
+void lj_write_stringmarker(jitlog_State *context, GCstr *label, int flags)
+{
+  lua_assert(label != NULL);
+  jitlog_writemarker(ctx2usr(context), strdata(label), flags);
+}
+
 static int jlib_writemarker(lua_State *L)
 {
   jitlog_State *context = jlib_getstate(L);
