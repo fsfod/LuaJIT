@@ -132,6 +132,12 @@ static void *growvec(void *p, MSize *szp, MSize lim, MSize esz)
   ((p) = (t *)growvec((p), &(n), (m), (MSize)sizeof(t)))
 #define jl_freevec(ctx, p, n, t)	free((p))
 
+void LJ_FASTCALL lj_jitlog_checkbuffer(lua_State *L)
+{
+  jitlog_State *context = (jitlog_State *)(G(L)->vmevent_data);
+  ubuf_more(&context->ub, 256);
+}
+
 extern void* lightud_intern(lua_State* L, void* p);
 
 static void setlightudV(lua_State *L, TValue *tv, void *p)
