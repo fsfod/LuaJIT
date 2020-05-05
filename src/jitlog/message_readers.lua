@@ -1008,6 +1008,7 @@ function readers:trace(msg)
     nk = msg.constant_count - REF_BIAS,
     mcodesize = msg.mcodesize,
     mcodeaddr = msg.mcodeaddr,
+    called = 0,
   }
   if true then
     local snaps, length = msg:get_snapshots()
@@ -1566,28 +1567,40 @@ function readers:perf_section(msg)
   local isstart = msg.isstart
   local length
 
-  local label = id
-  if id < self.maxsection then
-    label = self.section_names[id]
-  else
-    label = tostring(id)
-   -- self:log_msg("section", "No label found for section %d", id)
-  end
-  if isstart then
-    self.section_starts[id] = msg.time
-    self.section_counts[id] = (self.section_counts[id] or 0) + 1
-  else
-    local start = self.section_starts[id]
-    if start then
-      length = tonumber(msg.time - start)
-      self.section_starts[id] = false
-      self.section_time[id] = (self.section_time[id] or 0ull) + length
+  if msg.istrace then
+    local trace = self.traces[id]
+    if(isstart) then
+      if(trace) then
+        trace.called = trace.called+1
+      end
+      self.lasttrace = id
     else
-      self:log_msg("section", "Section(%s): found end without a section start at %d", label, self.eventid)
+      self.lasttrace = nil
     end
+    self:log_msg("section", "Section(Trace %d): start = %s", id, isstart)
+  else
+    local label = id
+    if id < self.maxsection then
+      label = self.section_names[id]
+    else
+      label = tostring(id)
+     -- self:log_msg("section", "No label found for section %d", id)
+    end
+    if isstart then
+      self.section_starts[id] = msg.time
+      self.section_counts[id] = (self.section_counts[id] or 0) + 1
+    else
+      local start = self.section_starts[id]
+      if start then
+        length = tonumber(msg.time - start)
+        self.section_starts[id] = false
+        self.section_time[id] = (self.section_time[id] or 0ull) + length
+      else
+        self:log_msg("section", "Section(%s): found end without a section start at %d", label, self.eventid)
+      end
+    end
+    self:log_msg("section", "Section(%s): start = %s, jitted = %s", label, isstart, msg.jitted)
   end
-  self:log_msg("section", "Section(%s): start = %s, jitted = %s", label, isstart, msg.jitted)
-
   return id, isstart, length
 end
 

@@ -1816,6 +1816,7 @@ static const char *const flushreason[] = {
   "profile_toggle",
   "set_builtinmt",
   "set_immutableuv",
+  "jitlog_tracemarkers",
 };
 
 static const char * jitparams[] = {
@@ -2276,6 +2277,7 @@ static void jitlog_preshutdown(jitlog_State* context)
 
 static void jitlog_shutdown(jitlog_State *context, int stateexit)
 {
+  global_State *g = context->g;
   lua_State *L = mainthread(context->g);
   int loadstate = context->loadstate;
 
@@ -2305,6 +2307,18 @@ static void jitlog_shutdown(jitlog_State *context, int stateexit)
     free_pinnedtab(L, context->protos);
     free_pinnedtab(L, context->funcs);
   }
+
+#if LJ_HASJIT
+  /* Stop the JIT generating trace markers if we've enabled them */
+  if (context->mode & JITLogMode_TraceMarkers) {
+    G2J(g)->flags &= ~JIT_F_TRACE_MARKERS;
+  }
+
+  /* Flush all the traces if some are directly writing to the jitlog */
+  if (context->mode & JITLogMode_FlushOnShutdown) {
+    lj_trace_flushall(L, FLUSHREASON_PROFILETOGGLE);
+  }
+#endif
 
   free_context(context);
 
@@ -2565,6 +2579,29 @@ LUA_API int64_t jitlog_last_msgoffset(JITLogUserContext* usrcontext, int msgtype
   return last_msgoffset(&context->ub, msgtype, start);
 }
 
+static int set_tracemarkers_enabled(JITLogUserContext *usrcontext, int enable)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+  global_State *g = context->g;
+
+  int state = (G2J(g)->flags & JIT_F_TRACE_MARKERS) != 0;
+  if (state == enable) {
+    return 1;
+  }
+
+  if (lj_trace_flushall(&G2GG(g)->L, FLUSHREASON_JITLOG_TRACEMARKERS) != 0) {
+    return 0;
+  }
+
+  if (enable) {
+    G2J(context->g)->flags |= JIT_F_TRACE_MARKERS;
+    context->mode |= JITLogMode_FlushOnShutdown;
+  } else {
+    G2J(context->g)->flags &= ~JIT_F_TRACE_MARKERS;
+  }
+
+  return 1;
+}
 
 LUA_API int jitlog_setmode(JITLogUserContext *usrcontext, JITLogMode mode, int enabled)
 {
@@ -2574,6 +2611,11 @@ LUA_API int jitlog_setmode(JITLogUserContext *usrcontext, JITLogMode mode, int e
     case JITLogMode_TraceExitRegs:
     case JITLogMode_DisableMemorization:
     case JITLogMode_VerboseTraceLog:
+      break;
+    case JITLogMode_TraceMarkers:
+      if (!set_tracemarkers_enabled(usrcontext, enabled)) {
+        return 0;
+      }
       break;
     default:
       /* Unknown mode return false */
@@ -2945,6 +2987,7 @@ static const ModeEntry jitlog_modes[] = {
   {"texit_regs", JITLogMode_TraceExitRegs},
   {"nomemo", JITLogMode_DisableMemorization},
   {"verbose_trinfo", JITLogMode_VerboseTraceLog},
+  {"trace_markers", JITLogMode_TraceMarkers},
 };
 
 static int jlib_setmode(lua_State *L)

@@ -483,6 +483,28 @@ it("perf_section", function()
   assert(section_time[userid_start + 1] > section_time[userid_start + 2])
 end)
 
+it("trace markers", function()
+  jitlog.start()
+  jitlog.setmode("trace_markers", true)
+  local a = 0 
+  for i = 1, 300 do
+    if i >= 100 then
+      if i <= 200 then
+        a = a + 1
+      else
+        a = a + 2
+      end
+    end
+  end
+
+  local result = parselog(jitlog.savetostring())
+  assert(#result.traces >= 3, #result.traces)
+  local traces = result.traces
+  assert(traces[1].called > 0)
+  assert(traces[2].called > 0)
+  assert(traces[3].called > 0)
+end)
+
 if hasjit then
 
 it("trace exits", function()

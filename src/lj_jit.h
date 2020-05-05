@@ -88,6 +88,7 @@
 #define JIT_F_OPT_FUSE		(JIT_F_OPT << 9)
 
 #define JIT_F_RECORD_IROFFSETS  0x40000000
+#define JIT_F_TRACE_MARKERS     0x80000000
 
 /* Optimizations names for -O. Must match the order above. */
 #define JIT_F_OPTSTRING	\

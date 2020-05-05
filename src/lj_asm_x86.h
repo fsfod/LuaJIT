@@ -2763,6 +2763,71 @@ static void writemarker(ASMState *as, Reg rbuff, Reg rend, Reg ub, uint32_t id, 
   checkmclim(as);
 }
 
+#define ISTRACE_BIT 2
+
+static void emit_tracemarker(ASMState *as, uint32_t id, int flags)
+{
+  char* eventbuff = (char *)J2G(as->J)->vmevent_data;
+  Reg ub = RID_NONE, rbuff = RID_ECX, rend = RID_EDX;
+  int stackspace = 5 * sizeof(intptr_t);
+  
+  flags |= MARKERFLAG_KIND_TRACE | MARKERFLAG_TIMESTAMP | JITED_BIT | ISTRACE_BIT;
+
+  int needts = MARKERFLAG_TIMESTAMP & flags;
+
+  if (flags & MARKERFLAG_ISSTART) {
+    emit_jcc(as, CC_LE, exitstub_addr(as->J, 0));
+    flags |= SECTION_START_BIT;
+  } else {
+    //FIXME: Exits from this sometimes break in snapshot restore
+    //emit_jcc(as, CC_LE, exitstub_addr(as->J, as->T->nsnap - 1));
+  }
+
+  if (flags & MARKERFLAG_TRACE_SAVEREGS) {
+    /* Restore copy of original ESP */
+    emit_rmro(as, XO_MOV, RID_ESP|REX_64, RID_ESP, 0);
+
+    /* Restore spilled registers */
+    emit_rmro(as, XO_MOV, RID_ECX|REX_64, RID_ESP, sizeof(intptr_t) * 1);
+    emit_rmro(as, XO_MOV, RID_EDX|REX_64, RID_ESP, sizeof(intptr_t) * 2);
+    if (needts) {
+      emit_rmro(as, XO_MOV, RID_EAX|REX_64, RID_ESP, sizeof(intptr_t) * 3);
+    }
+    if (!checkptr32(eventbuff)) {
+      ub = RID_EDI; /* Can't be a register clobbered by RDTSC */
+      emit_rmro(as, XO_MOV, ub|REX_64, RID_ESP, sizeof(intptr_t) * 4);
+    }
+  } else {
+    emit_rr(as, XO_MOV, RID_BASE|REX_64, RID_ESI);
+    if (!checkptr32(eventbuff)) {
+      ub = RID_EDI; /* Can't be a register clobbered by RDTSC */
+    }
+  }
+
+  writemarker(as, rbuff, rend, ub, id, flags);
+
+  if (flags & MARKERFLAG_TRACE_SAVEREGS) {
+    /* Spill the registers we need since none are free */
+    emit_rmro(as, XO_MOVto, RID_EDX|REX_64, RID_ESP, sizeof(intptr_t) * 2);
+    if (needts) {
+      emit_rmro(as, XO_MOVto, RID_EAX|REX_64, RID_ESP, sizeof(intptr_t) * 3);
+    }
+    if (ub != RID_NONE) {
+      emit_rmro(as, XO_MOVto, ub|REX_64, RID_ESP, sizeof(intptr_t) * 4);
+    }
+    /* Store ESP in the stack so we can restore it without modifying EFLAGS */
+    emit_rmro(as, XO_MOVto, RID_ECX|REX_64, RID_ESP, 0);
+    emit_addptr(as, RID_ECX|REX_64, stackspace);
+    emit_rr(as, XO_MOV, RID_ECX|REX_64, RID_ESP);
+
+    emit_rmro(as, XO_MOVto, RID_ECX|REX_64, RID_ESP, sizeof(intptr_t) * 1);
+    emit_addptr(as, RID_ESP|REX_64, -stackspace);
+  } else {
+    emit_rr(as, XO_MOV, RID_ESI|REX_64, RID_BASE);
+  }
+  checkmclim(as);
+}
+
 static void emit_marker(ASMState *as, uint32_t id, int flags)
 {
   char* eventbuff = (char *)J2G(as->J)->vmevent_data;

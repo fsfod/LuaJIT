@@ -83,6 +83,13 @@ typedef enum JITLogMode {
   ** recording a trace.
   */
   JITLogMode_VerboseTraceLog = 0x8,
+  /* Do a full trace flush when the JITLog is shutdown */
+  JITLogMode_FlushOnShutdown = 0x10,
+  /*
+  ** Enable automatically emitting markers in to the JITLog each time a compiled trace starts
+  ** executing or returns to the interpreter. The marker includes a timestamp
+  */
+  JITLogMode_TraceMarkers   = 0x20,
 } JITLogMode;
 
 LUA_API JITLogUserContext* jitlog_start(lua_State *L);

@@ -1915,6 +1915,9 @@ static void asm_head_root(ASMState *as)
 {
   int32_t spadj;
   asm_head_root_base(as);
+  if (as->flags & JIT_F_TRACE_MARKERS) {
+    emit_tracemarker(as, as->J->cur.traceno, MARKERFLAG_ISSTART);
+  }
   emit_setvmstate(as, (int32_t)as->T->traceno);
   spadj = asm_stack_adjust(as);
   as->T->spadjust = (uint16_t)spadj;
@@ -1941,6 +1944,10 @@ static void asm_head_side(ASMState *as)
   int pass2 = 0;
   int pass3 = 0;
   IRRef i;
+
+  if (as->flags & JIT_F_TRACE_MARKERS) {
+    emit_tracemarker(as, as->J->cur.traceno, MARKERFLAG_ISSTART|MARKERFLAG_TRACE_SAVEREGS);
+  }
 
   if (as->snapno && as->topslot > as->parent->topslot) {
     /* Force snap #0 alloc to prevent register overwrite in stack check. */
@@ -2120,6 +2127,10 @@ static void asm_tail_link(ASMState *as)
   SnapShot *snap = &as->T->snap[snapno];
   int gotframe = 0;
   BCReg baseslot = asm_baseslot(as, snap, &gotframe);
+
+  if ((as->flags & JIT_F_TRACE_MARKERS) && as->T->link != 0) {
+    emit_tracemarker(as, as->J->cur.traceno, MARKERFLAG_TRACE_SAVEREGS);
+  }
 
   as->topslot = snap->topslot;
   checkmclim(as);
