@@ -668,6 +668,7 @@ typedef struct global_State {
   uint32_t protocount;
   luaJIT_vmevent_callback vmevent_cb; /* User set VM event callback. */
   void *vmevent_data;                 /* VM event callback data. */
+  void *jitlog_buff; /* JITLog event UserBuf pointer if non null interpreter writes called function events to it */
 } global_State;
 
 #define mainthread(g)	(&gcref(g->mainthref)->th)

@@ -27,6 +27,7 @@
 #include "lj_ccall.h"
 #endif
 #include "luajit.h"
+#include "lj_usrbuf.h"
 
 #if defined(_WIN32)
 #include <fcntl.h>
