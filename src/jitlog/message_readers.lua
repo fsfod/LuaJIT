@@ -382,6 +382,7 @@ function readers:obj_proto(msg)
   local chunk = msg.chunkname
   local proto = {
     owner = self,
+    id = msg.id,
     chunk = chunk, 
     firstline = msg.firstline, 
     numline = msg.numline,

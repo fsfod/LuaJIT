@@ -387,6 +387,7 @@ typedef struct GCproto {
   uint8_t sizeuv;	/* Number of upvalues. */
   uint8_t flags;	/* Miscellaneous flags (see below). */
   uint16_t trace;	/* Anchor for chain of root traces. */
+  uint32_t id;
   /* ------ The following fields are for debugging/tracebacks only ------ */
   GCRef chunkname;	/* Name of the chunk this function was defined in. */
   BCLine firstline;	/* First line of the function definition. */
@@ -664,6 +665,7 @@ typedef struct global_State {
   lua_ObjAlloc_cb objalloc_cb; /* Callback for allocation of GC object*/
   void* objallocd;             /* GC object callback data */
 
+  uint32_t protocount;
   luaJIT_vmevent_callback vmevent_cb; /* User set VM event callback. */
   void *vmevent_data;                 /* VM event callback data. */
 } global_State;

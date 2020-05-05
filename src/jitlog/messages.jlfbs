@@ -222,6 +222,7 @@ message obj_proto{
   varnames : stringlist (prepacked)
   varinfo : [VarRecord]
   uvnames : stringlist (prepacked)
+  id : uint32
 
   structcopy = {
     fields = {
@@ -235,6 +236,7 @@ message obj_proto{
       "framesize",
       uv_count = "sizeuv",
       "flags",
+	  "id",
 	},
 	arg = {
 	  name = "pt",
