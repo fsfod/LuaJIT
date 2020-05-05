@@ -81,6 +81,7 @@ typedef struct jitlog_State {
   IRRef last_nins;
   IRIns last_ins;
   uint16_t last_snap;
+  char isbuffov_exit; 
 } jitlog_State;
 
 
@@ -996,10 +997,26 @@ static void jitlog_tracebc(jitlog_State *context)
 static const uint32_t large_traceid = 1 << 14;
 static const uint32_t large_exitnum = 1 << 9;
 
+int lj_isjitlog_exit(lua_State *L) 
+{
+  jitlog_State *context = (jitlog_State *)(G(L)->vmevent_data);
+  if (!context) {
+    return 0;
+  }
+  return context->isbuffov_exit;
+}
+
 static void jitlog_exit(jitlog_State *context, lua_State* L, VMEventData_TExit *exitState)
 {
   jit_State *J = G2J(context->g);
   context->traceexit = J->parent | J->exitno;
+  /* Did our usrbuff reach its redline while in a trace causing a trace exit */
+  if (ubufleft(&context->ub) <= 128) {
+    context->isbuffov_exit = 1;
+    ubuf_more(&context->ub, 128);
+  } else {
+    context->isbuffov_exit = 0;
+  }
 
   if (exitState) {
     context->traceexit = (J->parent << 16) | J->exitno;

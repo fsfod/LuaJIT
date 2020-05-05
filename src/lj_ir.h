@@ -146,6 +146,7 @@
   _(CALLS,	S , ref, lit) \
   _(CALLXS,	S , ref, ref) \
   _(CARG,	N , ref, ref) \
+  _(JLMARK,	S , ref, lit) \
   \
   /* End of list. */
 
@@ -269,6 +270,27 @@ IRFLDEF(FLENUM)
 #define IRTOSTR_INT		0	/* Convert integer to string. */
 #define IRTOSTR_NUM		1	/* Convert number to string. */
 #define IRTOSTR_CHAR		2	/* Convert char value to string. */
+
+enum MarkerKind {
+  MARKERKIND_NORMAL,
+  MARKERKIND_SECTION,
+  MARKERKIND_TRACE,
+};
+
+#define marker_kind(flags) (((flags) & MARKERFLAG_KIND) >> MARKERFLAG_KIND_SHIFT)
+
+typedef enum MarkerFlags {
+  MARKERFLAG_KIND_SHIFT = 16,
+  MARKERFLAG_KIND    = 3 << MARKERFLAG_KIND_SHIFT,
+  MARKERFLAG_KIND_MARKER  = MARKERKIND_NORMAL  << MARKERFLAG_KIND_SHIFT,
+  MARKERFLAG_KIND_SECTION = MARKERKIND_SECTION << MARKERFLAG_KIND_SHIFT,
+  MARKERFLAG_KIND_TRACE   = MARKERKIND_TRACE   << MARKERFLAG_KIND_SHIFT,
+
+  MARKERFLAG_ISSTART = 1 << 20,
+  MARKERFLAG_TIMESTAMP = 1 << 21,
+  MARKERFLAG_DYNID = 1 << 28,
+  MARKERFLAG_TRACE_SAVEREGS = 1 << 31,
+} MarkerFlags;
 
 /* -- IR operands --------------------------------------------------------- */
 

@@ -2,6 +2,7 @@
 ** x86/x64 IR assembler (SSA IR -> machine code).
 ** Copyright (C) 2005-2022 Mike Pall. See Copyright Notice in luajit.h
 */
+#include "lj_usrbuf.h"
 
 /* -- Guard handling ------------------------------------------------------ */
 
@@ -2667,6 +2668,145 @@ static void asm_prof(ASMState *as, IRIns *ir)
   asm_guardcc(as, CC_NE);
   emit_i8(as, HOOK_PROFILE);
   emit_rma(as, XO_GROUP3b, XOg_TEST, &J2G(as->J)->hookmask);
+}
+
+
+
+static void load_ubufptr(ASMState *as, Reg ub, Reg dest, void *buffptr, int offset)
+{
+  if (ub != RID_NONE) {
+    emit_rmro(as, XO_MOV, dest|REX_64, ub, offset);
+  } else {
+    emit_rma(as, XO_MOV, dest|REX_64, ((char *)buffptr) + offset);
+  }
+}
+
+const int jl_minbuffspace = 127;
+
+// The value of these is hard coded in the dasc file because the header is not built yet
+LJ_STATIC_ASSERT(MSGTYPE_idmarker4b == 1);
+LJ_STATIC_ASSERT(MSGTYPE_idmarker == 2);
+
+static void writemarker(ASMState *as, Reg rbuff, Reg rend, Reg ub, uint32_t id, int flags)
+{
+  char* eventbuff = (char *)J2G(as->J)->vmevent_data;
+  int msgtype = 0, needts = flags & MARKERFLAG_TIMESTAMP, msgsize;
+  int32_t header = ((flags & 0xffff) << 8);
+  int kind = marker_kind(flags);
+  int idshift = 8;
+
+  if (kind == MARKERKIND_SECTION || kind == MARKERKIND_TRACE) {
+    msgtype = MSGTYPE_perf_section;
+    idshift = 11;
+    msgsize = sizeof(MSG_perf_section);
+  } else if (needts) {
+    msgtype = MSGTYPE_idmarker;
+    msgsize = sizeof(MSG_idmarker);
+    idshift = 16;
+  } else {
+    msgtype = MSGTYPE_idmarker4b;
+    msgsize = 4;
+    idshift = 16;
+  }
+  header |= msgtype;
+
+  /* Check buffer space left */
+  emit_gmrmi(as, XG_ARITHi(XOg_CMP), rend | REX_64, jl_minbuffspace);
+  emit_rr(as, XO_ARITH(XOg_SUB), rend | REX_64, rbuff);
+
+  /* Load the buffer end */
+  load_ubufptr(as, ub, rend, eventbuff, offsetof(UserBuf, e));
+  checkmclim(as);
+
+  /*  Store the new buffer position pointer */
+  if (ub != RID_NONE) {
+    emit_rmro(as, XO_MOVto, rbuff|REX_64, ub, offsetof(UserBuf, p));
+  } else {
+    emit_rma(as, XO_MOVto, rbuff|REX_64, ((char *)eventbuff) + offsetof(UserBuf, p));
+  }
+  emit_addptr(as, rbuff|REX_64, msgsize);
+
+  if (MARKERFLAG_DYNID & flags) {
+    emit_rmro(as, XO_MOVto, rend, rbuff, 0);
+    /* Create combined message header and id */
+    emit_gri(as, XG_ARITHi(XOg_OR), rend, header);
+    emit_shifti(as, XOg_SHL, rend, idshift);
+    emit_rr(as, XO_MOV, rend, (Reg)id);
+  } else {
+    /*  Store the msg header to buffer */
+    emit_movmroi(as, rbuff|REX_64, 0, header | (id << idshift));
+  }
+  checkmclim(as);
+
+  if (needts) { 
+    /* Store TSC value */
+    emit_rmro(as, XO_MOVto, RID_EDX|REX_64, rbuff, 4);
+    /*  Load buffer position pointer */
+    load_ubufptr(as, ub, rbuff, eventbuff, offsetof(UserBuf, p));
+
+    emit_rr(as, XO_ARITH(XOg_OR), RID_EDX|REX_64, RID_EAX);
+    emit_shifti(as, XOg_SHL|REX_64, RID_EDX, 32);
+    /* Write a time stamp first so we can reuse the registers it used */
+    ((uint16_t*)(as->mcp))[-1] = XI_RDTSC;
+    as->mcp -= 2;
+  } else {
+    /*  Load buffer position pointer */
+    load_ubufptr(as, ub, rbuff, eventbuff, offsetof(UserBuf, p));
+  }
+#if LJ_64
+  if (ub != RID_NONE) {
+    emit_loadu64(as, ub, (uintptr_t)(eventbuff));
+  }
+#else
+  lj_assertA(ub == RID_NONE);
+#endif
+  checkmclim(as);
+}
+
+static void emit_marker(ASMState *as, uint32_t id, int flags)
+{
+  char* eventbuff = (char *)J2G(as->J)->vmevent_data;
+  Reg rbuff, rend, ub = RID_NONE;
+  int needts = marker_kind(flags) == MARKERKIND_SECTION;
+  RegSet allow = RSET_GPR, tscregs = RID2RSET(RID_EAX)|RID2RSET(RID_EDX);
+
+  /* Don't evict the id register when getting scratch regs */
+  if ((flags & MARKERFLAG_DYNID) && ra_hasreg(IR(id)->r)) {
+    rset_clear(allow, IR(id)->r);
+  }
+
+  if (needts) {
+    rbuff = RID_EAX;
+    rend = RID_EDX;
+    allow &= ~tscregs;
+    ra_evictset(as, tscregs);
+  } 
+  /*
+  ** If we can't fit the buffer pointer in a 32bit immediate of a instruction
+  ** reserve an extra register to load it in to.
+  */
+  if (!checkptr32(eventbuff)) {
+    ub = ra_scratch(as, rset_exclude(allow, RID_EBP));
+    rset_clear(allow, ub);
+  }
+
+  if (!needts) {
+    rbuff = ra_scratch(as, allow);
+    rset_clear(allow, rbuff);
+    rend = ra_scratch(as, rset_exclude(allow, RID_EBP));
+    rset_clear(allow, rend);
+  }
+
+  if (flags & MARKERFLAG_DYNID) {
+    Reg rid = ra_alloc1(as, id, allow);
+    lj_assertA(!needts || !rset_test(tscregs, rid), "Bad JITLog marker timestamp register");
+    lj_assertA(rid != rbuff && rid != rend, "JITLog buffer registers assigned the same register");
+    id = rid;
+  }
+  
+  asm_guardcc(as, CC_LE);
+  writemarker(as, rbuff, rend, ub, id, flags);
+  checkmclim(as);
 }
 
 /* -- Stack handling ------------------------------------------------------ */

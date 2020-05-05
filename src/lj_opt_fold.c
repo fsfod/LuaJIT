@@ -2452,6 +2452,7 @@ LJFOLD(TNEW any any)
 LJFOLD(TDUP any)
 LJFOLD(CNEW any any)
 LJFOLD(XSNEW any any)
+LJFOLD(JLMARK any any)
 LJFOLDX(lj_ir_emit)
 
 /* ------------------------------------------------------------------------ */

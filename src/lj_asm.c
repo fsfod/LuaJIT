@@ -29,6 +29,7 @@
 #include "lj_dispatch.h"
 #include "lj_vm.h"
 #include "lj_target.h"
+#include "lj_jitlog_def.h"
 
 #ifdef LUA_USE_ASSERT
 #include <stdio.h>
@@ -1401,6 +1402,47 @@ static void asm_call(ASMState *as, IRIns *ir)
   asm_gencall(as, ci, args);
 }
 
+#define JITED_BIT 1
+#define SECTION_START_BIT 4
+
+static void emit_marker(ASMState *as, uint32_t id, int flags);
+
+static void asm_jlog_marker(ASMState *as, IRIns *ir)
+{
+  IRIns* ref = IR(ir->op1);
+  int userflags = ir->op2 & 127;
+  int flags = ((ir->op2 & 0xff00) << 8);
+  uint32_t id;
+  lj_assertA(ir->op2 < REF_BIAS, "Literals must be smaller than REF_BIAS for marker operand");
+
+  if (ir->op1 == REF_NIL) {
+    /* The id embedded in the instruction as the literal */
+    id = ir->op2;
+    userflags = 0;
+    flags = 0;
+  } else if (irt_isinteger(ref->t)) {
+    if (irref_isk(ir->op1)) {
+      id = ref->i & 0xffff;
+    } else {
+      id = ir->op1;
+      flags |= MARKERFLAG_DYNID;
+    }
+  } else {
+    lj_assertA(0, "Unknown jitlog marker type");
+    lj_trace_err(as->J, LJ_TRERR_NYIIR);
+  }
+  flags |= (userflags << 1) | JITED_BIT;
+
+  if (marker_kind(flags) == MARKERKIND_SECTION) {
+    flags |= MARKERFLAG_TIMESTAMP;
+    if (flags & MARKERFLAG_ISSTART) {
+      flags |= SECTION_START_BIT;
+    }
+  }
+
+  emit_marker(as, id, flags);
+}
+
 /* -- PHI and loop handling ----------------------------------------------- */
 
 /* Break a PHI cycle by renaming to a free register (evict if needed). */
@@ -1747,6 +1789,7 @@ static void asm_ir(ASMState *as, IRIns *ir)
   case IR_HIOP: asm_hiop(as, ir); break;
   case IR_GCSTEP: asm_gcstep(as, ir); break;
   case IR_PROF: asm_prof(as, ir); break;
+  case IR_JLMARK: asm_jlog_marker(as, ir); break;
 
   /* Guarded assertions. */
   case IR_LT: case IR_GE: case IR_LE: case IR_GT:

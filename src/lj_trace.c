@@ -882,6 +882,8 @@ static TraceNo trace_exit_find(jit_State *J, MCode *pc)
 }
 #endif
 
+int lj_isjitlog_exit(lua_State *L);
+
 /* A trace exited. Restore interpreter state. */
 int LJ_FASTCALL lj_trace_exit(jit_State *J, void *exptr)
 {
@@ -956,7 +958,7 @@ int LJ_FASTCALL lj_trace_exit(jit_State *J, void *exptr)
   } else if (G(L)->gc.state == GCSatomic || G(L)->gc.state == GCSfinalize) {
     if (!(G(L)->hookmask & HOOK_GC))
       lj_gc_step(L);  /* Exited because of GC: drive GC forward. */
-  } else {
+  } else if(!lj_isjitlog_exit(L)){
     trace_hotside(J, pc);
   }
   if (bc_op(*pc) == BC_JLOOP) {
