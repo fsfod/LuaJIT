@@ -195,6 +195,50 @@ function generator:write_structlist(list, name, getters, names)
   self:writef("lib.%s = %s\n", name, name)
 end
 
+function generator:write_vtables()
+  local typedef_lists = {self.msglist}
+
+  self:write("local vtables = {\n")
+
+  for _, msgdef in ipairs(self.msglist) do
+    self:write_vtable(msgdef, "message")
+  end
+
+  self:write("};\n")
+  self:write("lib.vtables = vtables\n\n")
+
+  self:writeline("local vt_types = {")
+
+  for _, list in ipairs(typedef_lists) do
+    for _, def in ipairs(list) do
+      self:write_fieldtypes(def)
+    end
+  end
+
+  self:writeline("};")
+  self:write("lib.vt_types = vt_types\n\n")
+
+  self:write("local vtable_names = {\n")
+
+  for _, list in ipairs(typedef_lists) do
+    for _, def in ipairs(list) do
+      self:writef("  [\"%s\"] = {%s},\n", def.name, util.concatf(def.vtable_names, "\"%s\", "))
+    end
+  end
+
+  self:write("};\n")
+  self:write("lib.vtable_names = vtable_names\n")
+
+  self:write("local typeids = util.make_enum({\n")
+  for _, list in ipairs(typedef_lists) do
+    for _, def in ipairs(list) do
+      self:writef('"%s",\n', def.name)
+    end
+  end
+  self:writef("}, %d)\n", self.user_fbstart)
+  self:writeline("lib.typeids = typeids")
+end
+
 function generator:writefile(options)
   self:write([=[
 local util = require("jitlog.util")
@@ -217,6 +261,7 @@ local function nop() end
 ]=])
   self:write_enum("MsgType", self.sorted_msgnames)
   self:write_msgsizes(false)
+  self:write_vtables()
 
   if GC64 then
     self:write([[
@@ -271,6 +316,14 @@ ffi.cdef("typedef uint32_t GCRef, MRef, GCSize;")]])
       self:writetemplate("msg_metatable", values)
     end
   end
+
+  self:write(buildtemplate([[
+  lib.typeid_info = {
+    userid_start = {{userid_start}},
+  }
+]], {
+    userid_start = self.user_fbstart,
+  }))
 
   self:write([[
   function lib.gen_msgparsers()

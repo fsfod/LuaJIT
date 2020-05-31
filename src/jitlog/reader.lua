@@ -1,9 +1,11 @@
 local ffi = require"ffi"
 local util = require("jitlog.util")
+local flatbuffers = require("jitlog.flatbuffers")
 local message_readers = require("jitlog.message_readers")
 local format = string.format
 local tinsert = table.insert
 local band, rshift = bit.band, bit.rshift
+local FBVTable = ffi.typeof("FBVTable*")
 require("table.new")
 
 local defaults = {
@@ -129,6 +131,41 @@ ffi.cdef[[
   } JITLogHeader;
 ]]
 
+function logreader:create_fbreader(name, buff, limit)
+  local logdef = self.logdef
+  if not logdef.vt_types[name] then
+    error("Log defintion does not contain type "..name)
+  end
+  if not self.vtablelookup[name] then
+    error("Log is missing vtable for type "..name)
+  end
+  local fb_reader = flatbuffers.createreader(logdef.vt_types[name], logdef.vtable_names[name], logdef.typeid_info)
+  local fb = fb_reader(buff, limit, self.vtablelookup[name])
+  fb.vtable:validate(limit, false, logdef.vt_types[name])
+  return fb
+end
+
+function logreader:create_type(typeid)
+  local logdef = self.logdef
+
+  local name = logdef.typeids.names[typeid]
+  if not name then
+    error("create_type: No type found with typeid "..typeid)
+  end
+
+  local file_vtable = self.vtablelookup[name]
+  if not file_vtable then
+    error("create_type: No vtable found for type "..name)
+  end
+
+  local vtable = logdef.vtables[name]
+
+  if file_vtable:equals(vtable) then
+    return logdef.type_list[typeid]
+  end
+
+end
+
 function logreader:readheader(buff, buffsize, info)
   local headerstart = ffi.cast("JITLogHeader*", buff)
 
@@ -153,7 +190,10 @@ function logreader:readheader(buff, buffsize, info)
   local logdef = self.logdef
   local MsgType = logdef.MsgType
 
-  local header = ffi.cast(ffi.typeof("$ *", logdef.msgtypes.header), buff)
+  local header_reader = flatbuffers.createreader(logdef.vt_types.header, logdef.vtable_names.header)
+  local header = header_reader(buff+8, headersize)
+  header.vtable:validate(headersize, false, logdef.vt_types.header)
+  info.flatbuffer = header
 
   if header.headersize > headersize then
     return false, "bad fixed header size"
@@ -205,8 +245,105 @@ function logreader:readheader(buff, buffsize, info)
   if msgtype_count ~= MsgType.MAX then
     self:log_msg("header", "Warning: Message type count differs from known types")
   end
-  
+
+  info.vtables = self:read_array("uint16_t", header:get_vtables())
+  info.vtablelookup = self:parse_vtables(info, info.vtables, file_typenames, logdef.vtables, logdef.vtable_names)
+
   return true
+end
+
+function logreader:parse_vtables(header, vtables, typenames, our_vtables, vt_fieldnames)
+  if vtables.length < 2 then
+    error("header vtable blob is too small")
+  end
+
+  local defvts = our_vtables
+
+  local vtablelookup = {}
+  local types = setmetatable({}, {
+    __index = function(t, index)
+      local result = self:create_type(index)
+      rawset(t, index, result)
+      return result
+    end
+  })
+  self.types = types
+
+  local logdef = self.logdef
+  local msgid_limit = #header.msgsizes
+
+  local i = 0
+  local index, limit = 0, vtables.length-1
+  while index < limit do
+    local name = typenames[i+1]
+    local ismsg = i < msgid_limit
+    local bitfields = (ismsg and header.msgsizes[i+1] > 0)
+
+    if index+2 > limit then
+      error("vtable "..name.." extends out past the vtable header blob")
+    end
+
+    local vtable = ffi.cast("FBVTable*", vtables.array + index)
+    local valid, errmsg = vtable:validate((limit+1 - index) * 2, bitfields, logdef.vt_types[name])
+    if not valid then
+      error(format("%s for msg %s", errmsg, name))
+    end
+
+    local ours = FBVTable(defvts[name])
+
+    -- Process this vtable if its type we know about
+    if ours then
+      local limit = vtable.count
+      local equal = true
+      if vtable.count > ours.count then
+        equal = false
+        limit = ours.count
+        self:log_msg("header", "Warning: vtable for %s had %d extra field entries expected %d", name, vtable.count- ours.count, ours.count)
+      elseif vtable.count < ours.count then
+        equal = false
+        self:log_msg("header", "Warning: vtable size of %s was smaller than expected %d < %d, fields will be missing", name, ours.count, vtable.count)
+      end
+
+      if vtable.objsize ~= ours.objsize then
+        equal = false
+        self:log_msg("header", "Warning: vtable object size of %s was smaller than expected %d < %d, fields will be missing", name, vtable.objsize, ours.objsize)
+      end
+
+      local names = vt_fieldnames[name]
+      local firstdiff = -1
+
+      for j = 0, vtable.count-1 do
+        local offset = vtable.offsets[j]
+        local our_offset = vtable.offsets[j]
+
+        -- Record the first non matching field
+        if offset ~= our_offset and firstdiff == -1 then
+          firstdiff = j
+        end
+
+        -- Check for not present fields in the vtable
+        if our_offset ~= 0 and offset == 0 then
+          self:log_msg("header", "Warning: field %s not present in vtable for %s", names[j], name)
+        elseif offset == 0 then
+        else
+        end
+      end
+
+      -- If the file's vtables exactly matches ours just use the pre-generated ctype
+      if equal and firstdiff == -1 then
+        if ismsg then
+
+        end
+      end
+    end
+
+    vtablelookup[name] = vtable
+
+    index = index + vtable.size/2
+    i = i + 1
+  end
+
+  return vtablelookup
 end
 
 function logreader:format_time(time, isseconds)
@@ -226,6 +363,15 @@ end
 
 function logreader:read_array(eletype, ptr, length)
   return (create_array(eletype, length, ptr))
+end
+
+-- Convert raw a flatbuffer in to a Lua table using a registered flatbuffers reader
+function logreader:readfb(name, fb, ...)
+  local fbreader = self.fbreaders[name]
+  if not fbreader then
+    error("Missing Flatbuffers reader for "..name)
+  end
+  return fbreader(self, fb, ...)
 end
   
 function logreader:parsefile(path)
@@ -369,6 +515,9 @@ function logreader:processheader(header)
       assert(size < 255 and size >= 4)
     end
   end
+
+  self.vtablelookup = header.vtablelookup
+  self:parseheader(header.flatbuffer)
 
   local msgparsers = logdef.gen_msgparsers(header.vtablelookup, header.msgnames)
 
@@ -516,6 +665,12 @@ function lib.makereader(options)
     assert(type(name) == "string")
     t[name] = value
   end
+
+  local fbreaders = {}
+  for name, value in pairs(msgreaders.fbreaders) do
+    fbreaders[name] = value
+  end
+  t.fbreaders = fbreaders
 
   if options.mixins then
     for _, mixin in ipairs(options.mixins) do

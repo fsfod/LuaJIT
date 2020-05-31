@@ -117,9 +117,18 @@ static void write_header(jitlog_State *context)
     .os = LJ_OS_NAME,
     .ggaddress = (uintptr_t)G2GG(g),
     .timerfreq = lj_perf_ticksfreq,
+    .vtables_length = sizeof(fb_vtables)/sizeof(short),
+    .vtables = fb_vtables,
+    .vtable_offsets = (unsigned int *)fb_vtoffsets,
+    .vtable_offsets_length = sizeof(fb_vtoffsets)/sizeof(int),
   };
   log_header(&context->ub, &args);
 
+  MSG_header* header = ((MSG_header*)ubufB(&context->ub));
+  // Manually build the vtable offset for the header since it can't be automatically generated. 
+  // It is always the first vtable in the shared pre-generated vtable list(fb_vtables).
+  ptrdiff_t diff = offsetof(MSG_header, vtables_offset) - offsetof(MSG_header, vtable);
+  header->vtable = (int32_t)-(header->vtables_offset + diff + 4);
 }
 
 LUA_API int jitlog_isrunning(lua_State *L)

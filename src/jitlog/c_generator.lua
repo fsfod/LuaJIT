@@ -142,6 +142,8 @@ function generator:write_header_logwriters(options)
 #include "lj_jitlog_def.h"
 #include "lj_usrbuf.h"
 
+extern const int fb_vtoffsets[];
+
 ]])
   for _, def in ipairs(self.msglist) do
     self:write_logfunc(def)
@@ -149,6 +151,29 @@ function generator:write_header_logwriters(options)
 
   self:write("#endif\n")
   self.outputfile:close()
+end
+
+function generator:write_flatbuffer_vtable()
+  self:write("const unsigned short fb_vtables[] = {\n")
+
+  local vtoffset = 0
+  local vtstarts = {}
+  local fbtype = {}
+
+  for _, name in ipairs(self.sorted_msgnames) do
+    local vtsize = self:write_vtable(self.msglookup[name], "message")
+    vtstarts[#vtstarts + 1] = vtoffset
+    vtoffset = vtoffset + vtsize
+    fbtype[#fbtype + 1] = name
+  end
+
+  self:write("};\n\n")
+
+  self:write_enum("FBType", fbtype, "FBType")
+
+  self:write("const int fb_vtoffsets[] = {\n")
+  self:write(table.concat(vtstarts, ",\n  "))
+  self:write("\n};\n")
 end
 
 function generator:write_headers_def(options)
@@ -172,6 +197,7 @@ LUA_API const int32_t jitlog_msgsizes[];
   self:write_namelist("jitlog_typenames", self.sorted_typenames)
   self:write_msgsizes()
   self:write_msgsizes(true)
+  self:write_flatbuffer_vtable()
 
   self:write("#endif\n")
   self.outputfile:close()

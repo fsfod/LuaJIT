@@ -179,6 +179,91 @@ it("field offsets", function()
   end
 end)
 
+it("message flatbuffers", function()
+  local msginfo = buildmsginfo([[
+  message header{
+    version : uint32
+    os : string
+  }
+]])
+
+  assert(#msginfo.msglist == 1)
+  local header = msginfo.msglist[1]
+  local fields = header.fields
+  assert(#header.fields == 5, #header.fields)
+
+  assert(not fields[1].vtslot)
+  assert(not fields[2].vtslot)
+  assert(not fields[3].vtslot)
+  assert(fields[4].vtslot == 0, fields[4].vtslot)
+  assert(fields[5].vtslot == 1)
+
+  local headervt = header.vtable
+  assert(#headervt == 4)
+  assert(headervt[1] == 4*2)
+  assert(headervt[2] == 12, headervt[2])
+
+  -- Fixed fields that are always present: header, size. The vtables treat the vtable offset field as part of the struct
+  local fields_start = 2 * 4
+  assert(headervt[3] == 4, headervt[3])
+  assert(fields[4].offset-fields_start == 4)
+  assert(headervt[4] == 8, headervt[4])
+  assert(fields[5].offset-fields_start == 8)
+end)
+
+it("message flatbuffers fixedsize", function()
+  local msginfo = buildmsginfo([[
+
+  message header{
+    version : uint32
+    os : string
+  }
+
+  message obj{
+    address : GCRef
+    data : uint64
+    data2 : uint32
+  }
+]])
+
+  assert(#msginfo.msglist == 2)
+
+  local obj = msginfo.msglist[2]
+  assert(obj.name == "obj")
+  assert(#obj.fields == 6, #obj.fields)
+
+  local fields = obj.fields
+  assert(not fields[1].vtslot)
+  assert(fields[4].vtslot == 0, fields[2].vtslot)
+  assert(fields[5].vtslot == 1, fields[3].vtslot)
+  assert(fields[6].vtslot == 2, fields[4].vtslot)
+
+  local objvt = obj.vtable
+  assert(#objvt == 5)
+  -- Size of the vtable is the first entry. Each vtable slot is 16 bits
+  assert(objvt[1] == 5*2)
+  -- Second vtable slot is always the size of the fixed part of a flatbuffers object
+  assert(objvt[2] == (GC64 and 24 or 20), objvt[2])
+
+  assert(objvt[3] == 4, objvt[3])
+  assert(fields[2].offset == 4)
+
+  -- GCRef size grows to 8 bytes on GC64
+  if GC64 then
+    assert(objvt[4] == 12, objvt[4])
+    assert(fields[3].offset == 12)
+
+    assert(objvt[5] == 20, objvt[5])
+    assert(fields[5].offset == 24)
+  else
+    assert(objvt[4] == 8, objvt[4])
+    assert(fields[4].offset == 12)
+
+    assert(objvt[5] == 16, objvt[5])
+    assert(fields[5].offset == 16, fields[5].offset )
+  end
+end)
+
 local function checkheader(header)
   assert(header)
   assert(header.os == jit.os)

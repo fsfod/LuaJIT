@@ -9,25 +9,25 @@ local emptytbl = {}
 local fbtype = flatbuffers.fbtype
 
 local builtin_types = {
-  bool   = {kind = "bool", size = 1, bitsize = 1, bool = true, c = "char", argtype = "int"},
+  bool   = {kind = "bool", size = 1, bitsize = 1, bool = true, c = "char", argtype = "int", typeid = fbtype.Bool},
 
-  int8   = {kind = "number", size = 1, signed = true,  c = "int8_t",   argtype = "int32_t"},
-  uint8  = {kind = "number", size = 1, signed = false, c = "uint8_t",  argtype = "uint32_t"},
-  int16  = {kind = "number", size = 2, signed = true,  c = "int16_t",  argtype = "int32_t"},
-  uint16 = {kind = "number", size = 2, signed = false, c = "uint16_t", argtype = "uint32_t"},
-  int32  = {kind = "number", size = 4, signed = true,  c = "int32_t",  argtype = "int32_t"},
-  uint32 = {kind = "number", size = 4, signed = false, c = "uint32_t", argtype = "uint32_t"},
-  int64  = {kind = "number", size = 8, signed = true,  c = "int64_t",  argtype = "int64_t"},
-  uint64 = {kind = "number", size = 8, signed = false, c = "uint64_t", argtype = "uint64_t"},
+  int8   = {kind = "number", size = 1, signed = true,  c = "int8_t",   argtype = "int32_t",  typeid = fbtype.Byte},
+  uint8  = {kind = "number", size = 1, signed = false, c = "uint8_t",  argtype = "uint32_t", typeid = fbtype.UByte},
+  int16  = {kind = "number", size = 2, signed = true,  c = "int16_t",  argtype = "int32_t",  typeid = fbtype.Short},
+  uint16 = {kind = "number", size = 2, signed = false, c = "uint16_t", argtype = "uint32_t", typeid = fbtype.UShort},
+  int32  = {kind = "number", size = 4, signed = true,  c = "int32_t",  argtype = "int32_t",  typeid = fbtype.Int},
+  uint32 = {kind = "number", size = 4, signed = false, c = "uint32_t", argtype = "uint32_t", typeid = fbtype.UInt},
+  int64  = {kind = "number", size = 8, signed = true,  c = "int64_t",  argtype = "int64_t",  typeid = fbtype.Long},
+  uint64 = {kind = "number", size = 8, signed = false, c = "uint64_t", argtype = "uint64_t", typeid = fbtype.ULong},
 
-  float  = {kind = "number", size = 4, signed = false, c = "float",  argtype = "float"},
-  double = {kind = "number", size = 8, signed = false, c = "double", argtype = "double"},
+  float  = {kind = "number", size = 4, signed = false, c = "float",  argtype = "float",  typeid = fbtype.Float},
+  double = {kind = "number", size = 8, signed = false, c = "double", argtype = "double", typeid = fbtype.Double},
 
-  MSize  = {kind = "number", size = 4, signed = false, c = "uint32_t", argtype = "MSize"},
-  GCSize = {kind = "number", size = 4, signed = false, c = "GCSize", argtype = "GCSize", GC64 = true},
+  MSize  = {kind = "number", size = 4, signed = false,  c = "uint32_t", argtype = "MSize", typeid = fbtype.UInt},
+  GCSize = {kind = "number", size = 4, signed = false,  c = "GCSize", argtype = "GCSize", GC64 = true},
 
-  timestamp  = {kind = "number", size = 8, signed = false, c = "uint64_t", writer = "timestamp_highres", noarg = true},
-  smallticks = {kind = "number", size = 4, signed = false, c = "uint32_t", argtype = "uint64_t"},
+  timestamp  = {kind = "number", size = 8, c = "uint64_t", writer = "timestamp_highres", noarg = true, typeid = fbtype.ULong},
+  smallticks = {kind = "number", size = 4, c = "uint32_t", argtype = "uint64_t", typeid = fbtype.UInt},
 
   TValue     = {kind = "struct,", size = 8, c = "TValue", argtype = "TValue"},
   GCRef      = {kind = "ptr", size = 4, c = "GCRef", writer = "setref", ref = "gcptr32", ref64 = "gcptr64", argtype = "GCRef", GC64 = true},
@@ -35,14 +35,17 @@ local builtin_types = {
   GCRefPtr   = {kind = "ptr", size = 4, c = "GCRef", writer = "setref", ref = "gcptr32", ref64 = "gcptr64", ptrarg = true, argtype = "void *", GC64 = true},
   MRef       = {kind = "ptr", size = 4, c = "MRef",  writer = "setref", ref = "ptr32", ref64 = "ptr64", ptrarg = true, argtype = "void *", GC64 = true},
   -- Always gets widen to 64 bit since this is assumed not to be a gc pointer
-  ptr        = {kind = "ptr", size = 8, signed = false, c = "uint64_t", printf = "0x%llx", writer = "widenptr", ptrarg = true, argtype = "void *"},
+  ptr        = {kind = "ptr", size = 8, c = "uint64_t", writer = "widenptr", ptrarg = true, argtype = "void *", typeid = fbtype.ULong},
 
   string     = {kind = "array", vsize = true, string = true,     c = "const char*", argtype = "const char *",  element_type = "int8", element_size = 1, typeid = fbtype.String},
   stringlist = {kind = "array", vsize = true, stringlist = true, c = "const char*", writer = "stringlist", argtype = "const char * const *",  element_type = "int8", element_size = 1, typeid = fbtype.Array+1},
 }
 
+local bit_fbstart = fbtype.Array + 1
+local user_fbstart = bit_fbstart + 1
+
 for i = 1, 31 do
-  builtin_types[i..""] = {kind = "bitfield", writer = "bitfield", bitsize = i, bitfield = true, signed = false, c = "uint32_t", argtype = "uint32_t"}
+  builtin_types[i..""] = {kind = "bitfield", writer = "bitfield", bitsize = i, bitfield = true, signed = false, c = "uint32_t", argtype = "uint32_t", typeid = bit_fbstart+i}
 end
 
 local function make_arraytype(element_type)
@@ -58,6 +61,7 @@ local function make_arraytype(element_type)
     argtype = format("const %s *", ctype),
     element_type = element_type,
     element_size = element_typeinfo.size,
+    typeid = bor(lshift(element_typeinfo.typeid or 0, 16), fbtype.Vector),
   }
   builtin_types[key] = typeinfo
   builtin_types[ctype.."[]"] = typeinfo
@@ -102,6 +106,7 @@ function parser:get_arraytype(element_type)
   local ctype = element_typeinfo.c or element_type
   local typeinfo = {
     kind = "array",
+    typeid = bor(lshift(element_typeinfo.typeid or 0, 16), fbtype.Vector),
     vsize = true,
     c = ctype.."*",
     argtype = format("const %s *", ctype),
@@ -272,8 +277,16 @@ function parser:parse_msg(def, m)
     end
   end
 
-  local bitpacked = true
   add_field({name = "header", type = "uint32", noarg = true, writer = "msghdr"})
+
+  local bitpacked = false
+  if def.attributes.no_vtable then
+    m.no_vtable = true
+    bitpacked = true
+  else
+    --Add the implicit vtable offset after the message header or after the msgsize
+    add_field({name = "vtable", vtable = true, noarg = true, type = "int32", writer = "vtable"})
+  end
 
   for _, field in ipairs(def.fields) do
     local name, ftype, attributes = field.name, field.type, field.attributes or emptytbl
@@ -419,6 +432,74 @@ function parser:parse_type(def)
   end
 end
 
+local kind_vtlayout = {
+  -- Fixed size message just exclude the header
+  message   = {firstfield = 2, baseoffset = 0},
+  -- Variable sized message with vtable offset, exclude header, size, vtable
+  fbmessage = {firstfield = 4, baseoffset = -8},
+}
+
+function parser:build_vtable(def)
+  local fields = def.fields
+  local vtable_names = {}
+  local kind = def.kind
+
+  assert(fields[1].writer ~= "header" or kind == "message", fields[1].name)
+
+  local offsets = {0, 0}
+  if kind == "message" and def.vsize then
+    kind = "fbmessage"
+    offsets[2] = def.size-8
+  else
+    offsets[2] = def.size
+  end
+
+  local setup = kind_vtlayout[kind]
+  assert(setup, "Unknown object kind when building vtable layout")
+
+  local baseoffset = setup.baseoffset
+
+  if def.no_vtable then
+
+  end
+
+  for i = setup.firstfield, #fields do
+    local f = fields[i]
+
+    local offset
+    if f.offset then
+      offset = f.offset + baseoffset
+    elseif f.vlen then
+      -- Variable length fields offsets are placed at the end of the message
+      offset = f.vindex*4 + def.size
+    elseif f.bitstorage and not def.vsize  then
+      local bitfield = def.fieldlookup[f.bitstorage]
+
+      offset = bitfield.offset
+      -- we can't use offset 0 because it means the field is not present when written into the vtable
+      if offset == 0 then
+        assert(fields[2].name ~= "msgsize")
+        offset = 1
+      end
+      offset = lshift(offset, 5)
+      -- Set MSB to signify a bitfield
+      offset = bor(bor(0x8000, offset), f.bitofs)
+    end
+
+    if offset then
+      local slot = #offsets - 2
+      f.vtslot = slot
+      tinsert(offsets, offset)
+      tinsert(vtable_names, f.name)
+    end
+  end
+
+  -- Update vtable size to the number of fields that have valid offsets
+  offsets[1] = #offsets * 2
+  def.vtable_names = vtable_names
+  def.vtable = offsets
+end
+
 parser.builtin_msgorder = {
   header = 0,
 }
@@ -458,6 +539,10 @@ function parser:complete()
   self.sorted_msgnames = sortmsglist(self.msglist, self.builtin_msgorder)
   self.sorted_typenames = util.clone(self.sorted_msgnames)
 
+  for _, def in ipairs(self.msglist) do
+    self:build_vtable(def, "message")
+  end
+
   local data = util.copyfields(self, {}, copyfields)
   return data
 end
@@ -465,6 +550,7 @@ end
 local generator = {
   -- Add a empty lookup table that can overriden in derived generators
   typerename = {},
+  user_fbstart = bit_fbstart
 }
 
 function generator:write(s)
@@ -731,7 +817,10 @@ generator.custom_field_writers = {
     write.vwrite = buildtemplate(self.templates.stringlist_writer, template_args)
     -- Write after variable length fields with known sizes
     write.order = write.order + 0x100000
-  end
+  end,
+  vtable = function(self, msgdef, f, valuestr)
+    return format("(int32_t)(-fb_vtoffsets[FBType_%s]);", msgdef.name)
+  end,
 }
 
 function generator:write_logfunc(def)
@@ -1001,6 +1090,48 @@ function generator:write_msgsizes(dispatch_table)
   end
 
   self:writetemplate(template, {list = sizes, count = #self.sorted_msgnames})
+end
+
+function generator:write_vtable(msgdef)
+  self:writetemplate("vtable", {
+    name = msgdef.name,
+    offsets = util.concatf(msgdef.vtable, "0x%X, "):sub(1, -3)
+  })
+
+  return #msgdef.vtable*2
+end
+
+function generator:write_fieldtypes(msgdef)
+  local typeids = {}
+
+  for i, f in ipairs(msgdef.fields) do
+    if f.vtslot then
+      local type =  self.types[f.type]
+      local typeid = type.typeid or 0
+
+      if typeid == 0 then
+        if type.GC64 then
+          if self.GC64 then
+            typeid = fbtype.ULong
+          else
+            typeid = fbtype.UInt
+          end
+        else
+          error("Missing type id for field "..f.name.." in type "..msgdef.name)
+        end
+      end
+      if type.element_type then
+      end
+      typeids[f.vtslot+1] = typeid
+    end
+  end
+  assert(typeids[1])
+
+  self:writetemplate("vtable", {
+    name = msgdef.name,
+    offsets = util.concatf(typeids, "%d, "):sub(1, -3)
+  })
+
 end
 
 function generator:write_msgdefs()
