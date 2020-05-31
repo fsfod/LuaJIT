@@ -139,7 +139,8 @@ function logreader:create_fbreader(name, buff, limit)
   if not self.vtablelookup[name] then
     error("Log is missing vtable for type "..name)
   end
-  local fb_reader = flatbuffers.createreader(logdef.vt_types[name], logdef.vtable_names[name], logdef.typeid_info)
+  
+  local fb_reader = flatbuffers.createreader(logdef.vt_types[name], logdef.vtable_names[name], logdef.typeid_info, self.types)
   local fb = fb_reader(buff, limit, self.vtablelookup[name])
   fb.vtable:validate(limit, false, logdef.vt_types[name])
   return fb
@@ -223,6 +224,7 @@ function logreader:readheader(buff, buffsize, info)
   
   local msgtype_count = header.msgtype_count
   info.msgtype_count = msgtype_count
+  info.structtype_count = header.structtype_count
   
   local file_typenames = header:get_typenames()
   assert(#file_typenames >= msgtype_count, "Message type count didn't match message name count")
@@ -271,6 +273,8 @@ function logreader:parse_vtables(header, vtables, typenames, our_vtables, vt_fie
 
   local logdef = self.logdef
   local msgid_limit = #header.msgsizes
+  local structid_limit = msgid_limit + header.structtype_count
+  local typeids = logdef.typeids
 
   local i = 0
   local index, limit = 0, vtables.length-1
@@ -283,8 +287,9 @@ function logreader:parse_vtables(header, vtables, typenames, our_vtables, vt_fie
       error("vtable "..name.." extends out past the vtable header blob")
     end
 
+	local istruct = (not ismsg and i < structid_limit)
     local vtable = ffi.cast("FBVTable*", vtables.array + index)
-    local valid, errmsg = vtable:validate((limit+1 - index) * 2, bitfields, logdef.vt_types[name])
+    local valid, errmsg = vtable:validate((limit+1 - index) * 2, bitfields, logdef.vt_types[name], istruct)
     if not valid then
       error(format("%s for msg %s", errmsg, name))
     end
@@ -333,6 +338,8 @@ function logreader:parse_vtables(header, vtables, typenames, our_vtables, vt_fie
       if equal and firstdiff == -1 then
         if ismsg then
 
+        elseif istruct then
+          types[typeids[name] + 1] = logdef.structs[name]
         end
       end
     end
@@ -362,6 +369,10 @@ function logreader:format_time(time, isseconds)
 end
 
 function logreader:read_array(eletype, ptr, length)
+  local struct = self.logdef.structs[eletype]
+  if struct then
+    eletype = struct
+  end
   return (create_array(eletype, length, ptr))
 end
 
@@ -482,6 +493,7 @@ function logreader:processheader(header)
   self.starttime = header.starttime
   self.timerfreq = header.timerfreq
   self.msgtype_count = header.msgtype_count
+  self.structtype_count = header.structtype_count
 
   -- Make the msgtype enum for this file
   local msgtype = util.make_enum(header.msgnames)

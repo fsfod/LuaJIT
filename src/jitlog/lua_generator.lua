@@ -95,6 +95,15 @@ end
   end
 ]],
 
+  msg_vgetter_struct = [[
+  local {{name}}_ptr = ffi.typeof("$ *", structs.{{type}})
+  function {{msgname}}:get_{{name}}()
+    assert(self, "Expected a '{{msgname}}' message as first parameter")
+    local array, size = get_fbarray(self, self.{{name}}_offset, {{offset}}, {{name}}_ptr)
+    return {{body}}
+  end
+]],
+
   msg_strgetter = [[
   function {{msgname}}:get_{{name}}()
     assert(self, "Expected a '{{msgname}}' message as first parameter")
@@ -151,6 +160,7 @@ function generator:fmt_accessor_def(struct, f, voffset)
       else
         tvalues.type = '"'..self.types[f.type].c..'"'
       end
+
       -- Add the buffer element count and element size as extra return values
       body = "array, size"
     end
@@ -196,12 +206,15 @@ function generator:write_structlist(list, name, getters, names)
 end
 
 function generator:write_vtables()
-  local typedef_lists = {self.msglist}
+  local typedef_lists = {self.msglist, self.structs}
 
   self:write("local vtables = {\n")
 
   for _, msgdef in ipairs(self.msglist) do
     self:write_vtable(msgdef, "message")
+  end
+  for _, structdef in ipairs(self.structs) do
+    self:write_vtable(structdef, "struct")
   end
 
   self:write("};\n")
@@ -279,7 +292,18 @@ ffi.cdef("typedef uint32_t GCRef, MRef, GCSize;")]])
 
   self:write("\n\n")
 
+  -- Create an anonymous struct ctype for each struct that we use for element of arrays fields
   local struct_getters = {}
+  local struct_names = {}
+
+  self:write_structlist(self.structs, "structs", struct_getters, struct_names)
+
+  self:write(buildtemplate([[
+lib.type_list = {
+{{structs:  structs.%s,\n}}
+}
+]], {structs =  struct_names}))
+
   self:write_structlist(self.msglist, "messages", struct_getters)
 
   -- Add runtime validation that
@@ -317,13 +341,24 @@ ffi.cdef("typedef uint32_t GCRef, MRef, GCSize;")]])
     end
   end
 
+  local function get_typeid(value)
+    if value == nil then
+      return 0
+    end
+    return bit.rshift(value.typeid, 16)
+  end
+
   self:write(buildtemplate([[
   lib.typeid_info = {
     userid_start = {{userid_start}},
+    structs = {startid = {{struct_start}}, endid = {{struct_end}}},
   }
 ]], {
     userid_start = self.user_fbstart,
+    struct_start = get_typeid(self.structs[1]),
+    struct_end = get_typeid(self.structs[#self.structs]),
   }))
+
 
   self:write([[
   function lib.gen_msgparsers()

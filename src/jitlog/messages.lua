@@ -49,4 +49,7 @@ module.messages = {
   },
 }
 
+module.structs = {
+}
+
 return module

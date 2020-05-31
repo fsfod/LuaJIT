@@ -232,10 +232,12 @@ namespace JitLog{
   self:write_enum("MsgId", self.sorted_msgnames)
   local union = ""
 
-  for key, def in ipairs(self.msglist) do
-    self:write_struct(def)
-    if i ~= 1 then
-      union = union .. format("    [FieldOffset(0)] public Msg_%s %s;\n", def.name, def.name)
+  for i, list in ipairs({self.structs, self.msglist}) do
+    for key, def in ipairs(list) do
+      self:write_struct(def)
+      if i ~= 1 then
+        union = union .. format("    [FieldOffset(0)] public Msg_%s %s;\n", def.name, def.name)
+      end
     end
   end
 

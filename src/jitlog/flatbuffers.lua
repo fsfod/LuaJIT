@@ -178,7 +178,7 @@ function vtable:equals(other)
   return (self:offsets_match(other))
 end
 
-function vtable:validate(limit, bitfields, types)
+function vtable:validate(limit, bitfields, types, isstruct)
   if self.size < 4 or self.size > limit then
     return false, string.format("Bad vtable size %d", self.size)
   end
@@ -195,7 +195,12 @@ function vtable:validate(limit, bitfields, types)
       if bitfields and band(offset, 0x8000) ~= 0 then
         offset = rshift(band(offset, 0x7fff), 5)
       end
-      
+
+      -- We can't use 0 as a offset so all struct offsets have one added to them
+      if isstruct then
+        offset = offset-1
+      end
+
       local overflow
       if types then
         local type = band(types[i+1], 0xff)
@@ -548,8 +553,10 @@ local fbtable_with_vtable = [[
   }
 ]]
 
-function lib.createreader(field_types, names)
+function lib.createreader(field_types, names, typeid_info, types)
   local lookup = {}
+  local userid_start = typeid_info and typeid_info.userid_start
+
   for i, name in ipairs(names) do
     local typeid = band(field_types[i], 0xff)
     local slot = i-1
@@ -569,12 +576,29 @@ function lib.createreader(field_types, names)
       end
     elseif typeid == fbtypes.Vector then
       local basetype = rshift(field_types[i], 16)
-      local ctype = ffi.typeof(lib.types[basetype+1].type.."*")
+      local ctype
+      local func = read_vector
+
+      if is_scalar(basetype) then
+        ctype = ffi.typeof(lib.types[basetype+1].type.."*")
+      else
+        assert(userid_start, "Found user type with no typeid_info passed")
+
+        if basetype >= typeid_info.structs.startid and basetype <= typeid_info.structs.endid then
+          local struct = types and types[basetype]
+          if not struct then
+            error("Missing ctype for struct with typeid "..basetype)
+          end
+
+          assert(type(struct) == "cdata")
+          ctype = ffi.typeof("$ *", struct)
+        end
+      end
 
       lookup["get_"..name] = function(self)
         local offset = self.vtable:get_offset(slot)
         if offset ~= 0 then
-          return read_vector(self.fbtable, offset, self.size, ctype)
+          return func(self.fbtable, offset, self.size, ctype)
         else
           return nil, 0
         end

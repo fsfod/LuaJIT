@@ -224,6 +224,43 @@ function parser:build_recordlayout(def)
   return msgsize
 end
 
+function parser:parse_struct(def, t)
+  
+  assert(def.name, "struct definition has no name")
+  local fieldlist = {}
+  local fieldlookup = {}
+
+  assert(def.fields[1], "struct definition contains no fields")
+
+  for _, field in ipairs(def.fields) do
+    local name, ftype = field.name, field.type
+    
+    assert(name, "no name specified for field")
+    if fieldlookup[name] then
+      self:report_error("Duplicate field '%s' in struct %s", name, def.name)
+    end
+    
+    local typeinfo = self.types[ftype]
+    if not typeinfo then
+      self:report_error("No type found named %s used for field %s in struct %s", ftype, name, def.name)
+    elseif typeinfo.vsize then
+     self:report_error("Bad field type %s for field %s in struct %s uses a restricted type", ftype, name, def.name)
+    end
+    
+    local f = {name = name, type = ftype, offset = 0}
+    fieldlookup[name] = f
+    table.insert(fieldlist, f)
+  end
+
+  t.fields = fieldlist
+  t.fieldlookup = fieldlookup
+  t.size = 0
+  t.typeid = fbtype.Obj
+  self:build_recordlayout(t)
+
+  return t
+end
+
 --[[
 Field List
   noarg: Don't automatically generate an argument for the field in the generated logger function. Set for implict values like timestamp and string length
@@ -387,8 +424,12 @@ end
 
 function parser:process_schema(schema)
 
-  for _, deflist in ipairs({schema.messages}) do
+  for _, deflist in ipairs({schema.structs, schema.messages}) do
     self:create_placeholders(deflist)
+  end
+
+  for _, def in pairs(schema.structs) do
+    self:parse_type(def)
   end
 
   for _, def in pairs(schema.messages) do
@@ -427,6 +468,9 @@ function parser:parse_type(def)
     self:parse_msg(def, type)
     self.msglookup[def.name] = type
     table.insert(self.msglist, type)
+  elseif def.kind == "struct" then
+    self:parse_struct(def, type)
+    table.insert(self.structs, type)
   else
     error("Unknown type "..def.kind)
   end
@@ -437,6 +481,8 @@ local kind_vtlayout = {
   message   = {firstfield = 2, baseoffset = 0},
   -- Variable sized message with vtable offset, exclude header, size, vtable
   fbmessage = {firstfield = 4, baseoffset = -8},
+  -- Structs have no vtable offset field but we can't start there field offsets in a vtable at 0 because that means the field is missing
+  struct    = {firstfield = 1, baseoffset = 1},
 }
 
 function parser:build_vtable(def)
@@ -444,7 +490,7 @@ function parser:build_vtable(def)
   local vtable_names = {}
   local kind = def.kind
 
-  assert(fields[1].writer ~= "header" or kind == "message", fields[1].name)
+  assert(fields[1].writer ~= "header" or (kind == "struct" or kind == "message"), fields[1].name)
 
   local offsets = {0, 0}
   if kind == "message" and def.vsize then
@@ -531,6 +577,7 @@ local copyfields = {
   "sorted_typenames",
   "types",
   "GC64",
+  "structs",
 }
 
 function parser:complete()
@@ -541,6 +588,22 @@ function parser:complete()
 
   for _, def in ipairs(self.msglist) do
     self:build_vtable(def, "message")
+  end
+
+  for _, list in ipairs({self.structs}) do
+    for _, def in ipairs(list) do
+      tinsert(self.sorted_typenames, def.name)
+      self:build_vtable(def)
+    end
+  end
+
+  local count = user_fbstart-1
+  -- Give our structs a subtype typeid used by the flatbuffers reader to look up the type in a table of ctypes
+  for _, list in ipairs({self.msglist, self.struct}) do
+    for i, def in ipairs(list) do
+      def.typeid = (def.typeid or 0) + lshift(i + count, 16)
+    end
+    count = count + #list
   end
 
   local data = util.copyfields(self, {}, copyfields)
@@ -1135,6 +1198,9 @@ function generator:write_fieldtypes(msgdef)
 end
 
 function generator:write_msgdefs()
+  for _, def in ipairs(self.structs) do
+    self:write_struct(def)
+  end
   for _, def in ipairs(self.msglist) do
     self:write_struct(def)
   end
@@ -1176,7 +1242,8 @@ local api = {
     local t = {
       msglist = {},
       msglookup = {},
-      types = setmetatable({}, {__index = builtin_types})
+      types = setmetatable({}, {__index = builtin_types}),
+      structs = {},
     }
     t.data = t
     return setmetatable(t, {__index = parser})

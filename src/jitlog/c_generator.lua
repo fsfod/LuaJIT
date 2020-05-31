@@ -57,6 +57,11 @@ ubuf_setoffset_rel(ub, vtotal-{{offset}});
   vtotal += ubuf_put_strlist(ub, {{value}}, {{sizename}});
   ]],
 
+  typecount = [[
+    enum {
+      STRUCTTYPE_COUNT = {{structs}},
+    };
+  ]]
 }
 
 local format_specifers = {
@@ -167,6 +172,13 @@ function generator:write_flatbuffer_vtable()
     fbtype[#fbtype + 1] = name
   end
 
+  for _, def in ipairs(self.structs) do
+    local vtsize = self:write_vtable(def, "struct")
+    vtstarts[#vtstarts + 1] = vtoffset
+    vtoffset = vtoffset + vtsize
+    fbtype[#fbtype + 1] = def.name
+  end
+
   self:write("};\n\n")
 
   self:write_enum("FBType", fbtype, "FBType")
@@ -216,6 +228,7 @@ function generator:writefile(options)
 ]])
 
   self:write_enum("MSGTYPES", self.sorted_msgnames, "MSGTYPE")
+  self:writetemplate("typecount", { structs = #self.structs})
   self:write_msgdefs()
   
   self:write([[
