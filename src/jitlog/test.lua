@@ -138,6 +138,14 @@ it("message sizes", function()
   end
 end)
 
+it("fb table sizes", function()
+  for _, def in ipairs(msginfo_vm.tables) do
+    if not def.size or def.size <= 4 then
+      error(format("Bad struct size %d for %s fb table", def.size or "nil", def.name))
+    end
+  end
+end)
+
 it("field offsets", function()
   for _, def in ipairs(msginfo_vm.msglist) do
     local msgname = def.name
@@ -155,7 +163,7 @@ it("field offsets", function()
           error(format("Field '%s' in message %s has a offset %d larger than message size of %d", name, msgname, f.offset, msgsize))
         end
         local name = f.name
-        if f.kind == "array" then
+        if f.kind == "array" or f.kind == "table" then
           local offset = ffi.offsetof(ctype, f.name)
           -- We only store an offset to the vlen fields
           if offset then
@@ -262,6 +270,25 @@ it("message flatbuffers fixedsize", function()
     assert(objvt[5] == 16, objvt[5])
     assert(fields[5].offset == 16, fields[5].offset )
   end
+end)
+
+it("flatbuffers table", function()
+  local msginfo = buildmsginfo([[
+
+  message header{
+    version : uint32
+    gcstats : gcinfo
+  }
+
+  table gcinfo{
+    mem : uint64
+    count : uint32
+  }
+]])
+
+  assert(#msginfo.tables == 1)
+  local t = msginfo.tables[1]
+  assert(t.fields)
 end)
 
 local function checkheader(header)

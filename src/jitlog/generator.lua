@@ -191,6 +191,8 @@ function parser:build_recordlayout(def)
       assert(f.argonly_length or fieldlookup[f.buflen], "could not find length field specified for vlength a field")
       assert(not f.bitstorage)
       assert(not f.bitsize)
+    elseif type.kind == "table" then
+      assert(not f.buflen)
     else
       assert(type, "unexpected type")
       assert(not f.bitstorage)
@@ -284,18 +286,30 @@ function parser:parse_msg(def, m)
     self:report_error("Message %s declared with no fields", def.name)
   end
 
-  m.cprefix = "MSG_"
+  if def.kind == "message" then
+    m.cprefix = "MSG_"
+    -- Ignore the header and size fields when calculating offset of data for dynamic field in the generated c writer functions
+    m.offset_start = 8
+  elseif def.kind == "table" then
+    m.cprefix = "FB_"
+    m.typeid = fbtype.Obj
+    m.writer = "fbtable"
+    m.argtype = format("const %s_Args *", def.name)
+    -- We don't store a size before flat buffer tables
+    m.offset_start = 0
+  end
+
   m.c = m.cprefix..def.name
-  -- Ignore the header and size fields when calculating offset of data for dynamic field in the generated c writer functions
-  m.offset_start = 8
 
   m.fields = {}
+  m.tables = {}
   m.vlen_fields = {}
   m.fieldlookup = {}
   m.size = 0
   m.vsize = false
   m.vcount = 0
-  m.struct_args = false
+  m.struct_args = {}
+  m.optcount = 0
 
   local fieldlookup = m.fieldlookup
   local vlen_fields = m.vlen_fields
@@ -314,7 +328,9 @@ function parser:parse_msg(def, m)
     end
   end
 
-  add_field({name = "header", type = "uint32", noarg = true, writer = "msghdr"})
+  if def.kind == "message" then
+    add_field({name = "header", type = "uint32", noarg = true, writer = "msghdr"})
+  end
 
   local bitpacked = false
   if def.attributes.no_vtable then
@@ -333,8 +349,13 @@ function parser:parse_msg(def, m)
       type = ftype,
       attributes = attributes,
       argtype = attributes.argtype,
+      optional = attributes.optional,
     }
     add_field(t)
+
+    if t.optional then
+      m.optcount = m.optcount + 1
+    end
 
     local typeinfo
     if field.isarray then
@@ -358,6 +379,12 @@ function parser:parse_msg(def, m)
       t.kind = "bitfield"
       t.bitfield = true
       t.bitsize = typeinfo.bitsize
+    elseif typeinfo.kind == "table" then
+      t.kind = "table"
+      table.insert(m.tables, t)
+      table.insert(vlen_fields, t)
+      t.vindex = #vlen_fields
+      t.ptrarg = true
     elseif kind == "array" or typeinfo.vsize then
       t.kind = "array"
       t.vlen = true
@@ -412,8 +439,10 @@ function parser:parse_msg(def, m)
 
   if not def.attributes.no_vtable then
     m.vsize = true
-    --Add the implicit message size field thats always after the message header
-    add_field({name = "msgsize", sizefield = true, noarg = true, type = "uint32", writer = "vtotal"}, 2)
+    if def.kind == "message" then
+      --Add the implicit message size field thats always after the message header
+      add_field({name = "msgsize", sizefield = true, noarg = true, type = "uint32", writer = "vtotal"}, 2)
+    end
   end
 
   m.vcount = #vlen_fields
@@ -424,11 +453,15 @@ end
 
 function parser:process_schema(schema)
 
-  for _, deflist in ipairs({schema.structs, schema.messages}) do
+  for _, deflist in ipairs({schema.structs, schema.tables, schema.messages}) do
     self:create_placeholders(deflist)
   end
 
   for _, def in pairs(schema.structs) do
+    self:parse_type(def)
+  end
+
+  for _, def in pairs(schema.tables) do
     self:parse_type(def)
   end
 
@@ -468,6 +501,9 @@ function parser:parse_type(def)
     self:parse_msg(def, type)
     self.msglookup[def.name] = type
     table.insert(self.msglist, type)
+  elseif def.kind == "table" then
+    self:parse_msg(def, type)
+    table.insert(self.tables, type)
   elseif def.kind == "struct" then
     self:parse_struct(def, type)
     table.insert(self.structs, type)
@@ -483,6 +519,8 @@ local kind_vtlayout = {
   fbmessage = {firstfield = 4, baseoffset = -8},
   -- Structs have no vtable offset field but we can't start there field offsets in a vtable at 0 because that means the field is missing
   struct    = {firstfield = 1, baseoffset = 1},
+  -- FlatBuffers tables have there vtable offset as there first field
+  table     = {firstfield = 2, baseoffset = 0},
 }
 
 function parser:build_vtable(def)
@@ -578,6 +616,7 @@ local copyfields = {
   "types",
   "GC64",
   "structs",
+  "tables",
 }
 
 function parser:complete()
@@ -590,7 +629,7 @@ function parser:complete()
     self:build_vtable(def, "message")
   end
 
-  for _, list in ipairs({self.structs}) do
+  for _, list in ipairs({self.structs, self.tables}) do
     for _, def in ipairs(list) do
       tinsert(self.sorted_typenames, def.name)
       self:build_vtable(def)
@@ -598,8 +637,8 @@ function parser:complete()
   end
 
   local count = user_fbstart-1
-  -- Give our structs a subtype typeid used by the flatbuffers reader to look up the type in a table of ctypes
-  for _, list in ipairs({self.msglist, self.struct}) do
+  -- Give our structs and tables a subtype typeid used by the flatbuffers reader to look up the type in a table of ctypes
+  for _, list in ipairs({self.msglist, self.structs, self.tables}) do
     for i, def in ipairs(list) do
       def.typeid = (def.typeid or 0) + lshift(i + count, 16)
     end
@@ -653,7 +692,7 @@ end
 function generator:mkfield(f)
   local ret
   
-  if self.inline_fieldaccess and (f.bitstorage or f.vlen) then
+  if self.inline_fieldaccess and (f.bitstorage or f.vlen or f.kind == "table") then
     return ""
   end
   
@@ -670,6 +709,8 @@ function generator:mkfield(f)
       langtype = self.typerename[type.element_type] or type.element_type or langtype
       -- Write a comment for fields that have to be fetched with a getter to still show there part of the struct
       ret = "  "..format(comment_line, format("%s %s[%s];", langtype, name, f.buflen)).."\n"
+    elseif f.kind == "table" then
+      return ""
     elseif f.bitstorage then
       ret = "  "..format(comment_line, format("%s %s:%d", langtype, name, f.bitsize)).."\n"
     else
@@ -830,6 +871,20 @@ static LJ_AINLINE int log_{{name}}({{args}})
 
 ]]
 
+local funcdef_fbtable = [[
+LJ_STATIC_ASSERT(sizeof({{cname}}) == {{msgsize}});
+
+static LJ_AINLINE size_t write_{{name}}({{args}})
+{
+{{header:  %s\n}}
+{{fields:  %s\n}}  setubufP(ub, ubufP(ub) + sizeof({{cname}}));
+
+{{vwrite:  %s\n}}
+  return vtotal;
+}
+
+]]
+
 generator.custom_field_writers = {
   timestamp_highres = "start_getticks();",
   gettime = "start_getticks();",
@@ -883,6 +938,24 @@ generator.custom_field_writers = {
   end,
   vtable = function(self, msgdef, f, valuestr)
     return format("(int32_t)(-fb_vtoffsets[FBType_%s]);", msgdef.name)
+  end,
+  fbtable = function(self, msgdef, f, valuestr, write)
+    assert(f.kind == "table")
+    local template = "fbwriter"
+    if f.optional then
+      template = "fbwriter_optional"
+    end
+
+    local template_args = {
+      name = f.name,
+      writer = "write_"..f.type,
+      offset = f.offset,
+      value = valuestr,
+    }
+    write.vwrite = buildtemplate(self.templates[template], template_args)
+    -- Write flatbuffer table fields after we've written other variable length fields
+    write.order = write.order + 0x200000
+    return
   end,
 }
 
@@ -1068,7 +1141,11 @@ function generator:write_logfunc(def)
   local minbuffspace = ""..128
   local template, msgstart, msgptr
 
-  if fixedsz then
+  if def.kind == "table" then
+    template = funcdef_fbtable
+    msgstart = "ubufP(ub)"
+    msgptr =  "{{cname}} *msg = ({{cname}} *)ubuf_more(ub, vtotal + {{minbuffspace}});"
+  elseif fixedsz then
     template = funcdef_fixed
     msgptr = "{{cname}} *msg = ({{cname}} *)ubufP(ub);"
   else
@@ -1201,6 +1278,10 @@ function generator:write_msgdefs()
   for _, def in ipairs(self.structs) do
     self:write_struct(def)
   end
+  for _, def in ipairs(self.tables) do
+    self:write_struct(def)
+  end
+
   for _, def in ipairs(self.msglist) do
     self:write_struct(def)
   end
@@ -1244,6 +1325,7 @@ local api = {
       msglookup = {},
       types = setmetatable({}, {__index = builtin_types}),
       structs = {},
+      tables = {},
     }
     t.data = t
     return setmetatable(t, {__index = parser})

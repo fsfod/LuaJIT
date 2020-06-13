@@ -219,6 +219,20 @@ if pcall(require, "ffi") then
     end
     return (ffi.string(array, size))
   end
+
+  function lib.get_fbtable(base, offset, adjustment, limit, type)
+    if offset == 0 then
+      return nil
+    end
+
+    base = ffi_cast(charptr, base)
+
+    if offset < 0 or (offset + adjustment+4) > limit  then
+      error("Bad flat buffers table offset "..offset)
+    end
+
+    return ffi.cast(type, base + adjustment+offset)
+  end
 end
 
 return lib

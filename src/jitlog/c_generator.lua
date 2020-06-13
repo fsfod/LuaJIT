@@ -60,8 +60,31 @@ ubuf_setoffset_rel(ub, vtotal-{{offset}});
   typecount = [[
     enum {
       STRUCTTYPE_COUNT = {{structs}},
+      TABLETYPE_COUNT = {{tables}},
     };
-  ]]
+  ]],
+
+  fbwriter = [[
+ubuf_setoffset_rel(ub, vtotal-{{offset}});
+  vtotal += {{writer}}(ub, {{value}});]],
+
+  fbwriter_optional = [[
+if ({{value}} != NULL) {
+    ubuf_setoffset_rel(ub, vtotal-{{offset}});
+    size_t {{name}}_size = {{writer}}(ub, {{value}});
+    vtotal += {{name}}_size;
+  } else {
+    ubuf_setoffset_val(ub, vtotal-{{offset}}, 0);
+  }]],
+
+  optarray_writer = [[
+if ({{value}} != NULL) {
+    ubuf_setoffset_rel(ub, vtotal-{{offset}});
+    ubuf_putarray(ub, {{value}}, {{sizename}}, {{element_size}});
+    vtotal += {{sizename}}*{{element_size}} + 4;
+  } else {
+    ubuf_setoffset_val(ub, vtotal-{{offset}}, 0);
+  }]],
 }
 
 local format_specifers = {
@@ -150,6 +173,11 @@ function generator:write_header_logwriters(options)
 extern const int fb_vtoffsets[];
 
 ]])
+
+  for _, def in ipairs(self.tables) do
+    self:write_logfunc(def)
+  end
+
   for _, def in ipairs(self.msglist) do
     self:write_logfunc(def)
   end
@@ -172,11 +200,13 @@ function generator:write_flatbuffer_vtable()
     fbtype[#fbtype + 1] = name
   end
 
-  for _, def in ipairs(self.structs) do
-    local vtsize = self:write_vtable(def, "struct")
-    vtstarts[#vtstarts + 1] = vtoffset
-    vtoffset = vtoffset + vtsize
-    fbtype[#fbtype + 1] = def.name
+  for _, list in ipairs({self.structs, self.tables}) do
+    for _, def in ipairs(list) do
+      local vtsize = self:write_vtable(def)
+      vtstarts[#vtstarts + 1] = vtoffset
+      vtoffset = vtoffset + vtsize
+      fbtype[#fbtype + 1] = def.name
+    end
   end
 
   self:write("};\n\n")
@@ -228,7 +258,7 @@ function generator:writefile(options)
 ]])
 
   self:write_enum("MSGTYPES", self.sorted_msgnames, "MSGTYPE")
-  self:writetemplate("typecount", { structs = #self.structs})
+  self:writetemplate("typecount", { structs = #self.structs, tables = #self.tables})
   self:write_msgdefs()
   
   self:write([[

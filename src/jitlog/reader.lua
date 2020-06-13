@@ -340,6 +340,8 @@ function logreader:parse_vtables(header, vtables, typenames, our_vtables, vt_fie
 
         elseif istruct then
           types[typeids[name] + 1] = logdef.structs[name]
+        else
+          types[typeids[name] + 1] = logdef.tables[name]
         end
       end
     end

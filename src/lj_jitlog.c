@@ -114,6 +114,7 @@ static void write_header(jitlog_State *context)
     .typenames = jitlog_typenames,
     .typenames_length = (sizeof(jitlog_typenames) / sizeof(char*))-1,
     .structtype_count = STRUCTTYPE_COUNT,
+    .tabletype_count = TABLETYPE_COUNT,
     .cpumodel = cpumodel,
     .os = LJ_OS_NAME,
     .ggaddress = (uintptr_t)G2GG(g),

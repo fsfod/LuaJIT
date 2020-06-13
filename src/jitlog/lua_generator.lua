@@ -110,6 +110,13 @@ end
     return (get_fbstring(self, self.{{name}}_offset, {{offset}}))
   end
 ]],
+  msg_fbgetter = [[
+  local type = ffi.typeof("$ *", {{kind}}s.{{type}})
+  function {{msgname}}:get_{{name}}()
+    assert(self, "Expected a '{{msgname}}' message as first parameter")
+    return (get_fbtable(self, self.{{name}}_offset, {{offset}}, self.msgsize, type))
+  end
+]],
 
   vtable = [[
   {{name}} = { {{offsets}} },
@@ -121,7 +128,7 @@ function generator:fmt_fieldget(def, f)
 end
 
 function generator:needs_accessor(struct, f)
-  return f.vlen or f.bitfield or f.bitstorage ~= nil
+  return f.vlen or f.bitfield or f.bitstorage ~= nil or f.kind == "table"
 end
 
 function generator:fmt_accessor_def(struct, f, voffset) 
@@ -139,7 +146,10 @@ function generator:fmt_accessor_def(struct, f, voffset)
   local ftype = self.types[f.type]
   tvalues.kind = tvalues.kind or ftype.kind
 
-  if f.vlen then
+  if f.kind == "table" then
+    template = self.templates.msg_fbgetter
+    tvalues.type = ftype.name
+  elseif f.vlen then
     template = self.templates.msg_vgetter
 
     tvalues.type = '"char*"'
@@ -206,7 +216,7 @@ function generator:write_structlist(list, name, getters, names)
 end
 
 function generator:write_vtables()
-  local typedef_lists = {self.msglist, self.structs}
+  local typedef_lists = {self.msglist, self.structs, self.tables}
 
   self:write("local vtables = {\n")
 
@@ -215,6 +225,10 @@ function generator:write_vtables()
   end
   for _, structdef in ipairs(self.structs) do
     self:write_vtable(structdef, "struct")
+  end
+
+  for _, tab in ipairs(self.tables) do
+    self:write_vtable(tab)
   end
 
   self:write("};\n")
@@ -260,7 +274,7 @@ local ffi_cast, ffi_string = ffi.cast, ffi.string
 local fb = require("jitlog.flatbuffers")
 local parse_strlist = fb.parse_strlist
 local band, rshift = bit.band, bit.rshift
-local get_fbarray, get_fbstring = util.get_fbarray, util.get_fbstring
+local get_fbarray, get_fbstring, get_fbtable = util.get_fbarray, util.get_fbstring, util.get_fbtable
 
 local lib = {}
 
@@ -294,15 +308,17 @@ ffi.cdef("typedef uint32_t GCRef, MRef, GCSize;")]])
 
   -- Create an anonymous struct ctype for each struct that we use for element of arrays fields
   local struct_getters = {}
-  local struct_names = {}
+  local struct_names, tables_names = {}, {}
 
   self:write_structlist(self.structs, "structs", struct_getters, struct_names)
+  self:write_structlist(self.tables, "tables", struct_getters, tables_names)
 
   self:write(buildtemplate([[
 lib.type_list = {
 {{structs:  structs.%s,\n}}
+{{tables:  tables.%s,\n}}
 }
-]], {structs =  struct_names}))
+]], {structs =  struct_names, tables = tables_names}))
 
   self:write_structlist(self.msglist, "messages", struct_getters)
 
@@ -312,8 +328,11 @@ lib.type_list = {
   end
   self:writeline()
 
-  for i, list in ipairs({self.msglist}) do
+  for i, list in ipairs({self.tables, self.msglist}) do
     local listname = "messages"
+    if list == self.tables then
+      listname = "tables"
+    end
 
     for _, def in ipairs(list) do
       local funclist = struct_getters[def.name]
@@ -352,13 +371,15 @@ lib.type_list = {
   lib.typeid_info = {
     userid_start = {{userid_start}},
     structs = {startid = {{struct_start}}, endid = {{struct_end}}},
+    tables = {startid = {{tab_start}}, endid = {{tab_end}}},
   }
 ]], {
     userid_start = self.user_fbstart,
     struct_start = get_typeid(self.structs[1]),
     struct_end = get_typeid(self.structs[#self.structs]),
+    tab_start = get_typeid(self.tables[1]),
+    tab_end = get_typeid(self.tables[#self.tables]),
   }))
-
 
   self:write([[
   function lib.gen_msgparsers()
