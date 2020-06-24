@@ -176,7 +176,7 @@ function lib.buildtemplate(tmpl, values)
 
     if fmt then
       if type(value) == "table" then
-        value = lib.joinlist_format(value, fmt)
+        value = lib.concatf(value, fmt)
       else
         value = format(fmt, value)
       end

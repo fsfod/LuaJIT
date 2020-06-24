@@ -3,6 +3,7 @@ local flatbuffers = require"jitlog.flatbuffers"
 local buildtemplate, trim = util.buildtemplate, util.trim
 local format = string.format
 local bor, lshift, rshift = bit.bor, bit.lshift,  bit.rshift
+local tinsert = table.insert
 local emptytbl = {}
 
 local fbtype = flatbuffers.fbtype
@@ -164,6 +165,7 @@ function parser:build_recordlayout(def)
       local bitofs = bitstorage.usedbits
       f.bitofs = bitofs
       f.bitsize = bitsize
+      f.writer = "bitfield"
       bitstorage.usedbits = bitofs + bitsize
 
       if bitstorage.usedbits > 32 then
@@ -239,6 +241,11 @@ function parser:parse_msg(def, m)
   if #def.fields == 0 then
     self:report_error("Message %s declared with no fields", def.name)
   end
+
+  m.cprefix = "MSG_"
+  m.c = m.cprefix..def.name
+  -- Ignore the header and size fields when calculating offset of data for dynamic field in the generated c writer functions
+  m.offset_start = 8
 
   m.fields = {}
   m.vlen_fields = {}
@@ -440,6 +447,7 @@ local copyfields = {
   "schema",
   "msglookup",
   "sorted_msgnames",
+  "sorted_typenames",
   "types",
   "GC64",
 }
@@ -448,12 +456,580 @@ function parser:complete()
   assert(#self.msglist > 0)
   assert(self.msglookup["header"], "a header message must be defined")
   self.sorted_msgnames = sortmsglist(self.msglist, self.builtin_msgorder)
+  self.sorted_typenames = util.clone(self.sorted_msgnames)
 
   local data = util.copyfields(self, {}, copyfields)
   return data
 end
 
+local generator = {
+  -- Add a empty lookup table that can overriden in derived generators
+  typerename = {},
+}
+
+function generator:write(s)
+  self.outputfile:write(s)
+end
+
+function generator:writeline(s)
+  self.outputfile:write(s or "", "\n")
+end
+
+function generator:writef(s, ...)
+  assert(type(s) == "string" and s ~= "")
+  self.outputfile:write(format(s, ...))
+end
+
+function generator:writetemplate(name, ...)
+  local template = self.templates[name]
+  local result
+  if not template then
+    error("Missing template "..name)
+  end
+  if type(template) == "string" then
+    assert(template ~= "")
+    result = buildtemplate(template, ...)
+  else
+    result = template(...)
+  end
+
+  self:write(result)
+end
+
+function generator:mkfield(f)
+  local ret
+
+  local comment_line = self.templates.struct_comment or self.templates.comment_line
+  local name = f.name
+
+  if f.type == "bitfield" then
+    ret = format("/*  %s: %d;*/\n", name, f.bitsize)
+  else
+    local type = self.types[f.type]
+    local langtype = type.c or f.type
+
+    if f.vlen then
+      langtype = type.element_type or langtype
+      -- Write a comment for fields that have to be fetched with a getter to still show there part of the struct
+      ret = "  "..format(comment_line, format("%s %s[%s];", langtype, name, f.buflen)).."\n"
+    elseif f.bitstorage then
+      ret = "  "..format(comment_line, format("%s %s:%d", langtype, name, f.bitsize)).."\n"
+    else
+      ret = format(self.templates.structfield, langtype, name)
+    end
+  end
+  return ret
+end
+
+function generator:write_struct(def, template)
+  local fieldstr = ""
+  local fieldgetters = {}
+
+  for _, f in ipairs(def.fields) do
+    fieldstr = fieldstr..self:mkfield(f)
+
+    if self:needs_accessor(def, f) then
+      local getter = self:fmt_accessor_def(def, f)
+      assert(getter)
+      table.insert(fieldgetters, getter)
+    end
+  end
+
+  -- Write offsets of vlength fields at the end of the struct treated as always present in the flatbuffers vtable
+  -- created for the message.
+  if def.vlen_fields then
+    local offset_type = self.typerename.int32 or self.types.int32.c
+
+    for _, f in ipairs(def.vlen_fields) do
+      fieldstr = fieldstr..format(self.templates.structfield, offset_type, f.name.."_offset")
+    end
+  end
+
+  if not template then
+    if def.kind == "message" and self.templates.msgstruct then
+      template = self.templates.msgstruct
+    else
+      template = self.templates.struct
+    end
+  end
+
+  local template_args = {
+    name = def.name,
+    kind = def.kind,
+    cprefix = def.cprefix or "",
+    fields = fieldstr,
+    bitfields = fieldgetters,
+  }
+
+  self:write(buildtemplate(template, template_args))
+  return #fieldgetters > 0 and fieldgetters
+end
+
+local function logfunc_getfieldvar(msgdef, argprefix, f)
+  local field = f.name
+
+  if f.value_name then
+    field = f.value_name
+  end
+  
+  if not f.noarg then
+    field = argprefix..field
+  end
+
+  return field
+end
+
+function generator:field_hasarg(msgdef, f)
+  local typedef = self.types[f.type]
+  return not typedef.noarg and not f.noarg
+end
+
+function generator:write_vlenfield(msgdef, f, valuestr, write)
+  local tmpldata = {
+    name = logfunc_getfieldvar(msgdef, self.argprefix, f),
+    sizename = f.name.."_size",
+    msgfield = f.name,
+    msgname = msgdef.name,
+    offset =  f.offset,
+    value = valuestr,
+  }
+
+  local vtype = self.types[f.type]
+  tmpldata.element_size = vtype.element_size or vtype.size
+
+  -- Check that the length is not an implicit arg after the field
+  if f.buflen and not f.implicitlen then
+    tmpldata.sizename = f.buflen
+    local szfield = msgdef.fieldlookup[f.buflen]
+    if szfield then
+      tmpldata.sizename = logfunc_getfieldvar(msgdef, self.argprefix, szfield)
+    end
+  end
+
+  local assignment
+
+  if f.type == "string" and (f.implicitlen or msgdef.use_msgsize == f.name) then
+    if f.optional then
+      write.header = buildtemplate("MSize {{sizename}} = {{value}} ? (MSize)strlen({{value}}) : 0;", tmpldata)
+    else
+      write.header = buildtemplate("MSize {{sizename}} = (MSize)strlen({{value}});", tmpldata)
+    end
+  elseif not f.noarg then
+    -- If the field does not have a size field generated inside the writer function like strings then add the argprefix
+   -- tmpldata.sizename = self.argprefix..tmpldata.sizename
+  end
+
+  -- Write optional fields last but before fb tables
+  if f.optional then
+    write.order = write.order + 0x100000
+    write.vwrite = buildtemplate(self.templates.optarray_writer, tmpldata)
+    assignment = ""
+  else
+    -- Adjust the offset of the field to account msgstart pointing at the vtable offset field which might be at 0
+    tmpldata.offset = tmpldata.offset - msgdef.offset_start
+    write.vtotal = buildtemplate("vtotal += {{sizename}} * {{element_size}};", tmpldata)
+    write.vwrite = buildtemplate("ubuf_putarray(ub, {{value}}, {{sizename}}, {{element_size}});", tmpldata)
+    write.needmsgstart = true
+    assignment = buildtemplate("msg->{{msgfield}}_offset = (int32_t)((ubufP(ub)-msgstart) -  {{offset}});", tmpldata)
+  end
+
+  return assignment, true
+end
+
+-- Assumes always a min of 128 bytes left in buffer if we fail to reserve more buffer space after writing fields
+-- revert buff pointer back to start of the message so we keep the min buff space invariant
+local funcdef_fixed = [[
+LJ_STATIC_ASSERT(sizeof({{cname}}) == {{msgsize}});
+
+static LJ_AINLINE int log_{{name}}({{args}})
+{
+{{header:  %s\n}}{{fields:  %s\n}}  setubufP(ub, ubufP(ub) + sizeof({{cname}}));
+  if (ubuf_more(ub, {{minbuffspace}}) == NULL) {
+    setubufP(ub, ubufP(ub) - sizeof({{cname}}));
+    return 0;
+  }
+  return 1;
+}
+
+]]
+
+-- Write the size of the message last to help external log readers polling the file for
+-- new messages and know when a message is fully written.
+-- msgstart is +8 because since we want to ignore the message header and size fields when calculating offsets of dynamic
+-- fields like arrays.
+local funcdef_vsize = [[
+LJ_STATIC_ASSERT(sizeof({{cname}}) == {{msgsize}});
+
+static LJ_AINLINE int log_{{name}}({{args}})
+{
+{{header:  %s\n}}
+{{fields:  %s\n}}  setubufP(ub, ubufP(ub) + sizeof({{cname}}));
+
+{{vwrite:  %s\n}}
+  ubuf_setmsgsize(ub, vtotal);
+  return 1;
+}
+
+]]
+
+generator.custom_field_writers = {
+  timestamp_highres = "start_getticks();",
+  gettime = "start_getticks();",
+  timestamp = function(self, msgdef, f, valuestr, write)
+    write.order = 0
+    -- Get the timestamp before we try to grow the buffer
+    write.header = format("uint64_t %s = start_getticks();", f.name)
+    return f.name
+  end,
+  setref = function(self, msgdef, f, valuestr)
+    local setref = (f.type == "MRef" and "setmref") or "setgcrefp"
+    local type = self.types[f.type]
+    if f.ptrarg or type.ptrarg or f.struct_addr then
+      return format("%s(msg->%s, %s);", setref, f.name, valuestr), true
+    else
+      -- Just do an assignment for raw GCref values
+      return valuestr
+    end
+  end,
+  msghdr = function(self, msgdef, f)
+    return format("msg->header = MSGTYPE_%s;", msgdef.name), true
+  end,
+  vtotal = function() return "" end,
+  widenptr = function(self, msgdef, f, valuestr)
+    return format("(uint64_t)(uintptr_t)(%s);", valuestr)
+  end,
+  bitfield  = function(self, msgdef, f, valuestr, write)
+    write.order = bor(lshift(msgdef.fieldlookup[f.bitstorage].offset, 6), f.bitofs)
+    -- Bit field is is stuffed in another field
+    return format("msg->%s |= (%s << %d);", f.bitstorage, valuestr, f.bitofs), true
+  end,
+  stringlist = function(self, msgdef, f, valuestr, write)
+    -- if the list of strings are already packed together in a simple blob of memory we don't need a complex write for them
+    if f.attributes.prepacked then
+      -- Change arg type from an array of char pointers to just a char pointer
+      write.arg = "const char *" .. f.name
+      return self:write_vlenfield(msgdef, f, valuestr, write)
+    end
+
+    assert(f.buflen)
+    local template_args = {
+      name = f.name,
+      offset = f.offset,
+      value = valuestr,
+      sizename = logfunc_getfieldvar(msgdef, self.argprefix,  msgdef.fieldlookup[f.buflen])
+    }
+
+    write.vwrite = buildtemplate(self.templates.stringlist_writer, template_args)
+    -- Write after variable length fields with known sizes
+    write.order = write.order + 0x100000
+  end
+}
+
+function generator:write_logfunc(def)
+  local fields = {}
+  local header = {}
+
+  if def.vsize then
+    local count = 0
+
+    for _, f in pairs(def.fields) do
+      -- Ignore tables and optionals arrays when calculating the extra space from array size prefix values
+      -- also skip fields where the builtin C writers that includes the count field in the size returned for the amount of data written
+      if f.vlen and f.kind == "array" and not (f.optional or f.element_implicitlen or self.types[self.types[f.type].element_type].kind == "table") then
+        count = count + 1
+      end
+    end
+
+    local vtotal = "size_t vtotal = sizeof(%s) + %d*4;"
+    if count == 0 then
+      vtotal = "size_t vtotal = sizeof(%s);"
+    end
+    tinsert(header, format(vtotal, def.c, count))
+  end
+
+  local argcount = 0
+  for _, f in ipairs(def.fields) do
+    local typename = f.type
+    local typedef = self.types[typename]
+
+    if not typedef.noarg and not f.noarg and (not f.lengthof or def.fieldlookup[f.lengthof].noarg) then
+      argcount = argcount + 1
+
+      local length = f.buflen and def.fieldlookup[f.buflen]
+      if f.buflen == false or (length and not length.noarg) then
+        argcount = argcount + 1
+      end
+    end
+  end
+
+  local simple_args = argcount < 5 and def.kind == "message"
+  local args = {}
+
+  --  If we have too many arguments pass them all in as a struct
+  if simple_args then
+    self.argprefix = ""
+    table.insert(args, "UserBuf *ub")
+  else
+    self.argprefix = "args->"
+  end
+
+  local added = {}
+  local fixedsz = def.attributes.no_vtable
+  local writes, vwrite = {}, {}
+
+  for i, f in ipairs(def.fields) do
+    local typename = f.type
+    local argtype
+    local typedef = self.types[typename]
+
+    if typename == "bitfield" then
+      typename = "uint32_t"
+    elseif typename == "string" then
+      argtype = self.types[typename].argtype
+    else
+      typename = typedef.c
+      argtype = f.argtype or typedef.argtype
+    end
+
+    local noarg = typedef.noarg or f.noarg
+    local arg, lenarg
+
+    -- Don't generate a function arg for fields that have implicit values. Also group arrays fields with
+    -- their length field in the parameter list.
+    if not noarg and (not f.lengthof or def.fieldlookup[f.lengthof].noarg) then
+      assert(not f.value_name and not f.struct_field)
+
+      arg = format("%s %s", (argtype or typename), f.name)
+      if f.buflen then
+        local leninfo = def.fieldlookup[f.buflen]
+        local buflen = f.buflen
+        assert(not leninfo or buflen == leninfo.name)
+
+        if not added[buflen] and (not leninfo or not leninfo.noarg) then
+          -- More than one buffer could be using this field as length so only include in the args once
+          added[buflen] = true
+          lenarg = "uint32_t "..buflen
+        end
+      end
+    end
+
+    local write = {
+      order = lshift(f.offset or i, 6),
+      arg = arg,
+      lenarg = lenarg,
+    }
+
+    local target = "msg->"..f.name
+    local value = f.name
+    local assigned = false
+
+    if f.value_name then
+      value = f.value_name
+    elseif not noarg or f.bitofs then
+      value = self.argprefix..f.name
+    end
+
+    local writer = f.writer or typedef.writer
+
+    if writer then
+      local writerimpl = self.custom_field_writers[writer]
+      if not writerimpl then
+        error(format("Missing writer implementation for %s used for field %s", writer, f.name))
+      end
+
+      if type(writerimpl) == "function" then
+        value, assigned = writerimpl(self, def, f, value, write)
+      else
+        assert(type(writerimpl) == "string", "Expected a custom field writer to be a string or function")
+        value = writerimpl
+      end
+    elseif f.vlen then
+      value = self:write_vlenfield(def, f, value, write)
+      assigned = true
+    elseif argtype and typedef.size and typedef.size < 4 then
+      -- truncate the value down to the fields size
+      value = format("(%s)%s", typename, value)
+    end
+
+    value = value or ""
+
+    if value ~= "" then
+      -- Some custom writers will build there own assignment skip
+      if not assigned then
+        value = format("%s = %s;", target, value)
+      end
+      write.assignment = value
+    end
+    if value ~= "" or write.header or write.vwrite then
+      table.insert(writes, write)
+    end
+  end
+
+  table.sort(writes, function(a, b) return a.order < b.order end)
+
+  -- Write flatbuffers based sub objects last
+  local needmsgstart = false
+  for _, f in ipairs(writes) do
+    if f.header then
+      table.insert(header, f.header)
+    end
+
+    if f.needmsgstart then
+      needmsgstart = true
+    end
+
+    if f.arg then
+      table.insert(args, f.arg)
+      if f.lenarg then
+        table.insert(args, f.lenarg)
+      end
+    end
+
+    if f.vwrite then
+      fixedsz = false
+      if f.assignment then
+        table.insert(vwrite, f.assignment)
+      end
+      table.insert(vwrite, f.vwrite)
+    else
+      table.insert(fields, f.assignment)
+    end
+  end
+
+  -- Message size
+  for _, f in ipairs(writes) do
+    if f.vtotal then
+      fixedsz = false
+      table.insert(header, f.vtotal)
+    end
+  end
+  -- Exclude the offsets for tables from the vtotal value
+  local minbuffspace = ""..128
+  local template, msgstart, msgptr
+
+  if fixedsz then
+    template = funcdef_fixed
+    msgptr = "{{cname}} *msg = ({{cname}} *)ubufP(ub);"
+  else
+    template = funcdef_vsize
+    msgstart = "ubufP(ub) + 8"
+    msgptr =  "{{cname}} *msg = ({{cname}} *)ubuf_msgstart(ub, vtotal + {{minbuffspace}});"
+  end
+
+  -- Pass all the arguments in through a struct if we have too many
+  if not simple_args then
+    self:writetemplate("struct", {
+      name = def.name.."_Args",
+      cprefix = "",
+      fields = util.concatf(args, "  %s;\n"),
+      bitfields = {},
+    })
+    args = {"UserBuf *ub", "const "..def.name.."_Args* args"}
+  end
+
+  local template_args = {
+    name = def.name,
+    cname = def.c or def.name,
+    msgsize = def.size,
+    args = table.concat(args, ", "),
+    header = header,
+    fields = fields,
+    vwrite = vwrite,
+    minbuffspace = minbuffspace,
+    msgstart = "",
+  }
+
+  -- Write the line to get the buffer pointer for the msg
+  table.insert(header, buildtemplate(msgptr, template_args))
+
+  if not fixedsz then
+    table.insert(header, "if(msg == NULL){ return 0;}")
+  end
+
+  --  msg start is only used for arrays we already reserved space for since its value is invalidated by buffer resizes
+  if msgstart and needmsgstart then
+    table.insert(header, format("char *msgstart = %s;", msgstart))
+  end
+
+  self:write(buildtemplate(template, template_args))
+end
+
+function generator:write_enum(name, names, prefix)
+  prefix = prefix and (prefix .. "_") or name
+
+  if self.outputlang ~= "c" then
+    prefix = ""
+  end
+  local entries = util.concatf(names, prefix..self.templates.enumline, "  ", "", true)
+  self:writetemplate("enum", {name = name, list = entries})
+end
+
+function generator:write_namelist(name, names)
+  self:writetemplate("namelist", {name = name, list = names, count = #names})
+end
+
+function generator:write_msgsizes(dispatch_table)
+  local sizes = {}
+
+  for _, name in ipairs(self.sorted_msgnames) do
+    local size = self.msglookup[name].size
+    if self.msglookup[name].vsize then
+      if dispatch_table then
+        size = 0
+      else
+        size = -size
+      end
+    end
+    table.insert(sizes, format("%d, %s", size, format(self.templates.comment_line, name)))
+  end
+
+  local template
+
+  if dispatch_table and self.templates.msgsize_dispatch then
+    template = "msgsize_dispatch"
+  else
+    template = "msgsizes"
+  end
+
+  self:writetemplate(template, {list = sizes, count = #self.sorted_msgnames})
+end
+
+function generator:write_msgdefs()
+  for _, def in ipairs(self.msglist) do
+    self:write_struct(def)
+  end
+end
+
 local lang_generator = {}
+
+local function writelang(lang, data, options)
+  options = options or {}
+
+  local lgen = lang_generator[lang]
+  if not lgen then
+    lgen = require("jitlog."..lang.."_generator")
+    lang_generator[lang] = lgen
+  end
+
+  local state = {}
+  util.copyfields(data, state, copyfields)
+  -- Allow the language generator to override base generator functions
+  setmetatable(state, {
+    __index = function(self, key)
+      local v = lgen[key]
+      return (v ~= nil and v) or generator[key]
+    end
+  })
+  
+  local outdir = options.outdir or ""
+  local filepath = outdir..(options.filename or state.default_filename)
+  state.outputfile = io.open(filepath, "w")
+  state:writefile(options)
+  state.outputfile:close()
+  return filepath
+end
+
+local c_generator = require("jitlog.c_generator")
 
 local api = {
   create_parser = function(GC64)
@@ -464,6 +1040,26 @@ local api = {
     }
     t.data = t
     return setmetatable(t, {__index = parser})
+  end,
+
+  writelang = writelang,
+  write_c = function(data, options)
+    local t = {}
+    util.copyfields(data, t, copyfields)
+    -- Allow the c generator to override base generator functions
+    setmetatable(t, {
+      __index = function(self, key)
+        local v = c_generator[key]
+        return (v ~= nil and v) or generator[key]
+      end
+    })
+
+    if not options or options.mode == "defs" then
+      t:write_headers_def(options)
+    end
+    if options and options.mode == "writers" then
+      t:write_header_logwriters(options)
+    end
   end,
 }
 

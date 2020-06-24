@@ -28,7 +28,7 @@ message header {
   vtables : [uint16]
   vtable_offsets : [uint32]
   msgsizes : [int32]
-  msgnames : stringlist
+  typenames : stringlist
   cpumodel : string
   os : string
   ggaddress : uint64

@@ -10,3 +10,6 @@
 *.swp
 .tags
 test/builds/
+src/lj_jitlog_writers.h
+src/lj_jitlog_def.h
+src/lj_jitlog_decl.h

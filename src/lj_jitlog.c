@@ -11,6 +11,10 @@
 #include "luajit.h"
 #include "lauxlib.h"
 
+#include "lj_jitlog_def.h"
+#include "lj_jitlog_decl.h"
+#include "lj_jitlog_writers.h"
+
 #include "jitlog.h"
 
 #define JITLOG_FILE_VERSION 2
@@ -57,6 +61,50 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
   }
 }
 
+#if LJ_TARGET_X86ORX64
+
+static int getcpumodel(char *model)
+{
+  lj_vm_cpuid(0x80000002u, (uint32_t*)(model));
+  lj_vm_cpuid(0x80000003u, (uint32_t*)(model + 16));
+  lj_vm_cpuid(0x80000004u, (uint32_t*)(model + 32));
+  return (int)strnlen((char*)model, 12 * 4);
+}
+
+#else
+
+static int getcpumodel(char *model)
+{
+  strcpy(model, "unknown");
+  return (int)strlen("unknown");
+}
+
+#endif
+
+
+static void write_header(jitlog_State *context)
+{
+  global_State *g = context->g;
+  char cpumodel[64] = {0};
+  int model_length = getcpumodel(cpumodel);
+  header_Args args = {
+    .fileheader = 0x474c4a,
+    .headersize = sizeof(MSG_header),
+    .version = JITLOG_FILE_VERSION,
+    .flags = 0,
+    .msgsizes = jitlog_msgsizes,
+    .msgsizes_length = sizeof(jitlog_msgsizes)/sizeof(int),
+    .msgtype_count = MSGTYPE_MAX,
+    .typenames = jitlog_typenames,
+    .typenames_length = (sizeof(jitlog_typenames) / sizeof(char*))-1,
+    .cpumodel = cpumodel,
+    .os = LJ_OS_NAME,
+    .ggaddress = (uintptr_t)G2GG(g),
+  };
+  log_header(&context->ub, &args);
+
+}
+
 LUA_API int jitlog_isrunning(lua_State *L)
 {
   void* current_context = NULL;
@@ -91,6 +139,7 @@ LUA_API JITLogUserContext* jitlog_start(lua_State *L)
     return NULL;
   }
   luaJIT_vmevent_sethook(L, jitlog_callback, context);
+  write_header(context);
 
   return &context->user;
 }
@@ -126,6 +175,7 @@ LUA_API void jitlog_reset(JITLogUserContext *usrcontext)
 {
   jitlog_State *context = usr2ctx(usrcontext);
   ubuf_reset(&context->ub);
+  write_header(context);
 }
 
 LUA_API uint64_t jitlog_getsize(JITLogUserContext* usrcontext)

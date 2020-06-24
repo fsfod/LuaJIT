@@ -68,21 +68,53 @@ if not isminilua then
 end
 
 local argstart = 1
+local genjitlog = false
 
-if arg[1] == "--gc64" then
+if arg[1] == "--jitlog" then
+  genjitlog = true
+  argstart = argstart + 1
+end
+
+if arg[argstart] == "--gc64" then
   GC64 = true
   argstart = argstart + 1
   --stdout:write("GC64 = true\n")
 end
 
-local schema_path = arg[argstart]
+local schema_path, gentype, outpath = arg[argstart], arg[argstart + 1], arg[argstart + 2]
 assert(schema_path, "No message schema file path specified as first argument")
+assert(gentype, "No generation mode specified as second argument")
 
 local fbs_parser = require("jitlog.fbs_parser")
 local schema = fbs_parser.parse_fbsfile(schema_path)
+
+outpath = outpath or ""
 
 local apigen = require"jitlog.generator"
 local parser = apigen.create_parser(GC64)
 parser:process_schema(schema)
 
 local data = parser:complete()
+
+local actions =  {
+  defs = function() apigen.write_c(data, {outdir = outpath, mode = "defs"}) end,
+  writers = function() apigen.write_c(data, {outdir = outpath, mode = "writers"})  end,
+}
+
+actions.all = function()
+  for k, f in pairs(actions) do
+    if k ~= "all" then
+      print("Running generator:", k)
+      f()
+    end
+  end
+end
+
+local actionfunc = actions[gentype]
+
+if actionfunc then
+  actionfunc()
+else
+  error("Unknown action "..gentype)
+end
+
