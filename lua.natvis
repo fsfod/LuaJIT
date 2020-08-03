@@ -425,7 +425,7 @@
 </Type>
 
 <Type Name="GCfuncL">
-  <DisplayString>Lua, UpValues = {(unsigned int)nupvalues,i}, {((GCproto*)pc.ptr32)[-1]}</DisplayString>
+  <DisplayString>Lua, {((GCproto*)*pc)[-1]}</DisplayString>
   <Expand>
     <Item Name="Proto">((GCproto*)pc.ptr32)[-1],na</Item>
     <Synthetic Name="Byte Code">
@@ -446,7 +446,7 @@
 </Type>
 
 <Type Name="GCfuncC">
-  <DisplayString>C, UpValues = {(unsigned int)nupvalues,i}, func = {f}</DisplayString>
+  <DisplayString>C, {f}</DisplayString>
   <Expand>
     <Item Name="func">f</Item>
     <Item Name="env">env</Item>
