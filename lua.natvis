@@ -122,6 +122,10 @@
 
 <Type Name="Node">
   <DisplayString>key = {key} val = {val}</DisplayString>
+  <Expand>
+    <Item Name="Key">key</Item>
+    <Item Name="Value">val</Item>
+  </Expand>
 </Type>
 
 <Type Name="GCtab">
