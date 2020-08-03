@@ -1,33 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
-
 <AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
 
 <Type Name="GCstr">
-    <DisplayString Condition="len != 0">{(char*)(this+1),s}</DisplayString>
-    <DisplayString Condition="len == 0">""</DisplayString>
-    <StringView>(char*)(this+1)</StringView>
-    <Expand>
-       <Item Name="[size]">len,i</Item>
-       <Item Name="raw">(char*)(this+1),s</Item>
-    </Expand>
+  <DisplayString Condition="len != 0">{(char*)(this+1),s}</DisplayString>
+  <DisplayString Condition="len == 0">""</DisplayString>
+  <StringView>(char*)(this+1)</StringView>
+  <Expand>
+     <Item Name="[size]">len,i</Item>
+     <Item Name="raw">(char*)(this+1),s</Item>
+  </Expand>
+</Type>
+
+<Type Name="GCRef" Priority="Low">
+  <SmartPointer Usage="Minimal">(GCobj*)(gcptr64 &amp; 0x7FFFFFFFFFFFull)</SmartPointer>
+  <DisplayString Condition="gcptr64 != 0">{(GCobj*)(gcptr64 &amp; 0x7FFFFFFFFFFF)}</DisplayString>
+  <DisplayString Condition="gcptr64 == 0">nil</DisplayString>
 </Type>
 
 <Type Name="GCRef">
+  <SmartPointer Usage="Minimal">(GCobj*)gcptr32</SmartPointer>
   <DisplayString Condition="gcptr32 != 0">{(GCobj*)gcptr32}</DisplayString>
-  <DisplayString Condition="gcptr32 == 0">nil</DisplayString>
-  <Expand>
-     <ExpandedItem Condition="gcptr32 != 0">(GCobj*)gcptr32</ExpandedItem>
-  </Expand>
+  <DisplayString Condition="gcptr32 == 0">nil</DisplayString> 
+</Type>
+  
+<Type Name="MRef">
+  <SmartPointer Usage="Minimal" Optional="true">(uint32_t*)&amp;ptr32</SmartPointer>
+  <DisplayString>{(void*)ptr32}</DisplayString> 
+</Type>
+
+<Type Name="MRef" Priority="Low">
+  <SmartPointer Usage="Minimal" Optional="true">(uint64_t*)&amp;ptr64</SmartPointer>
+  <DisplayString>{(void*)ptr64}</DisplayString>
 </Type>
   
 <Type Name="SBuf">
-  <DisplayString>size: {((char*)p.ptr32) - (char*)b.ptr32} buff: {(char*)b.ptr32}</DisplayString>
+  <DisplayString>size: {((char*)*p) - (char*)*b} buff: {(char*)*b}</DisplayString>
   <Expand>
-    <Item Name="size">((char*)p.ptr32) - (char*)b.ptr32</Item>
-    <Item Name="capacity">((char*)e.ptr32) - (char*)b.ptr32</Item>
-    <Item Name="buff">(char*)b.ptr32,s</Item>
-    <Item Name="pos">(char*)p.ptr32</Item>
-    <Item Name="end">(char*)e.ptr32</Item>
+    <Item Name="size">((char*)*p) - (char*)*b</Item>
+    <Item Name="capacity">((char*)*e) - (char*)*b</Item>
+    <Item Name="buff">(char*)*b,s</Item>
+    <Item Name="pos">(char*)*p</Item>
+    <Item Name="end">(char*)*e</Item>
   </Expand>
 </Type>
   
@@ -67,7 +80,7 @@
     <ExpandedItem Condition="gch.gct == 6">th</ExpandedItem>
     <ExpandedItem Condition="gch.gct == 7">pt</ExpandedItem>
     <ExpandedItem Condition="gch.gct == 8">fn</ExpandedItem>
-    <ExpandedItem Condition="gch.gct == 9" Optional="true">(GCtrace*)this</ExpandedItem>
+    <ExpandedItem Condition="gch.gct == 9" Optional="true">*(GCtrace*)this,na</ExpandedItem>
     <ExpandedItem Condition="gch.gct == 10">cd</ExpandedItem>
     <ExpandedItem Condition="gch.gct == 11">tab</ExpandedItem>
     <ExpandedItem Condition="gch.gct == 12">ud</ExpandedItem>
@@ -80,34 +93,59 @@
   <DisplayString Condition="it == ~2u">true</DisplayString>
   <DisplayString Condition="it == ~3u">lightuserdata: {gcr.gcptr32,x}</DisplayString>
   
-  <DisplayString Condition="it == ~4u">{*((GCstr*)gcr.gcptr32)}</DisplayString>
+  <DisplayString Condition="it == ~4u">{gcr->str}</DisplayString>
   <DisplayString Condition="it == ~5u">{gcr,na}</DisplayString>
   <DisplayString Condition="it == ~6u">{gcr,na}</DisplayString>
   <DisplayString Condition="it == ~7u">{gcr,na}</DisplayString>
   <DisplayString Condition="it == ~8u">{gcr,na}</DisplayString>
-  <DisplayString Condition="it == ~9u" Optional="true">{*((GCtrace*)gcr.gcptr32)}</DisplayString>
+  <DisplayString Condition="it == ~9u" Optional="true">{*((GCtrace*)&amp;gcr->gch)}</DisplayString>
   <DisplayString Condition="it == ~10u">{gcr,na}</DisplayString>
-  <DisplayString Condition="it == ~11u">table: {(GCtab*)gcr.gcptr32,na}</DisplayString>
+  <DisplayString Condition="it == ~11u">table: {gcr->tab}</DisplayString>
   <DisplayString Condition="it == ~12u">{gcr}</DisplayString>
   <DisplayString Condition="it &lt; ~13u">{n,g}</DisplayString>
   
   <Expand>
-    <ExpandedItem Condition="it == ~4u">gcr</ExpandedItem>
-    <ExpandedItem Condition="it == ~5u">gcr</ExpandedItem>
-    <ExpandedItem Condition="it == ~6u">gcr</ExpandedItem>
-    <ExpandedItem Condition="it == ~7u">gcr</ExpandedItem>
-    <ExpandedItem Condition="it == ~8u">gcr</ExpandedItem>
-    <ExpandedItem Condition="it == ~9u" Optional="true">*((GCtrace*)gcr.gcptr32)</ExpandedItem>
-    <ExpandedItem Condition="it == ~10u">gcr</ExpandedItem>
-    <ExpandedItem Condition="it == ~11u">gcr</ExpandedItem>
-    <ExpandedItem Condition="it == ~12u">gcr</ExpandedItem>
-    
+    <ExpandedItem Condition="it &gt; ~13u">gcr,na</ExpandedItem>  
     <ExpandedItem Condition="it &lt; ~13u">n</ExpandedItem>
     
     <Item Name="GCObj" Condition="it &lt; ~13u">gcr</Item>
     <Item Name="Function Frame" Condition="it &lt; ~13u">fr</Item>
   </Expand>
-</Type>   
+</Type>  
+  
+<Type Name="TValue" Priority="Low">
+  <DisplayString Condition="(uint32_t)(it64 &gt;&gt; 47) == ~0u">nil</DisplayString>
+  <DisplayString Condition="(uint32_t)(it64 &gt;&gt; 47) == ~1u">false</DisplayString>
+  <DisplayString Condition="(uint32_t)(it64 &gt;&gt; 47) == ~2u">true</DisplayString>
+  <DisplayString Condition="(uint32_t)(it64 &gt;&gt; 47) == 0xfffeffff">{i}</DisplayString>
+  <DisplayString Condition="(uint32_t)(it64 &gt;&gt; 47) == ~3">lightuserdata: {(gcr.gcptr64 &amp; 0x7FFFFFFFFFFF),x}</DisplayString>
+  <DisplayString Condition="(uint32_t)(it64 &gt;&gt; 47) &lt; ~13u">{n,g}</DisplayString>
+  <DisplayString Condition="(uint32_t)(it64 &gt;&gt; 47) &gt; ~13u">{gcr,na}</DisplayString>
+  
+  <Expand>
+    <ExpandedItem Condition="(uint32_t)(it64 &gt;&gt; 47) &gt; ~13u">gcr</ExpandedItem>  
+    <ExpandedItem Condition="(uint32_t)(it64 &gt;&gt; 47) == ~13">n</ExpandedItem>
+    
+    <Item Name="GCObj" Condition="(it64 &gt;&gt; 47) &lt; ~13">gcr</Item>
+
+    <Synthetic Name="Frame" Condition="(uint32_t)(it64 &gt;&gt; 47) &lt; ~13">
+      <DisplayString Condition="(ftsz &amp; 7) == 0">Lua</DisplayString>
+      <DisplayString Condition="(ftsz &amp; 7) == 1">C</DisplayString>
+      <DisplayString Condition="(ftsz &amp; 7) == 2">Continuation</DisplayString>
+      <DisplayString Condition="(ftsz &amp; 7) == 3">VarArg</DisplayString>
+      <DisplayString Condition="(ftsz &amp; 7) == 4">Protected Lua</DisplayString>
+      <DisplayString Condition="(ftsz &amp; 7) == 5">Protected C Frame</DisplayString>
+      <DisplayString Condition="(ftsz &amp; 7) == 6">Lua PCALL</DisplayString>
+      <DisplayString Condition="(ftsz &amp; 7) == 7">Lua PCALL in hook</DisplayString>
+      <Expand>
+        <Item Name="Ftsz">ftsz &amp; 7</Item>
+        <Item Name="Stack offset" Condition="(ftsz &amp; 3) != 0">ftsz &gt;&gt; 3</Item>
+        <Item Name="Function">this[-1].gcr</Item>
+        <Item Name="Call Base" Condition="(ftsz &amp; 3) == 0">(uint8_t)(((BCIns*)(u64 &amp; ~3))[-1] &gt;&gt; 8)</Item>
+      </Expand>
+    </Synthetic>
+  </Expand>
+</Type>
 
 <Type Name="GCudata">
   <DisplayString>size = {len,i}, first int = {*(unsigned int*)(this+1)}, mt = {metatable}, env = {env}</DisplayString>
@@ -131,16 +169,26 @@
 <Type Name="GCtab">
   <DisplayString>{{asize = {asize,i}, hsize = {hmask,i}}}</DisplayString>
   <Expand>
-    <Item Name="metatable" Condition="metatable.gcptr32 != 0">metatable</Item>
+    <Item Name="metatable" Condition="(&amp;metatable->tab) != 0">metatable</Item>
     <Item Name="[asize]" Condition="hmask == 0 &amp;&amp; asize != 0">asize</Item>
     <Item Name="[hsize]">hmask</Item>
-    <ArrayItems Condition="hmask == 0">
+    <CustomListItems  Condition="hmask != 0">
+      <Variable Name="nodes" InitialValue="(Node*)(*node)" />
+      <Variable Name="i" InitialValue="0" />
+      <Loop>
+        <If Condition="i == (hmask+1)">
+          <Break/>
+        </If>
+        <If Condition="nodes[i].val.it != -1">
+          <Item>nodes[i]</Item>
+        </If>
+        <Exec>i++</Exec>
+      </Loop>
+    </CustomListItems>
+    
+    <ArrayItems>
       <Size>asize</Size>
-      <ValuePointer>(TValue*)(array.ptr32)</ValuePointer>
-    </ArrayItems>
-    <ArrayItems Condition="asize == 0">
-      <Size>hmask+1</Size>
-      <ValuePointer>(Node*)(node.ptr32)</ValuePointer>
+      <ValuePointer>(TValue*)(*array)</ValuePointer>
     </ArrayItems>
      
     <Synthetic Name="Array" Condition="hmask != 0 &amp;&amp; asize != 0">
@@ -148,17 +196,16 @@
       <Expand>
         <ArrayItems>
           <Size>asize</Size>
-          <ValuePointer>(Node*)(array.ptr32)</ValuePointer>
+          <ValuePointer>(Node*)(*array)</ValuePointer>
         </ArrayItems>
       </Expand>
     </Synthetic>
     <Synthetic Name="Hash" Condition="hmask != 0">
-      <DisplayString>{hmask+1}</DisplayString>
       <Expand>
-        <ArrayItems>
-          <Size>hmask+1</Size>
-          <ValuePointer>(Node*)(node.ptr32)</ValuePointer>
-        </ArrayItems>
+      <ArrayItems Condition="asize == 0">
+        <Size>hmask+1</Size>
+        <ValuePointer>(Node*)(*node)</ValuePointer>
+      </ArrayItems>
       </Expand>
     </Synthetic>
   </Expand>
@@ -197,7 +244,7 @@
       <Expand>
         <IndexListItems>
           <Size>sizekgc</Size>
-          <ValueNode>((GCRef*)k.ptr32)[-$i],na</ValueNode>
+          <ValueNode>((GCRef*)*k)[-$i],na</ValueNode>
         </IndexListItems>
       </Expand>
     </Synthetic>
@@ -207,15 +254,15 @@
       <Expand>
         <IndexListItems Condition="numline &lt; 256">
           <Size>sizebc</Size>
-          <ValueNode>(int)(((uint8_t*)lineinfo.ptr32)[$i])</ValueNode>
+          <ValueNode>(int)(((uint8_t*)*lineinfo)[$i])</ValueNode>
         </IndexListItems>
         <IndexListItems Condition="numline &lt; 65536 &amp;&amp; numline &gt; 256">
           <Size>sizebc</Size>
-          <ValueNode>(((uint16_t*)lineinfo.ptr32)[$i]),d</ValueNode>
+          <ValueNode>(((uint16_t*)*lineinfo)[$i]),d</ValueNode>
         </IndexListItems>
         <IndexListItems Condition="numline &gt; 65536">
             <Size>sizebc</Size>
-            <ValueNode>(((uint32_t*)lineinfo.ptr32)[$i]),d</ValueNode>
+            <ValueNode>(((uint32_t*)*lineinfo)[$i]),d</ValueNode>
         </IndexListItems>
       </Expand>
     </Synthetic>
@@ -233,12 +280,15 @@
   </Expand>
 </Type>
 
+  
 <Type Name="IRIns">
-  <DisplayString Condition="o == IR_KGC">{(IROp)o,en} {t,en} {gcr}</DisplayString>
+  <DisplayString Optional="true" Condition="o == IR_KGC &amp;&amp; gcr.gcptr32 != 0">{(IROp)o,en} {t,en} {gcr,na}</DisplayString>
+  <DisplayString Optional="true" Condition="o == IR_KGC &amp;&amp; gcr.gcptr64 != 0">{(IROp)o,en} {t,en} {this[1].gcr,na}</DisplayString>
+  
   <DisplayString Condition="o == IR_KINT">{(IROp)o,en} {i}</DisplayString>
-  <DisplayString Condition="o == IR_KINT64">{(IROp)o,en} {*((long long*)ptr.ptr32)}</DisplayString>
-  <DisplayString Condition="o == IR_KPTR">{(IROp)o,en}({t,en}) {ptr.ptr32,x}</DisplayString>
-  <DisplayString Condition="o == IR_KNUM">{(IROp)o,en} {*((double*)ptr.ptr32)}</DisplayString>
+  <DisplayString Condition="o == IR_KINT64">{(IROp)o,en} {this[1].tv.u64}</DisplayString>
+  <DisplayString Condition="o == IR_KPTR">{(IROp)o,en}({t,en}) {*ptr,x}</DisplayString>
+  <DisplayString Condition="o == IR_KNUM">{(IROp)o,en} {this[1].tv.n,g}</DisplayString>
   <DisplayString Condition="o == IR_KPRI">{(IROp)o,en}({t,en})</DisplayString>
   <DisplayString Condition="o == IR_SLOAD || o == IR_BASE || o == IR_LOOP">{(IROp)o,en}({t,en}) op1:{op1,i} op2:{op2,i}</DisplayString>
   <DisplayString>{(IROp)o,en}({t,en}) op1:{op1-REF_BIAS,i} op2:{op2-REF_BIAS,i}</DisplayString>
@@ -246,12 +296,13 @@
   <Expand>
     <Item Name="op">(IROp)o</Item>
     <ExpandedItem>t</ExpandedItem>
+    <Item Name="Constant" Optional="true" Condition="o == IR_KGC  &amp;&amp; gcr.gcptr32 != 0">gcr,na</Item>
+    <Item Name="Constant" Optional="true" Condition="o == IR_KGC  &amp;&amp; gcr.gcptr64 != 0">this[1].gcr,na</Item>
+    <Item Name="Constant" Condition="o == IR_KINT">i</Item>
+    <Item Name="Constant" Optional="true" Condition="o == IR_KPTR  &amp;&amp; gcr.gcptr32 != 0">ptr,x</Item>
+    <Item Name="Constant" Optional="true" Condition="o == IR_KPTR  &amp;&amp; gcr.gcptr64 != 0">this[1].ptr,x</Item>
     
-    <Item Name="Constant" Condition="o == 22">gcr</Item><!--IR_KGC-->
-    <Item Name="Constant" Condition="o == 23">i</Item><!--IR_KINT-->   
-    <Item Name="Constant" Condition="o == 24">ptr.ptr32</Item><!--IR_KPTR-->
-    <Item Name="Constant" Condition="o == 27">*((double*)ptr.ptr32)</Item><!--IR_KNUM-->
-    
+    <Item Name="Constant" Condition="o == IR_KNUM">this[1].tv.n,g</Item>
     <Item Name="Op 1">op1,i</Item>
     <Item Name="Op 2">op2,i</Item>
     <Item Name="prev">prev-REF_BIAS,i</Item>
@@ -417,27 +468,27 @@
 
 <Type Name="GCupval">
   <DisplayString Condition="closed == 1">Closed, {tv}</DisplayString>
-  <DisplayString Condition="closed == 0">Open, {*(TValue*)v.ptr32}</DisplayString>
+  <DisplayString Condition="closed == 0">Open, {*(TValue*)*v}</DisplayString>
   
   <Expand>
-    <Item Name="v" Condition="closed == 1">tv</Item>
-    <Item Name="v" Condition="closed == 0">(TValue*)v.ptr32</Item>
+    <Item Name="Value" Condition="closed == 1">tv</Item>
+    <Item Name="Value" Condition="closed == 0">(TValue*)*v</Item>
     <Item Name="Immutable">immutable</Item>
-    <Item Name="Prev" Condition="closed == 0">(GCupval*)prev.gcptr32</Item>
-    <Item Name="Next" Condition="closed == 0">(GCupval*)next.gcptr32</Item>
+    <Item Name="Prev" Condition="closed == 0">prev->uv</Item>
+    <Item Name="Next" Condition="closed == 0">next->uv</Item>
   </Expand>
 </Type>
 
 <Type Name="GCfuncL">
   <DisplayString>Lua, {((GCproto*)*pc)[-1]}</DisplayString>
   <Expand>
-    <Item Name="Proto">((GCproto*)pc.ptr32)[-1],na</Item>
+    <Item Name="Proto">((GCproto*)*pc)[-1],na</Item>
     <Synthetic Name="Byte Code">
-      <DisplayString>{pc.ptr32,x} Header: {(BCOp)(((BCIns*)pc.ptr32)[0]&amp;0xff)}</DisplayString>
+      <DisplayString>{*pc,x} Header: {(BCOp)(((BCIns*)*pc)[0]&amp;0xff)}</DisplayString>
       <Expand>
         <IndexListItems>
-          <Size>((GCproto*)pc.ptr32)[-1].sizebc</Size>
-          <ValueNode>(BCOp)(((BCIns*)pc.ptr32)[$i]&amp;0xff)</ValueNode>
+          <Size>((GCproto*)*pc)[-1].sizebc</Size>
+          <ValueNode>(BCOp)(((BCIns*)*pc)[$i]&amp;0xff)</ValueNode>
         </IndexListItems>
       </Expand>
     </Synthetic>
@@ -481,15 +532,17 @@
   <DisplayString Condition="(ftsz &amp; 7) == 6">Lua PCALL</DisplayString>
   <DisplayString Condition="(ftsz &amp; 7) == 7">Lua PCALL in hook</DisplayString>
   <Expand>
-      <Item Name="PC Address" Condition="pcr.ptr32 &gt; 65000">pcr.ptr32&amp;~3</Item>
-      <Item Name="Call Base" Condition="pcr.ptr32 &gt; 65000">(uint8_t)(((BCIns*)(pcr.ptr32&amp;~3))[-1]&gt;&gt; 8)</Item>
-      <Item Name="Stack offset" Condition="pcr.ptr32 &lt; 65000">pcr.ptr32&gt;&gt;3</Item>
+      <Item Name="PC Address"   Optional="true" Condition="*pcr &gt; 65000">*pcr &amp; ~3</Item>
+      <Item Name="Call Base"    Optional="true" Condition="pcr.ptr32 &gt; 65000">(uint8_t)(((BCIns*)(pcr.ptr32&amp;~3))[-1]&gt;&gt; 8)</Item>
+      <Item Name="Stack offset" Optional="true" Condition="pcr.ptr32 &lt; 65000">pcr.ptr32&gt;&gt;3</Item>
+
+      <Item Name="Call Base"    Optional="true" Condition="pcr.ptr64 &gt; 65000">(uint8_t)(((BCIns*)(pcr.ptr64 &amp; ~3))[-1]&gt;&gt; 8)</Item>
+      <Item Name="Stack offset" Optional="true" Condition="pcr.ptr64 &lt; 65000">pcr.ptr64&gt;&gt;3</Item>
   </Expand>
 </Type>  
 
 <Type Name="CType">
-    <DisplayString Condition="((info &gt;&gt; 28) == 0) &amp;&amp; ((info &amp; 0x04000000u) == 0)">int: {size} {name}</DisplayString>
-    
+    <DisplayString Condition="((info &gt;&gt; 28) == 0) &amp;&amp; ((info &amp; 0x04000000u) == 0)">int: {size} {name}</DisplayString>  
     <DisplayString Condition="((info &gt;&gt; 28) == 0) &amp;&amp; ((info &amp; 0x04000000u) != 0)">float: {size} {name}</DisplayString>
     <DisplayString Condition="(info &gt;&gt; 28) == 1">struct: size={size} {name}</DisplayString>
     <DisplayString Condition="(info &gt;&gt; 28) == 2">ptr: {size} {name} cid: {info&amp;0xffff}</DisplayString>
@@ -507,7 +560,7 @@
     <DisplayString Condition="(info &gt;&gt; 28) == 13">keyword: {name} {size}</DisplayString>
     
     <Expand>
-      <Item Name="name" Condition="name.gcptr32 != 0">name</Item>
+      <Item Name="name" Condition="(&amp;name->str) != 0">name</Item>
       <Item Name="cid">info&amp;0xffff,i</Item>
       <Item Name="size">size,i</Item>
       <Item Name="info">info&amp;0xfff0000</Item>
@@ -548,7 +601,7 @@
   <DisplayString>VMState: {vmstate}</DisplayString>
 
   <Expand>
-    <Item Name="CType State">(CTState*)ctype_state.ptr32</Item>
+    <Item Name="CType State">(CTState*)*ctype_state</Item>
     <Item Name="GC State">gc</Item>
     <Item Name="JIT State" Optional="true">*(jit_State *)(this+1)</Item>
     <Item Name="Registry">registrytv</Item>
@@ -557,7 +610,7 @@
       <Expand>
         <LinkedListItems>
           <HeadPointer>&amp;uvhead</HeadPointer>
-          <NextPointer>(GCupval*)next.gcptr32</NextPointer>
+          <NextPointer>&amp;next->uv</NextPointer>
           <ValueNode>this</ValueNode>
         </LinkedListItems>
       </Expand>
@@ -580,22 +633,8 @@
 	  <Item Name="Heap Size Pause">pause,i</Item>
 	  <Item Name="Step Rate Multiplier">stepmul,i</Item>
 	  <Item Name="GC Rate Debt">debt,i</Item>
-  
-    <Synthetic Name="GC Objects1">
-      <Expand>
-        <CustomListItems>
-          <Variable Name="orig_head" InitialValue="((GCobj*)root.gcptr32)"/>
-          <Variable Name="iter" InitialValue="((GCobj*)root.gcptr32)"/>
-          <Loop>
-            <Break Condition="iter == 0"/>
-            <Item>*iter</Item>
-            <Exec>iter = (GCobj*)(iter-&gt;gch.nextgc.gcptr32)</Exec>
-          </Loop>
-        </CustomListItems>
-      </Expand>
-    </Synthetic>
-    
-    <Synthetic Name="GC Objects2">
+      
+    <Synthetic Name="GC Objects" Optional="true">
       <Expand>        
         <LinkedListItems>
           <HeadPointer>((GCobj*)root.gcptr32)</HeadPointer>
@@ -604,34 +643,51 @@
         </LinkedListItems>
       </Expand>
     </Synthetic>
+    <Synthetic Name="GC Objects" Optional="true">
+      <Expand>
+        <LinkedListItems>
+          <HeadPointer>((GCobj*)root.gcptr64)</HeadPointer>
+          <NextPointer>(GCobj*)gch.nextgc.gcptr64</NextPointer>
+          <ValueNode>this</ValueNode>
+        </LinkedListItems>
+      </Expand>
+    </Synthetic>
   </Expand>
 </Type>
 
+  
 <Type Name="lua_State">
-  <DisplayString>Lua State {base[-1].fr.func,na}</DisplayString>
+  <DisplayString Optional="true">Lua State {base[-1].fr.func,na}</DisplayString>
   <Expand>
-    <Item Name="Current Function">base[-1].fr.func,na</Item>  
-    <Item Name="Prev Function(Lua)" Condition="(base[-1].fr.tp.ftsz &amp; 1) == 0">((base-1)-(((unsigned char*)(base[-1].fr.tp.pcr.ptr32))[-3]+1))[0].fr.func,na</Item>
-    <Item Name="Prev Function(C)" Condition="(base[-1].fr.tp.ftsz &amp; 1) != 0">((TValue*)(((char*)(base-1))-(base[-1].fr.tp.ftsz &amp; ~7)))[0].fr.func,na</Item>
+    <Item Name="Current Function" Optional="true">base[-1].fr.func,na</Item>  
+    <Item Name="Prev Function(Lua)" Optional="true" Condition="(base[-1].fr.tp.ftsz &amp; 1) == 0">((base-1)-(((unsigned char*)(base[-1].fr.tp.pcr.ptr32))[-3]+1))[0].fr.func,na</Item>
+    <Item Name="Prev Function(C)" Optional="true" Condition="(base[-1].fr.tp.ftsz &amp; 1) != 0">((TValue*)(((char*)(base-1))-(base[-1].fr.tp.ftsz &amp; ~7)))[0].fr.func,na</Item>
     
-    <Item Name="Global State">*(global_State*)glref.ptr32</Item>
-    <Item Name="GG State">*(GG_State *)(((char*)glref.ptr32)-(int)(((lua_State*)0)+1))</Item>
-    <Item Name="JIT State" Optional="true">*(jit_State *)(((global_State*)glref.ptr32)+1)</Item>
+    <Item Name="Global State">*(global_State*)*glref</Item>
+    <Item Name="GG State">*(GG_State *)(((char*)*glref)-(int)(((lua_State*)0)+1))</Item>
+    <Item Name="JIT State" Optional="true">*(jit_State *)(((global_State*)*glref)+1)</Item>
     <Item Name="Globals">env</Item>
-    <Item Name="Registry">(*(global_State*)glref.ptr32).registrytv</Item>
+    <Item Name="Registry">(*(global_State*)*glref).registrytv</Item>
+    
+    <Item Name="FrameSize" Optional="true" Condition="(*(GCobj*)base[-1].gcr.gcptr32).gch.gct == 8 &amp;&amp; ((GCobj*)base[-1].fr.func.gcptr32)->fn.l.ffid == 0">
+      ((GCproto*)((GCobj*)base[-1].fr.func.gcptr32)->fn.l.pc.ptr32)[-1].framesize
+    </Item>
     
     <Synthetic Name="[full stack]">
-      <DisplayString>{top-((TValue*)stack.ptr32),i}</DisplayString>
+      <DisplayString>{top-((TValue*)*stack),i}</DisplayString>
       <Expand>
         <ArrayItems>
-          <Size>top-((TValue*)stack.ptr32)</Size>
-          <ValuePointer>(TValue*)stack.ptr32</ValuePointer>
+          <Size>top-((TValue*)*stack)</Size>
+          <ValuePointer>(TValue*)*stack</ValuePointer>
         </ArrayItems>
       </Expand>
     </Synthetic>
     <Item Name="[stack top]">*(top-1)</Item>
     <Item Name="[stack size]">top-base</Item>  
     <ArrayItems>
+      <Size Optional="true" Condition="base[-1].gcr->gch.gct == 8 &amp;&amp; ((GCobj*)base[-1].fr.func.gcptr32)->fn.l.ffid == 0">
+        ((GCproto*)((GCobj*)base[-1].fr.func.gcptr32)->fn.l.pc.ptr32)[-1].framesize
+      </Size>
       <Size>top-base</Size>
       <ValuePointer>base</ValuePointer>
     </ArrayItems>
