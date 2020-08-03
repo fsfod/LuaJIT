@@ -89,7 +89,7 @@
   <DisplayString Condition="it == ~10u">{gcr,na}</DisplayString>
   <DisplayString Condition="it == ~11u">table: {(GCtab*)gcr.gcptr32,na}</DisplayString>
   <DisplayString Condition="it == ~12u">{gcr}</DisplayString>
-  <DisplayString Condition="it &lt; ~13u">{n}</DisplayString>
+  <DisplayString Condition="it &lt; ~13u">{n,g}</DisplayString>
   
   <Expand>
     <ExpandedItem Condition="it == ~4u">gcr</ExpandedItem>
@@ -288,11 +288,12 @@
   <DisplayString>trace({traceno,i}), {startpt}, {(TraceLink)linktype}</DisplayString>
   <Expand>
     <Item Name="Trace Number">traceno,i</Item>
+    <Item Name="Parent Trace" Condition="root != ir[0x8000].op1">ir[0x8000].op1</Item>
     <Item Name="Root Trace" Condition="root != 0">root,i</Item>
     <Item Name="Starting Function">startpt</Item>
     <Item Name="Start Bytecode">(BCOp)(startins&amp;0xff)</Item>
     <Item Name="Link Type">(TraceLink)linktype</Item>
-    <Item Name="MCode">mcode</Item>
+    <Item Name="MCode">(uintptr_t)mcode,x</Item>
     
     <Synthetic Name="IR Byte Code">
       <DisplayString>[size] = {nins-0x8000,i}</DisplayString>
