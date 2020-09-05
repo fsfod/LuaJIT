@@ -1487,6 +1487,115 @@ it("object allocation log", function()
   assert(labels["f2"].address == allocs[2].address)
   assert(labels["f3"].address == allocs[3].address)
 end)
+
+it("stackcapture modes", function()
+  jitlog.start()
+  -- Missing args
+  assert(not pcall(jitlog.set_stackcapture_mode))
+  assert(not pcall(jitlog.set_stackcapture_mode, "tstart"))
+
+  assert(not pcall(jitlog.set_stackcapture_mode, "tstart"))
+
+  -- Bad event type
+  assert(not pcall(jitlog.set_stackcapture_mode, "ttt", "frames"))
+  assert(not pcall(jitlog.set_stackcapture_mode, "", "frames"))
+
+  assert(pcall(jitlog.set_stackcapture_mode, "tstart", "frames"))
+
+  -- Bad stack capture mode
+  assert(not pcall(jitlog.set_stackcapture_mode, "texit", "fff"))
+  assert(not pcall(jitlog.set_stackcapture_mode, "texit", ""))
+end)
+
+local stacktexit_mixin = {
+  {
+    init = function(self)
+      self.textstacks = {}
+    end,
+    actions = {
+      trace_exit = function(self, msg)
+        self.current_texit = msg.traceid
+      end,
+      trace_exitend = function(self, msg)
+        local stack = self:readfb("stacksnapshot", msg:get_stack())
+        --stack:printframes()
+        table.insert(self.textstacks, {stack = stack, trace = msg.traceid, exit = msg.exit})
+      end
+    }
+  }
+}
+
+it("stackcapture trace exit", function()
+  jitlog.start()
+  jitlog.set_stackcapture_mode("texit", "frames")
+  local function wrapper()
+    local a = 0
+    for i = 1, 200 do
+      if i <= 100 then
+        a = a + 1
+      end
+      if i == 198 then
+        jitlog.set_stackcapture_mode("texit", "full")
+      end
+    end
+    assert(a == 100)
+  end
+  wrapper()
+  jitlog.labelobj(wrapper, "wrapper")
+
+  local result = parselog(jitlog.savetostring(), false, stacktexit_mixin)
+  assert(result.exits > 4)
+  assert(#result.textstacks == result.exits)
+
+  local wrapperpt = result.objlabel_lookup.wrapper
+  assert(wrapperpt)
+
+  for i, exit in ipairs(result.textstacks) do
+    assert(exit.stack:has_funcproto(wrapperpt), "Missing function in stack capture")
+  end
+end)
+
+it("stackcapture trace start/stop", function()
+  jitlog.start()
+  jitlog.set_stackcapture_mode("tstart", "full")
+  jitlog.set_stackcapture_mode("tstop", "frames")
+  jitlog.set_stackcapture_mode("tabort", "full")
+  local function wrapper()
+    local a = 0
+    for i = 1, 200 do
+      if i <= 100 then
+        a = a + 1
+      end
+      if i > 180 then
+        -- Force an abort that can't be trace stitched
+        jit.off()
+        jit.on()
+      end
+    end
+    assert(a == 100)
+  end
+  wrapper()
+  jitlog.labelobj(wrapper, "wrapper")
+
+  local result = parselog(jitlog.savetostring())
+  assert(#result.traces > 1)
+
+  for i, t in ipairs(result.traces) do
+    local stack = t.stack
+    assert(stack ~= nil)
+    assert(stack.framesonly)
+
+    stack = t.start_stack
+    assert(stack ~= nil)
+    assert(not stack.framesonly)
+  end
+
+  for i, t in ipairs(result.aborts) do
+    local stack = t.stack
+    assert(stack ~= nil)
+    assert(not stack.framesonly)
+  end
+end)
   
 local failed = false
 

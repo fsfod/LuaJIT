@@ -572,6 +572,12 @@ function readers:trace_start(msg)
     startpc = msg.startpc,
     stitched = msg.stitched,
   }
+
+  local stack = msg:get_stack()
+  if stack then
+    trace.stack = self:readfb("stacksnapshot", stack)
+  end
+
   self.current_trace = trace
   self.snapnum = 0
   self:log_msg("trace_start", "TraceStart(%d): start = %s, parentid = %d", id, startpt and startpt:get_displayname(),  msg.parentid)
@@ -983,6 +989,7 @@ function readers:trace(msg)
     time = msg.time,
     start_eventid = start and start.eventid,
     start_time = start and start.time,
+    start_stack = start and start.stack,
     id = id,
     rootid = msg.root,
     parentid = msg.parentid,
@@ -1032,6 +1039,12 @@ function readers:trace(msg)
   else
     tinsert(self.traces, trace)
   end
+
+  local stack = msg:get_endstack()
+  if stack then
+    trace.stack = self:readfb("stacksnapshot", stack)
+  end
+
   setmetatable(trace, self.msgobj_mt.trace)
   self:log_msg("trace", trace:get_displaystring())
   
@@ -1842,6 +1855,11 @@ function readers:tab_resize(msg)
   
   self:log_msg("tab_resize", "TableResize: address = 0x%x, hsize = %d, asize = %d", address,  hsize, asize)
   return address, self.objects[address], hsize, asize
+end
+
+function readers:trace_exitend(msg)
+  local stackfb = msg:get_stack()
+  self:log_msg("trace_exitend", "TraceExitEnd: trace = %d, exit = %d, hasstack = %s", msg.traceid,  hsize, stackfb and "true" or "false")
 end
 
 function readers:trace_func(msg)

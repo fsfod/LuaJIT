@@ -61,6 +61,7 @@ typedef struct jitlog_State {
   GCfunc *lastfunc;
   TValue *saved_stack;
   uint32_t saved_stacksz;
+  uint32_t stackcapture_mode;
   TracedFunc *traced_funcs;
   uint32_t traced_funcs_count;
   uint32_t traced_funcs_capacity;
@@ -95,9 +96,22 @@ typedef enum StackCaptureMode
   StackCaptureMode_BitCount            = 3,
 } StackCaptureMode;
 
+enum StackCapture
+{
+  StackCapture_TraceStart = 1,
+  StackCapture_TraceStop  = 2,
+  StackCapture_TraceAbort = 4,
+  StackCapture_TraceExit  = 8,
+};
+
 #define usr2ctx(usrcontext)  ((jitlog_State *)(((char *)usrcontext) - offsetof(jitlog_State, user)))
 #define ctx2usr(context)  (&(context)->user)
 #define jitlog_isfiltered(context, evt) (((context)->user.logfilter & (evt)) != 0)
+
+static StackCaptureMode get_stackcapture_mode(jitlog_State* context, int evt)
+{
+  return (StackCaptureMode)((context->stackcapture_mode >> evt * StackCaptureMode_BitCount) & StackCaptureMode_Mask);
+}
 
 static void *growvec(void *p, MSize *szp, MSize lim, MSize esz)
 {
@@ -489,6 +503,22 @@ static luastack_Args build_rawstack(jitlog_State *context, lua_State *L, int max
   return args;
 }
 
+int jitlog_set_stackcapture(jitlog_State* context, int event, int mode)
+{
+
+  if ((mode & StackCaptureMode_Mask) != mode) {
+    return 0;
+  }
+
+  /* Clear old mode */
+  context->stackcapture_mode &= ~(StackCaptureMode_Mask << (event * StackCaptureMode_BitCount));
+
+  if (mode != StackCaptureMode_None) {
+    context->stackcapture_mode |= mode << (event * StackCaptureMode_BitCount);
+  }
+  return 1;
+}
+
 static luastack_Args capture_stack(jitlog_State *context, lua_State *L, StackCaptureMode mode)
 {
   int base = (int)(L->base - mref(L->stack, TValue));
@@ -636,7 +666,7 @@ static int isstitched(jitlog_State *context, GCtrace *T)
   return 0;
 }
 
-static void jitlog_tracestart(jitlog_State *context, GCtrace *T)
+static void jitlog_tracestart(jitlog_State *context, lua_State *L, GCtrace *T)
 { 
   jit_State *J = G2J(context->g);
   GCproto *startpt = &gcref(T->startpt)->pt;
@@ -663,6 +693,15 @@ static void jitlog_tracestart(jitlog_State *context, GCtrace *T)
     .parentexit = J->exitno,
     .startpc = startpc,
   };
+
+  int capturestack = get_stackcapture_mode(context, StackCapture_TraceStart);
+  luastack_Args stack;
+
+  if (capturestack) {
+    stack = capture_stack(context, L, capturestack);
+    args.stack = &stack;
+  }
+
   log_trace_start(&context->ub, &args);
 }
 
@@ -715,7 +754,7 @@ typedef enum TraceWriteKind {
   TraceWriteKind_Existing,
 } TraceWriteKind;
 
-static void jitlog_writetrace(jitlog_State *context, GCtrace *T, TraceWriteKind kind)
+static void jitlog_writetrace(jitlog_State *context, GCtrace *T, TraceWriteKind kind, lua_State *L)
 {
   jit_State *J = G2J(context->g);
   GCproto *startpt = &gcref(T->startpt)->pt, *stoppt;
@@ -738,6 +777,17 @@ static void jitlog_writetrace(jitlog_State *context, GCtrace *T, TraceWriteKind 
 
   if (kind != TraceWriteKind_Abort) {
     write_exitstubs(context, T);
+  }
+
+  luastack_Args stack;
+  int capturestack = 0;
+
+  if (kind != TraceWriteKind_Existing) {
+    capturestack = get_stackcapture_mode(context, kind  == TraceWriteKind_Stop ? StackCapture_TraceStop : StackCapture_TraceAbort);
+
+    if (capturestack) {
+      stack = capture_stack(context, L, capturestack);
+    }
   }
 
   int abortreason = -1, abortinfo = 0;
@@ -801,27 +851,28 @@ static void jitlog_writetrace(jitlog_State *context, GCtrace *T, TraceWriteKind 
     .tracedbc_length = context->traced_bc_count,
     .iroffsets = (uint32_t *)T->iroffsets,
     .iroffsets_length = T->niroffsets,
+    .endstack = capturestack ? &stack : NULL,
   };
 
   log_trace(&context->ub, &args);
   free(snapshots);
 }
 
-static void jitlog_tracestop(jitlog_State *context, GCtrace *T)
+static void jitlog_tracestop(jitlog_State *context, lua_State *L, GCtrace *T)
 {
   if (jitlog_isfiltered(context, LOGFILTER_TRACE_COMPLETED)) {
     return;
   }
-  jitlog_writetrace(context, T, TraceWriteKind_Stop);
+  jitlog_writetrace(context, T, TraceWriteKind_Stop, L);
   context->events_written |= JITLOGEVENT_TRACE_COMPLETED;
 }
 
-static void jitlog_traceabort(jitlog_State *context, GCtrace *T)
+static void jitlog_traceabort(jitlog_State *context, lua_State* L, GCtrace *T)
 {
   if (jitlog_isfiltered(context, LOGFILTER_TRACE_ABORTS)) {
     return;
   }
-  jitlog_writetrace(context, T, TraceWriteKind_Abort);
+  jitlog_writetrace(context, T, TraceWriteKind_Abort, L);
   context->events_written |= JITLOGEVENT_TRACE_ABORT;
 }
 
@@ -934,7 +985,7 @@ static void jitlog_tracebc(jitlog_State *context)
 static const uint32_t large_traceid = 1 << 14;
 static const uint32_t large_exitnum = 1 << 9;
 
-static void jitlog_exit(jitlog_State *context, VMEventData_TExit *exitState)
+static void jitlog_exit(jitlog_State *context, lua_State* L, VMEventData_TExit *exitState)
 {
   jit_State *J = G2J(context->g);
   context->traceexit = J->parent | J->exitno;
@@ -945,34 +996,45 @@ static void jitlog_exit(jitlog_State *context, VMEventData_TExit *exitState)
     context->traceexit = 0;
   }
 
-  if (!exitState || jitlog_isfiltered(context, LOGFILTER_TRACE_EXITS)) {
+  if (jitlog_isfiltered(context, LOGFILTER_TRACE_EXITS)) {
     return;
   }
 
-  if (exitState && (context->mode & JITLogMode_TraceExitRegs)) {
-    register_state_Args args = {
-      .source = 0,
-      .gprs = exitState->gprs,
-      .gprs_length = exitState->gprs_size,
-      .gpr_count = RID_NUM_GPR,
-      .fprs = exitState->fprs,
-      .fprs_length = exitState->fprs_size,
-      .fpr_count = RID_NUM_FPR,
-      .vec_count = 0,
-      .vregs_length = exitState->vregs_size,
-      .vregs = exitState->vregs,
-    };
-    log_trace_exitfull(&context->ub, exitState->gcexit, J->parent, J->exitno, &args);
-  } else {
-    /* Use a more the compact message if the trace Id is smaller than 16k and the exit smaller than
-    ** 512 which will fit in the spare 24 bits of a message header.
-    */
-    if (J->parent < large_traceid && J->exitno < large_exitnum) {
-      log_trace_exitsmall(&context->ub, exitState->gcexit, J->parent, J->exitno);
+  if (exitState) {
+    if (context->mode & JITLogMode_TraceExitRegs) {
+      register_state_Args args = {
+        .source = 0,
+        .gprs = exitState->gprs,
+        .gprs_length = exitState->gprs_size,
+        .gpr_count = RID_NUM_GPR,
+        .fprs = exitState->fprs,
+        .fprs_length = exitState->fprs_size,
+        .fpr_count = RID_NUM_FPR,
+        .vec_count = 0,
+        .vregs_length = exitState->vregs_size,
+        .vregs = exitState->vregs,
+      };
+      log_trace_exitfull(&context->ub, exitState->gcexit, J->parent, J->exitno, &args);
     } else {
-      log_trace_exit(&context->ub, exitState->gcexit, J->parent, J->exitno);
+      /* Use a more the compact message if the trace Id is smaller than 16k and the exit smaller than
+      ** 512 which will fit in the spare 24 bits of a message header.
+      */
+      if (J->parent < large_traceid && J->exitno < large_exitnum) {
+        log_trace_exitsmall(&context->ub, exitState->gcexit, J->parent, J->exitno);
+      } else {
+        log_trace_exit(&context->ub, exitState->gcexit, J->parent, J->exitno);
+      }
+    }
+  } else {
+    StackCaptureMode capturemode = get_stackcapture_mode(context, StackCapture_TraceExit);
+    if (capturemode) {
+      /* Capture the Lua stack after its been restored by the exit handler */
+      luastack_Args stack = capture_stack(context, L, capturemode);
+      stack.savedpc = (void *)cframe_pc(cframe_raw(L->cframe));
+      log_trace_exitend(&context->ub, J->parent, J->exitno, &stack);
     }
   }
+
   context->events_written |= JITLOGEVENT_TRACE_EXITS;
 }
 
@@ -1413,19 +1475,19 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
   switch (event) {
 #if LJ_HASJIT
     case VMEVENT_TRACE_START:
-      jitlog_tracestart(context, (GCtrace*)eventdata);
+      jitlog_tracestart(context, L, (GCtrace*)eventdata);
       break;
     case VMEVENT_RECORD:
       jitlog_tracebc(context);
       break;
     case VMEVENT_TRACE_STOP:
-      jitlog_tracestop(context, (GCtrace*)eventdata);
+      jitlog_tracestop(context, L, (GCtrace*)eventdata);
       break;
     case VMEVENT_TRACE_ABORT:
-      jitlog_traceabort(context, (GCtrace*)eventdata);
+      jitlog_traceabort(context, L, (GCtrace*)eventdata);
       break;
     case VMEVENT_TRACE_EXIT:
-      jitlog_exit(context, (VMEventData_TExit*)eventdata);
+      jitlog_exit(context, L, (VMEventData_TExit*)eventdata);
       break;
     case VMEVENT_PROTO_BLACKLISTED:
       jitlog_protobl(context, (VMEventData_ProtoBL*)eventdata);
@@ -3022,6 +3084,38 @@ static int jlib_set_objalloc_logging(lua_State *L)
   return 1;
 }
 
+static const EnumOption stackcapture_options[] = {
+  {"texit",  StackCapture_TraceExit},
+  {"tstart", StackCapture_TraceStart},
+  {"tstop",  StackCapture_TraceStop},
+  {"tabort", StackCapture_TraceAbort},
+};
+
+static const EnumOption stackcapture_modes[] = {
+  {"none",   StackCaptureMode_None},
+  {"frames", StackCaptureMode_CallFrames},
+  {"full",   StackCaptureMode_Full},
+};
+
+static int jlib_set_stackcapture_mode(lua_State* L)
+{
+  jitlog_State* context = jlib_getstate(L);
+  int event = lj_lib_checkenum(L, 1, stackcapture_options, sizeof(stackcapture_options) / sizeof(EnumOption));
+  int mode;
+
+  TValue *modetv = lj_lib_checkany(L, 2);
+
+  if (tvisstr(modetv)) {
+    mode = lj_lib_checkenum(L, 2, stackcapture_modes, sizeof(stackcapture_modes) / sizeof(EnumOption));
+  } else {
+    mode = tvistruecond(modetv) ? StackCaptureMode_CallFrames : StackCaptureMode_None;
+  }
+
+  jitlog_set_stackcapture(context, event, mode);
+
+  return 0;
+}
+
 static const luaL_Reg jitlog_lib[] = {
   {"start", jlib_start},
   {"shutdown", jlib_shutdown},
@@ -3050,6 +3144,7 @@ static const luaL_Reg jitlog_lib[] = {
   {"write_gcstats", jlib_write_gcstats},
   {"reset_gcstats", jlib_reset_gcstats},
   {"set_objalloc_logging", jlib_set_objalloc_logging},
+  {"set_stackcapture_mode", jlib_set_stackcapture_mode},
   {NULL, NULL},
 };
 

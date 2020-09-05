@@ -100,6 +100,13 @@ message trace_exitfull (mapto : trace_exit) {
   registers : register_state (optional)
 }
 
+// The end state of vm after its restored from a trace exit
+message trace_exitend {
+  traceid : uint16
+  exit : uint16
+  stack : luastack
+}
+
 table register_state{
   source : uint8
   gpr_count : uint8
@@ -275,7 +282,7 @@ message trace_start{
   rootid : uint16
   startpt : GCRefPtr (argtype : GCproto*)
   startpc : uint32 (argtype : BCPos)
-  callstack : luastack (optional)
+  stack : luastack (optional)
 }
 
 message trace{
@@ -309,6 +316,7 @@ message trace{
   tracedfuncs : [TracedFunc]
   tracedbc : [TracedBC]
   iroffsets : [uint32]
+  endstack : luastack (optional) // the current Lua stack at the point where trace stopped or aborted
   structcopy = {
     fields = {
       id = "traceno",
