@@ -32,6 +32,7 @@ typedef struct UserBuf {
   char *b;
   void *state;
   UBufHandler bufhandler;
+  ptrdiff_t msgstart;
   int userflags;
 } UserBuf;
 
@@ -108,6 +109,34 @@ static LJ_AINLINE char *ubuf_more(UserBuf *ub, size_t sz)
   return ubufP(ub);
 }
 
+static LJ_AINLINE char *ubuf_msgstart(UserBuf *ub, size_t minspace)
+{
+  lua_assert(ub->msgstart == -1);
+  ub->msgstart = ubuflen(ub);
+  return ubuf_more(ub, minspace);
+}
+
+/* Treats the current position of the buffer as the end of the message */
+static LJ_AINLINE void ubuf_setmsgsize(UserBuf *ub, size_t size)
+{
+  char* sizeptr = ubufP(ub) - (size - 4);
+  lua_assert(ub->msgstart >= 0);
+  lua_assert(size < UINT_MAX);
+  lua_assert(sizeptr >= ubufB(ub) && (ubufB(ub) + ub->msgstart + size) < ub->e && size < UINT_MAX);
+  *((uint32_t*)sizeptr) = (uint32_t)size;
+  ub->msgstart = -1;
+}
+
+static inline size_t ubuf_maxflush(UserBuf *ub)
+{
+  if (ub->msgstart != -1) {
+    lua_assert(ub->msgstart >= 0 && ub->msgstart <= ubuflen(ub));
+    return ubuflen(ub) - ub->msgstart;
+  } else {
+    return ubuflen(ub);
+  }
+}
+
 static LJ_AINLINE UserBuf *ubuf_putmem(UserBuf *ub, const void *q, size_t len)
 {
   char *p = ubuf_more(ub, len);
@@ -126,6 +155,21 @@ static LJ_AINLINE UserBuf* ubuf_putarray(UserBuf* ub, const void* q, uint32_t co
   p = (char*)memcpy(p+sizeof(uint32_t), q, len) + len;
   setubufP(ub, p);
   return ub;
+}
+
+/* write an offset field to a value pointing to the current position of the buffer */
+static LJ_AINLINE void ubuf_setoffset_rel(UserBuf* ub, size_t offset)
+{
+  char* offsetnum = ubufP(ub) - offset;
+  lua_assert(offsetnum >= ubufB(ub));
+  *((int32_t*)offsetnum) = (int32_t)offset;
+}
+
+static LJ_AINLINE void ubuf_setoffset_val(UserBuf* ub, size_t offset, int32_t value)
+{
+  char* offsetnum = ubufP(ub) - offset;
+  lua_assert(offsetnum >= ubufB(ub) && (offsetnum + value) < ubufP(ub));
+  *((int32_t*)offsetnum) = value;
 }
 
 static LJ_INLINE uint64_t ubuf_getoffset(UserBuf *ub)
@@ -181,6 +225,7 @@ int mmapbuf_doaction(UserBuf *ub, UBufAction action, void *arg);
 static LJ_INLINE int ubuf_init_mem(UserBuf *ub, int minbufspace)
 {
   UBufInitArgs args = {0};
+  ub->msgstart = -1;
   args.minbufspace = minbufspace;
   ub->bufhandler = membuf_doaction;
   return membuf_doaction(ub, UBUF_INIT, &args);
@@ -189,6 +234,7 @@ static LJ_INLINE int ubuf_init_mem(UserBuf *ub, int minbufspace)
 static LJ_INLINE int ubuf_init_file(UserBuf *ub, const char* path)
 {
   UBufInitArgs args = {0};
+  ub->msgstart = -1;
   ub->bufhandler = filebuf_doaction;
   args.path = path;
   return filebuf_doaction(ub, UBUF_INIT, &args);
@@ -197,6 +243,7 @@ static LJ_INLINE int ubuf_init_file(UserBuf *ub, const char* path)
 static LJ_INLINE int ubuf_init_mmap(UserBuf *ub, const char* path, int windowsize)
 {
   UBufInitArgs args = {0};
+  ub->msgstart = -1;
   lua_assert(path);
   ub->bufhandler = mmapbuf_doaction;
   args.minbufspace = windowsize;

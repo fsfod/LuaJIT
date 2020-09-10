@@ -93,6 +93,13 @@ static int membuff_grow(UserBuf *buff, size_t sz)
   return membuff_realloc(buff, nsz);
 }
 
+
+static int membuff_trimstart(UserBuf *ub, size_t sz)
+{
+  lua_assert(sz < ubuflen(ub));
+  memmove(ub->b, ub->b + sz, ubuflen(ub)-sz);
+}
+
 int membuf_doaction(UserBuf *ub, UBufAction action, void *arg)
 {
   switch (action)
@@ -143,13 +150,22 @@ int filebuf_doaction(UserBuf *ub, UBufAction action, void *arg)
     ub->state = (FILE *)file;
     return membuff_init(ub, args->minbufspace > 0 ? args->minbufspace : (32 * 1024 * 1024));
   } else if (action == UBUF_FLUSH || action == UBUF_GROW_OR_FLUSH) {
-    uintptr_t extra = (uintptr_t)arg;
-    size_t result = fwrite(ubufB(ub), 1, ubuflen(ub), file);
+    int flushsize = ubuf_maxflush(ub);
+
+    size_t result = fwrite(ubufB(ub), 1, flushsize, file);
     if (result == 0) {
       return report_error(ub, errno);
     }
     lua_assert(result == ubuflen(ub));
-    setubufP(ub, ubufB(ub));
+
+    /* If we didn't flush the whole buffer */
+    if (flushsize != ubuflen(ub)) {
+      membuff_trimstart(ub, flushsize);
+    } else {
+      setubufP(ub, ubufB(ub));
+    }
+
+    uintptr_t extra = (uintptr_t)arg;
 
     if (action == UBUF_FLUSH) {
       if (fflush(file) != 0) {
@@ -332,10 +348,19 @@ static int mmapbuf_free(UserBuf *ub)
   return 1;
 }
 
-static int mmapbuf_grow(UserBuf *ub, size_t sz)
+static int mmapbuf_grow(UserBuf *ub, size_t sz, size_t minoffset)
 {
   MMapBuf *state = (MMapBuf *)ub->state;
-  uint64_t pos = state->bufbase + ubuflen(ub);
+  uint64_t pos;
+  /* Check if we need to keep some minimum range of data accessible when remapping thw window */
+  if (minoffset) {
+    lua_assert(minoffset < ubuflen(ub));
+    pos = state->bufbase + minoffset;
+    sz += minoffset;
+  } else {
+    pos = state->bufbase + ubuflen(ub);
+  }
+
   munmap(ubufB(ub), state->window_size);
   return mmapbuf_setmapping(ub, pos, sz);
 }
@@ -360,11 +385,11 @@ int mmapbuf_doaction(UserBuf *ub, UBufAction action, void *arg)
   if (action == UBUF_INIT) {
     return mmapbuf_init(ub, (UBufInitArgs *)arg);
   } else if (action == UBUF_GROW_OR_FLUSH) {
-    uintptr_t size = (uintptr_t)arg;
-    if (size < state->window_size) {
-      size = state->window_size;
+    uintptr_t extra = (uintptr_t)arg;
+    if (extra < state->window_size) {
+      extra = state->window_size;
     }
-    return mmapbuf_grow(ub, size);
+    return mmapbuf_grow(ub, extra, ubuf_maxflush(ub) - ubuflen(ub));
   } else if (action == UBUF_FLUSH) {
     return mmapbuf_flush(ub);
   } else if (action == UBUF_CLOSE) {
