@@ -22,6 +22,7 @@ typedef enum VMEvent2 {
   VMEVENT_RECORD,
   VMEVENT_PROTO_BLACKLISTED,
   VMEVENT_MCODE_ARENA,
+  VMEVENT_JIT_LOOP_UNROLL,
   VMEVENT__MAX
 } VMEvent2;
 
@@ -93,5 +94,12 @@ typedef struct VMEventData_MCodeArena {
   size_t size;
   char free;
 } VMEventData_MCodeArena;
+
+typedef struct VMEventData_LoopUnroll {
+  unsigned short *irmapping;
+  int ircount;
+  char success;
+  int traceerr;
+} VMEventData_LoopUnroll;
 
 #endif
