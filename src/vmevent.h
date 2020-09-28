@@ -21,6 +21,7 @@ typedef enum VMEvent2 {
   VMEVENT_TRACE_FLUSH,
   VMEVENT_RECORD,
   VMEVENT_PROTO_BLACKLISTED,
+  VMEVENT_MCODE_ARENA,
   VMEVENT__MAX
 } VMEvent2;
 
@@ -86,5 +87,11 @@ typedef struct VMEventData_LoadScript {
   void **luareader_data;
   char isfile;
 } VMEventData_LoadScript;
+
+typedef struct VMEventData_MCodeArena {
+  void *base;
+  size_t size;
+  char free;
+} VMEventData_MCodeArena;
 
 #endif

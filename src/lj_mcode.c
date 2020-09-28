@@ -53,6 +53,7 @@ void lj_mcode_sync(void *start, void *end)
 }
 
 #endif
+#include "lj_vmevent.h"
 
 #if LJ_HASJIT
 
@@ -276,6 +277,12 @@ static void mcode_allocarea(jit_State *J)
   ((MCLink *)J->mcarea)->size = sz;
   J->szallmcarea += sz;
   J->mcbot = (MCode *)lj_err_register_mcode(J->mcarea, sz, (uint8_t *)J->mcbot);
+
+  lj_vmevent_callback_(mainthread(J2G(J)), VMEVENT_MCODE_ARENA,
+    VMEventData_MCodeArena eventdata = {0};
+    eventdata.base = J->mcarea;
+    eventdata.size = sz;
+  );
 }
 
 /* Free all MCode areas. */
@@ -288,6 +295,12 @@ void lj_mcode_free(jit_State *J)
     MCode *next = ((MCLink *)mc)->next;
     size_t sz = ((MCLink *)mc)->size;
     lj_err_deregister_mcode(mc, sz, (uint8_t *)mc + sizeof(MCLink));
+    lj_vmevent_callback_(mainthread(J2G(J)), VMEVENT_MCODE_ARENA,
+      VMEventData_MCodeArena eventdata = {0};
+      eventdata.base = mc;
+      eventdata.size = ((MCLink*)mc)->size;
+      eventdata.free = 1;
+    );
     mcode_free(J, mc, sz);
     mc = next;
   }
