@@ -23,6 +23,7 @@ typedef enum VMEvent2 {
   VMEVENT_PROTO_BLACKLISTED,
   VMEVENT_MCODE_ARENA,
   VMEVENT_JIT_LOOP_UNROLL,
+  VMEVENT_JIT_STAGE,
   VMEVENT__MAX
 } VMEvent2;
 
@@ -56,6 +57,14 @@ typedef enum GCAtomicStage {
   GCATOMIC_CLEARWEAK,
   GCATOMIC__MAX
 } GCAtomicStage;
+
+typedef enum JITStage {
+  JITSTAGE_END,
+  JITSTAGE_RECORD,
+  JITSTAGE_OPT,
+  JITSTAGE_ASM,
+  JITStage__MAX
+} JITStage;
 
 typedef struct VMEventData_TExit {
   int gprs_size;

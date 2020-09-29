@@ -34,6 +34,8 @@
 
 /* -- Error handling ------------------------------------------------------ */
 
+#define vmvent_jitstage(J, stage) lj_vmevent_callback(J->L, VMEVENT_JIT_STAGE, (void*)(intptr_t)(stage));
+
 /* Synchronous abort with error message. */
 void lj_trace_err(jit_State *J, TraceError e)
 {
@@ -669,6 +671,7 @@ static TValue *trace_state(lua_State *L, lua_CFunction dummy, void *ud)
       lj_dispatch_update(J2G(J));
       if (J->state != LJ_TRACE_RECORD_1ST)
 	break;
+	  vmvent_jitstage(J, JITSTAGE_RECORD);
       /* fallthrough */
 
     case LJ_TRACE_RECORD_1ST:
@@ -699,6 +702,7 @@ static TValue *trace_state(lua_State *L, lua_CFunction dummy, void *ud)
     case LJ_TRACE_END:
       trace_pendpatch(J, 1);
       J->loopref = 0;
+      vmvent_jitstage(J, JITSTAGE_OPT);
       if ((J->flags & JIT_F_OPT_LOOP) &&
 	  J->cur.link == J->cur.traceno && J->framedepth + J->retdepth == 0) {
 	setvmstate(J2G(J), OPT);
@@ -708,6 +712,7 @@ static TValue *trace_state(lua_State *L, lua_CFunction dummy, void *ud)
 	  J->cur.linktype = LJ_TRLINK_NONE;
 	  J->loopref = J->cur.nins;
 	  J->state = LJ_TRACE_RECORD;  /* Try to continue recording. */
+	  vmvent_jitstage(J, JITSTAGE_RECORD);
 	  break;
 	}
 	J->loopref = J->chain[IR_LOOP];  /* Needed by assembler. */
@@ -715,12 +720,15 @@ static TValue *trace_state(lua_State *L, lua_CFunction dummy, void *ud)
       lj_opt_split(J);
       lj_opt_sink(J);
       if (!J->loopref) J->cur.snap[J->cur.nsnap-1].count = SNAPCOUNT_DONE;
+      vmvent_jitstage(J, JITSTAGE_END);
       J->state = LJ_TRACE_ASM;
       break;
 
     case LJ_TRACE_ASM:
       setvmstate(J2G(J), ASM);
+      vmvent_jitstage(J, JITSTAGE_ASM);
       lj_asm_trace(J, &J->cur);
+      vmvent_jitstage(J, JITSTAGE_END);
       trace_stop(J);
       setvmstate(J2G(J), INTERP);
       J->state = LJ_TRACE_IDLE;
