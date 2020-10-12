@@ -982,7 +982,7 @@ it("script load", function()
   assert(scripts[1].name == "function")
   assert(scripts[1].load_kind == "loadstring")
   assert(scripts[1].source == "function")
-  assert(scripts[1].stop_eventid == scripts[1].eventid+2) -- we get a source chuck message before it errors
+  assert(scripts[1].stop_eventid > scripts[1].eventid+1) -- we get a source chuck message before it errors
  
   -- Check we get the correct events and data when a Lua file is loaded instead of a string
   assert(scripts[2].name == "@jitlog/test.lua")
@@ -1596,7 +1596,22 @@ it("stackcapture trace start/stop", function()
     assert(not stack.framesonly)
   end
 end)
-  
+
+it("error thrown", function()
+  jitlog.start()
+  pcall(function() error("testmsg") end)
+  pcall(function() assert(false) end)
+  pcall(loadstring, "function")
+
+  local result = parselog(jitlog.savetostring())
+  assert(#result.luaerrors == 3)
+
+  local errors = result.luaerrors
+  assert(string.find(errors[1].errmsg, "testmsg"))
+  assert(string.find(errors[2].errmsg, "assertion failed"), errors[2].errmsg)
+  assert(string.find(errors[3].errmsg, "'<name>' expected near '<eof>'"))
+end)
+
 local failed = false
 
 pcall(jitlog.shutdown)

@@ -1934,6 +1934,26 @@ function readers:ir_fold(msg)
   
 end
 
+function readers:error_thrown(msg)
+  local err = {
+    eventid = self.eventid,
+    time  = msg.time,
+    errmsg = msg.errmsg,
+    errid = msg.errid,
+    argidx = msg.badarg,
+  }
+
+  local stack = msg:get_stack()
+  if stack then
+    err.stack = self:readfb("stacksnapshot", stack)
+  end
+
+  tinsert(self.luaerrors, err)
+
+  self:log_msg("error_thrown", "LuaError: errid %d, %s", err.errid, err.errmsg)
+return err
+end
+
 local function init(self)
   self.strings = {}
   self.protos = {}
@@ -1987,6 +2007,8 @@ local function init(self)
   else
     self.IRIns = IRIns32
   end
+
+  self.luaerrors = {}
 
   return t
 end

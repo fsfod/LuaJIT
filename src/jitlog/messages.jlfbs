@@ -545,3 +545,12 @@ message jitlogend{
   vmsettings : VMSettings
   gcinfo : gc_info
 }
+
+message error_thrown {
+  time : timestamp
+  errmsg : string
+  errid : int32
+  badarg : int32
+  frame : int32
+  stack : luastack  (optional)
+}

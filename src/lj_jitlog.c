@@ -16,6 +16,7 @@
 #include "lj_target.h"
 #include "lj_frame.h"
 #include "lj_ctype.h"
+#include "lj_err.h"
 
 #include "lj_jitlog_def.h"
 #include "lj_jitlog_decl.h"
@@ -1458,6 +1459,53 @@ static void jitlog_iremit(jitlog_State* context, uint32_t data)
   }
 }
 
+enum LJ_ERRID {
+#define ERRDEF(name, msg) LJ_ERRID_##name,
+#include "lj_errmsg.h"
+  LJ_ERRID_MAX,
+};
+#undef ERRDEF
+
+static const char* const errmsg[] = {
+#define ERRDEF(name, msg) #name,
+#include "lj_errmsg.h"
+};
+
+#undef ERRDEF
+
+#define ERRDEF(name, msg) case LJ_ERR_##name: \
+  return LJ_ERRID_##name;
+
+/* Map errmsg enum ids that are based off the string of the message template a sequential enum whos members increment by 1 like normal */
+static int map_errorid(int errid) {
+  switch (errid) {
+#include "lj_errmsg.h"
+  default:
+    return -1;
+  }
+}
+
+#undef ERRDEF
+
+void jitlog_error_thrown(jitlog_State* context, lua_State* L, VMEventData_LuaError* info)
+{
+  int needstack = 1;
+  luastack_Args stack;
+
+  if (needstack) {
+    stack = capture_stack(context, L, StackCaptureMode_Full);
+  }
+
+  error_thrown_Args args = {
+    .errmsg = info->errmsg,
+    .errid = map_errorid(info->errid),
+    .badarg = info->narg,
+    .stack = needstack ?&stack : NULL,
+  };
+  log_error_thrown(&context->ub, &args);
+  context->events_written |= JITLOGEVENT_LUAERROR;
+}
+
 static void jitlog_shutdown(jitlog_State* context, int stateexit);
 
 static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *eventdata)
@@ -1515,6 +1563,9 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
         /* Block any extra events being triggered from us destroying our state */
         luaJIT_vmevent_sethook(L, NULL, NULL);
       }
+      break;
+    case VMEVENT_ERROR_THROWN:
+      jitlog_error_thrown(context, L, (VMEventData_LuaError*)eventdata);
       break;
     default:
       break;
@@ -1794,6 +1845,7 @@ static enumdef_Args enumlist[] = {
   {.name = "CounterId",  .valuenames = CounterId_names, .valuenames_length = Counter_MAX},
   {.name = "TimerId",    .valuenames = TimerId_names,   .valuenames_length = Timer_MAX},
   {.name = "SectionId",  .valuenames = SectionId_names, .valuenames_length = Section_MAX},
+  enum_entry("errmsg", errmsg),
   {.name = "fold_names", .valuenames = fold_names, .valuenames_length = 0},
 };
 
