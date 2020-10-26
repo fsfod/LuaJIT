@@ -24,6 +24,7 @@ typedef enum VMEvent2 {
   VMEVENT_MCODE_ARENA,
   VMEVENT_JIT_LOOP_UNROLL,
   VMEVENT_JIT_STAGE,
+  VMEVENT_ERROR_THROWN,
   VMEVENT__MAX
 } VMEvent2;
 
@@ -110,5 +111,13 @@ typedef struct VMEventData_LoopUnroll {
   char success;
   int traceerr;
 } VMEventData_LoopUnroll;
+
+typedef struct VMEventData_LuaError {
+  char catching;
+  const char* errmsg;
+  int errid;
+  int narg;
+  void *frame;
+} VMEventData_LuaError;
 
 #endif
