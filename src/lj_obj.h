@@ -489,10 +489,25 @@ typedef struct Node {
 
 LJ_STATIC_ASSERT(offsetof(Node, val) == 0);
 
+typedef enum TableFlags {
+  LJ_TAB_HASCOLO  = 1,
+  LJ_TAB_READONLY = 2,
+  LJ_TAB_NOGCVALS = 4, // No GC values contained in the table
+  LJ_TAB_HASEXTRA = 0x80,
+} TableFlags;
+
+/* Must be a multiple of 8 */
+typedef struct TabExtra {
+  int8_t size;
+  int8_t colo;
+  char unusued[6];
+  char extra[0];
+} TabExtra;
+
 typedef struct GCtab {
   GCHeader;
   uint8_t nomm;		/* Negative cache for fast metamethods. */
-  int8_t colo;		/* Array colocation. */
+  uint8_t flags;	/* Flags including Array colocation. */
   MRef array;		/* Array part. */
   GCRef gclist;
   GCRef metatable;	/* Must be at same offset in GCudata. */
@@ -504,7 +519,9 @@ typedef struct GCtab {
 #endif
 } GCtab;
 
-#define sizetabcolo(n)	((n)*sizeof(TValue) + sizeof(GCtab))
+#define lj_tab_extra(t)   ((TabExtra*)((t)+1))
+#define lj_tab_colosz(t)   (((t)->flags & LJ_TAB_HASCOLO) ? lj_tab_extra(t)->colo : 0)
+#define sizetabcolo(n)	((n)*sizeof(TValue) + sizeof(TabExtra) + sizeof(GCtab))
 #define tabref(r)	(&gcref((r))->tab)
 #define noderef(r)	(mref((r), Node))
 #define nextnode(n)	(mref((n)->next, Node))
