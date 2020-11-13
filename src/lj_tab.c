@@ -97,14 +97,14 @@ static LJ_AINLINE void clearapart(GCtab *t)
 }
 
 /* Create a new table. Note: the slots are not initialized (yet). */
-static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
+static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits, uint32_t exsize)
 {
   GCtab *t;
   /* First try to colocate the array part. */
   if (LJ_MAX_COLOSIZE != 0 && asize > 0 && asize <= LJ_MAX_COLOSIZE) {
     Node *nilnode;
     lj_assertL((sizeof(GCtab) & 7) == 0, "bad GCtab size");
-    t = (GCtab *)lj_mem_newgco(L, sizetabcolo(asize));
+    t = (GCtab *)lj_mem_newgco(L, sizetabcolo(asize) + exsize);
     t->gct = ~LJ_TTAB;
     t->nomm = (uint8_t)~0;
     t->flags = LJ_TAB_HASCOLO | LJ_TAB_HASEXTRA;
@@ -120,10 +120,16 @@ static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
 #endif
   } else {  /* Otherwise separately allocate the array part. */
     Node *nilnode;
-    t = lj_mem_newobj(L, GCtab);
+    uint32_t size = exsize == 0 ? sizeof(GCtab) : (sizeof(GCtab) + sizeof(TabExtra) + exsize);
+    t = (GCtab*)lj_mem_newgco(L, size);
+    if (exsize > 0) {
+      t->flags = LJ_TAB_HASEXTRA;
+      lj_tab_extra(t)->size = exsize + sizeof(TabExtra);
+    } else {
+      t->flags = 0;
+    }
     t->gct = ~LJ_TTAB;
     t->nomm = (uint8_t)~0;
-    t->flags = 0;
     setmref(t->array, NULL);
     setgcrefnull(t->metatable);
     t->asize = 0;  /* In case the array allocation fails. */
@@ -158,7 +164,7 @@ static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
 */
 GCtab *lj_tab_new(lua_State *L, uint32_t asize, uint32_t hbits)
 {
-  GCtab *t = newtab(L, asize, hbits);
+  GCtab *t = newtab(L, asize, hbits, 0);
   clearapart(t);
   if (t->hmask > 0) clearhpart(t);
   return t;
@@ -170,10 +176,18 @@ GCtab *lj_tab_new_ah(lua_State *L, int32_t a, int32_t h)
   return lj_tab_new(L, (uint32_t)(a > 0 ? a+1 : 0), hsize2hbits(h));
 }
 
+GCtab* lj_tab_newex(lua_State* L, int32_t a, int32_t h, uint32_t extra)
+{
+  GCtab* t = newtab(L, (uint32_t)(a > 0 ? a + 1 : 0), hsize2hbits(h), extra);
+  clearapart(t);
+  if (t->hmask > 0) clearhpart(t);
+  return t;
+}
+
 #if LJ_HASJIT
 GCtab * LJ_FASTCALL lj_tab_new1(lua_State *L, uint32_t ahsize)
 {
-  GCtab *t = newtab(L, ahsize & 0xffffff, ahsize >> 24);
+  GCtab *t = newtab(L, ahsize & 0xffffff, ahsize >> 24, 0);
   clearapart(t);
   if (t->hmask > 0) clearhpart(t);
   return t;
@@ -185,7 +199,7 @@ GCtab * LJ_FASTCALL lj_tab_dup(lua_State *L, const GCtab *kt)
 {
   GCtab *t;
   uint32_t asize, hmask;
-  t = newtab(L, kt->asize, kt->hmask > 0 ? lj_fls(kt->hmask)+1 : 0);
+  t = newtab(L, kt->asize, kt->hmask > 0 ? lj_fls(kt->hmask)+1 : 0, 0);
   lj_assertL(kt->asize == t->asize && kt->hmask == t->hmask,
 	     "mismatched size of table and template");
   t->nomm = 0;  /* Keys with metamethod names may be present. */

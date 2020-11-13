@@ -498,9 +498,9 @@ typedef enum TableFlags {
 
 /* Must be a multiple of 8 */
 typedef struct TabExtra {
-  int8_t size;
   int8_t colo;
-  char unusued[6];
+  char unusued[3];
+  int32_t size;
   char extra[0];
 } TabExtra;
 

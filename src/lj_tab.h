@@ -35,6 +35,8 @@ static LJ_AINLINE uint32_t hashrot(uint32_t lo, uint32_t hi)
 
 LJ_FUNCA GCtab *lj_tab_new(lua_State *L, uint32_t asize, uint32_t hbits);
 LJ_FUNC GCtab *lj_tab_new_ah(lua_State *L, int32_t a, int32_t h);
+LJ_FUNC GCtab *lj_tab_newex(lua_State* L, int32_t a, int32_t h, uint32_t extra);
+
 #if LJ_HASJIT
 LJ_FUNC GCtab * LJ_FASTCALL lj_tab_new1(lua_State *L, uint32_t ahsize);
 #endif
