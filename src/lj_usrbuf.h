@@ -160,6 +160,15 @@ static LJ_AINLINE UserBuf* ubuf_putarray(UserBuf* ub, const void* q, uint32_t co
   return ub;
 }
 
+static LJ_AINLINE size_t ubuf_fbarray_init(UserBuf* ub, size_t count)
+{
+  size_t space = (count + 1) * 4;
+  char* p = ubuf_more(ub, space);
+  *((uint32_t*)p) = (uint32_t)count;
+  setubufP(ub, ub->p + space);
+  return space;
+}
+
 /* write an offset field to a value pointing to the current position of the buffer */
 static LJ_AINLINE void ubuf_setoffset_rel(UserBuf* ub, size_t offset)
 {
@@ -173,6 +182,22 @@ static LJ_AINLINE void ubuf_setoffset_val(UserBuf* ub, size_t offset, int32_t va
   char* offsetnum = ubufP(ub) - offset;
   lua_assert(offsetnum >= ubufB(ub) && (offsetnum + value) < ubufP(ub));
   *((int32_t*)offsetnum) = value;
+}
+
+/* Write a list of strings as a single array with a null separating each string in the array */
+static size_t ubuf_put_strlist(UserBuf* ub, const char* const* list, size_t count)
+{
+  size_t size = 4;
+  /* Reserve space for the array size value */
+  setubufP(ub, ub->p + 4);
+
+  for (int i = 0; i < count; i++) {
+    size_t length = strlen(list[i]) + 1;
+    ubuf_putmem(ub, list[i], (uint32_t)length);
+    size += length;
+  }
+  ubuf_setoffset_val(ub, size, (int32_t)(uint32_t)(size - 4));
+  return size;
 }
 
 static LJ_INLINE uint64_t ubuf_getoffset(UserBuf *ub)
