@@ -54,6 +54,10 @@ static int report_winerror(UserBuf *buff, DWORD error)
 
 static int membuff_init(UserBuf *buff, MSize sz)
 {
+  if (sz < UBUF_MINSPACE) {
+    sz = UBUF_MINSPACE;
+  }
+
   char *b = malloc(sz);
   if (!b) {
     return 0;

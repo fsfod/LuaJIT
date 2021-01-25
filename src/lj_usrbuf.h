@@ -50,6 +50,8 @@ typedef struct UBufInitArgs {
 #define ubufP(ub) ((ub)->p)
 #define ubufL(ub) ((ub)->L)
 
+#define UBUF_MINSPACE 127
+
 
 #ifdef LJ_FASTCALL
 
@@ -123,6 +125,7 @@ static LJ_AINLINE void ubuf_setmsgsize(UserBuf *ub, size_t size)
   lua_assert(ub->msgstart >= 0);
   lua_assert(size < UINT_MAX);
   lua_assert(sizeptr >= ubufB(ub) && (ubufB(ub) + ub->msgstart + size) < ub->e && size < UINT_MAX);
+  lua_assert(ubufleft(ub) >= UBUF_MINSPACE);
   *((uint32_t*)sizeptr) = (uint32_t)size;
   ub->msgstart = -1;
 }
@@ -139,7 +142,7 @@ static inline size_t ubuf_maxflush(UserBuf *ub)
 
 static LJ_AINLINE UserBuf *ubuf_putmem(UserBuf *ub, const void *q, size_t len)
 {
-  char *p = ubuf_more(ub, len);
+  char *p = ubuf_more(ub, len + UBUF_MINSPACE);
   p = (char *)memcpy(p, q, len) + len;
   setubufP(ub, p);
   return ub;
@@ -149,7 +152,7 @@ static LJ_AINLINE UserBuf *ubuf_putmem(UserBuf *ub, const void *q, size_t len)
 static LJ_AINLINE UserBuf* ubuf_putarray(UserBuf* ub, const void* q, uint32_t count, size_t elesz)
 {
   size_t len = count * elesz;
-  char* p = ubuf_more(ub, len+4);
+  char* p = ubuf_more(ub, len+4 + UBUF_MINSPACE);
   lua_assert(count == 0 || q != NULL);
   *((uint32_t*)p) = (uint32_t)count;
   p = (char*)memcpy(p+sizeof(uint32_t), q, len) + len;
