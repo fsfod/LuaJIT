@@ -191,7 +191,7 @@ function logreader:readheader(buff, buffsize, info)
   local logdef = self.logdef
   local MsgType = logdef.MsgType
 
-  local header_reader = flatbuffers.createreader(logdef.vt_types.header, logdef.vtable_names.header)
+  local header_reader = flatbuffers.createreader(logdef.vt_types.header, logdef.vtable_names.header, logdef.typeid_info)
   local header = header_reader(buff+8, headersize)
   header.vtable:validate(headersize, false, logdef.vt_types.header)
   info.flatbuffer = header
@@ -385,6 +385,39 @@ function logreader:readfb(name, fb, ...)
     error("Missing Flatbuffers reader for "..name)
   end
   return fbreader(self, fb, ...)
+end
+
+-- Read an array of flatbuffer objects that are stored in the array as offsets
+function logreader:read_fbarray(name, arrayptr, count, limit, ...)
+  local fbreader = self.fbreaders[name]
+  if not fbreader then
+    error("Missing Flatbuffers reader for "..name)
+  end
+
+  local array = flatbuffers.getoffsetarray(arrayptr, count, limit, ...)
+  local result = {}
+
+  if array.count == 0 then
+    return result
+  end
+
+  local ctype = self.logdef.tables[name]
+
+  ctype = ffi.typeof("$*", ctype)
+
+  for i = 1, array.count do
+    local fb, limit = array:get(i-1)
+
+    fb = ffi.cast(ctype, fb)
+
+    if fb ~= nil then
+      result[i] = fbreader(self, fb, ...)
+    else
+      result[i] = nil
+    end
+  end
+
+  return result
 end
   
 function logreader:parsefile(path)

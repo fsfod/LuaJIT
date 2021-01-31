@@ -242,6 +242,10 @@ function generator:write_vtables()
     end
   end
 
+  for _, tab in ipairs(self.tables) do
+    self:write_fieldtypes(tab)
+  end
+
   self:writeline("};")
   self:write("lib.vt_types = vt_types\n\n")
 
@@ -272,7 +276,7 @@ local util = require("jitlog.util")
 local ffi = require("ffi")
 local ffi_cast, ffi_string = ffi.cast, ffi.string
 local fb = require("jitlog.flatbuffers")
-local parse_strlist = fb.parse_strlist
+local parse_strlist, read_tabvector = fb.parse_strlist, fb.read_tabvector
 local band, rshift = bit.band, bit.rshift
 local get_fbarray, get_fbstring, get_fbtable = util.get_fbarray, util.get_fbstring, util.get_fbtable
 

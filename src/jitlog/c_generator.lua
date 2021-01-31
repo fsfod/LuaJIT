@@ -85,6 +85,15 @@ if ({{value}} != NULL) {
   } else {
     ubuf_setoffset_val(ub, vtotal-{{offset}}, 0);
   }]],
+  fbtable_array = [[
+ubuf_setoffset_rel(ub, vtotal-{{offset}});
+  size_t {{msgfield}}_base = vtotal + 4;
+  vtotal += ubuf_fbarray_init(ub, {{sizename}});
+  for(int j = 0; j != {{sizename}}; j++) {
+    ubuf_setoffset_rel(ub, vtotal - ({{msgfield}}_base + j*4));
+    vtotal += {{writer}}(ub, {{value}} + j);
+  }
+  ]]
 }
 
 local format_specifers = {

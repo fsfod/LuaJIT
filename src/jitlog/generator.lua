@@ -97,25 +97,36 @@ function parser:get_arraytype(element_type)
   end
   
   local element_typeinfo = self.types[element_type]
+
   if not element_typeinfo then
     error(format("Unknown type '%s' used for array element ", element_type))
-  elseif element_typeinfo.vsize or element_typeinfo.noarg then
+  elseif (element_typeinfo.vsize and element_typeinfo.kind ~= "table")  or element_typeinfo.noarg then
     error(format("Bad type '%s' used for array element", element_type))
   end
-  
+
+  local element_size = element_typeinfo.size
   local ctype = element_typeinfo.c or element_type
+  local argtype
+
+  if element_typeinfo.GC64 and self.GC64 then
+    element_size = 8
+    argtype = format("const %s *", ctype)
+  elseif element_typeinfo.kind == "table" then
+    -- Flat buffer arrays of tables are just an array offsets
+    element_size = 4
+    argtype =  format("const %s_Args *", element_type)
+  end
+
+
   local typeinfo = {
     kind = "array",
     typeid = bor(lshift(element_typeinfo.typeid or 0, 16), fbtype.Vector),
     vsize = true,
     c = ctype.."*",
-    argtype = format("const %s *", ctype),
+    argtype = argtype,
     element_type = element_type,
-    element_size = element_typeinfo.size,
+    element_size = element_size,
   }
-  if element_typeinfo.GC64 and self.GC64 then
-    typeinfo.element_size = 8
-  end
   self.types[arraytype] = typeinfo
   self.types[ctype.."[]"] = typeinfo
   return arraytype, typeinfo
@@ -645,6 +656,15 @@ function parser:complete()
     count = count + #list
   end
 
+  -- Fixup type ids for array types where the element type is a user defined type
+  for _, atype in pairs(self.types) do
+    local element_type = atype.kind == "array" and self.types[atype.element_type]
+
+    if element_type and (element_type.kind == "table" or element_type.kind == "struct") then
+      atype.typeid = bor(bit.band(element_type.typeid, 0xffff0000), fbtype.Vector)
+    end
+  end
+
   local data = util.copyfields(self, {}, copyfields)
   return data
 end
@@ -824,12 +844,20 @@ function generator:write_vlenfield(msgdef, f, valuestr, write)
     write.vwrite = buildtemplate(self.templates.optarray_writer, tmpldata)
     assignment = ""
   else
-    -- Adjust the offset of the field to account msgstart pointing at the vtable offset field which might be at 0
-    tmpldata.offset = tmpldata.offset - msgdef.offset_start
-    write.vtotal = buildtemplate("vtotal += {{sizename}} * {{element_size}};", tmpldata)
-    write.vwrite = buildtemplate("ubuf_putarray(ub, {{value}}, {{sizename}}, {{element_size}});", tmpldata)
+
+    if f.kind == "array" and self.types[vtype.element_type].kind == "table" then
+      tmpldata.writer = "write_"..vtype.element_type
+      write.vwrite = buildtemplate(self.templates.fbtable_array, tmpldata)
+    else
+      -- Adjust the offset of the field to account msgstart pointing at the vtable offset field which might be at 0
+      tmpldata.offset = tmpldata.offset - msgdef.offset_start
+
+      write.vtotal = buildtemplate("vtotal += {{sizename}} * {{element_size}};", tmpldata)
+      write.vwrite = buildtemplate("ubuf_putarray(ub, {{value}}, {{sizename}}, {{element_size}});", tmpldata)
+      assignment = buildtemplate("msg->{{msgfield}}_offset = (int32_t)((ubufP(ub)-msgstart) -  {{offset}});", tmpldata)
+    end
+
     write.needmsgstart = true
-    assignment = buildtemplate("msg->{{msgfield}}_offset = (int32_t)((ubufP(ub)-msgstart) -  {{offset}});", tmpldata)
   end
 
   return assignment, true
@@ -1261,6 +1289,10 @@ function generator:write_fieldtypes(msgdef)
         end
       end
       if type.element_type then
+        local element_type = self.types[type.element_type]
+        if element_type.kind == "table" or element_type.kind == "struct" then
+          assert(element_type.typeid ~= 0)
+        end
       end
       typeids[f.vtslot+1] = typeid
     end

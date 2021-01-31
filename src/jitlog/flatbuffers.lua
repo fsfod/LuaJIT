@@ -56,6 +56,7 @@ end
 if not hasffi then
   return lib
 end
+
 local ffi_cast, ffi_string = ffi.cast, ffi.string
 local char_ptr = ffi.typeof("char*")
 require("table.new")
@@ -88,7 +89,54 @@ ffi.cdef[[
     uint32_t count;
     char data[0];
   } FBArray;
+
+  typedef struct FBOffsetArray{
+    int32_t* offsets;
+    uint32_t count;
+    uint32_t limit;
+  } FBOffsetArray;
 ]]
+
+local OffsetArray = ffi.typeof("FBOffsetArray")
+local vtable = {}
+
+local offsetarray_mt = {
+  __index = {
+    get = function(self, index)
+      assert(index >= 0 and index < self.count)
+
+      local offset = self.offsets[index]
+      if offset == 0 then
+        return nil, 0
+      end
+
+      if offset > 0 and (self.limit-offset) < 0 then
+        error("Offset %d with value %d is past buffer limit of %d in offset array ", index, offset, self.limit)
+      end
+      return ffi_cast(char_ptr, self.offsets + index) + offset,  self.limit - (offset + index*4)
+    end,
+    validate = function(self)
+      if self.count == 0 then
+        assert(self.offsets == nil or self.offsets == 0 or self.offsets[-1] == 0)
+        return true
+      end
+
+      return true
+    end
+  },
+
+  __new = function(self, offsetptr, count, limit)
+      local vtable = ffi.new(OffsetArray, ffi_cast(int32_ptr, offsetptr), count, limit)
+      return vtable
+  end
+}
+
+ffi.metatype("FBOffsetArray", offsetarray_mt)
+
+function lib.getoffsetarray(offsets, count, limit)
+  assert(limit > 0)
+  return (OffsetArray(offsets, count, limit))
+end
 
 local FBVTable = ffi.typeof("FBVTable")
 local vtable = {}
@@ -346,6 +394,32 @@ local function get_objptr(ptr, offset, limit)
   return ffi_cast(char_ptr, ptr) + offset+ objoffset, limit - objoffset
 end
 
+local empty_offsetarray = OffsetArray(nil, 0, 0)
+
+function lib.read_tabvector(ptr, offset, limit)
+  assert(type(ptr) == "cdata")
+  local vecoffset = read_uint32(ptr, offset)
+  if vecoffset == 0 then
+    return empty_offsetarray
+  end
+  ptr = updatepointer(ptr, offset+vecoffset)
+
+  limit = limit - offset
+
+  if vecoffset + 4 > limit then
+    error("vector size past end of buffer")
+  end
+
+  local vec = ffi_cast("FBArray*", ptr)
+  limit = limit - vecoffset
+
+  if vec.count * 4 > limit then
+    error("part of vector is past end of buffer")
+  end
+
+  return (OffsetArray(vec.data, vec.count, limit))
+end
+
 local function parse_strlist(strlist, bufsize)
   local t = {}
   if not strlist then
@@ -592,6 +666,9 @@ function lib.createreader(field_types, names, typeid_info, types)
 
           assert(type(struct) == "cdata")
           ctype = ffi.typeof("$ *", struct)
+        else
+          assert(basetype >= typeid_info.tables.startid and basetype <= typeid_info.tables.endid)
+          ctype = int32_ptr
         end
       end
 
