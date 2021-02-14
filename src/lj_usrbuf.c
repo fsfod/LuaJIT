@@ -60,6 +60,7 @@ static int membuff_init(UserBuf *buff, size_t sz)
 
   char *b = malloc(sz);
   if (!b) {
+    buff->b = buff->p = buff->e = NULL;
     return 0;
   }
   buff->b = b;

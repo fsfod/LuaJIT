@@ -141,12 +141,14 @@ static inline size_t ubuf_maxflush(UserBuf *ub)
   }
 }
 
-static LJ_AINLINE UserBuf *ubuf_putmem(UserBuf *ub, const void *q, size_t len)
+static LJ_AINLINE int ubuf_putmem(UserBuf *ub, const void *q, size_t len)
 {
   char *p = ubuf_more(ub, len + UBUF_MINSPACE);
+  if (p == NULL)
+    return 0;
   p = (char *)memcpy(p, q, len) + len;
   setubufP(ub, p);
-  return ub;
+  return 1;
 }
 
 /* write an array prefixed with element count */
