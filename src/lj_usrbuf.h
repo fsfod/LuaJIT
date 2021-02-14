@@ -4,6 +4,7 @@
 #include "lua.h"
 #include "stdint.h"
 #include <memory.h>
+#include <string.h>
 
 #ifndef lua_assert
 #define lua_assert(check)
@@ -38,7 +39,7 @@ typedef struct UserBuf {
 
 typedef struct UBufInitArgs {
   const char *path;
-  int minbufspace;
+  size_t minbufspace;
 } UBufInitArgs;
 
 #define ubufsz(ub) ((size_t)((ub)->e - (ub)->b))
@@ -133,7 +134,7 @@ static LJ_AINLINE void ubuf_setmsgsize(UserBuf *ub, size_t size)
 static inline size_t ubuf_maxflush(UserBuf *ub)
 {
   if (ub->msgstart != -1) {
-    lua_assert(ub->msgstart >= 0 && ub->msgstart <= ubuflen(ub));
+    lua_assert(ub->msgstart >= 0 && ub->msgstart <= (ptrdiff_t)ubuflen(ub));
     return ubuflen(ub) - ub->msgstart;
   } else {
     return ubuflen(ub);
@@ -185,7 +186,7 @@ static LJ_AINLINE void ubuf_setoffset_val(UserBuf* ub, size_t offset, int32_t va
 }
 
 /* Write a list of strings as a single array with a null separating each string in the array */
-static size_t ubuf_put_strlist(UserBuf* ub, const char* const* list, size_t count)
+static LJ_INLINE size_t ubuf_put_strlist(UserBuf* ub, const char* const* list, size_t count)
 {
   size_t size = 4;
   /* Reserve space for the array size value */
@@ -250,7 +251,7 @@ int membuf_doaction(UserBuf *ub, UBufAction action, void *arg);
 int filebuf_doaction(UserBuf *ub, UBufAction action, void *arg);
 int mmapbuf_doaction(UserBuf *ub, UBufAction action, void *arg);
 
-static LJ_INLINE int ubuf_init_mem(UserBuf *ub, int minbufspace)
+static LJ_INLINE int ubuf_init_mem(UserBuf *ub, size_t minbufspace)
 {
   UBufInitArgs args = {0};
   ub->msgstart = -1;
@@ -268,7 +269,7 @@ static LJ_INLINE int ubuf_init_file(UserBuf *ub, const char* path)
   return filebuf_doaction(ub, UBUF_INIT, &args);
 }
 
-static LJ_INLINE int ubuf_init_mmap(UserBuf *ub, const char* path, int windowsize)
+static LJ_INLINE int ubuf_init_mmap(UserBuf *ub, const char* path, size_t windowsize)
 {
   UBufInitArgs args = {0};
   ub->msgstart = -1;

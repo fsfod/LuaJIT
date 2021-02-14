@@ -52,7 +52,7 @@ static int report_winerror(UserBuf *buff, DWORD error)
 }
 #endif
 
-static int membuff_init(UserBuf *buff, MSize sz)
+static int membuff_init(UserBuf *buff, size_t sz)
 {
   if (sz < UBUF_MINSPACE) {
     sz = UBUF_MINSPACE;
@@ -97,8 +97,7 @@ static int membuff_grow(UserBuf *buff, size_t sz)
   return membuff_realloc(buff, nsz);
 }
 
-
-static int membuff_trimstart(UserBuf *ub, size_t sz)
+static void membuff_trimstart(UserBuf *ub, size_t sz)
 {
   lua_assert(sz < ubuflen(ub));
   memmove(ub->b, ub->b + sz, ubuflen(ub)-sz);
@@ -154,7 +153,7 @@ int filebuf_doaction(UserBuf *ub, UBufAction action, void *arg)
     ub->state = (FILE *)file;
     return membuff_init(ub, args->minbufspace > 0 ? args->minbufspace : (32 * 1024 * 1024));
   } else if (action == UBUF_FLUSH || action == UBUF_GROW_OR_FLUSH) {
-    int flushsize = ubuf_maxflush(ub);
+    size_t flushsize = ubuf_maxflush(ub);
 
     size_t result = fwrite(ubufB(ub), 1, flushsize, file);
     if (result == 0) {
