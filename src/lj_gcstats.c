@@ -168,10 +168,11 @@ void gcstats_walklist(global_State *g, GCobj *liststart, GCObjStat *result)
 typedef struct GCSnapshotHandle {
   lua_State *L;
   LJList list;
+  LJList huge_list;
   UserBuf sb;
 } GCSnapshotHandle;
 
-static int dump_gcobjects(lua_State *L, GCobj *liststart, LJList *list, UserBuf *buf);
+static int dump_gcobjects(lua_State *L, GCobj *liststart, LJList *list, LJList *huge_list, UserBuf *buf);
 
 GCSnapshot *gcsnapshot_create(lua_State *L, int objmem)
 {
@@ -182,11 +183,14 @@ GCSnapshot *gcsnapshot_create(lua_State *L, int objmem)
   handle->L = L;
   ubuf_init_mem(&handle->sb, 0);
   lj_list_init(L, &handle->list, 32, SnapshotObj);
+  lj_list_init(L, &handle->huge_list, 8, HugeSnapshotObj);
 
-  dump_gcobjects(L, gcref(G(L)->gc.root), &handle->list, sb);
+  dump_gcobjects(L, gcref(G(L)->gc.root), &handle->list, &handle->huge_list, sb);
 
   snapshot->count = handle->list.count;
   snapshot->objects = (SnapshotObj *)handle->list.list;
+  snapshot->huge_count = handle->huge_list.count;
+  snapshot->huge_objects = (HugeSnapshotObj *)handle->huge_list.list;
 
   if (sb) {
     snapshot->gcmem = ubufB(&handle->sb);
@@ -208,6 +212,7 @@ LUA_API void gcsnapshot_free(GCSnapshot *snapshot)
 
   ubuf_free(&handle->sb);
   lj_mem_freevec(g, handle->list.list, handle->list.capacity, SnapshotObj);
+  lj_mem_freevec(g, handle->huge_list.list, handle->huge_list.capacity, HugeSnapshotObj);
 
   lj_mem_free(g, handle, sizeof(GCSnapshotHandle) + sizeof(GCSnapshot));
 }
@@ -232,7 +237,7 @@ LUA_API size_t gcsnapshot_getgcstats(GCSnapshot *snap, GCStats *gcstats)
 
 static uint32_t dump_strings(lua_State *L, LJList *list, UserBuf *buf);
 
-static int dump_gcobjects(lua_State *L, GCobj *liststart, LJList *list, UserBuf *buf)
+static int dump_gcobjects(lua_State *L, GCobj *liststart, LJList *list, LJList *huge_list, UserBuf *buf)
 {
   GCobj *o = liststart;
   SnapshotObj *entry;
@@ -248,7 +253,13 @@ static int dump_gcobjects(lua_State *L, GCobj *liststart, LJList *list, UserBuf 
     entry = lj_list_current(L, *list, SnapshotObj);
 
     if (size >= (1 << 28)) {
-      //TODO: Overflow side list of sizes
+      HugeSnapshotObj *huge = lj_list_current(L, *huge_list, HugeSnapshotObj);
+      setgcrefp(huge->address, o);
+      huge->size = size;
+      huge->typeinfo = gcobj_type(o);
+      huge->index = list->count;
+      lj_list_increment(L, *huge_list, HugeSnapshotObj);
+
       size = (1 << 28) - 1;
     }
 

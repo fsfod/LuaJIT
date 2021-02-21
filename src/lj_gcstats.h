@@ -49,10 +49,19 @@ LUA_API void gcstats_collect(lua_State *L, GCStats* result);
 #ifdef _MSC_VER
 
 #pragma pack(push, 1)
+
 typedef struct SnapshotObj {
   GCRef address;
   uint32_t typeandsize;
 } SnapshotObj;
+
+typedef struct HugeSnapshotObj {
+  GCRef address;
+  uint32_t typeinfo;
+  uint32_t index;
+  uint64_t size;
+} HugeSnapshotObj;
+
 #pragma pack(pop)
 
 #else
@@ -62,13 +71,23 @@ typedef struct SnapshotObj {
   uint32_t typeandsize;
 } __attribute__((packed)) SnapshotObj;
 
+typedef struct HugeSnapshotObj {
+  GCRef address;
+  uint32_t typeinfo;
+  uint32_t index;
+  uint64_t size;
+} __attribute__((packed)) HugeSnapshotObj;
+
 #endif
+
 
 typedef struct GCSnapshotHandle GCSnapshotHandle;
 
 typedef struct GCSnapshot {
   uint32_t count;
   SnapshotObj* objects;
+  uint32_t huge_count;
+  HugeSnapshotObj *huge_objects;
   char* gcmem;
   size_t gcmem_size;
   GCSnapshotHandle* handle;
