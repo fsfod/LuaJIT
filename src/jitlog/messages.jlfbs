@@ -130,6 +130,15 @@ table VMDef{
   bc : stringlist
   bc_mode : [uint16]
   fastfuncs : stringlist
+  terror: stringlist
+  trace_errors : stringlist
+  ir : stringlist
+  ir_mode : [uint8]
+  irtypes : stringlist
+  ircalls : stringlist
+  irfpmath : stringlist
+  irfields : stringlist
+  trace_link : stringlist
 }
 
 message gcstate {
@@ -262,4 +271,69 @@ message trace_start{
   rootid : uint16
   startpt : GCRefPtr (argtype : GCproto*)
   startpc : uint32 (argtype : BCPos)
+}
+
+message trace{
+  time : timestamp
+  aborted : bool
+  stitched : bool
+  id : uint16
+  parentid : uint16 (argtype : TraceNo1)
+  parentexit : uint16
+  linktype : uint8 (enum : trace_link)
+  startpt : GCRef
+  stoppt : GCRefPtr
+  stoppc : uint32 (argtype : BCPos)
+  stopfunc : GCRefPtr
+  abortcode : uint16
+  abortinfo : uint16
+  ins_count : uint16
+  constant_count : uint16
+  root : uint16
+  nsnap: uint16
+  nsnapmap: uint16
+  spadjust : uint16
+  link : uint16
+  startpc : uint32 (argtype : BCPos)
+  mcodesize : uint32
+  mcodeaddr : ptr
+  mcode : [uint8]
+  ir : [uint64] (argtype : IRIns *)
+  snapshots : [TraceSnapshot]
+  snapmap : [uint32] (buflen : nsnapmap)
+  structcopy = {
+    fields = {
+      id = "traceno",
+      "startpt",
+      "linktype",
+      "root",
+      "nsnap",
+      "nsnapmap",
+      "spadjust",
+      "link",
+      mcodeaddr = "mcode",
+      mcodesize = "szmcode",
+      "snapmap",
+	},
+    arg = {
+	  name = "trace",
+	  type = "GCtrace *",
+	}
+  }
+}
+
+struct TraceSnapshot{
+  mapofs : uint32;	// Offset into snapshot map. 
+  mcode_offset : uint32
+  first_irref : uint16	// First IR ref for this snapshot. */
+  slot_count : uint8	// Number of valid slots. */
+  topslot : uint8		// Maximum frame extent. */
+  entry_count : uint8;	// Number of compressed entries. 
+}
+
+message exitstubs{
+  startid : uint16
+  first : ptr
+  count : uint16
+  spacing : uint16
 }
