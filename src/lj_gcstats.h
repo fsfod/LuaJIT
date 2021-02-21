@@ -94,6 +94,10 @@ typedef struct GCSnapshot {
 } GCSnapshot;
 
 LUA_API GCSnapshot* gcsnapshot_create(lua_State *L, int objmem);
+/*
+** Capture the objects stored in a Lua table to a GCSnapshot
+*/
+LUA_API GCSnapshot *gcsnapshot_fromtabvalues(lua_State *L, int tabidx, int objmem);
 LUA_API void gcsnapshot_free(GCSnapshot* snapshot);
 
 LUA_API void gcsnapshot_savetofile(GCSnapshot* snapshot, const char* path);

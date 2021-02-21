@@ -11,6 +11,7 @@
 size_t gcobj_size(GCobj *o);
 void gcobj_tablestats(GCtab* t, GCStatsTable* result);
 int validatedump(int count, SnapshotObj* objects, char* objectmem, size_t mem_size);
+GCSnapshot *gcsnapshot_fromobjlist(lua_State *L, GCtab *objlist, int objmem);
 
 typedef struct LJList {
   MSize count;
