@@ -127,6 +127,8 @@ table VMDef{
   jitparams : stringlist
   gcstates : stringlist
   gcatomic_stages : stringlist
+  bc : stringlist
+  bc_mode : [uint16]
 }
 
 message gcstate {
@@ -156,4 +158,71 @@ message obj_label{
   obj : GCRefPtr
   label : string
   flags : 20
+}
+
+message obj_string{
+  address : GCRef
+  len : uint32
+  hash : uint32
+  data : [uint8] (buflen : len, argtype : const char *)
+
+  structcopy = {
+    fields = {
+      "len",
+      "hash",
+	},
+	arg = {
+	  name = "s",
+	  type = "GCstr *",
+	},
+    store_address = "address",
+  }
+}
+
+message obj_proto{
+  address : GCRef
+  size : uint32
+  chunkname : string
+  firstline : int32
+  numline : int32
+  flags : uint32
+  numparams : uint8
+  framesize : uint8
+  uv_count : uint8
+  kgc_count : uint16
+  knum_count : uint16
+  bcaddr : MRef
+  bclen : uint32
+  bc : [uint32]
+  knum : [double] (buflen : knum_count)
+  kgc : [GCRef] (buflen : kgc_count)
+  lineinfo : [uint8]
+  varnames : stringlist (prepacked)
+  varinfo : [VarRecord]
+  uvnames : stringlist (prepacked)
+
+  structcopy = {
+    fields = {
+      "firstline",
+      "numline",
+      bclen = "sizebc",
+      kgc_count = "sizekgc",
+      knum_count = "sizekn",
+      size = "sizept",
+      "numparams",
+      "framesize",
+      uv_count = "sizeuv",
+      "flags",
+	},
+	arg = {
+	  name = "pt",
+	  type = "GCproto *",
+	},
+    store_address = "address",
+  }
+}
+
+struct VarRecord{
+  startpc : uint32
+  extent: uint32
 }

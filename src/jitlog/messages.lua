@@ -102,6 +102,72 @@ module.messages = {
   },
 
   {
+    name = "obj_string",
+    fields = [[
+      address : GCRef
+      len : u32
+      hash : u32
+      data : string[len]
+    ]],
+    structcopy = {
+      fields = {
+        "len",
+        "hash",
+      },
+      arg = "s : GCstr *",
+      store_address = "address",
+    },
+    use_msgsize = "len",
+  },
+
+  {
+    name = "obj_proto",
+    fields = [[
+      address : GCRef
+      size : u32
+      chunkname : string
+      firstline : i32
+      numline : i32
+      flags : 24
+      numparams : u8
+      framesize : u8
+      uvcount : u8
+      bcaddr : MRef
+      bclen : u32
+      bc : u32[bclen]
+      sizeknum : u16
+      knum : double[sizeknum]
+      sizekgc : u16
+      kgc : GCRef[sizekgc]
+      lineinfo_length : u32
+      lineinfo : u8[lineinfo_length]
+      varnames_length : u32
+      varnames : stringlist[varnames_length]
+      varinfo_length : u32
+      varinfo : VarRecord[varinfo_length]
+      uvnames_length : u32
+      uvnames : stringlist[uvnames_length]
+    ]],
+    structcopy = {
+      fields = {
+        "firstline",
+        "numline",
+        bclen = "sizebc",
+        "sizekgc",
+        sizeknum = "sizekn",
+        "sizekgc",
+        size = "sizept",
+        "numparams",
+        "framesize",
+        uvcount = "sizeuv",
+        "flags",
+      },
+      arg = "pt : GCproto *",
+      store_address = "address",
+    },
+  },
+
+  {
     name = "traceexit_small",
     fields = [[
       isgcexit : bool
@@ -180,6 +246,13 @@ module.messages = {
 }
 
 module.structs = {
+  {
+    name = "VarRecord",
+    fields = [[
+      startpc : u32
+      extent: u32
+    ]]
+  },
 }
 
 return module

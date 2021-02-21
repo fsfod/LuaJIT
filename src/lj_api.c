@@ -709,6 +709,32 @@ LUA_API void lua_pushboolean(lua_State *L, int b)
   incr_top(L);
 }
 
+#if LJ_64
+void *lightud_intern(lua_State *L, void *p)
+{
+  global_State *g = G(L);
+  uint64_t u = (uint64_t)p;
+  uint32_t up = lightudup(u);
+  uint32_t *segmap = mref(g->gc.lightudseg, uint32_t);
+  MSize segnum = g->gc.lightudnum;
+  if (segmap) {
+    MSize seg;
+    for (seg = 0; seg <= segnum; seg++)
+      if (segmap[seg] == up)  /* Fast path. */
+	return (void *)(((uint64_t)seg << LJ_LIGHTUD_BITS_LO) | lightudlo(u));
+    segnum++;
+  }
+  if (!((segnum-1) & segnum) && segnum != 1) {
+    if (segnum >= (1 << LJ_LIGHTUD_BITS_SEG)) lj_err_msg(L, LJ_ERR_BADLU);
+    lj_mem_reallocvec(L, segmap, segnum, segnum ? 2*segnum : 2u, uint32_t);
+    setmref(g->gc.lightudseg, segmap);
+  }
+  g->gc.lightudnum = segnum;
+  segmap[segnum] = up;
+  return (void *)(((uint64_t)segnum << LJ_LIGHTUD_BITS_LO) | lightudlo(u));
+}
+#endif
+
 LUA_API void lua_pushlightuserdata(lua_State *L, void *p)
 {
 #if LJ_64
