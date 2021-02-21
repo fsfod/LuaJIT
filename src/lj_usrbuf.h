@@ -275,7 +275,10 @@ static LJ_INLINE int ubuf_init_mmap(UserBuf *ub, const char* path, size_t window
 {
   UBufInitArgs args = {0};
   ub->msgstart = -1;
-  lua_assert(path);
+  if (path == NULL) {
+    lua_assert(0);
+    return 0;
+  }
   ub->bufhandler = mmapbuf_doaction;
   args.minbufspace = windowsize;
   args.path = path;
