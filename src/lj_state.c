@@ -318,6 +318,7 @@ lua_State *lj_state_new(lua_State *L)
   setgcrefr(L1->env, L->env);
   stack_init(L1, L);  /* init stack */
   lj_assertL(iswhite(obj2gco(L1)), "new thread object is not white");
+  lj_mem_createcb(L, L1, sizeof(lua_State));
   return L1;
 }
 
@@ -329,6 +330,6 @@ void LJ_FASTCALL lj_state_free(global_State *g, lua_State *L)
   lj_func_closeuv(L, tvref(L->stack));
   lj_assertG(gcref(L->openupval) == NULL, "stale open upvalues");
   lj_mem_freevec(g, tvref(L->stack), L->stacksize, TValue);
-  lj_mem_freet(g, L);
+  lj_mem_freegco(g, L, sizeof(lua_State));
 }
 

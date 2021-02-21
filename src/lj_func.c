@@ -19,7 +19,7 @@
 
 void LJ_FASTCALL lj_func_freeproto(global_State *g, GCproto *pt)
 {
-  lj_mem_free(g, pt, pt->sizept);
+  lj_mem_freegco(g, pt, pt->sizept);
 }
 
 /* -- Upvalues ------------------------------------------------------------ */
@@ -63,6 +63,7 @@ static GCupval *func_finduv(lua_State *L, TValue *slot)
   setgcrefr(uv->next, g->uvhead.next);
   setgcref(uvnext(uv)->prev, obj2gco(uv));
   setgcref(g->uvhead.next, obj2gco(uv));
+  lj_mem_createcb(L, uv, sizeof(GCupval));
   lj_assertG(uvprev(uvnext(uv)) == uv && uvnext(uvprev(uv)) == uv,
 	     "broken upvalue chain");
   return uv;
@@ -76,6 +77,7 @@ static GCupval *func_emptyuv(lua_State *L)
   uv->closed = 1;
   setnilV(&uv->tv);
   setmref(uv->v, &uv->tv);
+  lj_mem_createcb(L, uv, sizeof(GCupval));
   return uv;
 }
 
@@ -103,7 +105,7 @@ void LJ_FASTCALL lj_func_freeuv(global_State *g, GCupval *uv)
 {
   if (!uv->closed)
     unlinkuv(g, uv);
-  lj_mem_freet(g, uv);
+  lj_mem_freegco(g, uv, sizeof(GCupval));
 }
 
 /* -- Functions (closures) ------------------------------------------------ */
@@ -150,6 +152,7 @@ GCfunc *lj_func_newL_empty(lua_State *L, GCproto *pt, GCtab *env)
     setgcref(fn->l.uvptr[i], obj2gco(uv));
   }
   fn->l.nupvalues = (uint8_t)nuv;
+  lj_mem_createcb(L, fn, sizeLfunc((MSize)pt->sizeuv));
   return fn;
 }
 
@@ -179,6 +182,7 @@ GCfunc *lj_func_newL_gc(lua_State *L, GCproto *pt, GCfuncL *parent)
     setgcref(fn->l.uvptr[i], obj2gco(uv));
   }
   fn->l.nupvalues = (uint8_t)nuv;
+  lj_mem_createcb(L, fn, sizeLfunc((MSize)pt->sizeuv));
   return fn;
 }
 
@@ -186,6 +190,6 @@ void LJ_FASTCALL lj_func_free(global_State *g, GCfunc *fn)
 {
   MSize size = isluafunc(fn) ? sizeLfunc((MSize)fn->l.nupvalues) :
 			       sizeCfunc((MSize)fn->c.nupvalues);
-  lj_mem_free(g, fn, size);
+  lj_mem_freegco(g, fn, size);
 }
 

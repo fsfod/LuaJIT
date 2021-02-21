@@ -141,6 +141,7 @@ static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
   }
   if (hbits)
     newhpart(L, t, hbits);
+  lj_mem_createcb(L, t, sizeof(GCtab) + (asize*sizeof(TValue) + (1u << hbits)));
   return t;
 }
 
@@ -237,10 +238,11 @@ void LJ_FASTCALL lj_tab_free(global_State *g, GCtab *t)
     lj_mem_freevec(g, noderef(t->node), t->hmask+1, Node);
   if (t->asize > 0 && LJ_MAX_COLOSIZE != 0 && t->colo <= 0)
     lj_mem_freevec(g, tvref(t->array), t->asize, TValue);
-  if (LJ_MAX_COLOSIZE != 0 && t->colo)
-    lj_mem_free(g, t, sizetabcolo((uint32_t)t->colo & 0x7f));
-  else
-    lj_mem_freet(g, t);
+  if (LJ_MAX_COLOSIZE != 0 && t->colo) {
+    lj_mem_freegco(g, t, sizetabcolo((uint32_t)t->colo & 0x7f));
+  } else {
+    lj_mem_freegco(g, t, sizeof(GCtab));
+  }
 }
 
 /* -- Table resizing ------------------------------------------------------ */
@@ -306,6 +308,16 @@ void lj_tab_resize(lua_State *L, GCtab *t, uint32_t asize, uint32_t hbits)
     }
     g = G(L);
     lj_mem_freevec(g, oldnode, oldhmask+1, Node);
+  }
+  if (G(L)->objalloc_cb) {
+    uint32_t info = (~LJ_TUDATA) + 1;
+    if (oldhmask != 0) {
+      info |= lj_fls(oldhmask+1) << 8;
+    } else {
+      info |= 0xff00;
+    }
+    info |= oldasize << 16;
+    G(L)->objalloc_cb(G(L)->objallocd, (GCobj*)(t), (int)info, sizeof(GCtab) + (asize*sizeof(TValue) + t->hmask *sizeof(Node)));
   }
 }
 

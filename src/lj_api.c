@@ -697,6 +697,7 @@ LUA_API void lua_pushcclosure(lua_State *L, lua_CFunction f, int n)
   while (n--)
     copyTV(L, &fn->c.upvalue[n], L->top+n);
   setfuncV(L, L->top, fn);
+  lj_mem_createcb(L, fn, sizeCfunc(n));
   lj_assertL(iswhite(obj2gco(fn)), "new GC object is not white");
   incr_top(L);
 }
@@ -1176,6 +1177,7 @@ static TValue *cpcall(lua_State *L, lua_CFunction func, void *ud)
   GCfunc *fn = lj_func_newC(L, 0, getcurrenv(L));
   TValue *top = L->top;
   fn->c.f = func;
+  lj_mem_createcb(L, fn, sizeCfunc(0));
   setfuncV(L, top++, fn);
   if (LJ_FR2) setnilV(top++);
 #if LJ_64
