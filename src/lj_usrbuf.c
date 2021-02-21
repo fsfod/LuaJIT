@@ -39,7 +39,7 @@
 
 static int report_error(UserBuf *buff, int error)
 {
-  lua_assert(0);
+  lj_assertX(0, "NYI save error");
   return 0;
 }
 
@@ -47,7 +47,7 @@ static int report_error(UserBuf *buff, int error)
 
 static int report_winerror(UserBuf *buff, DWORD error)
 {
-  lua_assert(0);
+  lj_assertX(0, "NYI save error");
   return 0;
 }
 #endif
@@ -100,7 +100,7 @@ static int membuff_grow(UserBuf *buff, size_t sz)
 
 static void membuff_trimstart(UserBuf *ub, size_t sz)
 {
-  lua_assert(sz < ubuflen(ub));
+  lj_assertX(sz < ubuflen(ub), "Bad buffer trim size");
   memmove(ub->b, ub->b + sz, ubuflen(ub)-sz);
 }
 
@@ -160,7 +160,7 @@ int filebuf_doaction(UserBuf *ub, UBufAction action, void *arg)
     if (result == 0) {
       return report_error(ub, errno);
     }
-    lua_assert(result == ubuflen(ub));
+    lj_assertX(result == ubuflen(ub), "fwrite didn't write full buffer");
 
     /* If we didn't flush the whole buffer */
     if (flushsize != ubuflen(ub)) {
@@ -193,7 +193,7 @@ int filebuf_doaction(UserBuf *ub, UBufAction action, void *arg)
 
 char *LJ_FASTCALL ubuf_need2(UserBuf *ub, size_t sz)
 {
-  lua_assert(sz > ubufsz(ub));
+  lj_assertX(sz > ubufleft(ub), "ubuf_need2 called with buffer space already satisfied");
   int result = ub->bufhandler(ub, UBUF_GROW_OR_FLUSH, (void *)(uintptr_t)sz);
   if (!result) {
     return NULL;
@@ -203,7 +203,7 @@ char *LJ_FASTCALL ubuf_need2(UserBuf *ub, size_t sz)
 
 char *LJ_FASTCALL ubuf_more2(UserBuf *ub, size_t sz)
 {
-  lua_assert(sz > ubufleft(ub));
+  lj_assertX(sz > ubufleft(ub), "ubuf_more2 called with buffer space already satisfied");
   int result = ub->bufhandler(ub, UBUF_GROW_OR_FLUSH, (void *)(uintptr_t)sz);
   if (!result) {
     return NULL;
@@ -255,7 +255,7 @@ int munmap(void *addr, size_t len)
 static void* map_range(UserBuf *ub, uint64_t offset, size_t length)
 {
   MMapBuf *state = (MMapBuf *)ub->state;
-  lua_assert((offset & 0xffff) == 0);
+  lj_assertX((offset & 0xffff) == 0, "File mapped offset was not page aligned");
 
   uint64_t newfilesz = offset + length;
   HANDLE mapping = CreateFileMapping((HANDLE)_get_osfhandle(state->fd), 0, PAGE_READWRITE,
@@ -287,7 +287,7 @@ static void* map_range(UserBuf *ub, uint64_t offset, size_t length)
   char *b = mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, state->fd, offset);
   if (b == MFAIL) {
     report_error(ub, errno);
-    lua_assert(0 && "failed to map file range");
+    lj_assertX(0, "Failed to map file range");
   }
   return b;
 }
