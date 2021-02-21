@@ -107,8 +107,8 @@ LUA_API int gcsnapshot_validate(GCSnapshot* dump);
 typedef struct AllocationStat {
   uint32_t acount;
   uint32_t fcount;
-  GCSize atotal;
-  GCSize ftotal;
+  uint64_t atotal;
+  uint64_t ftotal;
 } AllocationStat;
 
 typedef struct GCAllocationStats {
