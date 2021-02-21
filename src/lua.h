@@ -65,7 +65,7 @@ typedef int (*lua_Writer) (lua_State *L, const void* p, size_t sz, void* ud);
 ** prototype for memory-allocation functions
 */
 typedef void * (*lua_Alloc) (void *ud, void *ptr, size_t osize, size_t nsize);
-
+typedef void(*lua_ObjAlloc_cb) (void *ud, void *obj, int type, size_t size);
 
 /*
 ** basic types
