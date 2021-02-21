@@ -35,4 +35,28 @@ typedef struct ChunkHeader{
 
 #define lj_list_current(L, l, t) (((t*)(l).list)+(l).count)
 
+struct ScanContext;
+
+typedef void (*obj_foundcb)(struct ScanContext* context, GCobj* holdingobj, GCRef* field_holding_object);
+
+typedef struct ScanContext {
+  GCobj* obj;
+  uint32_t typefilter;
+  obj_foundcb callback;
+  void* userstate;
+  lua_State* L;
+  int abort;
+}ScanContext;
+
+void scan_func(GCfunc *fn, ScanContext* state);
+void scan_proto(GCproto *pt, ScanContext* state);
+void scan_table(GCtab *t, ScanContext* state);
+void scan_trace(GCtrace *T, ScanContext* state);
+void scan_thread(lua_State *th, ScanContext* state);
+void scan_userdata(GCudata *ud, ScanContext* state);
+
+int gcobj_finduses(lua_State* L, GCobj* obj, GCobj** foundholders);
+
+void gcobj_findusesinlist(GCobj* liststart, ScanContext* state);
+
 #endif
