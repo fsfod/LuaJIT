@@ -18,7 +18,8 @@ typedef enum GCObjType {
   GCObjType_Upvalue,
   GCObjType_Thread,
   GCObjType_FuncPrototype,
-  GCObjType_Function,
+  GCObjType_LuaFunction,
+  GCObjType_CFunction,
   GCObjType_Trace,
   GCObjType_CData,
   GCObjType_Table,
@@ -77,7 +78,7 @@ typedef struct AllocationStat {
 
 typedef struct GCAllocationStats {
   lua_State *L;
-  AllocationStat stats[11];
+  AllocationStat stats[12];
 } GCAllocationStats;
 
 LUA_API GCAllocationStats *start_gcstats_tracker(lua_State *L);
