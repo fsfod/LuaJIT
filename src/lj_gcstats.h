@@ -36,6 +36,7 @@ typedef struct GCStatsTable {
 
 typedef struct GCStats {
   GCObjStat objstats[GCObjType_Max];
+  
   GCStatsTable registry;
   GCStatsTable globals;
   int finlizercdata_count;
@@ -66,5 +67,20 @@ LUA_API void gcsnapshot_free(GCSnapshot* snapshot);
 LUA_API void gcsnapshot_savetofile(GCSnapshot* snapshot, const char* path);
 LUA_API size_t gcsnapshot_getgcstats(GCSnapshot* snap, GCStats* gcstats);
 LUA_API int gcsnapshot_validate(GCSnapshot* dump);
+
+typedef struct AllocationStat {
+  uint32_t acount;
+  uint32_t fcount;
+  GCSize atotal;
+  GCSize ftotal;
+} AllocationStat;
+
+typedef struct GCAllocationStats {
+  lua_State *L;
+  AllocationStat stats[11];
+} GCAllocationStats;
+
+LUA_API GCAllocationStats *start_gcstats_tracker(lua_State *L);
+LUA_API void stop_gcstats_tracker(GCAllocationStats *tracker);
 
 #endif
