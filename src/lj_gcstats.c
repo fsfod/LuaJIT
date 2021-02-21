@@ -734,3 +734,210 @@ void scan_userdata(GCudata *ud, ScanContext *search)
     search->callback(search, (GCobj *)ud, &ud->env);
   }
 }
+
+typedef struct ObjFixup {
+  GCRef o;
+  GCRef target;
+} ObjFixup;
+
+typedef struct FixupInfo {
+  ObjFixup *table;
+  MSize size;
+  lua_State *L;
+  SnapshotObj *objects;
+  MSize objcount;
+} FixupInfo;
+
+#define fixup_gcref(fixups, ref) ref = fixupgcobj(fixups, ref)
+#define fixup_address(p, diff, t) p = (t *)(((intptr_t)p)+((intptr_t)diff))
+
+static GCRef fixupgcobj(FixupInfo *fixups, GCRef ref)
+{
+  if (gcref(ref) == NULL) {
+    return ref;
+  }
+
+  MSize hash = gcrefu(ref) >> 4;
+
+  GCRef result = { 0 };
+  MSize index = hash & fixups->size;
+
+  for (; index < fixups->size; index++) {
+    if (gcrefu(fixups->table[index].o) == 0) {
+      break;
+    }
+    if (gcrefu(fixups->table[index].o) == gcrefu(ref)) {
+      return fixups->table[index].target;
+    }
+  }
+
+  return result;
+}
+
+static void fixup_table(FixupInfo *fixups, GCtab *t)
+{
+  TValue *array = tvref(t->array);
+  Node *node = noderef(t->node);
+
+  fixup_gcref(fixups, t->metatable);
+
+  if (t->asize != 0) {
+    setmref(t->array, (TValue *)(t + 1));
+  }
+
+  for (size_t i = 0; i < t->asize; i++) {
+    if (tvisgcv(&array[i])) {
+      fixup_gcref(fixups, array[i].gcr);
+    }
+  }
+
+  if (t->hmask == 0) {
+    setmref(t->node, &G(fixups->L)->nilnode);
+    //No hash table to fix up
+    return;
+  }
+
+  setmref(t->node, (((char *)t) + sizeof(GCtab)) + (sizeof(TValue) * t->asize));
+
+  for (uint32_t i = 0; i < t->hmask + 1; i++) {
+    if (tvisgcv(&node[i].key)) {
+      fixup_gcref(fixups, node[i].key.gcr);
+    }
+
+    if (tvisgcv(&node[i].val)) {
+      fixup_gcref(fixups, node[i].val.gcr);
+    }
+  }
+}
+
+static void fixup_userdata(FixupInfo *fixups, GCudata *ud)
+{
+  fixup_gcref(fixups, ud->metatable);
+  fixup_gcref(fixups, ud->env);
+}
+
+//See trace_save
+static void fixup_trace(FixupInfo *fixups, GCtrace *T, uintptr_t oldadr)
+{
+  IRRef ref;
+
+  fixup_gcref(fixups, T->startpt);
+
+  intptr_t diff = oldadr - (uintptr_t)T;
+  fixup_address(T->ir, diff, IRIns);
+  fixup_address(T->snap, diff, SnapShot);
+  fixup_address(T->snapmap, diff, SnapEntry);
+
+  for (ref = T->nk; ref < REF_TRUE; ref++) {
+    IRIns *ir = &T->ir[ref];
+
+    if (ir->o == IR_KGC) {
+      fixup_gcref(fixups, ir->gcr);
+    }
+  }
+}
+
+static void fixup_function(FixupInfo *fixups, GCfunc *fn)
+{
+  fn->l.env = fixupgcobj(fixups, fn->l.env);
+
+  if (isluafunc(fn)) {
+    GCfuncL *func = &fn->l;
+    GCRef proto;
+    //Bytecode is allocated after the function prototype
+    setgcrefp(proto, mref(func->pc, char) - sizeof(GCproto));
+
+    fixup_gcref(fixups, proto);
+    setmref(func->pc, gcrefp(proto, char) + sizeof(GCproto));
+
+    for (size_t i = 0; i < fn->l.nupvalues; i++) {
+      fixup_gcref(fixups, fn->l.uvptr[i]);
+    }
+  } else {
+    for (size_t i = 0; i < fn->c.nupvalues; i++) {
+      if (tvisgcv(&fn->c.upvalue[i])) {
+        fixup_gcref(fixups, fn->c.upvalue[i].gcr);
+      }
+    }
+  }
+}
+
+static void fixup_proto(FixupInfo *fixups, GCproto *pt)
+{
+  fixup_gcref(fixups, pt->chunkname);
+  for (size_t i = -(ptrdiff_t)pt->sizekgc; i < 0; i++) {
+    fixup_gcref(fixups, mref((pt)->k, GCRef)[i]);
+  }
+}
+
+static void fixup_thread(FixupInfo *fixups, lua_State *th)
+{
+  fixup_gcref(fixups, th->env);
+  /* TODO: what should we really fixup here */
+  TValue *stack = mref(th->stack, TValue);
+  for (size_t i = th->stacksize; i > 0; i--) {
+    if (tvisgcv(&stack[i])) {
+      fixup_gcref(fixups, stack[i].gcr);
+    }
+  }
+}
+
+void gcsnapshot_fixup(lua_State *L, GCSnapshot *snapshot)
+{
+  FixupInfo fixups = { 0 };
+  char *curr = snapshot->gcmem;
+  SnapshotObj *objects = snapshot->objects;
+  GCRef *objs = lj_mem_newvec(L, snapshot->count, GCRef);
+
+  for (size_t i = 0; i < snapshot->count; i++) {
+    GCSize size = objects[i].typeandsize >> 4;
+    GCObjType type = (GCObjType)(objects[i].typeandsize & 15);
+    GCobj *o;
+
+    if (type == GCObjType_String) {
+      o = (GCobj *)lj_str_new(L, curr + sizeof(GCstr), size - sizeof(GCstr));
+    } else {
+      o = (GCobj *)lj_mem_newgco(L, size);
+      memcpy(o, curr, size);
+    }
+    setgcrefp(objs[i], o);
+    curr += size;
+  }
+
+  for (size_t i = 0; i < snapshot->count; i++) {
+    GCobj *o = (GCobj *)gcref(objs[i]);
+
+    switch (o->gch.gct) {
+    case ~LJ_TCDATA:
+    case ~LJ_TSTR:
+      continue;
+
+    case ~LJ_TTAB:
+      fixup_table(&fixups, gco2tab(o));
+      break;
+
+    case ~LJ_TUDATA:
+      fixup_userdata(&fixups, gco2ud(o));
+      break;
+
+    case ~LJ_TFUNC:
+      fixup_function(&fixups, gco2func(o));
+      break;
+
+    case ~LJ_TPROTO:
+      fixup_proto(&fixups, gco2pt(o));
+      break;
+
+    case ~LJ_TTHREAD:
+      fixup_thread(&fixups, gco2th(o));
+      break;
+
+    case ~LJ_TTRACE: {
+      fixup_trace(&fixups, gco2trace(o), gcrefu(objects[i].address));
+      break;
+    }
+    }
+  }
+
+}
+
