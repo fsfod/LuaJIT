@@ -40,6 +40,7 @@ message header {
   enums : [enumdef]
   vmsettings : VMSettings
   vmdef : VMDef
+  gcinfo : gc_info
 }
 
 message stringmarker{
@@ -117,9 +118,24 @@ message trace_flushall{
 table VMSettings{
   jitparams : [int32]
   jitparams_default: [int32]  (optional)
+  gc_stepmul : uint32
+  gc_pause : uint32
 }
 
 table VMDef{
   flushreason : stringlist
   jitparams : stringlist
+  gcstates : stringlist
+}
+
+message gcstate {
+  time : timestamp
+  prevstate : uint8
+  gcinfo : gc_info 
+}
+
+table gc_info{
+  totalmem : GCSize
+  strnum : uint32
+  state : uint8 (enum : gcstate)
 }

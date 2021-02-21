@@ -97,9 +97,58 @@ static void jitlog_traceflush(jitlog_State *context, FlushReason reason)
 }
 
 #endif
+
+static gc_info_Args build_gcinfo(jitlog_State* context) {
+  global_State* g = context->g;
+  gc_info_Args args = {
+    .state = g->gc.state,
+    .totalmem = g->gc.total,
+    .strnum = g->str.num,
+  };
+  return args;
+}
+
+static void jitlog_gcstate(jitlog_State* context, int newstate)
+{
+  global_State* g = context->g;
+  gc_info_Args gcinfo = build_gcinfo(context);
+  gcinfo.state = newstate != -1 ? newstate : g->gc.state,
+  log_gcstate(&context->ub, g->gc.state, &gcinfo);
+}
+
 static void free_context(jitlog_State *context);
 
 static void jitlog_loadstage2(lua_State *L, jitlog_State *context);
+
+static void jitlog_gcevent(void *contextptr, lua_State *L, int eventid, void *eventdata)
+{
+  VMEvent2 event = (VMEvent2)eventid;
+  jitlog_State *context = contextptr;
+  void *bufpos = ubufP(&context->ub);
+
+  JITLogUserContext* usr = ctx2usr(context);
+
+  if (context->loadstate == LoadState_SafeStart) {
+    if (usr->gcevent) {
+      usr->gcevent(usr->gcevent_ud, L, eventid, eventdata);
+    }
+    return;
+  }
+
+  uintptr_t data = (uintptr_t)eventdata;
+
+  switch (event) {
+    case GCEVENT_STATECHANGE:
+      jitlog_gcstate(context, (int)data);
+      break;
+    default:
+      break;
+  }
+
+  if (usr->gcevent) {
+    usr->gcevent(usr->gcevent_ud, L, eventid, eventdata);
+  }
+}
 
 static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *eventdata)
 {
@@ -209,6 +258,15 @@ JIT_PARAMDEF(JIT_PARAMINIT)
   0
 };
 
+static const char *const gcstates[] = {
+  "pause", 
+  "propagate", 
+  "atomic", 
+  "sweepstring", 
+  "sweep", 
+  "finalize",
+};
+
 #define enum_entry(enumname, strarray) {.name = enumname, .valuenames = strarray, .valuenames_length = (sizeof(strarray)/sizeof(strarray[0]))}
 #define array_length(arr) (sizeof(arr)/sizeof((arr)[0]))
 
@@ -222,6 +280,7 @@ static enumdef_Args enumlist[] = {
 VMDef_Args vmdef = {
   vmdef_array(flushreason, flushreason),
   vmdef_array(jitparams, jitparams),
+  vmdef_array(gcstates, gcstates),
 };
 
 static void write_header(jitlog_State *context)
@@ -234,8 +293,11 @@ static void write_header(jitlog_State *context)
     .jitparams_length = JIT_P__MAX,
     .jitparams_default = jit_param_default,
     .jitparams_default_length = JIT_P__MAX,
+    .gc_stepmul = g->gc.stepmul,
+    .gc_pause = g->gc.pause,
   };
 
+  gc_info_Args gcinfo = build_gcinfo(context);
   header_Args args = {
     .fileheader = 0x474c4a,
     .headersize = sizeof(MSG_header),
@@ -260,6 +322,7 @@ static void write_header(jitlog_State *context)
     .enums_length = sizeof(enumlist) / sizeof(enumlist[0]),
     .vmsettings = &vmsettings,
     .vmdef = &vmdef,
+    .gcinfo = &gcinfo,
   };
   log_header(&context->ub, &args);
 
@@ -358,6 +421,23 @@ static void jitlog_loadstage2(lua_State *L, jitlog_State *context)
   */
   context->loadstate = 2;
   lj_lib_prereg(L, "jitlog", luaopen_jitlog, tabref(L->env));
+  
+  void *gceventud = NULL;
+  void* gcevent = luaJIT_gcevent_gethook(L, &gceventud);
+
+    JITLogUserContext* usr = ctx2usr(context);
+    /* If theres an existing gcevent hook save it away so we can forward events to it */
+    if (gcevent) {
+      usr->gcevent = gcevent;
+      usr->gcevent_ud = gceventud;
+    }
+    /* Only register for GC events after we've created our tables */
+    luaJIT_gcevent_sethook(L, jitlog_gcevent, context);
+  
+
+  /* Only register for GC events after we've created our tables */
+  luaJIT_gcevent_sethook(L, jitlog_gcevent, context);
+
   context->loadstate = LoadState_Running;
 }
 
@@ -394,6 +474,14 @@ static void jitlog_shutdown(jitlog_State *context)
   if (cb == jitlog_callback) {
     lua_assert(current_context == context);
     luaJIT_vmevent_sethook(L, NULL, NULL);
+  }
+
+  JITLogUserContext* usr = ctx2usr(context);
+
+  if (usr->gcevent) {
+    luaJIT_gcevent_sethook(L, usr->gcevent, usr->gcevent_ud);
+  } else {
+    luaJIT_gcevent_sethook(L, NULL, NULL);
   }
 
   free_context(context);

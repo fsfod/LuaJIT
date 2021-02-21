@@ -171,6 +171,8 @@ function fbreaders:VMSettings(msg)
   local settings = {
     jitparams = jitparams,
     jitparams_default = jitparams_default,
+    gc_stepmul = msg.gc_stepmul,
+    gc_pause = msg.gc_pause,
   }
 
   self:log_msg("VMSettings", "VMSettings: jitparams = %d", paramvalues.length)
@@ -181,8 +183,53 @@ function fbreaders:VMDef(msg)
   local vmdef = {
     flushreason = util.make_enum(msg:get_flushreason()),
     jitparams = util.make_enum(msg:get_jitparams()),
+    gcstate = util.make_enum(msg:get_gcstates()),
   }
   return vmdef
+end
+
+function readers:gcstate(msg)
+  local info = msg:get_gcinfo()
+  local newstate = info.state
+  local phase = self.vmdef.gcstate[newstate]
+  local prev_phase = self.vmdef.gcstate[msg.prevstate]
+  local laststate = self.gcstateid
+
+  self.gcstateid = newstate
+  self.gcstate = phase
+  self.gcstatecount = self.gcstatecount + 1
+
+  if laststate ~= newstate then
+    -- A new GC cycle has only started once we're past the 'pause' GC state
+    if laststate == nil or newstate == 1 or (laststate > newstate and newstate > 0)  then
+      self.gccount = self.gccount + 1
+    end
+    if phase == "atomic" then
+      self.atomicstage = nil
+    end
+    self:log_msg("gcstate", "GCState(%s): changed from %s", phase, self.vmdef.gcstate[laststate])
+  end
+
+  self:update_gcinfo(info, "gcstate")
+  return phase, prev_phase
+end
+
+function api:update_gcinfo(info, source)
+  local gcstate = self.vmdef.gcstate[info.state]
+
+  -- If the gcinfo didn't come from a state change use current state
+  if source == "startup" then
+    assert(not self.gcstate and not self.gcstateid)
+    self.gcstateid = info.state
+    self.gcstate = gcstate
+  elseif source == "shutdown" then
+    self:log_msg("gcstate", "GCState: got state closing gc state %s", self.gcstate)
+  end
+
+  local totalmem = tonumber(info.totalmem)
+  self.peakmem = math.max(self.peakmem or 0, totalmem)
+  self.peakstrnum = math.max(self.peakstrnum or 0, info.strnum)
+  self:log_msg("gcinfo", "GCInfo: MemTotal = %dMB, StrCount = %d", totalmem/(1024*1024), info.strnum)
 end
 
 local function init(self)
@@ -194,6 +241,8 @@ local function init(self)
   self.gcexits = 0 -- number of trace exits force triggered by the GC being in the 'atomic' or 'finalize' states
   self.enums = {}
   self.flushes = {}
+  self.gccount = 0 -- number GC full cycles that have been seen in the log
+  self.gcstatecount = 0 -- number times the gcstate changed
 
   return t
 end
