@@ -43,10 +43,24 @@ typedef struct GCStats {
 
 LUA_API void gcstats_collect(lua_State *L, GCStats* result);
 
+/* FIXME: wasted space from struct layout for GC64  address will have 4 bytes of padding */
 typedef struct SnapshotObj {
   uint32_t typeandsize;
-  uint32_t address;
+  GCRef address;
 } SnapshotObj;
 
+
+typedef struct GCSnapshotHandle GCSnapshotHandle;
+
+typedef struct GCSnapshot {
+  uint32_t count;
+  SnapshotObj* objects;
+  char* gcmem;
+  size_t gcmem_size;
+  GCSnapshotHandle* handle;
+} GCSnapshot;
+
+LUA_API GCSnapshot* gcsnapshot_create(lua_State *L, int objmem);
+LUA_API void gcsnapshot_free(GCSnapshot* snapshot);
 
 #endif
