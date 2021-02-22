@@ -42,6 +42,7 @@ message header {
   vmdef : VMDef
   gcinfo : gc_info
   reflect : ReflectInfo
+  ctypes : CTypeRecords
 }
 
 message stringmarker{
@@ -544,6 +545,7 @@ message ir_fold (no_vtable){
 message jitlogend{
   vmsettings : VMSettings
   gcinfo : gc_info
+  ctypes : CTypeRecords
 }
 
 message error_thrown {
@@ -553,4 +555,21 @@ message error_thrown {
   badarg : int32
   frame : int32
   stack : luastack  (optional)
+}
+
+struct CTypeEntry{
+  info : uint32
+  size : uint32
+  name : uint16
+  sib  : uint16
+}
+
+table CTypeRecords{
+  ctypes : [CTypeEntry]
+  names : stringlist
+}
+
+message new_ctypes{
+  startid : int32
+  ctypes : CTypeRecords
 }

@@ -1612,6 +1612,24 @@ it("error thrown", function()
   assert(string.find(errors[3].errmsg, "'<name>' expected near '<eof>'"))
 end)
 
+it("ctype capture", function()
+  jitlog.start()
+  local log1 = jitlog.savetostring()
+  ffi.cdef[[struct dummystruct1]]
+  jitlog.reset()
+
+  local result2 = parselog(jitlog.savetostring())
+  local result1 = parselog(log1)
+
+  local ctypes1 = result1.ctype_records
+  local ctypes2 = result2.ctype_records
+
+  -- Check we capture dummystruct1 at the end log1 and in the header of log2
+  assert(ctypes2[1].ctypes.length-ctypes1[1].ctypes.length == 1)
+  assert(#ctypes2[1].names-#ctypes1[1].names == 1)
+  assert(ctypes2[1].names[#ctypes2[1].names] == "dummystruct1")
+end)
+
 local failed = false
 
 pcall(jitlog.shutdown)

@@ -1954,6 +1954,21 @@ function readers:error_thrown(msg)
 return err
 end
 
+function readers:new_ctypes(msg)
+  local ctypes = self:readfb("CTypeRecords", msg:get_ctypes())
+  table.insert(self.ctype_records, ctypes)
+  self:log_msg("new_ctypes", "NewCTypes: typeid_start = %d, count = %d, names = %d", msg.startid, ctypes.ctypes.length, #ctypes.names)
+  return ctypes
+end
+
+function fbreaders:CTypeRecords(fb)
+  local ctypes = self:read_array("CTypeEntry", fb:get_ctypes())
+  local names = fb:get_names()
+  assert(ctypes.length > 0 and #names < 0xffff)
+
+  return {names = names, ctypes = ctypes}
+end
+
 local function init(self)
   self.strings = {}
   self.protos = {}
@@ -2009,6 +2024,7 @@ local function init(self)
   end
 
   self.luaerrors = {}
+  self.ctype_records = {}
 
   return t
 end
@@ -2059,6 +2075,13 @@ function api:parseheader(header)
 
     -- Reflect getters are built on demand when first accessed
     self.reflect = reflect_reader.create(info.fieldoffsets, info.typesizes)
+  end
+
+  local ctypes, limit = header:get_ctypes()
+  if ctypes then
+    local reader = self:create_fbreader("CTypeRecords", ctypes, limit)
+    local ctypes = self:readfb("CTypeRecords", reader)
+    table.insert(self.ctype_records, ctypes)
   end
 end
 

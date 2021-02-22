@@ -76,6 +76,7 @@ typedef struct jitlog_State {
   char oballoc_stacks;
   GCSize last_heapsize;
   GCSize heapsize_difflog;
+  uint16_t last_ctype;
   IRRef last_nk;
   IRRef last_nins;
   IRIns last_ins;
@@ -755,6 +756,8 @@ typedef enum TraceWriteKind {
   TraceWriteKind_Existing,
 } TraceWriteKind;
 
+static void write_newctypes(jitlog_State* context);
+
 static void jitlog_writetrace(jitlog_State *context, GCtrace *T, TraceWriteKind kind, lua_State *L)
 {
   jit_State *J = G2J(context->g);
@@ -779,6 +782,7 @@ static void jitlog_writetrace(jitlog_State *context, GCtrace *T, TraceWriteKind 
   if (kind != TraceWriteKind_Abort) {
     write_exitstubs(context, T);
   }
+  write_newctypes(context);
 
   luastack_Args stack;
   int capturestack = 0;
@@ -1506,6 +1510,56 @@ void jitlog_error_thrown(jitlog_State* context, lua_State* L, VMEventData_LuaErr
   context->events_written |= JITLOGEVENT_LUAERROR;
 }
 
+static CTypeRecords_Args capture_ctypes(CType *types, int count)
+{
+  const char **strings = (const char **)malloc(count * sizeof(char *));
+  CTypeEntry *dest = (CTypeEntry *)malloc(count * sizeof(CTypeEntry));
+  int strcount = 0;
+
+  for (int i = 0; i < count; i++)
+  {
+    dest[i].info = types[i].info;
+    dest[i].size = types[i].size;
+    dest[i].sib = types[i].sib;
+
+    if (strref(types[i].name))
+    {
+      dest[i].name = strcount;
+      strings[strcount++] = strdata(strref(types[i].name));
+    } else
+    {
+      dest[i].name = 0;
+    }
+  }
+
+  CTypeRecords_Args args = {
+    .ctypes = dest,
+    .ctypes_length = count,
+    .names = strings,
+    .names_length = strcount,
+  };
+  return args;
+}
+
+
+static void write_newctypes(jitlog_State* context)
+{
+  CTState *cts = ctype_ctsG(context->g);
+
+  if (cts == NULL || context->last_ctype == cts->top) {
+    return;
+  }
+
+  CTypeRecords_Args ctypes = capture_ctypes(cts->tab + context->last_ctype, cts->top - context->last_ctype);
+
+  if (log_new_ctypes(&context->ub, context->last_ctype, &ctypes)) {
+    context->last_ctype = cts->top;
+  }
+
+  free((CTypeEntry*)ctypes.ctypes);
+  free((char**)ctypes.names);
+}
+
 static void jitlog_shutdown(jitlog_State* context, int stateexit);
 
 static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *eventdata)
@@ -1888,6 +1942,13 @@ static void write_header(jitlog_State *context)
     .gc_pause = g->gc.pause,
   };
 
+  CTState *cts = ctype_ctsG(g);
+  CTypeRecords_Args ctypes = {0};
+  if (cts != NULL) {
+    ctypes = capture_ctypes(cts->tab, cts->top);
+    context->last_ctype = cts->top;
+  }
+
   gc_info_Args gcinfo = build_gcinfo(context);
   header_Args args = {
     .fileheader = 0x474c4a,
@@ -1915,10 +1976,14 @@ static void write_header(jitlog_State *context)
     .vmdef = &vmdef,
     .gcinfo = &gcinfo,
     .reflect = &reflect_info,
+    .ctypes = &ctypes,
   };
   // We can't use an extern value as a constant at compile time
   enumlist[sizeof(enumlist) / sizeof(enumdef_Args) - 1].valuenames_length = lj_numfold;
   log_header(&context->ub, &args);
+
+  free((void*)ctypes.ctypes);
+  free((void*)ctypes.names);
 
   MSG_header* header = ((MSG_header*)ubufB(&context->ub));
   // Manually build the vtable offset for the header since it can't be automatically generated. 
@@ -2163,6 +2228,7 @@ static void free_context(jitlog_State *context)
 static void jitlog_preshutdown(jitlog_State* context)
 {
   global_State* g = context->g;
+  CTState *cts = ctype_ctsG(context->g);
   if (context->loadstate == LoadState_PreShutdown) {
     return;
   }
@@ -2175,7 +2241,14 @@ static void jitlog_preshutdown(jitlog_State* context)
     .gc_pause = g->gc.pause,
   };
   gc_info_Args gc_info = build_gcinfo(context);
-  log_jitlogend(&context->ub, &vmsettings, &gc_info);
+  CTypeRecords_Args ctypes = { 0 };
+  if (cts != NULL) {
+    ctypes = capture_ctypes(cts->tab + context->last_ctype, cts->top - context->last_ctype);
+  }
+
+  log_jitlogend(&context->ub, &vmsettings, &gc_info, &ctypes);
+  free((void*)ctypes.ctypes);
+  free((void*)ctypes.names);
 }
 
 static void jitlog_shutdown(jitlog_State *context, int stateexit)
