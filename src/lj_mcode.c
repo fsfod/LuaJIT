@@ -473,6 +473,7 @@ void lj_mcode_commit(jit_State *J, MCode *top)
   MCLink *link = (MCLink *)J->mcarea;
   MCUnwind *unwind = (MCUnwind *)(J->mctop - sizeof(MCUnwind));
   uint16_t spadj = J->cur.spadjust;
+  mcode_protect(J, MCPROT_GEN);
   unwind->rf.BeginAddress = (DWORD)(top - J->mcarea);
   unwind->rf.EndAddress = (DWORD)(J->mctop - J->mcarea);
   if (spadj) {
