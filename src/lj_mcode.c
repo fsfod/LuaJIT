@@ -427,9 +427,9 @@ static void mcode_allocarea(jit_State *J)
   
   link->numunwind = 0;
   link->unwind = (MCUnwind *)J->mctop;
-  RtlInstallFunctionTableCallback(3|(DWORD64)link, (DWORD64)link, (DWORD)sz,
-				  mcode_find_win64_unwind_data, link,
-				  mcode_our_dll_name());
+ // RtlInstallFunctionTableCallback(3|(DWORD64)link, (DWORD64)link, (DWORD)sz,
+//				  mcode_find_win64_unwind_data, link,
+//				  mcode_our_dll_name());
 #endif
 }
 
@@ -495,6 +495,7 @@ void lj_mcode_commit(jit_State *J, MCode *top)
     unwind->rf.UnwindInfoAddress = (DWORD)(J->win64tracexdata - J->mcarea);
   }
   unwind->chain.EndAddress = (DWORD)((MCode *)link->unwind - J->mcarea);
+  RtlAddFunctionTable(&unwind->rf, 1, J->mcarea);
   link->unwind = unwind;
   ++link->numunwind;
   top -= (uintptr_t)top & 3;
