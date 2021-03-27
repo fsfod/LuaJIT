@@ -354,7 +354,7 @@ static PRUNTIME_FUNCTION mcode_find_win64_unwind_data(DWORD64 pc, PVOID mc)
   uint32_t i;
   DWORD off = (DWORD)(pc - (DWORD64)mc);
   for (i = 0; i < numunwind; ++i) {
-    if (unwind->rf.BeginAddress <= off && off < unwind->rf.EndAddress) {
+    if (unwind->rf.BeginAddress >= off && off < unwind->rf.EndAddress) {
       return &unwind->rf;
     }
     unwind = (MCUnwind *)((char *)mc + unwind->chain.EndAddress);
