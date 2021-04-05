@@ -1155,10 +1155,10 @@ function fbreaders:VMDef(msg)
     terror = util.make_enum(msg:get_terror()),
     trace_errors = util.make_enum(msg:get_trace_errors()),
     ir = util.make_enum(msg:get_ir()),
-    irtypes = util.make_enum(msg:get_irtypes()),
-    ircalls = util.make_enum(msg:get_ircalls()),
-    irfpmath = util.make_enum(msg:get_irfpmath()),
-    irfields = util.make_enum(msg:get_irfields()),
+    irtypes = util.make_enum(msg:get_ir_types()),
+    ircalls = util.make_enum(msg:get_ir_call()),
+    irfpmath = util.make_enum(msg:get_ir_fpmath()),
+    irfields = util.make_enum(msg:get_ir_fields()),
     trace_link = util.make_enum(msg:get_trace_link()),
   }
   return vmdef

@@ -17,6 +17,7 @@
 #include "lj_frame.h"
 #include "lj_ctype.h"
 #include "lj_err.h"
+#include "lj_vmdef.h"
 
 #include "lj_jitlog_def.h"
 #include "lj_jitlog_decl.h"
@@ -1728,190 +1729,6 @@ static void write_bnote(UserBuf *ub, const char *label, const void *data, size_t
   log_note(ub, &args);
 }
 
-#define SIZEDEF(_) \
-  _(TValue,   sizeof(TValue)) \
-  _(string,   sizeof(GCstr)) \
-  _(upvalue,  sizeof(GCupval)) \
-  _(thread,   sizeof(lua_State)) \
-  _(proto,    sizeof(GCproto)) \
-  _(function, sizeof(GCfunc)) \
-  _(trace,    sizeof(GCtrace)) \
-  _(cdata,    sizeof(GCcdata)) \
-  _(table,    sizeof(GCtab)) \
-  _(userdata, sizeof(GCudata)) \
-  _(GCfuncC,  sizeof(GCfuncC)) \
-  _(GCfuncL,  sizeof(GCfuncL)) \
-  _(GChead,   offsetof(GChead, unused1)) \
-  _(table_node,   sizeof(Node)) \
-  _(GG_State,     sizeof(GG_State)) \
-  _(global_State, sizeof(global_State)) \
-  _(GCState,      sizeof(GCState)) \
-  _(CTState,      sizeof(CTState)) \
-  _(jit_State,    sizeof(jit_State)) \
-
-#define SIZENUM(name, sz) sz,
-#define SIZENAME(name, sz) #name,
-
-static const MSize reflect_typesizes[] = {
-  SIZEDEF(SIZENUM)
-};
-
-static const char *reflect_typenames[] = {
-  SIZEDEF(SIZENAME)
-  NULL,
-};
-
-#define REFLECT_FLDEF(_) \
-  _(str_len,	offsetof(GCstr, len)) \
-  _(str_hash,	offsetof(GCstr, hash)) \
-  _(func_env,	offsetof(GCfunc, l.env)) \
-  _(func_pc,	offsetof(GCfunc, l.pc)) \
-  _(func_ffid,	offsetof(GCfunc, l.ffid)) \
-  _(thread_env,	offsetof(lua_State, env)) \
-  _(tab_colo,	offsetof(GCtab, colo)) \
-  _(tab_meta,	offsetof(GCtab, metatable)) \
-  _(tab_array,	offsetof(GCtab, array)) \
-  _(tab_node,	offsetof(GCtab, node)) \
-  _(tab_asize,	offsetof(GCtab, asize)) \
-  _(tab_hmask,	offsetof(GCtab, hmask)) \
-  _(node_key,	offsetof(Node, key)) \
-  _(node_val,	offsetof(Node, val)) \
-  _(node_next,	offsetof(Node, next)) \
-  _(udata_meta,	offsetof(GCudata, metatable)) \
-  _(udata_env,	offsetof(GCudata, env)) \
-  _(udata_udtype, offsetof(GCudata, udtype)) \
-  _(cdata_ctypeid, offsetof(GCcdata, ctypeid)) \
-  _(gchead_gct, offsetof(GChead, gct)) \
-  _(gchead_marked, offsetof(GChead, marked))
-
-
-#define FLDSIZENUM(name, sz) sz,
-#define FLDSIZENAME(name, sz) #name,
-
-static const MSize reflect_offsets[] = {
-  REFLECT_FLDEF(SIZENUM)
-};
-
-static const char *reflect_fieldnames[] = {
-  REFLECT_FLDEF(SIZENAME)
-  NULL,
-};
-
-ReflectInfo_Args reflect_info = {
-  .typenames = reflect_typenames,
-  .typenames_length = sizeof(reflect_typenames) / sizeof(char*) - 1,
-  .typesizes = reflect_typesizes,
-  .typesizes_length = sizeof(reflect_typesizes) / sizeof(MSize),
-  .fieldnames = reflect_fieldnames,
-  .fieldnames_length = sizeof(reflect_fieldnames) / sizeof(char*) - 1,
-  .fieldoffsets = reflect_offsets,
-  .fieldoffsets_length = sizeof(reflect_offsets) / sizeof(MSize),
-};
-
-static const char *const flushreason[] = {
-  "other",
-  "user_requested",
-  "maxmcode",
-  "maxtrace",
-  "profile_toggle",
-  "set_builtinmt",
-  "set_immutableuv",
-  "jitlog_tracemarkers",
-};
-
-static const char * jitparams[] = {
-  #define PARAMNAME(len, name, value)	#name,
-  JIT_PARAMDEF(PARAMNAME)
-  #undef PARAMNAME
-};
-
-static const int32_t jit_param_default[JIT_P__MAX + 1] = {
-#define JIT_PARAMINIT(len, name, value)	(value),
-JIT_PARAMDEF(JIT_PARAMINIT)
-#undef JIT_PARAMINIT
-  0
-};
-
-static const char *const gcstates[] = {
-  "pause", 
-  "propagate", 
-  "atomic", 
-  "sweepstring", 
-  "sweep", 
-  "finalize",
-};
-
-static const char *const gcatomic_stages[] = {
-  "stage_end",
-  "mark_upvalues",
-  "mark_roots",
-  "mark_grayagain",
-  "separate_udata",
-  "mark_udata",
-  "clearweak",
-};
-
-static const char *const bc_names[] = {
-  #define BCNAME(name, ma, mb, mc, mt)       #name,
-  BCDEF(BCNAME)
-  #undef BCNAME
-};
-
-static const char *const fastfunc_names[] = {
-  "Lua",
-  "C",
-  #define FFDEF(name)   #name,
-  #include "lj_ffdef.h"
-  #undef FFDEF
-};
-
-static const char *const terror[] = {
-  #define TREDEF(name, msg)	#name,
-  #include "lj_traceerr.h"
-  #undef TREDEF
-};
-
-static const char *const trace_errors[] = {
-  #define TREDEF(name, msg)	msg,
-  #include "lj_traceerr.h"
-  #undef TREDEF
-};
-
-static const char *const ir_names[] = {
-  #define IRNAME(name, m, m1, m2)	#name,
-  IRDEF(IRNAME)
-  #undef IRNAME
-};
-
-static const char *const irt_names[] = {
-  #define IRTNAME(name, size)	#name,
-  IRTDEF(IRTNAME)
-  #undef IRTNAME
-};
-
-static const char *const ircall_names[] = {
-  #define IRCALLNAME(cond, name, nargs, kind, type, flags)	#name,
-  IRCALLDEF(IRCALLNAME)
-  #undef IRCALLNAME
-};
-
-static const char* const irfpmath_names[] = {
-  #define IRFPMDEFNAME(name)	#name,
-  IRFPMDEF(IRFPMDEFNAME)
-  #undef IRFPMDEFNAME
-};
-
-static const char * irfield_names[] = {
-  #define FLNAME(name, ofs)	#name,
-  IRFLDEF(FLNAME)
-  #undef FLNAME
-};
-
-static const char *const trlink_names[] = {
-  "none", "root", "loop", "tail-recursion", "up-recursion", "down-recursion",
-  "interpreter", "return", "stitch"
-};
-
 extern const char* fold_names[];
 extern const int lj_numfold;
 
@@ -1919,7 +1736,6 @@ extern const int lj_numfold;
 #define array_length(arr) (sizeof(arr)/sizeof((arr)[0]))
 
 static enumdef_Args enumlist[] = {
-  enum_entry("flushreason", flushreason),
   {.name = "CounterId",  .valuenames = CounterId_names, .valuenames_length = Counter_MAX},
   {.name = "TimerId",    .valuenames = TimerId_names,   .valuenames_length = Timer_MAX},
   {.name = "SectionId",  .valuenames = SectionId_names, .valuenames_length = Section_MAX},
@@ -1927,28 +1743,8 @@ static enumdef_Args enumlist[] = {
   {.name = "fold_names", .valuenames = fold_names, .valuenames_length = 0},
 };
 
-#define vmdef_array(name, name_array) \
-  .name = name_array, .name##_length = sizeof(name_array)/sizeof((name_array)[0])
-
-VMDef_Args vmdef = {
-  vmdef_array(flushreason, flushreason),
-  vmdef_array(jitparams, jitparams),
-  vmdef_array(gcstates, gcstates),
-  vmdef_array(gcatomic_stages, gcatomic_stages),
-  vmdef_array(bc, bc_names),
-  .bc_mode = lj_bc_mode,
-  .bc_mode_length = BC__MAX + GG_NUM_ASMFF,
-  vmdef_array(fastfuncs, fastfunc_names),
-  vmdef_array(terror, terror),
-  vmdef_array(trace_errors, trace_errors),
-  vmdef_array(ir, ir_names),
-  vmdef_array(ir_mode, lj_ir_mode),
-  vmdef_array(irtypes, irt_names),
-  vmdef_array(ircalls, ircall_names),
-  vmdef_array(irfpmath, irfpmath_names),
-  vmdef_array(irfields, irfield_names),
-  vmdef_array(trace_link, trlink_names),
-};
+#define vmdef_array(name) \
+  .name = lj_vmdef.name.names, .name##_length = (uint32_t)lj_vmdef.name.count
 
 static void write_current_states(jitlog_State *context, UserBuf *ub);
 
@@ -1960,7 +1756,7 @@ static void write_header(jitlog_State *context)
   VMSettings_Args vmsettings = {
     .jitparams = G2J(g)->param,
     .jitparams_length = JIT_P__MAX,
-    .jitparams_default = jit_param_default,
+    .jitparams_default = lj_vmdef.jitparam_defaults,
     .jitparams_default_length = JIT_P__MAX,
     .gc_stepmul = g->gc.stepmul,
     .gc_pause = g->gc.pause,
@@ -1972,6 +1768,40 @@ static void write_header(jitlog_State *context)
     ctypes = capture_ctypes(cts->tab, cts->top);
     context->last_ctype = cts->top;
   }
+
+  ReflectInfo_Args reflect_info = {
+    .typenames = lj_vmreflect.typenames,
+    .typenames_length = lj_vmreflect.typecount,
+    .typesizes = lj_vmreflect.typesizes,
+    .typesizes_length = lj_vmreflect.typecount,
+    .fieldnames = lj_vmreflect.fieldnames,
+    .fieldnames_length = lj_vmreflect.fieldcount,
+    .fieldoffsets = lj_vmreflect.fieldoffsets,
+    .fieldoffsets_length = lj_vmreflect.fieldcount,
+  };
+
+  VMDef_Args vmdef = {
+    vmdef_array(flushreason),
+    vmdef_array(jitparams),
+    vmdef_array(gcstates),
+    vmdef_array(gcatomic_stages),
+    vmdef_array(bc),
+    .bc_mode = lj_bc_mode,
+    .bc_mode_length = BC__MAX + GG_NUM_ASMFF,
+    vmdef_array(fastfuncs),
+    vmdef_array(terror),
+    vmdef_array(trace_errors),
+    vmdef_array(ir),
+    .ir_mode = lj_vmdef.irmode,
+    .ir_mode_length = (uint32_t)lj_vmdef.ir.count+1,
+    vmdef_array(ir_types),
+    vmdef_array(ir_call),
+    vmdef_array(ir_fpmath),
+    vmdef_array(ir_fields),
+    vmdef_array(trace_link),
+    .ir_calladdr = (uint64_t*)lj_vmdef.ir_calladdr,
+    .ir_calladdr_length = lj_vmdef.ir_call.count,
+  };
 
   gc_info_Args gcinfo = build_gcinfo(context);
   header_Args args = {

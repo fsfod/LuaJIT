@@ -144,10 +144,11 @@ table VMDef{
   trace_errors : stringlist
   ir : stringlist
   ir_mode : [uint8]
-  irtypes : stringlist
-  ircalls : stringlist
-  irfpmath : stringlist
-  irfields : stringlist
+  ir_types : stringlist
+  ir_call : stringlist
+  ir_calladdr : [ptr]
+  ir_fpmath : stringlist
+  ir_fields : stringlist
   trace_link : stringlist
 }
 
