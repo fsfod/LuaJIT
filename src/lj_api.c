@@ -25,6 +25,7 @@
 #include "lj_vm.h"
 #include "lj_strscan.h"
 #include "lj_strfmt.h"
+#include "lj_vmevent.h"
 
 /* -- Common helper functions --------------------------------------------- */
 
@@ -1273,11 +1274,13 @@ LUA_API int lua_gc(lua_State *L, int what, int data)
   case LUA_GCSTEP: {
     GCSize a = (GCSize)data << 10;
     g->gc.threshold = (a <= g->gc.total) ? (g->gc.total - a) : 0;
+    lj_gcevent(G(L), GCEVENT_STEP, a);
     while (g->gc.total >= g->gc.threshold)
-      if (lj_gc_step(L) > 0) {
+      if (lj_gc_step_internal(L) > 0) {
 	res = 1;
 	break;
       }
+    lj_gcevent(G(L), GCEVENT_STEP, 0);
     break;
   }
   case LUA_GCSETPAUSE:
