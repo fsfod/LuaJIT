@@ -3,6 +3,37 @@ local arg
 local modulepath = ""
 local isminilua = not require 
 
+writemarker = function() end
+writeperfstats = function() end
+
+local success, jitlog
+
+if not isminilua then
+  success, jitlog = pcall(require, "jitlog")
+
+  if success then
+    writemarker = function(label)
+      jitlog.writemarker(label)
+      --jitlog.write_gcstats(label)
+    end
+    jitlog.start()
+    local jitlogpath = os.getenv("LUA_JITLOG")
+    if not jitlogpath then
+      jitlog.setlogsink("temp/parse.jitlog")
+    end
+    jitlog.write_gcsnapshot("START", true)
+
+    jitlog.memorize_existing()
+    jitlog.set_objalloc_logging(true)
+    --jitlog.setgcstats_enabled(true)
+    jitlog.setmode("trace_markers", true)
+    jitlog.set_stackcapture_mode("tstart", "full")
+    jitlog.set_stackcapture_mode("tstop", "full")
+    jitlog.set_stackcapture_mode("tabort", "full")
+  end
+end
+
+
 --Work around the limited API when run under minilua
 if not require then
   arg = {...}
@@ -85,11 +116,13 @@ local schema_path, gentype, outpath = arg[argstart], arg[argstart + 1], arg[args
 assert(schema_path, "No message schema file path specified as first argument")
 assert(gentype, "No generation mode specified as second argument")
 
+writemarker("Parse FBS")
 local fbs_parser = require("jitlog.fbs_parser")
 local schema = fbs_parser.parse_fbsfile(schema_path)
 
 outpath = outpath or ""
 
+writemarker("Process Schema")
 local apigen = require"jitlog.generator"
 local parser = apigen.create_parser(GC64)
 parser:process_schema(schema)
@@ -124,10 +157,23 @@ parser:scan_instrumented_files()
 local data = parser:complete()
 
 local actions =  {
-  defs = function() apigen.write_c(data, {outdir = outpath, mode = "defs"}) end,
-  writers = function() apigen.write_c(data, {outdir = outpath, mode = "writers"})  end,
-  lua = function() apigen.writelang("lua", data, {outdir = outpath})  end,
-  csharp = function() apigen.writelang("cs", data, {outdir = outpath})  end,
+  defs = function()
+    writemarker("Generate(Definitions)", 0x10000)
+    apigen.write_c(data, {outdir = outpath, mode = "defs"})
+    writeperfstats()
+  end,
+  writers = function()
+    writemarker("Generate(Writers)", 0x10000)
+    apigen.write_c(data, {outdir = outpath, mode = "writers"})
+  end,
+  lua = function()
+    writemarker("Generate(Lua)", 0x10000)
+    apigen.writelang("lua", data, {outdir = outpath})
+  end,
+  csharp = function()
+    writemarker("Generate(CSharp)", 0x10000)
+    apigen.writelang("cs", data, {outdir = outpath})
+  end,
 }
 
 actions.all = function()
@@ -145,5 +191,9 @@ if actionfunc then
   actionfunc()
 else
   error("Unknown action "..gentype)
+end
+
+if jitlog and success then
+  jitlog.write_gcsnapshot("END", true)
 end
 
