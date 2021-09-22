@@ -2128,7 +2128,7 @@ static void asm_tail_link(ASMState *as)
   int gotframe = 0;
   BCReg baseslot = asm_baseslot(as, snap, &gotframe);
 
-  if ((as->flags & JIT_F_TRACE_MARKERS) && as->T->link != 0) {
+  if ((as->flags & JIT_F_TRACE_MARKERS)) {
     emit_tracemarker(as, as->J->cur.traceno, MARKERFLAG_TRACE_SAVEREGS);
   }
 

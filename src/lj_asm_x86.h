@@ -2695,7 +2695,7 @@ static void writemarker(ASMState *as, Reg rbuff, Reg rend, Reg ub, uint32_t id, 
   int kind = marker_kind(flags);
   int idshift = 8;
 
-  if (kind == MARKERKIND_SECTION || kind == MARKERKIND_TRACE) {
+  if (kind == MARKERKIND_SECTION || (kind == MARKERKIND_TRACE && needts)) {
     msgtype = MSGTYPE_perf_section;
     idshift = 11;
     msgsize = sizeof(MSG_perf_section);
@@ -2771,7 +2771,12 @@ static void emit_tracemarker(ASMState *as, uint32_t id, int flags)
   Reg ub = RID_NONE, rbuff = RID_ECX, rend = RID_EDX;
   int stackspace = 5 * sizeof(intptr_t);
   
-  flags |= MARKERFLAG_KIND_TRACE | MARKERFLAG_TIMESTAMP | JITED_BIT | ISTRACE_BIT;
+  flags |= MARKERFLAG_KIND_TRACE | JITED_BIT | ISTRACE_BIT;
+
+  if (1)
+  {
+    flags |= MARKERFLAG_TIMESTAMP;
+  }
 
   int needts = MARKERFLAG_TIMESTAMP & flags;
 
