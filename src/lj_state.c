@@ -163,6 +163,8 @@ static TValue *cpluaopen(lua_State *L, lua_CFunction dummy, void *ud)
   return NULL;
 }
 
+void (*lstate_callback)(lua_State* L, int create) = NULL;
+
 static void close_state(lua_State *L)
 {
   global_State *g = G(L);
@@ -188,6 +190,13 @@ static void close_state(lua_State *L)
   lj_assertG(g->gc.total == ggsize,
 	     "memory leak of %lld bytes",
 	     (long long)(g->gc.total - ggsize));
+  /*
+  ** This callback must happen before the memory can be reused otherwise we can end up 
+  ** tracking Lua state multiple times based on its address being reused for a new Lua state.
+  */
+  if (lstate_callback != NULL) {
+    lstate_callback(L, 0);
+  }
 #ifndef LUAJIT_USE_SYSMALLOC
   if (g->allocf == lj_alloc_f)
     lj_alloc_destroy(g->allocd);
@@ -289,6 +298,9 @@ LUA_API lua_State *lua_newstate(lua_Alloc allocf, void *allocd)
     return NULL;
   }
   L->status = LUA_OK;
+  if (lstate_callback != NULL) {
+    lstate_callback(L, 1);
+  }
   return L;
 }
 
