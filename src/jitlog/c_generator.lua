@@ -15,11 +15,12 @@ const char *{{name}}[{{count}}+1] = {
 ]],
 
   enum = [[
-enum {{name}} {
+enum {{name}} {{base}}{
 {{list}}};
 
 ]],
   enumline = "%s,\n",
+  enum_valueline = "%s = %s,\n",
   msgsize_dispatch = [[
 const uint8_t msgsize_dispatch[255] = {
 {{list:  %s\n}}  255,/* Mark the unused message ids invalid */

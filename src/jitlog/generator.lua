@@ -275,6 +275,52 @@ function parser:process_structcopy(msgdef, structcopy, fieldlookup)
   return struct_arg
 end
 
+function parser:parse_enum(def, t)
+  assert(def.name, "Enum definition has no name")
+  assert(def.values[1], "Enum definition contains no values")
+
+  local values = {}
+  local fieldlookup = {}
+  local nextval = 0
+
+  for i, field in ipairs(def.values) do
+    local name, value = field.name, field.value
+
+    if fieldlookup[name] then
+      self:report_error("Duplicate value '%s' in enum %s", name, def.name)
+    end
+
+    if not value then
+      value = nextval
+      nextval = nextval + 1
+    end
+
+    local f = {name = name, value = value, index = i, implicitval = field.value == nil}
+    fieldlookup[name] = f
+    tinsert(values, f)
+  end
+
+  t.typeid = fbtype.UInt
+  t.entries = values
+  t.lookup = fieldlookup
+  t.prefix = def.name
+
+  if def.basetype then
+    local base = self.types[def.basetype]
+    if not base then
+      self:report_error("Base type %s for enum '%s' does not exist", def.basetype, def.name)
+    end
+    if base.kind ~= "number" then
+      self:report_error("Bad non number base type %s for enum '%s' does not exist", def.basetype, def.name)
+    end
+    t.basetype = def.basetype
+    t.size = base.size
+  else
+    t.basetype = "uint32"
+    t.size = 4
+  end
+end
+
 function parser:parse_struct(def, t)
   
   assert(def.name, "struct definition has no name")
@@ -308,6 +354,49 @@ function parser:parse_struct(def, t)
   t.size = 0
   t.typeid = fbtype.Obj
   self:build_recordlayout(t)
+
+  return t
+end
+
+function parser:parse_rpc(def, t)
+
+  assert(def.name, "rpc definition has no name")
+  local methods = {}
+  local methodlookup = {}
+
+  assert(def.methods[1], "rpc definition contains no methods")
+
+  for _, method in ipairs(def.methods) do
+    local name, arg, ret = method.name, method.arg, method.ret
+
+    assert(name, "no name specified for rpc method")
+
+    if methodlookup[name] then
+      self:report_error("Duplicate method '%s' in rpc %s", name, def.name)
+    end
+
+    local argtype = self.types[arg]
+    if not argtype then
+      self:report_error("No type found named %s used for argument method %s for rpc %s", arg, name, def.name)
+    end
+
+    local retype = self.types[ret]
+    if not retype then
+      self:report_error("No type found named %s used for return method %s for rpc %s", ret, name, def.name)
+    end
+
+    if retype.kind ~= "message" and retype.kind ~= "table" then
+      self:report_error("Bad return type %s for method %s for rpc %s, wrong kind should table or message", ret, name, def.name)
+    end
+
+    local f = {name = name, argtype = arg, rettype = ret}
+    methodlookup[name] = f
+    table.insert(methods, f)
+  end
+
+  t.attributes = def.attributes
+  t.methods = methods
+  t.methodlookup = methodlookup
 
   return t
 end
@@ -484,7 +573,7 @@ function parser:parse_msg(def, m)
       end
       t.buflen = length
     else
-      assert(kind == "number" or kind == "ptr" or kind == "bool")
+      assert(kind == "number" or kind == "ptr" or kind == "enum" or kind == "bool")
       t.kind = typeinfo.kind
     end
 
@@ -526,8 +615,12 @@ end
 
 function parser:process_schema(schema)
 
-  for _, deflist in ipairs({schema.structs, schema.tables, schema.messages}) do
+  for _, deflist in ipairs({schema.structs, schema.tables, schema.messages, schema.enums, schema.rpcs}) do
     self:create_placeholders(deflist)
+  end
+
+  for _, def in pairs(schema.enums) do
+    self:parse_type(def)
   end
 
   for _, def in pairs(schema.structs) do
@@ -539,6 +632,11 @@ function parser:process_schema(schema)
   end
 
   for _, def in pairs(schema.messages) do
+    self:parse_type(def)
+  end
+
+  for _, def in pairs(schema.rpcs) do
+
     self:parse_type(def)
   end
 
@@ -580,6 +678,12 @@ function parser:parse_type(def)
   elseif def.kind == "struct" then
     self:parse_struct(def, type)
     table.insert(self.structs, type)
+  elseif def.kind == "enum" then
+    self:parse_enum(def, type)
+    self.enums[def.name] = type
+  elseif def.kind == "rpc_service" then
+    self:parse_rpc(def, type)
+    table.insert(self.rpcs, type)
   else
     error("Unknown type "..def.kind)
   end
@@ -751,14 +855,21 @@ local enum_mt = {
         error(format("enum label '%s' already exists in enum %s", name, self.name))
       end
 
+      local implicit = false
+
       if not value then
-        self.lookup[name] = true
         self.seq_values = true
+        value = self.nextvalue
+        implicit = true
+        self.nextvalue = self.nextvalue + 1
       else
-        self.lookup[name] = true
         self.custom_values = true
       end
-      table.insert(self.entries, name)
+
+      local entry = {name = name, index = #self.entries+1, value = value, implicitval = implicit}
+
+      self.lookup[name] = entry
+      table.insert(self.entries, entry)
     end
   }
 }
@@ -773,6 +884,7 @@ function parser:add_enum(name)
     prefix = "",
     lookup = {},
     entries = {},
+    nextvalue = 0
   }
   setmetatable(enum, enum_mt)
   self.enums[name] = enum
@@ -817,6 +929,7 @@ local copyfields = {
   "structs",
   "tables",
   "namescans",
+  "rpcs",
 }
 
 function parser:complete()
@@ -824,6 +937,14 @@ function parser:complete()
   assert(self.msglookup["header"], "a header message must be defined")
   self.sorted_msgnames = sortmsglist(self.msglist, self.builtin_msgorder)
   self.sorted_typenames = util.clone(self.sorted_msgnames)
+
+  for _, def in pairs(self.rpcs) do
+    local enum = self:add_enum(def.name .. "Id")
+
+    for i, m in ipairs(def.methods) do
+      enum:add_entry(m.name)
+    end
+  end
 
   for _, def in ipairs(self.msglist) do
     self:build_vtable(def, "message")
@@ -1455,30 +1576,57 @@ function generator:build_boundscheck(msgdef)
 end
 
 function generator:write_enums()
+
   local sortednames = util.keys(self.enums)
   table.sort(sortednames)
   for _, name in ipairs(sortednames) do
     local def = self.enums[name]
-    self:write_enum(name, def.entries, def.prefix)
+    self:write_enum(name, def.entries, def.prefix, def.basetype)
   end
 end
 
 function generator:write_namelists()
   for name, def in pairs(self.enums) do
     if not def.no_namelist then
-      self:write_namelist(name.."_names", def.entries)
+      self:write_namelist(name.."_names", util.map(def.entries, function(f) return f.name  end))
     end
   end
 end
 
-function generator:write_enum(name, names, prefix)
+function generator:write_enum(name, names, prefix, base)
   prefix = prefix and (prefix .. "_") or name
 
   if self.outputlang ~= "c" then
     prefix = ""
   end
-  local entries = util.concatf(names, prefix..self.templates.enumline, "  ", "", true)
-  self:writetemplate("enum", {name = name, list = entries})
+
+  local namefmt = prefix..self.templates.enumline
+  local valuefmt = prefix..self.templates.enum_valueline
+
+  local entries
+
+  if type(names[1]) == "string" then
+    entries = util.concatf(names, prefix..self.templates.enumline, "  ", "", true)
+  else
+    names = util.map(names, function(f)
+      if not f.implicitval then
+        return format(namefmt, f.name)
+      else
+        return format(valuefmt, f.name, f.value)
+      end
+    end)
+
+    entries = "  " .. table.concat(names, "  ")
+  end
+
+  if not base then
+    base = ""
+  else
+    base = self.typerename[base] or self.types[base].c or base
+    base = " : " .. base
+  end
+
+  self:writetemplate("enum", {name = name, list = entries, base = base})
 end
 
 function generator:write_namelist(name, names)
@@ -1615,6 +1763,7 @@ local api = {
       structs = {},
       tables = {},
       enums = {},
+      rpcs = {},
     }
     t.data = t
     return setmetatable(t, {__index = parser})

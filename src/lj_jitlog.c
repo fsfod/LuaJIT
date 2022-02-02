@@ -1422,7 +1422,7 @@ static void jitlog_gcevent(void *contextptr, lua_State *L, int eventid, void *ev
 
   JITLogUserContext* usr = ctx2usr(context);
 
-  if (context->loadstate == LoadState_SafeStart) {
+  if (context->loadstate == LoadState_Starting) {
     if (usr->gcevent) {
       usr->gcevent(usr->gcevent_ud, L, eventid, eventdata);
     }

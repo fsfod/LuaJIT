@@ -25,6 +25,8 @@ lib.{{name}} = {{name}}
 
 ]],
   enumline = '"%s",\n',
+  enum_valueline = '%s = %s,\n',
+
   msgsizes = [[local msgsizes = {
 {{list:  %s\n}} };
 lib.msgsizes = msgsizes

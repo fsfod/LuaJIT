@@ -16,8 +16,9 @@ generator.templates = {
 ]],
 
   enumline = '  %s,\n',
+  enum_valueline = '  %s = %s,\n',
   enum = [[
-public enum {{name}}{
+public enum {{name}}{{base}}{
 {{list}}}
 
 ]],
