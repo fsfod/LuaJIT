@@ -125,9 +125,13 @@ outpath = outpath or ""
 writemarker("Process Schema")
 local apigen = require"jitlog.generator"
 local parser = apigen.create_parser(GC64)
+parser.jitlog = genjitlog == true
 parser:process_schema(schema)
 
 parser.srcdir = modulepath
+
+if genjitlog then
+
 parser.namescans = {
   timer = {
     pattens = {"TIMER_START%(([^%,)]+)", "TIMER_ADD%(([^%,)]+)"},
@@ -153,34 +157,53 @@ parser.files_to_scan = {
 }
 
 parser:scan_instrumented_files()
+end
 
 local data = parser:complete()
 
+local jitlogopts = {
+  defs =    {jitlog = true, outdir = outpath, name = "jitlog"},
+  writers = {jitlog = true, outdir = outpath, name = "jitlog"},
+  lua =     {jitlog = true, outdir = outpath},
+  csharp =  {jitlog = true, outdir = outpath, name = "JITLogMessageDefs", namespace = "JITLogger", buildreaders = false},
+}
+
+local generic_opts = {
+  c      = {outdir = outpath, name = "jlipc", filename = "jlipc_def"},
+  csharp = {outdir = outpath, name = "JITLogIPCDef", namespace = "LuaJITLib.IPC", buildreaders = true, buildwriters = true},
+}
+
 local actions =  {
-  defs = function()
+  defs = function(options)
     writemarker("Generate(Definitions)", 0x10000)
-    apigen.write_c(data, {outdir = outpath, mode = "defs"})
+    apigen.write_c(data, options, "defs")
     writeperfstats()
   end,
-  writers = function()
+  writers = function(options)
     writemarker("Generate(Writers)", 0x10000)
-    apigen.write_c(data, {outdir = outpath, mode = "writers"})
+    apigen.write_c(data, options, "writers")
   end,
-  lua = function()
+  c = function(options)
+    writemarker("Generate(Writers)", 0x10000)
+    apigen.write_c(data, options)
+  end,
+  lua = function(options)
     writemarker("Generate(Lua)", 0x10000)
-    apigen.writelang("lua", data, {outdir = outpath})
+    apigen.writelang("lua", data, options)
   end,
-  csharp = function()
+  csharp = function(options)
     writemarker("Generate(CSharp)", 0x10000)
-    apigen.writelang("cs", data, {outdir = outpath})
+    apigen.writelang("cs", data, options)
   end,
 }
 
+local opts = genjitlog and jitlogopts or  generic_opts
+
 actions.all = function()
   for k, f in pairs(actions) do
-    if k ~= "all" then
+    if k ~= "all" and opts[k] then
       print("Running generator:", k)
-      f()
+      f(opts[k])
     end
   end
 end
@@ -188,7 +211,7 @@ end
 local actionfunc = actions[gentype]
 
 if actionfunc then
-  actionfunc()
+  actionfunc(opts[gentype])
 else
   error("Unknown action "..gentype)
 end

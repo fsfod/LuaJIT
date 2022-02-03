@@ -15,21 +15,23 @@ const char *{{name}}[{{count}}+1] = {
 ]],
 
   enum = [[
-enum {{name}} {{base}}{
-{{list}}};
+typedef enum {{name}} {
+  {{list:@fmtlist("%s ", "", ",\n")}}
+} {{name}};
 
 ]],
-  enumline = "%s,\n",
-  enum_valueline = "%s = %s,\n",
+  enumline = "%s",
+  enum_valueline = "%s = %s",
   msgsize_dispatch = [[
 const uint8_t msgsize_dispatch[255] = {
-{{list:  %s\n}}  255,/* Mark the unused message ids invalid */
+  {{list:@fmtlist("", "", "\n")}}
+  255,/* Mark the unused message ids invalid */
 };
 
 ]],
 
   msgsizes = [[
-const int32_t jitlog_msgsizes[{{count}}] = {
+const int32_t {{name}}_msgsizes[{{count}}] = {
 {{list:  %s\n}}
 };
 
@@ -51,7 +53,15 @@ typedef struct {{cprefix}}{{name}} {
   structfield_sizedarray = "  {{type}} {{name}}[{{size}}];\n",
   vtable = [[
   /* {{name}} */
-  {{offsets}},
+  {{offsets:@fmtlist("0x%X", "", ",\n")}}
+]],
+  vtable_start = "const unsigned short {{nameprefix}}vtables[] = {\n",
+  vtable_end = "};\n",
+  vtable_offsets = [[
+const int {{nameprefix}}vtoffsets[] = {
+  {{offsets:@fmtlist("%d", "", ",\n")}}
+};
+
 ]],
 
   stringlist_writer = [[
@@ -60,11 +70,12 @@ ubuf_setoffset_rel(ub, vtotal-{{offset}});
   ]],
 
   typecount = [[
-    enum {
-      STRUCTTYPE_COUNT = {{structs}},
-      TABLETYPE_COUNT = {{tables}},
-    };
-  ]],
+enum {
+  STRUCTTYPE_COUNT_{{name}} = {{structs}},
+  TABLETYPE_COUNT_{{name}} = {{tables}},
+};
+
+]],
 
   fbwriter = [[
 ubuf_setoffset_rel(ub, vtotal-{{offset}});
@@ -95,7 +106,10 @@ ubuf_setoffset_rel(ub, vtotal-{{offset}});
     ubuf_setoffset_rel(ub, vtotal - ({{msgfield}}_base + j*4));
     vtotal += {{writer}}(ub, {{value}} + j);
   }
-  ]]
+  ]],
+  sizedarray_writer = [[
+memcpy(msg->{{name}}, {{value}},  {{size}}*{{element_size}});
+]],
 }
 
 local format_specifers = {
@@ -118,7 +132,7 @@ local format_specifers = {
   MRef     = "0x%llx",
 }
 
-function generator:fmt_fieldget(def, f)
+function generator:fmt_fieldget(def, f, action)
   local ftype = self.types[f.type]
 
   if self:needs_accessor(def, f) then
@@ -130,11 +144,29 @@ function generator:fmt_fieldget(def, f)
   end
 end
 
-function generator:needs_accessor(struct, f, type)
+function generator:needs_accessor(struct, f, action)
   return f.vlen or f.bitfield or f.bitstorage
 end
 
-function generator:fmt_accessor_def(struct, f, voffset)
+function generator:mkfield(struct, f, action)
+
+  local type = self.types[f.type]
+
+  if type.kind == "enum" then
+
+    if type.basetype then
+      local base = self.types[type.basetype]
+      assert(base, "enum base type does not exist")
+      assert(base.kind == "number", "enum base type should be number")
+      return format(self.templates.structfield, base.c, f.name)
+    end
+
+  end
+
+  return self.base.mkfield(self, struct, f, action)
+end
+
+function generator:fmt_accessor_def(struct, f, voffset, action)
   local body
   if f.vlen then
     local first_cast
@@ -171,64 +203,6 @@ function generator:fmt_namelookup(enum, idvar)
   return format("%s_names[%s]", enum, idvar)
 end
 
-function generator:write_header_logwriters(options)
-  options = options or {}
-  local outdir = options.outdir or ""
-
-  self.outputfile = io.open(outdir.."lj_jitlog_writers.h", "w")
-  self:write_headerguard("jitlog_writers")
-  self:write([[
-#include "lj_jitlog_def.h"
-#include "lj_usrbuf.h"
-
-extern const int fb_vtoffsets[];
-
-]])
-
-  for _, def in ipairs(self.tables) do
-    self:write_logfunc(def)
-  end
-
-  for _, def in ipairs(self.msglist) do
-    self:write_logfunc(def)
-  end
-
-  self:write("#endif\n")
-  self.outputfile:close()
-end
-
-function generator:write_flatbuffer_vtable()
-  self:write("const unsigned short fb_vtables[] = {\n")
-
-  local vtoffset = 0
-  local vtstarts = {}
-  local fbtype = {}
-
-  for _, name in ipairs(self.sorted_msgnames) do
-    local vtsize = self:write_vtable(self.msglookup[name], "message")
-    vtstarts[#vtstarts + 1] = vtoffset
-    vtoffset = vtoffset + vtsize
-    fbtype[#fbtype + 1] = name
-  end
-
-  for _, list in ipairs({self.structs, self.tables}) do
-    for _, def in ipairs(list) do
-      local vtsize = self:write_vtable(def)
-      vtstarts[#vtstarts + 1] = vtoffset
-      vtoffset = vtoffset + vtsize
-      fbtype[#fbtype + 1] = def.name
-    end
-  end
-
-  self:write("};\n\n")
-
-  self:write_enum("FBType", fbtype, "FBType")
-
-  self:write("const int fb_vtoffsets[] = {\n")
-  self:write(table.concat(vtstarts, ",\n  "))
-  self:write("\n};\n")
-end
-
 local defentry = [[
 const char msgdefstr[] = {
 {{lines:"%s\\n"
@@ -262,9 +236,9 @@ typedef struct EnumInfo {
 EnumInfo enuminfo_list[] = {
 ]])
   
-  for name, def in pairs(self.enums) do
+  for _, def in pairs(self.enums) do
     if not def.no_namelist then
-      self:writef('  {"%s", %s_names, %d},\n', name, name, #def.entries)
+      self:writef('  {"%s", %s_names, %d},\n', def.name, def.name, #def.entries)
     end
   end
   -- Add a null entry at the end
@@ -273,38 +247,52 @@ EnumInfo enuminfo_list[] = {
 end
 
 function generator:write_headers_def(options)
-  options = options or {}
-  local outdir = options.outdir or ""
- 
-  self.outputfile = io.open(outdir.."lj_jitlog_def.h", "w")
-  self:writefile(options)
+  local path = self:build_outputpath(options,  "_def.h", "lj_")
+  self.outputfile = io.open(path, "w")
+
+  self:write_headerguard("jitlogdef")
+  self:write_defs(options)
+  self:writeline("#endif\n")
   self.outputfile:close()
+end
 
-  -- Write the header for arrays that should only be in one translation unit
-  self.outputfile = io.open(outdir.."lj_jitlog_decl.h", "w")
-  self:write_headerguard("jitlog_decl")
-  self:write([[
-#include "stdint.h"
+-- Write the header for arrays that should only be in one translation unit
+function generator:write_header_decl(options)
+  local path = self:build_outputpath(options,  "_decl.h", "lj_")
+  self.outputfile = io.open(path, "w")
 
-LUA_API const uint8_t msgsize_dispatch[];
-LUA_API const int32_t jitlog_msgsizes[];
-
-]])
-  self:write_namelist("jitlog_typenames", self.sorted_typenames)
-  self:write_msgsizes()
-  self:write_msgsizes(true)
-  self:write_flatbuffer_vtable()
-  self:write_namelists()
-  self:write_enuminfo()
-
-  self:write_msginfo()
-
+  self:write_headerguard(options.name .. "_decl")
+  self:write('#include "stdint.h"\n\n')
+  self:write_declartions(options)
   self:write("#endif\n")
   self.outputfile:close()
 end
 
-function generator:writefile(options)
-  self:write_headerguard("timerdef")
+function generator:write_declartions(options)
+
+  if options.jitlog then
+self:write([[
+LUA_API const uint8_t msgsize_dispatch[];
+LUA_API const int32_t jitlog_msgsizes[];
+
+]])
+    self:write_namelist(options.name .. "_typenames", self.sorted_typenames)
+    -- Write the message table that can be used to quickly skip messages based on there header
+    self:write_msgsizes(options.name, true)
+  end
+
+  self:write_msgsizes(options.name)
+
+  self:write_vtable_data(options.name)
+  self:write_namelists()
+
+  if options.jitlog then
+    self:write_enuminfo()
+    self:write_msginfo()
+  end
+end
+
+function generator:write_defs(options)
   self:write([[
 #ifdef _MSC_VER
   #define LJ_PACKED
@@ -315,19 +303,122 @@ function generator:writefile(options)
 
 ]])
 
-  self:write_enum("MSGTYPES", self.sorted_msgnames, "MSGTYPE")
-  self:writetemplate("typecount", { structs = #self.structs, tables = #self.tables})
+  self:write_enum("MsgTypes_"..options.name, self.sorted_msgnames, "MSGTYPE", nil, "MAX_"..options.name)
+  self:writetemplate("typecount", {name = options.name, structs = #self.structs, tables = #self.tables})
   self:write_enums()
   self:write_msgdefs()
-  
+
   self:write([[
 #ifdef _MSC_VER
   #pragma pack(pop)
 #endif
+]])
+end
 
-#endif
+function generator:write_header_logwriters(options)
+  local path = self:build_outputpath(options, "_writers.h", "lj_")
+
+  self.outputfile = io.open(path, "w")
+
+  self:write_headerguard("jitlog_writers")
+
+  self:write([[
+#include "lj_jitlog_def.h"
+#include "lj_usrbuf.h"
+
+extern const int fb_vtoffsets[];
+
+]])
+  self:write_logwriters(options)
+  self:write("#endif\n")
+  self.outputfile:close()
+end
+
+function generator:write_logwriters(options)
+
+  for _, def in ipairs(self.tables) do
+    self:write_logfunc(def)
+  end
+
+  for _, def in ipairs(self.msglist) do
+    self:write_logfunc(def)
+  end
+end
+
+local funcdef_reader = [[
+
+static LJ_AINLINE int read_{{name}}(UserBuf *ub, {{name}}_Args* result)
+{
+  size_t limit = ubuflen(ub);
+  if(sizeof({{cname}}) > limit) {
+    return 0;
+  }
+  {{cname}} *msg = ({{cname}} *)ubufB(ub);
+{{fields:  %s\n}};
+  return 1;
+}
+
+]]
+
+function generator:write_readers(options)
+  for _, def in ipairs(self.tables) do
+    if def.vcount ~= 0 then
+      local data = {
+        name = def.name,
+        cname = "FB_" .. def.name,
+        fields = {}
+      }
+
+      local fields = data.fields
+      for i, f in ipairs(def.fields) do
+        local line
+        if f.vlen then
+          if f.type == "string" then
+            line = string.format("if(!ubuf_read_fbstring(ub, &msg->%s_offset, &result->%s)) return 0;", f.name, f.name)
+          else
+            line = string.format("if(!ubuf_read_fbarray(ub, &msg->%s_offset, %d, &result->%s, &result->%s_length)) return 0;", f.name, f.element_size, f.name, f.name)
+          end
+        elseif f.writer ~= "vtable" and f.writer ~= "msgsize" then
+          line = string.format("result->%s = msg->%s;", f.name, f.name)
+        end
+
+        if line then
+          table.insert(fields, line)
+        end
+      end
+
+      self:write(util.buildtemplate(funcdef_reader, data))
+    end
+  end
+end
+
+function generator:writefile(options, action)
+  options = options or {}
+
+  if action == "writers" then
+    self:write_header_logwriters(options)
+    return
+  elseif action == "defs" then
+    self:write_headers_def(options)
+    self:write_header_decl(options)
+    return
+  end
+
+  local path = self:build_outputpath(options, ".h", "lj_")
+  self.outputfile = io.open(path, "w")
+  self:write_headerguard(options.name)
+  self:write([[
+#include "lj_usrbuf.h"
+
 ]])
 
+  self:write_defs(options)
+  self:write_declartions(options)
+  self:write_logwriters(options)
+  self:write_readers(options)
+
+  self:writeline("#endif")
+  self.outputfile:close()
 end
 
 return generator

@@ -4,7 +4,8 @@ local buildtemplate = util.buildtemplate
 
 local generator = {
   outputlang = "lua",
-  default_filename = "reader_def.lua",
+  extension = ".lua",
+  default_filename = "reader_def",
   typerename = {
     bool = "bool"
   }
@@ -20,12 +21,13 @@ local {{name}} = {
 
   enum = [[
 local {{name}} = util.make_enum{
-{{list}}}
+{{list:@fmtlist("%s", "", ",\n")}}
+}
 lib.{{name}} = {{name}}
 
 ]],
-  enumline = '"%s",\n',
-  enum_valueline = '%s = %s,\n',
+  enumline = '"%s"',
+  enum_valueline = '%s = %s',
 
   msgsizes = [[local msgsizes = {
 {{list:  %s\n}} };
@@ -122,14 +124,17 @@ end
 ]],
 
   vtable = [[
-  {{name}} = { {{offsets}} },
+  {{name}} = {
+    {{offsets:@fmtlist("%d", "", ",\n")}}
+  },
 ]],
 
   boundscheck_func = [[
   function {{name}}:check(limit)
     local offset = {{msgsize}}
     local msg = ffi_cast("char*", self)
-{{checks :%s}}  end]],
+      {{checks:@fmtlist("%s", "", "\n")}}
+    end]],
 
   boundscheck_line = [[
     offset = self.{{name}}_offset
@@ -312,7 +317,7 @@ local function nop() end
 
 ]=])
   self:write_enum("MsgType", self.sorted_msgnames)
-  self:write_msgsizes(false)
+  self:write_msgsizes(options.name, false)
   self:write_vtables()
 
   if GC64 then

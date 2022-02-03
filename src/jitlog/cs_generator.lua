@@ -5,21 +5,23 @@ local generator = {
   outputlang = "cs",
   default_filename = "JitLog.cs",
   inline_fieldaccess = true,
+  extension = ".cs"
 }
 
 generator.templates = {
   comment_line = "// %s",
   namelist = [[
-  public static string[] {{name}} = {
-{{list:  "%s"\n}}};
+  public static readonly string[] {{name}} = new string[] {
+{{list:    "%s",\n}}  };
 
 ]],
 
-  enumline = '  %s,\n',
-  enum_valueline = '  %s = %s,\n',
+  enumline = '%s',
+  enum_valueline = '%s = %s',
   enum = [[
 public enum {{name}}{{base}}{
-{{list}}}
+  {{list:@fmtlist()}}
+}
 
 ]],
 
@@ -28,29 +30,118 @@ public enum {{name}}{{base}}{
 {{list:      %s\n}}    };
 
 ]],
-
+  vtable = [[
+    // {{name}}
+{{offsets:   0x%X,\n}}
+]],
+  vtable_start = " public static readonly ushort[] vtables = new ushort[] {",
+  vtable_end = "\n  };\n",
+  vtable_offsets = [[
+  public static readonly int[] vtoffsets = new int[]{
+     {{offsets:@fmtlist("%d", "", ",\n")}}
+  };
+]],
   struct = [[
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
-public struct {{name}}{  {{fields}}
+{{modifiers:%s }}struct {{name}}{  {{fields}}
 {{bitfields:  %s\n}}};
 
 ]],
   fbstruct = [[
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
-public struct Raw{{name}} : {{name}} {  {{fields}}
+{{modifiers:%s }}struct Raw{{name}} : {{name}} {  {{fields}}
 {{bitfields:  %s\n}}}
 
 ]],
 
+  rawstruct = [[
+[StructLayout(LayoutKind.Sequential, Pack = 1, Size = {{size}})]
+{{modifiers:%s }}struct Raw{{name}}{  {{fields}}
+{{bitfields:  %s\n}}};
+
+]],
+
+  wrapstruct = [[
+public unsafe readonly struct Wrap{{name}} : {{name}}, FBHolder<Raw{{name}}> {
+  public readonly Raw{{name}}* _self;
+  public readonly uint _size;
+
+  public Wrap{{name}}(void* self, uint size) {
+    _self = (Raw{{name}}*)self;
+    _size = size;
+  }
+
+  public Wrap{{name}}(ReadOnlySpan<byte> span) {
+    _self = (Raw{{name}}*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(span));
+    _size = (uint)span.Length;
+  }
+
+  public Raw{{name}}* Self {
+    get => _self;
+    init => _self = value;
+  }
+
+  public uint FBSize  {
+    get => _size;
+    init => _size = value;
+  }
+{{fields}}
+{{bitfields:  %s\n}}}
+
+]],
+
+  fbreader = [[
+public unsafe readonly struct {{name}}_Reader : {{name}}, FBObject {
+  readonly ReadOnlyMemory<byte> _buffer;
+  readonly ushort* _vtable;
+
+  // The vtable passed in must of already been pinned for the duration this struct
+  public {{name}}_Reader(ReadOnlyMemory<byte> buffer, ReadOnlySpan<ushort> vt) {
+    _buffer = buffer;
+    fixed (ushort* ptr = vt) {
+      _vtable = ptr;
+    }
+  }
+
+  public ReadOnlySpan<byte> Buffer {
+    get => _buffer.Span;
+  }
+
+  public ReadOnlySpan<ushort> VTable  {
+    get => new Span<ushort>(_vtable, _vtable[0] >> 1);
+  }
+
+  public string GetSlotName(int slot) {
+    return $"slot{slot}";
+  }
+
+
+{{fields}}
+{{bitfields:  %s\n}}}
+]],
+
   interface = [[
-public interface {{name}}{{base}}{
+{{modifiers:%s }}interface {{name}}{{base}}{
 {{fields:  %s\n}}}
+
+]],
+  fbwriter = [[
+public readonly struct {{name}}_Writer {
+  public FBWriter Writer { get; }
+
+  public {{name}}_Writer(FBWriter writer, int vtableOffset, ushort[] vtable){
+    Writer = writer;
+    Writer.Initialize(vtableOffset, vtable[1]);
+  }
+
+{{fields}}{{bitfields:%s\n}}
+}
 
 ]],
 
   msgstruct = [[
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
-public struct Raw{{name}} : {{name}}{  {{fields}}
+{{modifiers:%s }}struct Raw{{name}} : {{name}}{  {{fields}}
 {{bitfields:  %s\n}}  public MsgId MsgId => (MsgId)(byte)header;{{boundscheck}}
 };
 
@@ -88,7 +179,7 @@ public struct Raw{{name}} : {{name}}{  {{fields}}
         throw new Exception("Bad field offset for {{name}}");
       }
 
-      var offset = (ulong)({{field}}) + 4 + MsgInfo.GetArrayLength(ref {{field}}) * (ulong){{element_size}};
+      var offset = (ulong)({{field}}) + 4 + FBUtils.GetArrayLength(ref {{field}}) * (ulong){{element_size}};
       if(offset > limit) {
         throw new Exception("Bad field length for {{name}}");
       }
@@ -116,6 +207,15 @@ local type_rename = {
   GCSize    = "uint",
   timestamp = "ulong",
   ptr       = "ulong",
+
+  int8_t  = "sbyte",
+  uint8_t = "byte",
+
+  int16_t  = "short",
+  uint16_t = "ushort",
+
+  int32_t  = "int",
+  uint32_t = "uint",
 }
 
 generator.typerename = type_rename
@@ -154,8 +254,23 @@ function generator:fmt_fieldget(def, f)
   return self:fixname(f.name)
 end
 
-function generator:needs_accessor(struct, f)
-  return not self.build_rawstructs
+local no_vtslot = {
+  vtable = true,
+  vtotal = true,
+  msghdr = true,
+  -- Only the bit storage of the field has a vt slot
+  bitfield = true,
+}
+
+function generator:needs_accessor(struct, f, action)
+  if action == "reader" or action == "writer" then
+    local isbuiltin = no_vtslot[f.writer]
+    if not isbuiltin and not f.vtslot then
+      error("Missing vtable slot index for non buitin field "..f.name)
+    end
+    return not isbuiltin
+  end
+  return action ~= "rawstructs"
 end
 
 function generator:fmt_accessor_get(struct, f, msgvar)
@@ -166,9 +281,17 @@ local vprop_array = [[
 public unsafe {{ret}} {{csname}} {
     get {
       if (_self->{{name}}_offset == 0) {
-         MsgInfo.ThrowMissingField("{{name}}");
+         FBUtils.ThrowMissingField("{{name}}");
       }
-      return MsgInfo.{{body}}<{{type}}>(_self, &_self->{{name}}_offset, _size);
+      return FBUtils.{{body}}<{{type}}>(_self, &_self->{{name}}_offset, _size);
+    }
+  }
+]]
+
+local vprop_fixedarray = [[
+public unsafe {{ret}} {{csname}} {
+    get {
+      return new Span<{{type}}>(&_self->{{name}}, {{size}});
     }
   }
 ]]
@@ -177,9 +300,9 @@ local vprop_table = [[
 public {{type}} {{csname}} {
     get {
         if (_self->{{name}}_offset == 0) {
-          MsgInfo.ThrowMissingField("{{name}}");
+          FBUtils.ThrowMissingField("{{name}}");
         }
-        return MsgInfo.Create<Wrap{{type}}, Raw{{type}}>(_self, &_self->{{name}}_offset, _size);
+        return FBUtils.Create<Wrap{{type}}, Raw{{type}}>(_self, &_self->{{name}}_offset, _size);
     }
   }
 
@@ -189,7 +312,7 @@ public {{type}} {{csname}} {
 local vprop_string = [[
 public unsafe string {{csname}} {
     get {
-        var span = MsgInfo.GetArraySpan<sbyte>(_self, &_self->{{name}}_offset, _size);
+        var span = FBUtils.GetArraySpan<sbyte>(_self, &_self->{{name}}_offset, _size);
         if(span.IsEmpty) {
           return null;
         }
@@ -203,24 +326,27 @@ public unsafe string {{csname}} {
 local vprop_stringlist = [[
 public unsafe string[] {{csname}} {
   get {
-        return MsgInfo.ParseStringList(MsgInfo.GetArraySpan<byte>(_self, &_self->{{name}}_offset, _size));
-    }
+    return FBUtils.ParseStringList(FBUtils.GetArraySpan<byte>(_self, &_self->{{name}}_offset, _size));
   }
+}
 ]]
 
-local field_template = {
+
+generator.field_template = {
   bool = {
     ret = function() return "bool", "byte" end,
+    interface = "[FBSlot({{vtslot}})]\n  public bool {{csname}} { get; }",
   },
   string = {
     ret = "string",
     template = vprop_string,
-    interface = "public string {{csname}} { get; }",
+    interface = "[FBSlot({{vtslot}})]\n  public string {{csname}} { get; }",
+    reader = [[public string {{csname}} => this.GetString({{vtslot}});]]
   },
   stringlist = {
     ret = "string[]",
     template = vprop_stringlist,
-    interface = "public string[] {{csname}} { get; }",
+    interface = "[FBSlot({{vtslot}})]\n  public string[] {{csname}} { get; }",
     missing = "public string[] {{csname}}  => Array.Empty<string>();",
   },
   table = {
@@ -228,11 +354,17 @@ local field_template = {
     ret = function(self, def, f)
       return self.typerename[f.type]
     end,
-    interface = "public {{type}} {{csname}} { get; }\n  public bool {{csname}}_HasValue{ get; }",
+    interface = "[FBSlot({{vtslot}})]\n  public {{type}} {{csname}} { get; }\n  public bool {{csname}}_HasValue{ get; }",
     missing = "public {{type}} {{csname}} => null",
   },
   array = {
-    template = vprop_array,
+    template = function(self, def, f)
+      if f.fixedsize then
+        return vprop_fixedarray
+      else
+        return vprop_array
+      end
+    end,
     body = function(self, def, f)
       if self.types[self.types[f.type].element_type].kind == "table" then
         return "GetFBTableVector"
@@ -251,7 +383,14 @@ local field_template = {
         return "ReadOnlySpan<"..ret..">", ret
       end
     end,
-    interface = "public {{ret}} {{csname}} { get ;}",
+    reader = function(self, def, f)
+      if f.fixedsize then
+        return [[public {{ret}} {{csname}} => this.GetFixedArray<{{structname}}, {{type}}>({{vtslot}}, {{size}});]]
+      else
+        return [[public {{ret}} {{csname}} => this.GetArray<{{structname}}, {{type}}>({{vtslot}});]]
+      end
+    end,
+    interface = "[FBSlot({{vtslot}})]\n  public {{ret}} {{csname}} { get ;}",
     missing = "public {{ret}} {{csname}} => Array.Empty<{{type}}>();",
   },
   bitfield = {
@@ -270,21 +409,32 @@ local field_template = {
   }
 }
 
+generator.base_field_template = {
+  writer = [[
+  public {{ret}} {{csname}} {
+    set => Writer.SetFieldSlot({{vtslot}}, value);
+  }
+]],
+  reader = [[public {{ret}} {{csname}} => this.GetField<{{structname}}, {{ret}}>({{vtslot}});]],
+  interface = "[FBSlot({{vtslot}})]\n  public {{ret}} {{csname}} { get; }",
+}
+
 local emptytab = {}
 
-local function strorfunc(val, default, ...)
+function generator:strorfunc(val, default, ...)
   if type(val) == "function" then
-    return val(...)
+    return val(self, ...)
   else
     return val or default
   end
 end
 
-local function get_fieldbasetype(f)
+function generator:get_fieldbasetype(f)
+  local templates = self.field_template
   if not f.bitstorage then
-    return field_template[f.type] or field_template[f.kind]
+    return templates[f.type] or templates[f.kind]
   else
-    return field_template.bitfield
+    return templates.bitfield
   end
 end
 
@@ -296,27 +446,51 @@ function generator:get_fieldreturn_type(struct, f)
     return "bool", "byte"
   end
 
-  local base = get_fieldbasetype(f)
+  local base = self:get_fieldbasetype(f)
   if base then
-    return strorfunc(base.ret, ret, self, struct, f)
+    return self:strorfunc(base.ret, ret, struct, f)
   else
     return ret
   end
 end
 
-function generator:fmt_accessor_def(struct, f, missing)
+function generator:mkfield(struct, f, action)
+
+  -- Only when we write the raw structs for messages and tables do we have fields declared in them, other definitions are just property accessors
+  if action == "rawstructs" or struct.kind == "struct" then
+    local type = self.types[f.type]
+
+    if type.kind == "enum" then
+      local name = self:fixname(f.name)
+      return string.format(self.templates.structfield, type.name, name)
+    end
+
+    return self.base.mkfield(self, struct, f, action)
+  else
+    return ""
+  end
+end
+
+function generator:fmt_accessor_def(struct, f, action)
   local buflen, template, dectype
   local body = ""
   local ftype = self.types[f.type]
   local mapto
 
-  local base = field_template[f.type] or field_template[f.kind]
+  local base = self.field_template[f.type] or self.field_template[f.kind]
   if f.bitstorage then
-    base = field_template.bitfield
+    base = self.field_template.bitfield
   end
 
-  local ret, dectype
+  local ret, dectype, default_template
 
+  if action then
+    template = self.base_field_template[action]
+    default_template = template
+  end
+
+  -- Check if we need to make this property match the same as another struct either by adding default return
+  -- for missing ones or by widening\narrowing return type
   if struct.mapto then
     mapto = struct.mapto.fieldlookup[f.name]
     if mapto then
@@ -325,14 +499,15 @@ function generator:fmt_accessor_def(struct, f, missing)
   end
 
   if base then
-    template = strorfunc(base.template, nil, self, struct, f, mapto)
-    body = strorfunc(base.body, body, self, struct, f, mapto)
-    if self.build_interfaces then
-      template = base.interface or template
+    template = self:strorfunc(base.template, nil, struct, f, mapto)
+    body = self:strorfunc(base.body, body, struct, f, mapto)
+
+    if action == "reader" or action == "writer" or action == "interface"then
+      template = self:strorfunc(base[action], default_template, struct, f, mapto)
     end
     -- Don't overwrite the mapped to fields type that we need to keep the same
     if not ret then
-      ret, dectype = strorfunc(base.ret, ret, self, struct, f, mapto)
+      ret, dectype = self:strorfunc(base.ret, ret, struct, f, mapto)
     end
   end
 
@@ -361,7 +536,7 @@ function generator:fmt_accessor_def(struct, f, missing)
     if base == nil then
       error("Unknow field type "..f.type.."for field "..f.name)
     end
-  elseif not base and (not self.build_interfaces or (f.kind ~= nil and f.kind ~= "bool" and f.kind ~= "number" and f.kind ~= "ptr")) then
+  elseif not base and (action ~= "interface" or (f.kind ~= nil and f.kind ~= "bool" and f.kind ~= "number" and f.kind ~= "ptr")) then
     assert(body, "unhandled field accessor type")
   end
 
@@ -370,31 +545,35 @@ function generator:fmt_accessor_def(struct, f, missing)
     body = name
   end
 
-  if f.bool then
+  if f.bool or f.type == "bool" then
     body = body .. " != 0"
     ret = "bool"
   end
 
   local csname = self:fixname(f.name, true)
 
-  if self.build_interfaces and not template then
-    return format("public %s %s { get; }", ret, csname)
-  elseif not template then
-    if self.build_rawstructs then
+
+  if not template then
+    if action == "rawstructs" then
       return ""
     end
     local fieldfmt
     if struct.kind == "struct" or f.bitstorage then
-      fieldfmt = "public %s %s => %s;"
+      template = "public {{ret}} {{csname}} => {{body}};"
     else
       fieldfmt = "public %s %s => _self->%s;"
     end
-    return format(fieldfmt, ret, csname, body)
+    if fieldfmt then
+      return format(fieldfmt, ret, csname, body)
+    end
   end
 
   local structname = self.typerename[struct.name]
 
-  if not self.build_interfaces and struct.kind ~= "struct" then
+  if action == "reader" then
+    assert(f.vtslot or f.writer == "msghdr")
+    structname = structname.."_Reader"
+  elseif action ~= "interface" and struct.kind ~= "struct" then
     structname = "Raw"..structname
   end
 
@@ -405,9 +584,33 @@ function generator:fmt_accessor_def(struct, f, missing)
     csname = csname,
     structname = structname,
     buflen = buflen,
-    body = body
+    body = body,
+    vtslot = f.vtslot or -1,
+    size = f.fixedsize,
   }
   return util.buildtemplate(template, data)
+end
+
+local default_modifiers = {"public"}
+local struct_modifiers = {"public", "partial"}
+local unsafe_modifiers = {"public", "unsafe", "partial"}
+
+function generator:write_struct_fixup(def, template, template_args, action)
+  local modifiers = default_modifiers
+
+  if def.fixedsize_arrays then
+    modifiers = unsafe_modifiers
+  elseif def.kind == "struct" then
+    modifiers = struct_modifiers
+  end
+  template_args.modifiers = modifiers
+end
+
+function generator:write_struct_offset_fields(fieldstr, def, extra_args, action)
+  if action ~= "rawstructs" then
+    return fieldstr
+  end
+  return self.base.write_struct_offset_fields(self, fieldstr, def, extra_args, action)
 end
 
 function generator:write_interface(def)
@@ -418,7 +621,7 @@ function generator:write_interface(def)
 
   for _, f in ipairs(def.fields) do
     if not f.vtable and f.writer ~= "msghdr" and not f.sizefield and (not mapto or not mapto.fieldlookup[f.name]) then
-      local fline = self:fmt_accessor_def(def, f)
+      local fline = self:fmt_accessor_def(def, f, "interface")
       if fline ~= nil then
         table.insert(fields, fline)
       end
@@ -429,6 +632,7 @@ function generator:write_interface(def)
     name = self.typerename[def.name],
     fields = fields,
     base = "",
+    modifiers = default_modifiers,
   }
 
   if mapto then
@@ -449,38 +653,55 @@ function generator:get_boundscheck(def)
   return self:build_boundscheck(def)
 end
 
-function generator:writefile(options)
-  self:write([[using System;
+generator.using_namespaces = [[
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 using System.Collections.Generic;
+using JITLogger;
+using LuaJITLib.FlatBuffers;
 
+]]
+
+function generator:write_fileheader(options)
+  self:write(options.using_namespaces or self.using_namespaces)
+
+  if options.jitlog then
+  self:write([[
 using MRef = System.UInt32;
 using GCRef = System.UInt32;
 using TValue = LuaJITLib.TValue;
 
-namespace JITLogger;
-
 ]])
+  end
 
-  self:write_enum("MsgId", self.sorted_msgnames)
-  local union = ""
+  self:writef("namespace %s;\n\n", options.namespace)
+end
 
-  self:write_enums()
-
-  for _, list in ipairs({self.structs, self.tables}) do
+function generator:fixup_names()
+  for _, list in ipairs({self.enums, self.structs, self.tables}) do
     for _, def in ipairs(list) do
       self.typerename[def.name] = CSName(def.name)
     end
   end
 
-  for i, def in ipairs(self.msglist) do
+  for _, def in ipairs(self.msglist) do
     self.typerename[def.name] =  "Msg_" .. CSName(def.name)
   end
+end
 
-  self.build_interfaces = true
+function generator:writefile(options)
+
+  self:fixup_names()
+
+  self:write_fileheader(options)
+
+  self:write_enum("MsgId", self.sorted_msgnames)
+  local union = ""
+
+  self:write_enums()
 
   for i, list in ipairs({self.tables, self.msglist}) do
     for key, def in ipairs(list) do
@@ -488,63 +709,36 @@ namespace JITLogger;
     end
   end
 
-  self.build_interfaces = false
   for key, def in ipairs(self.structs) do
     self:write_struct(def)
   end
 
-  self.build_rawstructs = true
-
-  local rawstruct = [[
-[StructLayout(LayoutKind.Sequential, Pack = 1, Size = {{size}})]
-public struct Raw{{name}}{  {{fields}}
-{{bitfields:  %s\n}}};
-
-]]
-
   for i, list in ipairs({self.tables, self.msglist}) do
     for key, def in ipairs(list) do
-      self:write_struct(def, rawstruct)
+      self:write_struct(def, self.templates.rawstruct, nil, "rawstructs")
     end
   end
 
-  self.build_rawstructs = false
+  if options.buildreaders then
+    for i, list in ipairs({self.tables, self.msglist}) do
+      for key, def in ipairs(list) do
+        self:write_struct(def, self.templates.fbreader, nil, "reader")
+      end
+    end
+  end
 
-  local wrapstruct = [[
-public unsafe readonly struct Wrap{{name}} : {{name}}, FBHolder<Raw{{name}}> {
-  public readonly Raw{{name}}* _self;
-  public readonly uint _size;
-
-  public Wrap{{name}}(void* self, uint size) {
-    _self = (Raw{{name}}*)self;
-    _size = size;
-  }
-
-   public Wrap{{name}}(ReadOnlySpan<byte> span) {
-     _self = (Raw{{name}}*)span.GetPinnableReference();
-     _size = (uint)span.Length;
-   }
-
-   public Raw{{name}}* Self {
-     get => _self;
-     init => _self = value;
-   }
-
-  public uint FBSize  {
-    get => _size;
-    init => _size = value;
-  }
-{{fields}}
-{{bitfields:  %s\n}}}
-
-]]
-
-  self.templates.structfield = ""
+  if options.buildwriters then
+    for i, list in ipairs({self.tables, self.msglist}) do
+      for key, def in ipairs(list) do
+        self:write_struct(def, self.templates.fbwriter, nil, "writer")
+      end
+    end
+  end
 
   -- Write the raw message structs
   for i, list in ipairs({self.tables, self.msglist}) do
     for key, def in ipairs(list) do
-      self:write_struct(def, wrapstruct)
+      self:write_struct(def, self.templates.wrapstruct, nil, "wrapstructs")
       if i == 2 then
         local name = "Wrap"..self.typerename[def.name]
         union = union .. format("    [FieldOffset(0)] public %s %s;\n", name, def.name)
@@ -572,7 +766,7 @@ public unsafe struct AllMsgs {
   self:write([[
 public unsafe partial class MsgInfo {
 ]])
-  self:write_msgsizes()
+  self:write_msgsizes(options.name)
 
   local fbnames = {}
 
@@ -593,7 +787,19 @@ public unsafe partial class MsgInfo {
 
   public static string[] MsgNames = new string[]{
 {{msgnames:      "%s",\n}}
-    };]], {fbnames = fbnames, msgnames = self.sorted_msgnames}))
+  };
+
+]], {fbnames = fbnames, msgnames = self.sorted_msgnames}))
+
+  for name, list in ipairs({self.msglist, self.tables}) do
+    for i, def in ipairs(list) do
+      self:write_namelist(self:fixname(def.name, true).."_names", util.map(def.vtable_names, function(f)
+        return self:fixname(f, true)
+      end))
+    end
+  end
+
+  self:write_vtable_data()
 
   if options.printers then
     self:writetemplate("printerlist", {list = self.sorted_msgnames})

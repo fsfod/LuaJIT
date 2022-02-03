@@ -142,7 +142,7 @@ function parser:build_recordlayout(def)
   local header
   local ismsg = def.kind == "message"
 
-  if ismsg then
+  if ismsg and fieldlookup.header then
     header = fieldlookup.header
     header.usedbits = 8
   end
@@ -163,12 +163,19 @@ function parser:build_recordlayout(def)
       end
     end
 
-    if f.bitfield or (bitsize and bitsize < 32-header.usedbits) then
+    local useheader = self.jitlog and bitsize and bitsize < 32-header.usedbits
+
+    if f.bitfield or useheader then
       assert(bitsize > 0 and bitsize < 32, "bad bitsize for bitfield")
 
       local bitstorage = f.bitstorage and fieldlookup[f.bitstorage]
 
       if not bitstorage then
+
+        if not self.jitlog then
+          error("missing bit storage for field "..f.name)
+        end
+
         -- Check if we can pack into the spare bits of the header field
         if bitsize < 32 and header.usedbits+bitsize <= 32 then
           f.bitstorage = "header"
@@ -206,6 +213,7 @@ function parser:build_recordlayout(def)
       assert(not f.buflen)
     elseif type.kind == "array" and f.fixedsize then
       f.offset = msgsize
+      f.writer = "sizedarray"
       size = f.fixedsize * f.element_size
       def.fixedsize_arrays = true
     else
@@ -281,33 +289,20 @@ end
 
 function parser:parse_enum(def, t)
   assert(def.name, "Enum definition has no name")
-  assert(def.values[1], "Enum definition contains no values")
 
-  local values = {}
   local fieldlookup = {}
   local nextval = 0
 
   for i, field in ipairs(def.values) do
     local name, value = field.name, field.value
-
-    if fieldlookup[name] then
-      self:report_error("Duplicate value '%s' in enum %s", name, def.name)
-    end
-
-    if not value then
-      value = nextval
-      nextval = nextval + 1
-    end
-
-    local f = {name = name, value = value, index = i, implicitval = field.value == nil}
-    fieldlookup[name] = f
-    tinsert(values, f)
+    t:add_entry(name, value)
   end
 
   t.typeid = fbtype.UInt
-  t.entries = values
   t.lookup = fieldlookup
-  t.prefix = def.name
+  t.prefix = def.attributes.prefix or def.name
+  t.c = def.name
+  t.argtype = def.name
 
   if def.basetype then
     local base = self.types[def.basetype]
@@ -319,6 +314,8 @@ function parser:parse_enum(def, t)
     end
     t.basetype = def.basetype
     t.size = base.size
+    -- The enum is stored as its base type
+    t.c = base.c
   else
     t.basetype = "uint32"
     t.size = 4
@@ -380,22 +377,28 @@ function parser:parse_rpc(def, t)
     end
 
     local argtype = self.types[arg]
-    if not argtype then
+    if not argtype and arg ~= "void" then
       self:report_error("No type found named %s used for argument method %s for rpc %s", arg, name, def.name)
     end
 
     local retype = self.types[ret]
-    if not retype then
+    if not retype and ret ~= "void" then
       self:report_error("No type found named %s used for return method %s for rpc %s", ret, name, def.name)
     end
 
-    if retype.kind ~= "message" and retype.kind ~= "table" then
+    if retype and retype.kind ~= "message" and retype.kind ~= "table" then
       self:report_error("Bad return type %s for method %s for rpc %s, wrong kind should table or message", ret, name, def.name)
     end
 
     local f = {name = name, argtype = arg, rettype = ret}
     methodlookup[name] = f
     table.insert(methods, f)
+  end
+
+  local enum_prefix = def.attributes.enum_prefix
+
+  if enum_prefix then
+    self.types[t.enum_name].prefix = enum_prefix
   end
 
   t.attributes = def.attributes
@@ -427,7 +430,7 @@ Field List
 function parser:parse_msg(def, m)
   assert(def.name, "message definition has no name")
 
-  if #def.fields == 0 then
+  if #def.fields == 0 and def.kind == "message" then
     self:report_error("Message %s declared with no fields", def.name)
   end
 
@@ -473,7 +476,7 @@ function parser:parse_msg(def, m)
     end
   end
 
-  if def.kind == "message" then
+  if def.kind == "message" and self.jitlog then
     add_field({name = "header", type = "uint32", noarg = true, writer = "msghdr"})
   end
 
@@ -483,7 +486,7 @@ function parser:parse_msg(def, m)
     local target = self.types[mapto]
     if not target then
       error(format("Bad mapto name no message named %s used for message %s", mapto, def.name))
-    elseif target.kind ~= "message" then
+    elseif target.kind ~= "message" and target.kind ~= "table" then
       error(format("Bad mapto target %s is not a message used for message %s", mapto, def.name))
     end
     def.mapto = target
@@ -614,9 +617,32 @@ function parser:parse_msg(def, m)
 
   if not def.attributes.no_vtable then
     m.vsize = true
-    if def.kind == "message" then
+    if def.kind == "message" and self.jitlog then
       --Add the implicit message size field thats always after the message header
       add_field({name = "msgsize", sizefield = true, noarg = true, type = "uint32", writer = "vtotal"}, 2)
+    end
+  end
+
+  local msg_group = def.attributes.msg_group
+  if msg_group then
+    local enum = self.types[msg_group]
+
+    if not enum then
+      enum = self:add_enum(msg_group)
+    elseif enum.kind == "rpc_service" then
+      enum = self.types[enum.enum_name]
+      assert(enum, "Missing rpc enum type")
+    end
+
+    local entry_name = def.name
+    local value = def.attributes.msg_group_id
+
+    if not enum.lookup[entry_name] then
+      enum:add_entry(entry_name, value)
+    elseif value then
+      enum:update_value(entry_name, value)
+    else
+      self:log("Skipping updating message id enum value %s that is already set for %s ", entry_name, msg_group)
     end
   end
 
@@ -666,12 +692,33 @@ function parser:create_placeholders(defs)
     local existing = self.types[name]
     if existing and def ~= existing then
       self:report_error("Type name conflict %s at line %d, already used by %s at line %d", name, def.line, existing.kind, existing.def.line)
+    elseif def.kind == "enum" then
+      local enum = self:add_enum(name)
+      enum.def = def
     else
       self.types[name] = {
         kind = def.kind,
         name = name,
         def = def,
       }
+    end
+
+    if def.kind == "rpc_service" then
+      local enumname = def.attributes.enum_name
+      if enumname then
+        if type(enumname) ~= "string" then
+          self:report_error("bad enum_name value for %s", def.name)
+        end
+      else
+        enumname = def.name .. "Id"
+      end
+
+      if not self.types[enumname] then
+        self:add_enum(enumname)
+        self.types[name].enum_name = enumname
+      else
+        self:report_error("Rpc Id enum name conflict %s at line %d, already used by %s at line %d", enumname, def.line, existing.kind, existing.def.line)
+      end
     end
   end
 end
@@ -694,7 +741,6 @@ function parser:parse_type(def)
     table.insert(self.structs, type)
   elseif def.kind == "enum" then
     self:parse_enum(def, type)
-    self.enums[def.name] = type
   elseif def.kind == "rpc_service" then
     self:parse_rpc(def, type)
     table.insert(self.rpcs, type)
@@ -738,7 +784,15 @@ function parser:build_vtable(def)
 
   end
 
-  for i = setup.firstfield, #fields do
+  local firstfield = setup.firstfield
+
+  if not self.jitlog and (kind == "message" or kind == "fbmessage") then
+    firstfield = 2
+    baseoffset = 0
+  end
+
+
+  for i = firstfield, #fields do
     local f = fields[i]
 
     local offset
@@ -762,6 +816,7 @@ function parser:build_vtable(def)
     end
 
     if offset then
+      assert(offset >= 0 or f.bitstorage)
       local slot = #offsets - 2
       f.vtslot = slot
       tinsert(offsets, offset)
@@ -842,7 +897,8 @@ function parser:scan_instrumented_files()
   end
   
   for name, def in pairs(self.namescans) do
-    local enum = self.enums[def.enumname]
+    local enum = self.types[def.enumname]
+    assert(enum)
 
     local matcher
     if def.match_action then
@@ -864,6 +920,13 @@ end
 
 local enum_mt = {
   __index = {
+    tryadd_entry = function(self, name, value)
+      if self.lookup[name] then
+        return false
+      end
+      self:add_entry(name, value)
+      return true
+    end,
     add_entry = function(self, name, value)
       if self.lookup[name] then
         error(format("enum label '%s' already exists in enum %s", name, self.name))
@@ -885,23 +948,39 @@ local enum_mt = {
       self.lookup[name] = entry
       table.insert(self.entries, entry)
     end
-  }
+  },
+  update_value = function(self, name, value)
+    local entry = self.lookup[name]
+    if not entry then
+      self:add_entry(name, value)
+      return
+    else
+      entry.value = value
+      assert(not entry.implicitval)
+      --entry.implicitval = false
+    end
+  end
 }
 
 function parser:add_enum(name)
-  local enum = self.enums[name] 
+  local enum = self.types[name]
   if enum then
+    assert(enum.kind == "enum")
     return enum
+  else
+    assert(not self.types[name])
   end
   enum = {
+    kind = "enum",
     name = name,
-    prefix = "",
+    prefix = name,
     lookup = {},
     entries = {},
     nextvalue = 0
   }
   setmetatable(enum, enum_mt)
-  self.enums[name] = enum
+  table.insert(self.enums, enum)
+  self.types[name] = enum
   return enum
 end
 
@@ -948,15 +1027,18 @@ local copyfields = {
 
 function parser:complete()
   assert(#self.msglist > 0)
-  assert(self.msglookup["header"], "a header message must be defined")
+  if self.jitlog then
+    assert(self.msglookup["header"], "a header message must be defined")
+  end
   self.sorted_msgnames = sortmsglist(self.msglist, self.builtin_msgorder)
   self.sorted_typenames = util.clone(self.sorted_msgnames)
 
   for _, def in pairs(self.rpcs) do
-    local enum = self:add_enum(def.name .. "Id")
+    local enum = self.types[def.enum_name]
+    assert(enum, "Missing enum type for rpc method id")
 
-    for i, m in ipairs(def.methods) do
-      enum:add_entry(m.name)
+    for _, m in ipairs(def.methods) do
+      enum:tryadd_entry(m.name)
     end
   end
 
@@ -973,7 +1055,7 @@ function parser:complete()
 
   local count = user_fbstart-1
   -- Give our structs and tables a subtype typeid used by the flatbuffers reader to look up the type in a table of ctypes
-  for _, list in ipairs({self.msglist, self.structs, self.tables}) do
+  for _, list in ipairs({self.msglist, self.structs, self.tables, self.enums}) do
     for i, def in ipairs(list) do
       def.typeid = (def.typeid or 0) + lshift(i + count, 16)
     end
@@ -1033,7 +1115,14 @@ function generator:fixname(name)
   return name
 end
 
-function generator:mkfield(f)
+function generator:get_native_type(typename, default)
+  local type = self.types[typename]
+  return self.typerename[typename] or self.typerename[type.c] or type.c or default or typename
+end
+
+function generator:mkfield(struct, f, action)
+  assert(struct)
+  assert(not action or type(action) == "string")
   local ret
   
   if self.inline_fieldaccess and (f.bitstorage or f.vlen or f.kind == "table") then
@@ -1043,18 +1132,19 @@ function generator:mkfield(f)
   local comment_line = self.templates.struct_comment or self.templates.comment_line
   local name = self:fixname(f.name)
 
+
   if f.type == "bitfield" then
     ret = format("/*  %s: %d;*/\n", name, f.bitsize)
   else
     local type = self.types[f.type]
-    local langtype = self.typerename[f.type] or type.c or f.type
+    local langtype = self.typerename[f.type] or self.typerename[type.c] or type.c or f.type
 
     if f.kind == "array" and f.fixedsize then
-      langtype = self.typerename[type.element_type] or type.element_type or langtype
+      langtype = self:get_native_type(type.element_type, langtype)
 
       ret = "  "..buildtemplate(self.templates.structfield_sizedarray,  {name = f.name, type = langtype, size = f.fixedsize})
     elseif f.kind == "array" then
-      langtype = self.typerename[type.element_type] or type.element_type or langtype
+      langtype = self:get_native_type(type.element_type, langtype)
       -- Write a comment for fields that have to be fetched with a getter to still show there part of the struct
       ret = "  "..format(comment_line, format("%s %s[%s];", langtype, name, f.buflen)).."\n"
     elseif f.kind == "table" then
@@ -1072,21 +1162,9 @@ function generator:get_boundscheck(def)
   return nil
 end
 
-function generator:write_struct(def, template, extra_args)
-  local fieldstr = ""
-  local fieldgetters = {}
+function generator:write_struct_offset_fields(fieldstr, def, extra_args, action)
 
-  for _, f in ipairs(def.fields) do
-    fieldstr = fieldstr..self:mkfield(f)
-
-    if self:needs_accessor(def, f) then
-      local getter = self:fmt_accessor_def(def, f)
-      assert(getter)
-      table.insert(fieldgetters, getter)
-    end
-  end
-
-  -- Write offsets of vlength fields at the end of the struct treated as always present in the flatbuffers vtable
+  -- Write offsets of vlength fields at the end of the struct they are treated as always present in the flatbuffers vtable
   -- created for the message.
   if def.vlen_fields then
     local offset_type = self.typerename.int32 or self.types.int32.c
@@ -1095,6 +1173,25 @@ function generator:write_struct(def, template, extra_args)
       fieldstr = fieldstr..format(self.templates.structfield, offset_type, f.name.."_offset")
     end
   end
+
+  return fieldstr
+end
+
+function generator:write_struct(def, template, extra_args, action)
+  local fieldstr = ""
+  local fieldgetters = {}
+
+  for _, f in ipairs(def.fields) do
+    fieldstr = fieldstr..self:mkfield(def, f, action)
+
+    if self:needs_accessor(def, f, action) then
+      local getter = self:fmt_accessor_def(def, f, action)
+      assert(getter)
+      table.insert(fieldgetters, getter)
+    end
+  end
+
+  fieldstr = self:write_struct_offset_fields(fieldstr, def, extra_args, action)
 
   if not template then
     if def.kind == "message" and self.templates.msgstruct then
@@ -1120,8 +1217,14 @@ function generator:write_struct(def, template, extra_args)
     end
   end
 
+  self:write_struct_fixup(def, template, template_args, action)
+
   self:write(buildtemplate(template, template_args))
   return #fieldgetters > 0 and fieldgetters
+end
+
+-- Allow derived generators override to add extra template arguments
+function generator:write_struct_fixup(def, template, template_args, action)
 end
 
 local function logfunc_getfieldvar(msgdef, argprefix, f)
@@ -1309,7 +1412,7 @@ generator.custom_field_writers = {
     write.order = write.order + 0x100000
   end,
   vtable = function(self, msgdef, f, valuestr)
-    return format("(int32_t)(-fb_vtoffsets[FBType_%s]);", msgdef.name)
+    return format("(int32_t)(-%s_vtoffsets[FBType_%s]);", self.target_name, msgdef.name)
   end,
   fbtable = function(self, msgdef, f, valuestr, write)
     assert(f.kind == "table")
@@ -1329,6 +1432,16 @@ generator.custom_field_writers = {
     write.order = write.order + 0x200000
     return
   end,
+  sizedarray = function(self, msgdef, f, valuestr, write)
+    local template_args = {
+      name = f.name,
+      offset = f.offset,
+      value = valuestr,
+      size = f.fixedsize,
+      element_size = f.element_size,
+    }
+    write.vwrite = buildtemplate(self.templates.sizedarray_writer, template_args)
+  end
 }
 
 function generator:write_logfunc(def)
@@ -1397,6 +1510,8 @@ function generator:write_logfunc(def)
     local argtype
     local typedef = self.types[typename]
 
+    local name = f.name
+
     if typename == "bitfield" then
       typename = "uint32_t"
     elseif typename == "string" then
@@ -1464,7 +1579,7 @@ function generator:write_logfunc(def)
     elseif f.vlen then
       value = self:write_vlenfield(def, f, value, write)
       assigned = true
-    elseif argtype and typedef.size and typedef.size < 4 then
+    elseif argtype and (typedef.size and typedef.size < 4) or f.argtype then
       -- truncate the value down to the fields size
       value = format("(%s)%s", typename, value)
     end
@@ -1595,23 +1710,32 @@ end
 
 function generator:write_enums()
 
-  local sortednames = util.keys(self.enums)
+  local sortednames = util.map(self.enums, function(e) return e.name end)
   table.sort(sortednames)
   for _, name in ipairs(sortednames) do
-    local def = self.enums[name]
-    self:write_enum(name, def.entries, def.prefix, def.basetype)
+    local def = self.types[name]
+    self:write_enum(def.name, def.entries, def.prefix, def.basetype)
   end
 end
 
 function generator:write_namelists()
-  for name, def in pairs(self.enums) do
+  for _, def in ipairs(self.enums) do
+
     if not def.no_namelist then
-      self:write_namelist(name.."_names", util.map(def.entries, function(f) return f.name  end))
+      self:write_namelist(def.name.."_names", util.map(def.entries, function(f) return f.name  end))
     end
   end
 end
 
-function generator:write_enum(name, names, prefix, base)
+local function fmtlist(list, fmt)
+  local t = {}
+  for i, v in ipairs(list) do
+    t[i] = format(fmt, v)
+  end
+  return t
+end
+
+function generator:write_enum(name, names, prefix, base, maxvalue)
   prefix = prefix and (prefix .. "_") or name
 
   if self.outputlang ~= "c" then
@@ -1622,11 +1746,13 @@ function generator:write_enum(name, names, prefix, base)
   local valuefmt = prefix..self.templates.enum_valueline
 
   local entries
+  maxvalue = maxvalue or "MAX"
 
   if type(names[1]) == "string" then
-    entries = util.concatf(names, prefix..self.templates.enumline, "  ", "", true)
+    entries = fmtlist(names, prefix..self.templates.enumline)
+    entries[#entries+1] =  format(prefix..self.templates.enumline, maxvalue)
   else
-    names = util.map(names, function(f)
+    entries = util.map(names, function(f)
       if not f.implicitval then
         return format(namefmt, f.name)
       else
@@ -1634,7 +1760,7 @@ function generator:write_enum(name, names, prefix, base)
       end
     end)
 
-    entries = "  " .. table.concat(names, "  ")
+    tinsert(entries, format(namefmt, maxvalue))
   end
 
   if not base then
@@ -1644,14 +1770,14 @@ function generator:write_enum(name, names, prefix, base)
     base = " : " .. base
   end
 
-  self:writetemplate("enum", {name = name, list = entries, base = base})
+  self:writetemplate("enum", {name = name, list = entries, base = base, prefix = prefix})
 end
 
 function generator:write_namelist(name, names)
   self:writetemplate("namelist", {name = name, list = names, count = #names})
 end
 
-function generator:write_msgsizes(dispatch_table)
+function generator:write_msgsizes(name, dispatch_table)
   local sizes = {}
 
   for _, name in ipairs(self.sorted_msgnames) do
@@ -1674,13 +1800,47 @@ function generator:write_msgsizes(dispatch_table)
     template = "msgsizes"
   end
 
-  self:writetemplate(template, {list = sizes, count = #self.sorted_msgnames})
+  self:writetemplate(template, {list = sizes, name = name, count = #self.sorted_msgnames})
+end
+
+function generator:write_vtable_data(name)
+  local nameprefix = ""
+  if name then
+    nameprefix = name.."_"
+  end
+  self:writetemplate("vtable_start", {nameprefix = nameprefix})
+
+  local vtoffset = 0
+  local vtstarts = {}
+  local fbtype = {}
+
+  for _, name in ipairs(self.sorted_msgnames) do
+    local vtsize = self:write_vtable(self.msglookup[name], "message")
+    vtstarts[#vtstarts + 1] = vtoffset
+    vtoffset = vtoffset + vtsize
+    fbtype[#fbtype + 1] = name
+  end
+
+  for _, list in ipairs({self.structs, self.tables}) do
+    for _, def in ipairs(list) do
+      local vtsize = self:write_vtable(def)
+      vtstarts[#vtstarts + 1] = vtoffset
+      vtoffset = vtoffset + vtsize
+      fbtype[#fbtype + 1] = def.name
+    end
+  end
+
+  self:writetemplate("vtable_end")
+
+  self:write_enum("FBType", fbtype, "FBType")
+
+  self:writetemplate("vtable_offsets", {nameprefix = nameprefix, offsets = vtstarts})
 end
 
 function generator:write_vtable(msgdef)
   self:writetemplate("vtable", {
     name = msgdef.name,
-    offsets = util.concatf(msgdef.vtable, "0x%X, "):sub(1, -3)
+    offsets = msgdef.vtable,
   })
 
   return #msgdef.vtable*2
@@ -1705,6 +1865,8 @@ function generator:write_fieldtypes(msgdef)
           error("Missing type id for field "..f.name.." in type "..msgdef.name)
         end
       end
+
+      -- Make sure the element type for arrays has an assigned typeid for user defined types
       if type.element_type then
         local element_type = self.types[type.element_type]
         if element_type.kind == "table" or element_type.kind == "struct" then
@@ -1718,7 +1880,7 @@ function generator:write_fieldtypes(msgdef)
 
   self:writetemplate("vtable", {
     name = msgdef.name,
-    offsets = util.concatf(typeids, "%d, "):sub(1, -3)
+    offsets = typeids,
   })
 
 end
@@ -1736,10 +1898,25 @@ function generator:write_msgdefs()
   end
 end
 
+function generator:build_outputpath(options, extension, prefix)
+  assert(options.outdir, "No output directory specified")
+  assert(options.name, "No name specified")
+
+  local outdir = options.outdir
+  if not string.find(outdir, "[\\/]$") then
+    outdir = outdir .. "/"
+  end
+
+  prefix = prefix or ""
+  local filename = options.filename or options.name
+
+  return outdir..prefix..filename..extension
+end
+
 local lang_generator = {}
 
-local function writelang(lang, data, options)
-  options = options or {}
+local function writelang(lang, data, options, action)
+  options = util.clone(options) or {}
 
   local lgen = lang_generator[lang]
   if not lgen then
@@ -1747,7 +1924,11 @@ local function writelang(lang, data, options)
     lang_generator[lang] = lgen
   end
 
-  local state = {}
+  local state = {
+    base = generator,
+    jitlog = options.jitlog,
+    target_name = options.name,
+  }
   util.copyfields(data, state, copyfields)
   -- Allow extra type renames to be added when running the generator
   if lgen.typerename then
@@ -1760,10 +1941,12 @@ local function writelang(lang, data, options)
       return (v ~= nil and v) or generator[key]
     end
   })
-  
-  local outdir = options.outdir or ""
-  local filepath = outdir..(options.filename or state.default_filename)
+  options.name = options.name or state.default_filename
+
+  assert(state.extension, "Generator did not a specifiy a output file extension")
+  local filepath = state:build_outputpath(options, state.extension)
   state.outputfile = io.open(filepath, "w")
+
   state:writefile(options)
   state.outputfile:close()
   return filepath
@@ -1788,8 +1971,11 @@ local api = {
   end,
 
   writelang = writelang,
-  write_c = function(data, options)
-    local t = {}
+  write_c = function(data, options, action)
+    local t = {
+      base = generator,
+      target_name = options.name,
+    }
     util.copyfields(data, t, copyfields)
     -- Allow the c generator to override base generator functions
     setmetatable(t, {
@@ -1799,12 +1985,7 @@ local api = {
       end
     })
 
-    if not options or options.mode == "defs" then
-      t:write_headers_def(options)
-    end
-    if options and options.mode == "writers" then
-      t:write_header_logwriters(options)
-    end
+    t:writefile(options, action or options.action)
   end,
 }
 

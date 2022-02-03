@@ -33,10 +33,12 @@ function lib.copyfields(src, dest, names)
   return dest
 end
 
-function lib.map(t, f)
+function lib.map(t, f, filter)
   local result = {}
   for _, v in ipairs(t) do
-    table.insert(result, f(v))
+    if not filter or not filter(v) then
+      table.insert(result, f(v))
+    end
   end
   return result
 end
@@ -156,12 +158,39 @@ function lib.unescape(s, unescapes)
   end)
 end
 
+local function fmtlist(value, wspace, fmt, prefix, suffix)
+
+  if value[1] == nil then
+    return ""
+  end
+
+  prefix = prefix or ""
+  suffix = suffix or ""
+  local t = value
+
+  if fmt and fmt ~= "" then
+    t = {}
+    for i, v in ipairs(value) do
+      t[i] = format(fmt, v)
+    end
+  end
+
+  local tail = suffix
+
+  if tail ~= "" then
+    tail = tail:gsub("[\r\n]+", "")
+  end
+
+  return wspace..prefix .. table.concat(t, suffix .. wspace .. prefix) .. tail
+end
+
 function lib.buildtemplate(tmpl, values)
-  return (string.gsub(tmpl, "{{(.-)}}", function(key)
-    local name, fmt = string.match(key, "%s*(.-)%s*:(.+)")
+  return (string.gsub(tmpl, "([ \t]*){{(.-)}}", function(wspace, key)
+    local name, rawfmt = string.match(key, "%s*(.-)%s*:(.+)")
+    local fmt
     if name then
       key = name
-      fmt = lib.unescape(fmt)
+      fmt = lib.unescape(rawfmt)
     end
 
     local value = values[key]
@@ -174,16 +203,31 @@ function lib.buildtemplate(tmpl, values)
       value = value(key)
     end
 
+    local custom_formatter, args
     if fmt then
-      if type(value) == "table" then
+      custom_formatter, args = rawfmt:match("@([a-zA-Z_]+)%(([^%)]*)%)")
+      if custom_formatter then
+        if custom_formatter == "fmtlist" then
+          if args == "" then
+            value = fmtlist(value, wspace, "", "", ",\n")
+          else
+            value = loadstring("local func, value, wspace = ...;return func(value, wspace, "..args..")")(fmtlist, value, wspace)
+          end
+          assert(value)
+        end
+
+      elseif type(value) == "table" then
         value = lib.concatf(value, fmt)
       else
         value = format(fmt, value)
       end
+
     end
-    
     if type(value) ~= "string" and type(value) ~= "number" then
       error("bad type for replacement value template key= '"..key.."'")
+    end
+    if not custom_formatter then
+      return wspace.. value
     end
     return value
   end))

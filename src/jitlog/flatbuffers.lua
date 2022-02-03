@@ -251,6 +251,9 @@ function vtable:validate(limit, bitfields, types, isstruct)
 
       local overflow
       if types then
+        if not types[i+1] then
+          error("Missing type for slot "..i)
+        end
         local type = band(types[i+1], 0xff)
         local tname = typenames[type]
 
