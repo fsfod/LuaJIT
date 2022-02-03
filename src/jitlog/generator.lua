@@ -204,6 +204,10 @@ function parser:build_recordlayout(def)
       assert(not f.bitsize)
     elseif type.kind == "table" then
       assert(not f.buflen)
+    elseif type.kind == "array" and f.fixedsize then
+      f.offset = msgsize
+      size = f.fixedsize * f.element_size
+      def.fixedsize_arrays = true
     else
       assert(type, "unexpected type")
       assert(not f.bitstorage)
@@ -538,6 +542,16 @@ function parser:parse_msg(def, m)
       table.insert(vlen_fields, t)
       t.vindex = #vlen_fields
       t.ptrarg = true
+    elseif kind == "array" and field.size then
+      t.kind = "array"
+      t.vlen = false
+      t.ptrarg = true
+      t.fixedsize = field.size
+      t.element_size = typeinfo.element_size
+      local ele = self.types[typeinfo.element_type]
+      if ele.kind ~= "number" and ele.kind ~= "struct" then
+        self:report_error("Bad field type '%s' for fixed size array field %s at line %d", ftype, name, field.line)
+      end
     elseif kind == "array" or typeinfo.vsize then
       t.kind = "array"
       t.vlen = true
@@ -1035,7 +1049,11 @@ function generator:mkfield(f)
     local type = self.types[f.type]
     local langtype = self.typerename[f.type] or type.c or f.type
 
-    if f.kind == "array" then
+    if f.kind == "array" and f.fixedsize then
+      langtype = self.typerename[type.element_type] or type.element_type or langtype
+
+      ret = "  "..buildtemplate(self.templates.structfield_sizedarray,  {name = f.name, type = langtype, size = f.fixedsize})
+    elseif f.kind == "array" then
       langtype = self.typerename[type.element_type] or type.element_type or langtype
       -- Write a comment for fields that have to be fetched with a getter to still show there part of the struct
       ret = "  "..format(comment_line, format("%s %s[%s];", langtype, name, f.buflen)).."\n"

@@ -57,6 +57,7 @@ public struct Raw{{name}} : {{name}}{  {{fields}}
 ]],
  
   structfield = "\n  public %s %s;",
+  structfield_sizedarray = "\n  public fixed {{type}} {{name}}[{{size}}];\n",
 
   printer = [[
   public static uint Print_{{name}}(void* msgptr)

@@ -46,6 +46,7 @@ typedef struct {{name}}{
 
 ]=],
   structfield = "\n  %s %s;",
+  structfield_sizedarray = "\n  {{type}} {{name}}[{{size}}];\n",
   struct_comment = "// %s",
 
   msg_metatable = [[

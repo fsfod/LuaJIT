@@ -48,6 +48,7 @@ typedef struct {{cprefix}}{{name}} {
 {{bitfields:%s\n}}
 ]],
   structfield = "  %s %s;\n",
+  structfield_sizedarray = "  {{type}} {{name}}[{{size}}];\n",
   vtable = [[
   /* {{name}} */
   {{offsets}},
