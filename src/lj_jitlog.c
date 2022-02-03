@@ -1128,10 +1128,12 @@ void jitlog_loadscript(jitlog_State *context, lua_State *L, VMEventData_LoadScri
         return;
       }
       /* Override the lua_Reader used to load the script to capture its source */
-      context->luareader = *eventdata->luareader;
-      context->luareader_data = *eventdata->luareader_data;
-      *eventdata->luareader = (void*)luareader_override;
-      *eventdata->luareader_data = context;
+      if (eventdata->luareader) {
+        context->luareader = *eventdata->luareader;
+        context->luareader_data = *eventdata->luareader_data;
+        *eventdata->luareader = (void*)luareader_override;
+        *eventdata->luareader_data = context;
+      }
     }
   } else {
     loadscript_Args args = {
@@ -1584,6 +1586,22 @@ static void write_newctypes(jitlog_State* context)
   free((char**)ctypes.names);
 }
 
+
+static void set_vmeventhook(jitlog_State *context, luaJIT_vmevent_callback cb, void *ud)
+{
+  lua_State *L = &G2GG(context->g)->L;
+  void* curr_ud = NULL;
+  luaJIT_vmevent_callback curr_cb = luaJIT_vmevent_gethook(L, (void**)&curr_ud);
+  
+  /* Set up forward events if there a existing vmevent hook not set by our JITLog instance */
+  if (curr_cb && context != curr_ud) {
+    ctx2usr(context)->nextcb = curr_cb;
+    ctx2usr(context)->nextcb_data = curr_ud;
+  }
+
+  luaJIT_vmevent_sethook(L, cb, ud);
+}
+
 static void jitlog_shutdown(jitlog_State* context, int stateexit);
 
 static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *eventdata)
@@ -1629,6 +1647,7 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
       break;
 #endif
     case VMEVENT_LOADSCRIPT:
+    case VMEVENT_LOADFILE:
       jitlog_loadscript(context, L, (VMEventData_LoadScript*)eventdata);
       break;
     case VMEVENT_BC:
@@ -1637,10 +1656,8 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
     case VMEVENT_DETACH:
       break;
     case VMEVENT_STATE_CLOSING:
-      if (G(L)->vmevent_cb == jitlog_callback) {
-        /* Block any extra events being triggered from us destroying our state */
-        luaJIT_vmevent_sethook(L, NULL, NULL);
-      }
+       /* Block any extra events being triggered from us destroying our state */
+      set_vmeventhook(context, ctx2usr(context)->nextcb, ctx2usr(context)->nextcb_data);
       break;
     case VMEVENT_ERROR_THROWN:
       jitlog_error_thrown(context, L, (VMEventData_LuaError*)eventdata);
@@ -1650,6 +1667,17 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
   }
 
   JITLogUserContext *usr = ctx2usr(context);
+
+  /* Check if new messages were written to the buffer */
+  if (ubufP(&context->ub) != bufpos) {
+    ubuf_msgcomplete(&context->ub);
+  }
+
+  if ((usr->autoflush_msgs & context->events_written) || (usr->vmevent_autoflush & (1ull << eventid))) {
+    ubuf_flush(&context->ub);
+    context->events_written = 0;
+  }
+
   if (usr->nextcb) {
     usr->nextcb(usr->nextcb_data, L, eventid, eventdata);
   }
@@ -1661,16 +1689,12 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
     return;
   }
 
-  /* Check if new messages were written to the buffer */
-  if (ubufP(&context->ub) != bufpos) {
-    ubuf_msgcomplete(&context->ub);
-  }
-
-  if ((usr->autoflush_msgs & context->events_written) || (usr->vmevent_autoflush & (1ull << eventid))) {
-    ubuf_flush(&context->ub);
-    context->events_written = 0;
-  }
   TIMER_END(jitlog_vmevent);
+}
+
+LUA_API void jitlog_callback_secondlog(void *ctx, lua_State *L, int eventid, void *eventdata) 
+{
+  jitlog_callback(ctx, L, eventid, eventdata);
 }
 
 void write_section(lua_State *L, int id, int isstart)
@@ -1894,13 +1918,15 @@ static int jitlog_set_gcstats_enabled(jitlog_State *context, int enable)
     }
     context->gcstats = start_gcstats_tracker(L);
     context->gcstats->ud = context;
-    context->g->objalloc_cb = (lua_ObjAlloc_cb)&jitlog_gcstatscb;
+    context->g->objalloc_cb = &jitlog_gcstatscb;
   } else { 
-    if (context->g->objalloc_cb == (lua_ObjAlloc_cb)&gcalloc_cb) {
+    if (context->g->objalloc_cb == &gcalloc_cb) {
       /* we shouldn't have both callbacks enabled at the same time */
       lua_assert(!context->gcstats);
       return 0;
     }
+    /* Don't trigger our assert in stop_gcstats_tracker about wrong callback set */
+    context->g->objalloc_cb = &gcstats_tracker_callback;
     stop_gcstats_tracker(context->gcstats);
     context->gcstats = NULL;
   }
@@ -1911,12 +1937,12 @@ static int jitlog_setobjalloclog(jitlog_State *context, int enable)
 {
   if (enable) {
     if (context->g->objalloc_cb != NULL) {
-      return context->g->objalloc_cb == (lua_ObjAlloc_cb)&gcalloc_cb;
+      return context->g->objalloc_cb == &gcalloc_cb;
     }
-    context->g->objalloc_cb = (lua_ObjAlloc_cb)&gcalloc_cb;
+    context->g->objalloc_cb = &gcalloc_cb;
     context->g->objallocd = context;
   } else {
-    if (context->g->objalloc_cb != (lua_ObjAlloc_cb)&gcalloc_cb) {
+    if (context->g->objalloc_cb != &gcalloc_cb) {
       return 1;
     }
     context->g->objalloc_cb = NULL;
@@ -1929,6 +1955,20 @@ static int jitlog_setobjalloclog(jitlog_State *context, int enable)
 
 LUA_API int luaopen_jitlog(lua_State *L);
 
+static void set_gchook(jitlog_State *context, luaJIT_vmevent_callback cb, void *ud)
+{
+  lua_State *L = &G2GG(context->g)->L;
+  void* curr_ud = NULL;
+  luaJIT_vmevent_callback curr_cb = luaJIT_gcevent_gethook(L, (void**)&curr_ud);
+
+  if (curr_cb && curr_ud != context) {
+    ctx2usr(context)->gcevent = curr_cb;
+    ctx2usr(context)->gcevent_ud = curr_ud;
+  }
+
+  luaJIT_gcevent_sethook(L, cb, ud);
+}
+
 static void update_gcevents(jitlog_State *context, int force_on)
 {
   lua_State *L = &G2GG(context->g)->L;
@@ -1939,22 +1979,16 @@ static void update_gcevents(jitlog_State *context, int force_on)
     void *gceventud = NULL;
     void* gcevent = luaJIT_gcevent_gethook(L, &gceventud);
 
-    /* Don't update the GC event hook if are already set for it */
-    if (gcevent == &jitlog_gcevent) {
-      lj_assertL(gceventud == context, "Unexpected GC event callback user value, expected JITLog state");
-      return;
-    }
-
-    /* If theres an existing gcevent hook save it away so we can forward events to it */
-    if (gcevent) {
+    /* If theres an existing gcevent hook not set by us save it away so we can forward events to it */
+    if (gcevent && gceventud != context) {
       usr->gcevent = gcevent;
       usr->gcevent_ud = gceventud;
     }
     /* Only register for GC events after we've created our tables */
-    luaJIT_gcevent_sethook(L, jitlog_gcevent, context);
+    set_gchook(context, jitlog_gcevent, context);
   } else {
     /* The Forward gc callback function pointer will be null most the time so this will disable GC events */
-    luaJIT_gcevent_sethook(L, usr->gcevent, usr->gcevent_ud);
+    set_gchook(context, usr->gcevent, usr->gcevent_ud);
   }
 }
 
@@ -1991,15 +2025,7 @@ static jitlog_State *jitlog_start_safe(lua_State *L, UserBuf *ub)
 
   write_header(context);
 
-  /* If there is an existing VMEvent hook set save its function away so we can forward events to it */
-  void *usrdata;
-  luaJIT_vmevent_callback callback = luaJIT_vmevent_gethook(L, &usrdata);
-  if (callback && callback != jitlog_callback) {
-    ctx2usr(context)->nextcb = callback;
-    ctx2usr(context)->nextcb_data = usrdata;
-  }
-
-  luaJIT_vmevent_sethook(L, jitlog_callback, context);
+  set_vmeventhook(context, jitlog_callback, context);
   update_gcevents(context, 0);
 
 #if LJ_HASJIT
@@ -2111,20 +2137,11 @@ static void jitlog_shutdown(jitlog_State *context, int stateexit)
     jitlog_preshutdown(context);
   }
 
-  void* current_context = NULL;
-  luaJIT_vmevent_callback cb = luaJIT_vmevent_gethook(L, (void**)&current_context);
-  if (cb == jitlog_callback) {
-    lua_assert(current_context == context);
-    luaJIT_vmevent_sethook(L, NULL, NULL);
-  }
-
   JITLogUserContext* usr = ctx2usr(context);
 
-  if (usr->gcevent) {
-    luaJIT_gcevent_sethook(L, usr->gcevent, usr->gcevent_ud);
-  } else {
-    luaJIT_gcevent_sethook(L, NULL, NULL);
-  }
+  /* The forwarding callback pointers are NULL by default so this will normally clear our hooks */
+  set_vmeventhook(context, usr->nextcb, usr->nextcb_data);
+  set_gchook(context, usr->gcevent, usr->gcevent_ud);
 
   clear_objalloc_callback(context);
 
