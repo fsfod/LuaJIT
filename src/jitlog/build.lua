@@ -76,7 +76,7 @@ if not require then
   end
 else
   arg = _G.arg
-  package.path = string.format("%s/?.lua;%s", "./", package.path)
+  --package.path = string.format("%s/?.lua;%s", ".", package.path)
 end
 
 local function splitpath(P)
@@ -85,17 +85,17 @@ end
 
 modulepath = splitpath(arg[0])
 assert(modulepath)
-modulepath = splitpath(modulepath)
-if modulepath == "/" then
-  modulepath = modulepath .. "/"
-end
+local parentpath = splitpath(modulepath)
 
-if not string.find("[\\/]$", modulepath) then
+assert(parentpath ~= "")
+modulepath = parentpath
+
+if not string.find(modulepath, "[\\/]$") then
   modulepath = modulepath .. "/"
 end
 
 if not isminilua then
-  package.path = string.format("%s/?.lua;%s", modulepath, package.path)
+  package.path = string.format("%s?.lua;%s", modulepath, package.path)
 end
 
 local argstart = 1
