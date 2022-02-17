@@ -180,6 +180,11 @@ LUA_API int jitlog_write_gcsnapshot(JITLogUserContext *usrcontext, const char *l
 */
 LUA_API int jitlog_write_gcstats(JITLogUserContext *usrcontext, const char* note);
 
+/*
+** Sets if GC object allocation logging is active.
+*/
+LUA_API int jitlog_setobjalloclog(JITLogUserContext *usr, int enable);
+
 
 LUA_API void jitlog_callback_secondlog(void *ctx, lua_State *L, int eventid, void *eventdata);
 

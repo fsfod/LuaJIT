@@ -134,6 +134,8 @@ static void *growvec(void *p, MSize *szp, MSize lim, MSize esz)
   ((p) = (t *)growvec((p), &(n), (m), (MSize)sizeof(t)))
 #define jl_freevec(ctx, p, n, t)	free((p))
 
+static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *eventdata);
+
 void LJ_FASTCALL lj_jitlog_checkbuffer(lua_State *L)
 {
   UserBuf *ub = (UserBuf *)(G(L)->jitlog_buff);
@@ -1910,7 +1912,7 @@ LUA_API JITLogUserContext* jitlog_getjlctx(lua_State *L) {
   return cb == jitlog_callback ? ctx2usr((jitlog_State *)current_context) : NULL;
 }
 
-static int jitlog_set_gcstats_enabled(jitlog_State *context, int enable)
+int jitlog_set_gcstats_enabled(jitlog_State *context, int enable)
 {
   lua_State *L = mainthread(context->g);
   if (enable) {
@@ -1934,8 +1936,9 @@ static int jitlog_set_gcstats_enabled(jitlog_State *context, int enable)
   return 1;
 }
 
-static int jitlog_setobjalloclog(jitlog_State *context, int enable)
+int jitlog_setobjalloclog(JITLogUserContext *usr, int enable)
 {
+  jitlog_State *context = usr2ctx(usr);
   if (enable) {
     if (context->g->objalloc_cb != NULL) {
       return context->g->objalloc_cb == &gcalloc_cb;
@@ -2454,6 +2457,7 @@ static int set_tracemarkers_enabled(JITLogUserContext *usrcontext, int enable)
   }
 
   if (enable) {
+    
     G2J(context->g)->flags |= JIT_F_TRACE_MARKERS;
     context->mode |= JITLogMode_FlushOnShutdown;
   } else {
@@ -3154,7 +3158,7 @@ static int jlib_set_objalloc_logging(lua_State *L)
 {
   jitlog_State *context = jlib_getstate(L);
   int enable = tvistruecond(lj_lib_checkany(L, 1));
-  int ret = jitlog_setobjalloclog(context, enable);
+  int ret = jitlog_setobjalloclog(ctx2usr(context), enable);
   if (enable && (L->top - L->base) > 1) {
     context->oballoc_stacks = tvistruecond(lj_lib_checkany(L, 2));
   }
