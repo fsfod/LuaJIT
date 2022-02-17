@@ -136,8 +136,9 @@ static void *growvec(void *p, MSize *szp, MSize lim, MSize esz)
 
 void LJ_FASTCALL lj_jitlog_checkbuffer(lua_State *L)
 {
-  jitlog_State *context = (jitlog_State *)(G(L)->vmevent_data);
-  ubuf_more(&context->ub, 256);
+  UserBuf *ub = (UserBuf *)(G(L)->jitlog_buff);
+  lj_assertX(ub, "JITLog event buffer is not initialized");
+  ubuf_more(ub, 256);
 }
 
 extern void* lightud_intern(lua_State* L, void* p);
@@ -2151,6 +2152,8 @@ static void jitlog_shutdown(jitlog_State *context, int stateexit)
     free_pinnedtab(L, context->funcs);
   }
 
+  context->g->jitlog_buff = NULL;
+
 #if LJ_HASJIT
   /* Stop the JIT generating trace markers if we've enabled them */
   if (context->mode & JITLogMode_TraceMarkers) {
@@ -2454,7 +2457,22 @@ static int set_tracemarkers_enabled(JITLogUserContext *usrcontext, int enable)
     G2J(context->g)->flags |= JIT_F_TRACE_MARKERS;
     context->mode |= JITLogMode_FlushOnShutdown;
   } else {
+    context->g->jitlog_buff = NULL;
     G2J(context->g)->flags &= ~JIT_F_TRACE_MARKERS;
+  }
+
+  return 1;
+}
+
+static int set_callmarkers_enabled(JITLogUserContext *usrcontext, int enable)
+{
+  jitlog_State *context = usr2ctx(usrcontext);
+  global_State *g = context->g;
+
+  if (enable) {
+    context->g->jitlog_buff = &context->ub;
+  } else {
+    context->g->jitlog_buff = NULL;
   }
 
   return 1;
@@ -2468,6 +2486,11 @@ LUA_API int jitlog_setmode(JITLogUserContext *usrcontext, JITLogMode mode, int e
     case JITLogMode_TraceExitRegs:
     case JITLogMode_DisableMemorization:
     case JITLogMode_VerboseTraceLog:
+      break;
+    case JITLogMode_CallMarkers:
+      if (!set_callmarkers_enabled(usrcontext, enabled)) {
+        return 0;
+      }
       break;
     case JITLogMode_TraceMarkers:
       if (!set_tracemarkers_enabled(usrcontext, enabled)) {
@@ -2845,6 +2868,7 @@ static const ModeEntry jitlog_modes[] = {
   {"nomemo", JITLogMode_DisableMemorization},
   {"verbose_trinfo", JITLogMode_VerboseTraceLog},
   {"trace_markers", JITLogMode_TraceMarkers},
+  {"call_markers", JITLogMode_CallMarkers},
 };
 
 static int jlib_setmode(lua_State *L)

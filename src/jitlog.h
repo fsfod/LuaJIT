@@ -91,6 +91,8 @@ typedef enum JITLogMode {
   ** executing or returns to the interpreter. The marker includes a timestamp
   */
   JITLogMode_TraceMarkers   = 0x20,
+
+  JITLogMode_CallMarkers = 0x40, 
 } JITLogMode;
 
 LUA_API JITLogUserContext* jitlog_start(lua_State *L);
