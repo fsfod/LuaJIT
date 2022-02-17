@@ -2359,7 +2359,7 @@ static LJ_AINLINE int visit_messages(UserBuf* ub, visitmsg_cb callback, void* ca
 
     uint32_t size = msgsize_dispatch[header->msgid];
     if (size == 255) {
-      return 0;
+      return -1;
     }
     /* Don't try to read a message size past the buffer end */
     if (size == 0 && (p + 4) > end) {
@@ -2369,6 +2369,10 @@ static LJ_AINLINE int visit_messages(UserBuf* ub, visitmsg_cb callback, void* ca
       break;
     }
 
+    lj_assertX(size != 0 || header->size, "Bad 0 size in message header");   
+    if (size == 0 && header->size == 0) {
+      return -2;
+    }
     size = size != 0 ? size : header->size;
     p += size;
   }
@@ -2378,6 +2382,60 @@ static LJ_AINLINE int visit_messages(UserBuf* ub, visitmsg_cb callback, void* ca
 LUA_API int jitlog_visitmsgs(JITLogUserContext* usrcontext, visitmsg_cb callback, void* callbackud, size_t start) {
   jitlog_State* context = usr2ctx(usrcontext);
   return visit_messages(&context->ub, callback, callbackud, start);
+}
+
+LUA_API int jitlog_visitmsgs_buff(UserBuf* ub, visitmsg_cb callback, void* callbackud, size_t start)
+{
+  return visit_messages(ub, callback, callbackud, start);
+}
+
+typedef struct VisitData {
+  int count;
+  char* base;
+  char* end;
+  size_t lastmsg;
+  uint32_t lastsz;
+  MsgTypes_jitlog lasttype;
+}VisitData;
+
+static int validate_visitor(void* state, uint8_t msgid, void* msg)
+{
+  VisitData* data = (VisitData*)state;
+  struct MsgHeader* header = (struct MsgHeader*)msg;
+
+  lj_assertX(msgid < MSGTYPE_MAX_jitlog, "Bad message type %d", msgid);
+  if (msgid < MSGTYPE_MAX_jitlog) {
+    return -4;
+  }
+
+  int size = msgsize_dispatch[msgid];
+
+  if (size == 0) {
+
+    lj_assertX(header->size != 0, "msg header size was zero");
+    lj_assertX(((char*)msg) + header->size < data->end, "bad message size");
+    data->lastsz = header->size;
+  } else {
+    data->lastsz = size;
+  }
+  data->lastmsg = ((char*)msg) - data->base;
+  data->lasttype = msgid;
+  return 1;
+}
+
+int jitlog_validatemsgs(UserBuf* ub, size_t start) {
+  VisitData data = {
+    .base = ubufB(ub) + start,
+    .end = ub->p,
+    .count = 0,
+  };
+
+  int result = jitlog_visitmsgs_buff(ub, validate_visitor, &data, start);
+
+  size_t msgend = data.lastmsg + data.lastsz;
+  lj_assertX(msgend == (ubuflen(ub) - start), "Msg doesn't stop at end of buffer");
+
+  return result;
 }
 
 typedef struct msgcheckud {

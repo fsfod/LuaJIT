@@ -145,6 +145,8 @@ LUA_API int jitlog_reset_tosavepoint(JITLogUserContext *usrcontext);
 typedef int visitmsg_cb(void* state, uint8_t msgid, void* msg);
 LUA_API int jitlog_visitmsgs(JITLogUserContext *usrcontext, visitmsg_cb callback, void* callbackud, size_t start);
 
+LUA_API int jitlog_visitmsgs_buff(UserBuf* ub, visitmsg_cb callback, void* callbackud, size_t start);
+
 /* Returns the offset of the first message with the specified type or -1 if none are found */
 LUA_API int64_t jitlog_first_msgoffset(JITLogUserContext* usrcontext, int msgtype, size_t start);
 /* Returns the offset of the last message with the specified type or -1 if none are found */
