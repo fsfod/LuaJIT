@@ -24,6 +24,7 @@ local GC64 = reader_def.GC64 == true
 
 local function mkparser(schema, GC64)
   local parser = apigen.create_parser(GC64)
+  parser.jitlog = true
   parser:process_schema(schema)
   return parser:complete()
 end
@@ -36,6 +37,7 @@ local function buildmsginfo(schema)
   local schema = fbsparser.parse_fbsstring(schema)
 
   local parser = apigen.create_parser(false)
+  parser.jitlog = true
   parser:process_schema(schema)
   return parser:complete()
 end
@@ -508,6 +510,7 @@ end)
 
 it("call markers", function()
   jitlog.start()
+  jitlog.setmode("call_markers", true)
   local f1 = loadstring("return 1", "f1")
   local f2 = loadstring("\nreturn 1, 2", "f2")
   local f3 = loadstring('return function(...) return select("#", ...), ... end', "f3")
@@ -1693,12 +1696,21 @@ if filter then
   end
 end
 
+local function breakfunc(err)
+  print(err)
+  print(debug.traceback())
+  if emmy then
+    emmy.breakHere()
+  elseif mobdebug then
+    mobdebug.pause()
+  end
+end
+
 for name, test in pairs(tests) do
   io.stdout:write("Running: "..name.."\n")
   local success, err
   if decoda_output or emmy then
-    test()
-    success = true
+    success, err = xpcall(test, breakfunc)
   else
     success, err = xpcall(test, stacktraceplus.stacktrace)
   end

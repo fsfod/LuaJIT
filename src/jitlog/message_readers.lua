@@ -1793,6 +1793,7 @@ function fbreaders:gc_stats(gcstats, source, time, note)
 end
 
 local lockind = util.make_enum{
+  "none",
   "proto",
   "pc",
   "cfunc",
@@ -1827,6 +1828,8 @@ function readers:obj_alloc(msg, name)
     local loc = tonumber(msg.location)
     object.location = bit.band(loc, 0xffff)
     object.trace = bit.rshift(loc, 16)
+  elseif location_kind == "pc" then
+    object.location = self:pc2proto(addrtonum(msg.pc))
   else
     assert(false, "NYI other location types")
   end
