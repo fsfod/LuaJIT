@@ -4,7 +4,6 @@ local format = string.format
 local generator = {
   outputlang = "cs",
   default_filename = "JitLog.cs",
-  inline_fieldaccess = true,
   extension = ".cs"
 }
 
@@ -604,13 +603,6 @@ function generator:write_struct_fixup(def, template, template_args, action)
     modifiers = struct_modifiers
   end
   template_args.modifiers = modifiers
-end
-
-function generator:write_struct_offset_fields(fieldstr, def, extra_args, action)
-  if action ~= "rawstructs" then
-    return fieldstr
-  end
-  return self.base.write_struct_offset_fields(self, fieldstr, def, extra_args, action)
 end
 
 function generator:write_interface(def)

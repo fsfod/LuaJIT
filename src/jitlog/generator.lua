@@ -209,8 +209,12 @@ function parser:build_recordlayout(def)
       assert(f.argonly_length or fieldlookup[f.buflen], "could not find length field specified for vlength a field")
       assert(not f.bitstorage)
       assert(not f.bitsize)
+      f.offset = msgsize
+      size = 4
     elseif type.kind == "table" then
       assert(not f.buflen)
+      f.offset = msgsize
+      size = 4
     elseif type.kind == "array" and f.fixedsize then
       f.offset = msgsize
       f.writer = "sizedarray"
@@ -236,15 +240,7 @@ function parser:build_recordlayout(def)
   end
 
   def.fixedsize = msgsize
-
-  if def.vlen_fields then
-    -- Offsets to variable length fields are placed at the end of the struct
-    for _, f in ipairs(def.vlen_fields) do
-      f.offset = msgsize
-      msgsize = msgsize + 4
-    end
-  end
-
+  
   def.size = msgsize
   return msgsize
 end
@@ -1123,15 +1119,10 @@ end
 function generator:mkfield(struct, f, action)
   assert(struct)
   assert(not action or type(action) == "string")
+
   local ret
-  
-  if self.inline_fieldaccess and (f.bitstorage or f.vlen or f.kind == "table") then
-    return ""
-  end
-  
   local comment_line = self.templates.struct_comment or self.templates.comment_line
   local name = self:fixname(f.name)
-
 
   if f.type == "bitfield" then
     ret = format("/*  %s: %d;*/\n", name, f.bitsize)
@@ -1143,12 +1134,16 @@ function generator:mkfield(struct, f, action)
       langtype = self:get_native_type(type.element_type, langtype)
 
       ret = "  "..buildtemplate(self.templates.structfield_sizedarray,  {name = f.name, type = langtype, size = f.fixedsize})
-    elseif f.kind == "array" then
-      langtype = self:get_native_type(type.element_type, langtype)
-      -- Write a comment for fields that have to be fetched with a getter to still show there part of the struct
-      ret = "  "..format(comment_line, format("%s %s[%s];", langtype, name, f.buflen)).."\n"
+    elseif f.kind == "table" or f.kind == "array" then
+      langtype = self:get_native_type("int32")
+      -- Write a comment for the real field type
+      if f.kind == "array" then
+        ret = "  "..format(comment_line, format("%s %s[%s];", langtype, name, f.buflen)).."\n"
+      else
+        ret = "  "..format(comment_line, format("%s %s;", langtype, name)).."\n"
+      end
+      ret = format(self.templates.structfield, langtype, name.."_offset")
     elseif f.kind == "table" then
-      return ""
     elseif f.bitstorage then
       ret = "  "..format(comment_line, format("%s %s:%d", langtype, name, f.bitsize)).."\n"
     else
@@ -1160,21 +1155,6 @@ end
 
 function generator:get_boundscheck(def)
   return nil
-end
-
-function generator:write_struct_offset_fields(fieldstr, def, extra_args, action)
-
-  -- Write offsets of vlength fields at the end of the struct they are treated as always present in the flatbuffers vtable
-  -- created for the message.
-  if def.vlen_fields then
-    local offset_type = self.typerename.int32 or self.types.int32.c
-
-    for _, f in ipairs(def.vlen_fields) do
-      fieldstr = fieldstr..format(self.templates.structfield, offset_type, f.name.."_offset")
-    end
-  end
-
-  return fieldstr
 end
 
 function generator:write_struct(def, template, extra_args, action)
@@ -1190,8 +1170,6 @@ function generator:write_struct(def, template, extra_args, action)
       table.insert(fieldgetters, getter)
     end
   end
-
-  fieldstr = self:write_struct_offset_fields(fieldstr, def, extra_args, action)
 
   if not template then
     if def.kind == "message" and self.templates.msgstruct then
