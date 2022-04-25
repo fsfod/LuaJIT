@@ -16,7 +16,7 @@ const char *{{name}}[{{count}}+1] = {
 
   enum = [[
 typedef enum {{name}} {
-  {{list:@fmtlist("%s ", "", ",\n")}}
+  {{list:@fmtlist("%s", "", ",\n")}}
 } {{name}};
 
 ]],
@@ -248,7 +248,7 @@ end
 
 function generator:write_headers_def(options)
   local path = self:build_outputpath(options,  "_def.h", "lj_")
-  self.outputfile = io.open(path, "w")
+  self:open_outputfile(path)
 
   self:write_headerguard("jitlogdef")
   self:write_defs(options)
@@ -256,10 +256,19 @@ function generator:write_headers_def(options)
   self.outputfile:close()
 end
 
+function generator:open_outputfile(path)
+  local file, err = io.open(path, "w")
+  if file then
+    self.outputfile = file
+  else
+    error(err)
+  end
+end
+
 -- Write the header for arrays that should only be in one translation unit
 function generator:write_header_decl(options)
   local path = self:build_outputpath(options,  "_decl.h", "lj_")
-  self.outputfile = io.open(path, "w")
+  self:open_outputfile(path)
 
   self:write_headerguard(options.name .. "_decl")
   self:write('#include "stdint.h"\n\n')
@@ -317,8 +326,7 @@ end
 
 function generator:write_header_logwriters(options)
   local path = self:build_outputpath(options, "_writers.h", "lj_")
-
-  self.outputfile = io.open(path, "w")
+  self:open_outputfile(path)
 
   self:write_headerguard("jitlog_writers")
 
@@ -359,41 +367,54 @@ static LJ_AINLINE int read_{{name}}(UserBuf *ub, {{name}}_Args* result)
 }
 
 ]]
-
 function generator:write_readers(options)
   for _, def in ipairs(self.tables) do
     if def.vcount ~= 0 then
-      local data = {
-        name = def.name,
-        cname = "FB_" .. def.name,
-        fields = {}
-      }
-
-      local fields = data.fields
-      for i, f in ipairs(def.fields) do
-        local line
-        if f.vlen then
-          if f.type == "string" then
-            line = string.format("if(!ubuf_read_fbstring(ub, &msg->%s_offset, &result->%s)) return 0;", f.name, f.name)
-          else
-            line = string.format("if(!ubuf_read_fbarray(ub, &msg->%s_offset, %d, &result->%s, &result->%s_length)) return 0;", f.name, f.element_size, f.name, f.name)
-          end
-        elseif f.writer ~= "vtable" and f.writer ~= "msgsize" then
-          line = string.format("result->%s = msg->%s;", f.name, f.name)
-        end
-
-        if line then
-          table.insert(fields, line)
-        end
-      end
-
-      self:write(util.buildtemplate(funcdef_reader, data))
+      self:write_reader(def, options)
     end
   end
+
 end
+
+function generator:write_reader(def, options)
+
+  local data = {
+    name = def.name,
+    cname = "FB_" .. def.name,
+    fields = {}
+  }
+
+  local fields = data.fields
+  for i, f in ipairs(def.fields) do
+    local line
+    local type = self.types[f.type]
+
+    if f.vlen then
+      if f.type == "string" then
+        line = string.format("if(!ubuf_read_fbstring(ub, &msg->%s_offset, &result->%s)) return 0;", f.name, f.name)
+      elseif type.kind == "table" then
+        line = string.format("if(!ubuf_read_pointer(ub, &msg->%s_offset, 4, &result->%s)) return 0;", f.name, f.name)
+      elseif type.kind == "array" then
+        line = string.format("if(!ubuf_read_fbarray(ub, &msg->%s_offset, %d, &result->%s, &result->%s_length)) return 0;", f.name, f.element_size, f.name, f.name)
+      end
+    elseif type.writer == "TValue"  then
+      line = string.format("result->%s.u64 = msg->%s;", f.name, f.name)
+    elseif f.writer ~= "vtable" and f.writer ~= "msgsize" then
+      line = string.format("result->%s = msg->%s;", f.name, f.name)
+    end
+
+    if line then
+      table.insert(fields, line)
+    end
+  end
+
+  self:write(util.buildtemplate(funcdef_reader, data))
+end
+
 
 function generator:writefile(options, action)
   options = options or {}
+  self.jitlog = options.jitlog
 
   if action == "writers" then
     self:write_header_logwriters(options)
@@ -405,7 +426,7 @@ function generator:writefile(options, action)
   end
 
   local path = self:build_outputpath(options, ".h", "lj_")
-  self.outputfile = io.open(path, "w")
+  self:open_outputfile(path)
   self:write_headerguard(options.name)
   self:write([[
 #include "lj_usrbuf.h"

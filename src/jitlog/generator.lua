@@ -29,7 +29,7 @@ local builtin_types = {
   timestamp  = {kind = "number", size = 8, c = "uint64_t", writer = "timestamp_highres", noarg = true, typeid = fbtype.ULong},
   smallticks = {kind = "number", size = 4, c = "uint32_t", argtype = "uint64_t", typeid = fbtype.UInt},
 
-  TValue     = {kind = "struct,", size = 8, c = "TValue", argtype = "TValue"},
+  TValue     = {kind = "struct", size = 8, c = "uint64_t", writer = "TValue", argtype = "TValue", typeid = fbtype.Array+2},
   GCRef      = {kind = "ptr", size = 4, c = "GCRef", writer = "setref", ref = "gcptr32", ref64 = "gcptr64", argtype = "GCRef", GC64 = true},
   --GCRef field with the value passed in as a pointer
   GCRefPtr   = {kind = "ptr", size = 4, c = "GCRef", writer = "setref", ref = "gcptr32", ref64 = "gcptr64", ptrarg = true, argtype = "void *", GC64 = true},
@@ -41,7 +41,7 @@ local builtin_types = {
   stringlist = {kind = "array", vsize = true, stringlist = true, c = "const char*", writer = "stringlist", argtype = "const char * const *",  element_type = "int8", element_size = 1, typeid = fbtype.Array+1},
 }
 
-local bit_fbstart = fbtype.Array + 1
+local bit_fbstart = fbtype.Array + 2
 local user_fbstart = bit_fbstart + 1
 
 for i = 1, 31 do
@@ -106,11 +106,10 @@ function parser:get_arraytype(element_type)
 
   local element_size = element_typeinfo.size
   local ctype = element_typeinfo.c or element_type
-  local argtype
+  local argtype = format("const %s *", element_typeinfo.argtype or ctype)
 
   if element_typeinfo.GC64 and self.GC64 then
     element_size = 8
-    argtype = format("const %s *", ctype)
   elseif element_typeinfo.kind == "table" then
     -- Flat buffer arrays of tables are just an array offsets
     element_size = 4
@@ -240,7 +239,7 @@ function parser:build_recordlayout(def)
   end
 
   def.fixedsize = msgsize
-  
+
   def.size = msgsize
   return msgsize
 end
@@ -775,18 +774,20 @@ function parser:build_vtable(def)
   assert(setup, "Unknown object kind when building vtable layout")
 
   local baseoffset = setup.baseoffset
-
-  if def.no_vtable then
-
-  end
-
   local firstfield = setup.firstfield
 
   if not self.jitlog and (kind == "message" or kind == "fbmessage") then
     firstfield = 2
     baseoffset = 0
+    offsets[2] = def.size
   end
 
+  assert(offsets[1] >= 0 and offsets[1] < 0xffff)
+  assert(offsets[2] >= 0 and offsets[2] < 0xffff)
+
+  if def.no_vtable then
+
+  end
 
   for i = firstfield, #fields do
     local f = fields[i]
@@ -813,6 +814,7 @@ function parser:build_vtable(def)
 
     if offset then
       assert(offset >= 0 or f.bitstorage)
+      assert(offset < 0xffff)
       local slot = #offsets - 2
       f.vtslot = slot
       tinsert(offsets, offset)
@@ -1295,7 +1297,10 @@ LJ_STATIC_ASSERT(sizeof({{cname}}) == {{msgsize}});
 
 static LJ_AINLINE int log_{{name}}({{args}})
 {
-{{header:  %s\n}}{{fields:  %s\n}}  setubufP(ub, ubufP(ub) + sizeof({{cname}}));
+{{header:  %s\n}}
+  {{fields:@fmtlist("", "", "\n")}}
+  setubufP(ub, ubufP(ub) + sizeof({{cname}}));
+  {{msgend}}
   if (ubuf_more(ub, {{minbuffspace}}) == NULL) {
     setubufP(ub, ubufP(ub) - sizeof({{cname}}));
     return 0;
@@ -1318,7 +1323,7 @@ static LJ_AINLINE int log_{{name}}({{args}})
 {{fields:  %s\n}}  setubufP(ub, ubufP(ub) + sizeof({{cname}}));
 
 {{vwrite:  %s\n}}
-  ubuf_setmsgsize(ub, vtotal);
+  {{msgend}}
   return 1;
 }
 
@@ -1356,6 +1361,9 @@ generator.custom_field_writers = {
       -- Just do an assignment for raw GCref values
       return valuestr
     end
+  end,
+  TValue = function(self, msgdef, f, valuestr)
+    return valuestr..".u64"
   end,
   msghdr = function(self, msgdef, f)
     return format("msg->header = MSGTYPE_%s;", msgdef.name), true
@@ -1618,6 +1626,8 @@ function generator:write_logfunc(def)
   local minbuffspace = ""..128
   local template, msgstart, msgptr
 
+  local msgend = ""
+
   if def.kind == "table" then
     template = funcdef_fbtable
     msgstart = "ubufP(ub)"
@@ -1629,6 +1639,12 @@ function generator:write_logfunc(def)
     template = funcdef_vsize
     msgstart = "ubufP(ub) + 8"
     msgptr =  "{{cname}} *msg = ({{cname}} *)ubuf_msgstart(ub, vtotal + {{minbuffspace}});"
+
+    if self.jitlog then
+      msgend = "ubuf_setmsgsize(ub, vtotal);"
+    else
+      msgend = "ubuf_msgend(ub);"
+    end
   end
 
   -- Pass all the arguments in through a struct if we have too many
@@ -1652,6 +1668,7 @@ function generator:write_logfunc(def)
     vwrite = vwrite,
     minbuffspace = minbuffspace,
     msgstart = "",
+    msgend = msgend,
   }
 
   -- Write the line to get the buffer pointer for the msg

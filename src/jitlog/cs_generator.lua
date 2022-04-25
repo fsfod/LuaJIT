@@ -91,19 +91,23 @@ public unsafe readonly struct Wrap{{name}} : {{name}}, FBHolder<Raw{{name}}> {
 
   fbreader = [[
 public unsafe readonly struct {{name}}_Reader : {{name}}, FBObject {
-  readonly ReadOnlyMemory<byte> _buffer;
-  readonly ushort* _vtable;
+  private readonly byte* _data;
+  private readonly int size;
+  private readonly ushort* _vtable;
 
   // The vtable passed in must of already been pinned for the duration this struct
-  public {{name}}_Reader(ReadOnlyMemory<byte> buffer, ReadOnlySpan<ushort> vt) {
-    _buffer = buffer;
+  public {{name}}_Reader(ReadOnlySpan<byte> buffer, ReadOnlySpan<ushort> vt) {
+    fixed (byte* ptr = buffer) {
+      _data = ptr;
+    }
+    size = buffer.Length;
     fixed (ushort* ptr = vt) {
       _vtable = ptr;
     }
   }
 
   public ReadOnlySpan<byte> Buffer {
-    get => _buffer.Span;
+    get => new ReadOnlySpan<byte>(_data, size);
   }
 
   public ReadOnlySpan<ushort> VTable  {
@@ -111,10 +115,8 @@ public unsafe readonly struct {{name}}_Reader : {{name}}, FBObject {
   }
 
   public string GetSlotName(int slot) {
-    return $"slot{slot}";
+    return MsgInfo.{{cname}}_names[slot];
   }
-
-
 {{fields}}
 {{bitfields:  %s\n}}}
 ]],
@@ -128,9 +130,9 @@ public unsafe readonly struct {{name}}_Reader : {{name}}, FBObject {
 public readonly struct {{name}}_Writer {
   public FBWriter Writer { get; }
 
-  public {{name}}_Writer(FBWriter writer, int vtableOffset, ushort[] vtable){
+  public {{name}}_Writer(FBWriter writer, int vtableOffset, Memory<ushort> vtable){
     Writer = writer;
-    Writer.Initialize(vtableOffset, vtable[1]);
+    Writer.Initialize(vtableOffset, vtable);
   }
 
 {{fields}}{{bitfields:%s\n}}
@@ -215,6 +217,7 @@ local type_rename = {
 
   int32_t  = "int",
   uint32_t = "uint",
+  TValue = "TValue"
 }
 
 generator.typerename = type_rename
@@ -340,7 +343,7 @@ generator.field_template = {
     ret = "string",
     template = vprop_string,
     interface = "[FBSlot({{vtslot}})]\n  public string {{csname}} { get; }",
-    reader = [[public string {{csname}} => this.GetString({{vtslot}});]]
+    reader = [[public string {{csname}} => FBReader.GetString(VTable, Buffer, {{vtslot}});]]
   },
   stringlist = {
     ret = "string[]",
@@ -384,9 +387,9 @@ generator.field_template = {
     end,
     reader = function(self, def, f)
       if f.fixedsize then
-        return [[public {{ret}} {{csname}} => this.GetFixedArray<{{structname}}, {{type}}>({{vtslot}}, {{size}});]]
+        return [[public {{ret}} {{csname}} => FBReader.GetFixedArray<{{type}}>(VTable, Buffer, {{vtslot}}, {{size}});]]
       else
-        return [[public {{ret}} {{csname}} => this.GetArray<{{structname}}, {{type}}>({{vtslot}});]]
+        return [[public {{ret}} {{csname}} => FBReader.GetArray<{{type}}>(VTable, Buffer, {{vtslot}});]]
       end
     end,
     interface = "[FBSlot({{vtslot}})]\n  public {{ret}} {{csname}} { get ;}",
@@ -414,7 +417,7 @@ generator.base_field_template = {
     set => Writer.SetFieldSlot({{vtslot}}, value);
   }
 ]],
-  reader = [[public {{ret}} {{csname}} => this.GetField<{{structname}}, {{ret}}>({{vtslot}});]],
+  reader = [[public {{ret}} {{csname}} => FBReader.GetField<{{ret}}>(VTable, Buffer, {{vtslot}});]],
   interface = "[FBSlot({{vtslot}})]\n  public {{ret}} {{csname}} { get; }",
 }
 
