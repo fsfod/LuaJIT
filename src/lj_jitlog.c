@@ -1530,7 +1530,7 @@ void jitlog_error_thrown(jitlog_State* context, lua_State* L, VMEventData_LuaErr
   }
 
   error_thrown_Args args = {
-    .errmsg = info->errmsg,
+    .errmsg = info->errmsg ? info->errmsg : "",
     .errid = map_errorid(info->errid),
     .badarg = info->narg,
     .stack = needstack ?&stack : NULL,
