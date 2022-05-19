@@ -2206,6 +2206,12 @@ LUA_API uint64_t jitlog_getsize(JITLogUserContext* usrcontext)
   return ubuf_getoffset(&context->ub);
 }
 
+LUA_API uint64_t jitlog_get_totalwritten(JITLogUserContext* usrcontext)
+{
+  jitlog_State * context = usr2ctx(usrcontext);
+  return ubuf_get_totalwritten(&context->ub);
+}
+
 /* Trigger a flush if required for event types just written should be only used from explicit user called JITLog apis */
 static int jitlog_checkflush(jitlog_State* context, JITLogEventTypes events)
 {
