@@ -5,6 +5,12 @@ local generator = {
   outputlang = "c"
 }
 
+generator.typerename = {
+  -- We have to store TValues as plain numbers because the TValue struct has align specifier of 8 that can break our
+  -- serialized struct layouts.
+  TValue = "uint64_t"
+}
+
 generator.templates = {
   comment_line = "/* %s */",
   namelist = [[

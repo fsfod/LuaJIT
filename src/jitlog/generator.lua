@@ -29,7 +29,7 @@ local builtin_types = {
   timestamp  = {kind = "number", size = 8, c = "uint64_t", writer = "timestamp_highres", noarg = true, typeid = fbtype.ULong},
   smallticks = {kind = "number", size = 4, c = "uint32_t", argtype = "uint64_t", typeid = fbtype.UInt},
 
-  TValue     = {kind = "struct", size = 8, c = "uint64_t", writer = "TValue", argtype = "TValue", typeid = fbtype.Array+2},
+  TValue     = {kind = "struct", size = 8, c = "TValue", writer = "TValue", argtype = "TValue", typeid = fbtype.Array+2},
   GCRef      = {kind = "ptr", size = 4, c = "GCRef", writer = "setref", ref = "gcptr32", ref64 = "gcptr64", argtype = "GCRef", GC64 = true},
   --GCRef field with the value passed in as a pointer
   GCRefPtr   = {kind = "ptr", size = 4, c = "GCRef", writer = "setref", ref = "gcptr32", ref64 = "gcptr64", ptrarg = true, argtype = "void *", GC64 = true},
@@ -287,6 +287,10 @@ function parser:parse_enum(def, t)
 
   local fieldlookup = {}
   local nextval = 0
+
+  if def.attributes.bit_flags then
+    t.bit_flags = true
+  end
 
   for i, field in ipairs(def.values) do
     local name, value = field.name, field.value
@@ -593,7 +597,7 @@ function parser:parse_msg(def, m)
       end
       t.buflen = length
     else
-      assert(kind == "number" or kind == "ptr" or kind == "enum" or kind == "bool")
+      assert(kind == "number" or kind == "ptr" or kind == "enum" or kind == "bool" or kind == "struct")
       t.kind = typeinfo.kind
     end
 
@@ -638,14 +642,12 @@ function parser:parse_msg(def, m)
     end
 
     local entry_name = def.name
-    local value = def.attributes.msg_group_id
-
-    if not enum.lookup[entry_name] then
-      enum:add_entry(entry_name, value)
-    elseif value then
-      enum:update_value(entry_name, value)
-    else
-      self:log("Skipping updating message id enum value %s that is already set for %s ", entry_name, msg_group)
+    if not def.attributes.msg_group_id then
+      if not enum.lookup[entry_name] then
+        enum:add_entry(entry_name)
+      else
+        self:log("Skipping updating message id enum value %s that is already set for %s ", entry_name, msg_group)
+      end
     end
   end
 
@@ -667,6 +669,36 @@ function parser:process_schema(schema)
 
   for _, deflist in ipairs({schema.structs, schema.tables, schema.messages, schema.enums, schema.rpcs}) do
     self:create_placeholders(deflist)
+  end
+
+  -- Populate message group enum with explicit message ids
+  for _, t in pairs(self.types) do
+    local def = t.def
+    local id = def and def.attributes.msg_group_id
+    local msg_group = id and def.attributes.msg_group
+
+    if msg_group and id then
+      local enum = self.types[msg_group]
+
+      if not enum then
+        enum = self:add_enum(msg_group)
+      elseif enum.kind == "rpc_service" then
+        enum = self.types[enum.enum_name]
+        assert(enum, "Missing rpc enum type")
+      end
+
+      enum:add_entry(def.name, id)
+    end
+  end
+
+  for _, t in pairs(self.enums) do
+    table.sort(t.entries, function(a, b)
+      if not a.implicit and a.value < b.value then
+        return true
+        else
+        return false
+      end
+    end)
   end
 
   for _, def in pairs(schema.enums) do
@@ -948,11 +980,18 @@ local enum_mt = {
       local implicit = false
 
       if not value then
-        self.seq_values = true
-        value = self.nextvalue
-        implicit = true
+        if self.bit_flags then
+          value = bit.lshift(1, self.nextvalue)
+        else
+          value = self.nextvalue
+          implicit = true
+        end
         self.nextvalue = self.nextvalue + 1
       else
+        -- Implicit enum values should start after last highest explicit enum values
+        if not self.bit_flags and self.nextvalue <= value then
+          self.nextvalue = value+1
+        end
         self.custom_values = true
       end
 
@@ -966,7 +1005,6 @@ local enum_mt = {
     local entry = self.lookup[name]
     if not entry then
       self:add_entry(name, value)
-      return
     else
       entry.value = value
       assert(not entry.implicitval)
@@ -1810,7 +1848,7 @@ function generator:write_enum(name, names, prefix, base, maxvalue)
     entries[#entries+1] =  format(prefix..self.templates.enumline, maxvalue)
   else
     entries = util.map(names, function(f)
-      if not f.implicitval then
+      if f.implicitval then
         return format(namefmt, f.name)
       else
         return format(valuefmt, f.name, f.value)
