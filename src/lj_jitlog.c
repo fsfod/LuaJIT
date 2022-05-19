@@ -1658,7 +1658,7 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
       break;
 #endif
     case VMEVENT_LOADSCRIPT:
-    case VMEVENT_LOADFILE:
+    //case VMEVENT_LOADFILE:
       jitlog_loadscript(context, L, (VMEventData_LoadScript*)eventdata);
       break;
     case VMEVENT_BC:
