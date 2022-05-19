@@ -2279,6 +2279,18 @@ LUA_API void jitlog_writemarker(JITLogUserContext* usrcontext, const char* label
   jitlog_checkflush(context, JITLOGEVENT_MARKER);
 }
 
+int jitlog_write_reqmarker(JITLogUserContext* usrcontext, int id, int flags)
+{
+  jitlog_State* context = usr2ctx(usrcontext);
+
+  if (log_marker(&context->ub, 0, flags, id)) {
+    jitlog_checkflush(context, JITLOGEVENT_MARKER);
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
 LUA_API void jitlog_setresetpoint(JITLogUserContext *usrcontext)
 {
   jitlog_State *context = usr2ctx(usrcontext);

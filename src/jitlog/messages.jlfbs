@@ -66,6 +66,12 @@ message idmarker (no_vtable, mapto : idmarker4b){
   id : 16
 }
 
+message marker (no_vtable){
+  system : uint8
+  flags : 16
+  id : uint32
+}
+
 message note{
   time : timestamp
   isbinary : bool
