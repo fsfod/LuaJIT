@@ -1839,12 +1839,6 @@ static void write_header(jitlog_State *context)
   free((void*)ctypes.ctypes);
   free((void*)ctypes.names);
 
-  MSG_header* header = ((MSG_header*)ubufB(&context->ub));
-  // Manually build the vtable offset for the header since it can't be automatically generated. 
-  // It is always the first vtable in the shared pre-generated vtable list(fb_vtables).
-  ptrdiff_t diff = offsetof(MSG_header, vtables_offset) - offsetof(MSG_header, vtable);
-  header->vtable = (int32_t)-(header->vtables_offset + diff + 4);
-
   write_note(&context->ub, "msgdefs", msgdefstr);
 
 

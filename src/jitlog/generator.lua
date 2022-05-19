@@ -530,6 +530,14 @@ function parser:parse_msg(def, m)
       t.bool = true
     end
 
+    if attributes.self_vtable then
+      t.self_vtable = true
+      def.vtable_field = name
+      if kind ~= "array" then
+        self:report_error("self_vtable field %s must be an array at line %d", name, field.line)
+      end
+    end
+
     if typeinfo.bitfield or (kind == "bool" and bitpacked) then
       t.kind = "bitfield"
       t.bitfield = true
@@ -639,6 +647,13 @@ function parser:parse_msg(def, m)
     else
       self:log("Skipping updating message id enum value %s that is already set for %s ", entry_name, msg_group)
     end
+  end
+
+  if def.attributes.first_message then
+    if self.first_message then
+      error("first_message already set for message "..self.first_message.."when trying to set it for "..def.name)
+    end
+    self.first_message = def.name
   end
 
   m.vcount = #vlen_fields
@@ -989,14 +1004,35 @@ parser.builtin_msgorder = {
   perf_section = 3,
 }
 
-local function sortmsglist(msglist, msgorder)
+function parser:sortmsglist(msglist, msgorder, prevorder)
   local names = util.map(msglist, function(def) return def.name end)
   msgorder = msgorder or {}
+  local prev = {}
+
+  if prevorder then
+    for i, v in pairs(prevorder) do
+      prev[v] = i
+    end
+  end
 
   -- Order the fixed built-in messages with a well know order
   table.sort(names, function(a, b)
+    -- Previous message order takes precedence over any custom ordering
+    if prev[a] or prev[b] then
+      if prev[a] and prev[b] then
+        return prev[a] < prev[b]
+      else
+        -- if b has a previous order index but a doesn't move it before a
+        if prev[b] then
+          return true
+        else
+          return false
+        end
+      end
+    end
+
     if not msgorder[a] and not msgorder[b] then
-      return a < b
+      return self.types[a].def.line < self.types[b].def.line
     else
       if msgorder[a] and msgorder[b] then
         return msgorder[a] < msgorder[b]
@@ -1028,7 +1064,19 @@ function parser:complete()
   if self.jitlog then
     assert(self.msglookup["header"], "a header message must be defined")
   end
-  self.sorted_msgnames = sortmsglist(self.msglist, self.builtin_msgorder)
+
+  local msgorder = util.clone(self.builtin_msgorder)
+
+  if self.first_message then
+    assert(self.types[self.first_message], "first_message type "..self.first_message.." does not exist")
+    msgorder[self.first_message] = 0
+  end
+
+ -- for name, index in pairs(self.msg_ordering) do
+    
+--  end
+
+  self.sorted_msgnames = self:sortmsglist(self.msglist, msgorder)
   self.sorted_typenames = util.clone(self.sorted_msgnames)
 
   for _, def in pairs(self.rpcs) do
@@ -1183,6 +1231,7 @@ function generator:write_struct(def, template, extra_args, action)
 
   local template_args = {
     name = self.typerename[def.name] or def.name,
+    cname = def.name,
     kind = def.kind,
     cprefix = def.cprefix or "",
     fields = fieldstr,
@@ -1281,7 +1330,18 @@ function generator:write_vlenfield(msgdef, f, valuestr, write)
 
       write.vtotal = buildtemplate("vtotal += {{sizename}} * {{element_size}};", tmpldata)
       write.vwrite = buildtemplate("ubuf_putarray(ub, {{value}}, {{sizename}}, {{element_size}});", tmpldata)
-      assignment = buildtemplate("msg->{{msgfield}}_offset = (int32_t)((ubufP(ub)-msgstart) -  {{offset}});", tmpldata)
+
+      local template = "msg->{{msgfield}}_offset = (int32_t)((ubufP(ub)-msgstart) -  {{offset}});"
+      if f.self_vtable then
+        template = template .. [[
+
+  /* The vtable for this message is contained in this field */
+  ptrdiff_t diff = offsetof(MSG_{{msgname}}, {{msgfield}}_offset) - offsetof(MSG_{{msgname}}, vtable);
+  msg->vtable = (int32_t)-(msg->{{msgfield}}_offset + diff + 4);]]
+      end
+
+      assignment = buildtemplate(template, tmpldata)
+
     end
 
     write.needmsgstart = true
@@ -1398,7 +1458,9 @@ generator.custom_field_writers = {
     write.order = write.order + 0x100000
   end,
   vtable = function(self, msgdef, f, valuestr)
-    return format("(int32_t)(-%s_vtoffsets[FBType_%s]);", self.target_name, msgdef.name)
+    if not msgdef.vtable_field then
+      return format("(int32_t)(-%s_vtoffsets[FBType_%s]);", self.target_name, msgdef.name)
+    end
   end,
   fbtable = function(self, msgdef, f, valuestr, write)
     assert(f.kind == "table")

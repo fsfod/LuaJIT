@@ -20,12 +20,12 @@
 //  stringlist: A list of strings joined together into an array but separated with nulls chars.
 //
 
-message header {
+message header (first_message) {
   fileheader : 24
   version : uint32
   headersize : uint32
   flags : uint32
-  vtables : [uint16]
+  vtables : [uint16] (self_vtable)
   vtable_offsets : [uint32]
   msgsizes : [int32]
   typenames : stringlist
