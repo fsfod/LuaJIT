@@ -1828,8 +1828,8 @@ static void write_header(jitlog_State *context)
     vmdef_array(ir_fpmath),
     vmdef_array(ir_fields),
     vmdef_array(trace_link),
-    .ir_calladdr = (uint64_t*)lj_vmdef.ir_calladdr,
-    .ir_calladdr_length = lj_vmdef.ir_call.count,
+    .ir_calladdr = lj_vmdef.ir_calladdr,
+    .ir_calladdr_length = (uint32_t)lj_vmdef.ir_call.count,
   };
 
   gc_info_Args gcinfo = build_gcinfo(context);
