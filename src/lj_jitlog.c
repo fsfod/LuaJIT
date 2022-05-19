@@ -1197,16 +1197,16 @@ static void gcalloc_cb(jitlog_State *context, GCobj *o, uint32_t info, size_t si
     ahsize |= t->hmask > 0 ? lj_fls(t->hmask+1) : 0;
     log_tab_resize(&context->ub, (info >> 8) & 0xff, info >> 16, o, ahsize);
     context->events_written |= JITLOGEVENT_OBJALLOC;
-    return;
+    goto end;
   }
 
   if (!free && 0) {
     if (tid == ~LJ_TSTR) {
       memorize_string(context, (GCstr *)o);
-      return;
+      goto end;
     } else if(tid == ~LJ_TFUNC) {
       memorize_func(context, (GCfunc *)o);
-      return;
+      goto end;
     }
   }
 
@@ -1223,7 +1223,7 @@ static void gcalloc_cb(jitlog_State *context, GCobj *o, uint32_t info, size_t si
     }
     log_obj_free(&context->ub, type, (uint32_t)(size <= 0xfffff ? size : 0), o);
     context->events_written |= JITLOGEVENT_OBJALLOC;
-    return;
+    goto end;
   }
 
   global_State *g = context->g;
@@ -1281,6 +1281,14 @@ static void gcalloc_cb(jitlog_State *context, GCobj *o, uint32_t info, size_t si
   }
 
   context->events_written |= JITLOGEVENT_OBJALLOC;
+
+end: {
+  lua_ObjAlloc_cb gcobj_event = ctx2usr(context)->gcobj_event;
+  void* ud = ctx2usr(context)->gcobj_event_ud;
+  if (gcobj_event && ud) {
+    gcobj_event(ud, o, info, size);
+  }
+}
 }
 
 static gc_info_Args build_gcinfo(jitlog_State* context) {
