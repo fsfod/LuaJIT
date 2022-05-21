@@ -20,6 +20,7 @@ typedef enum UBufAction {
   UBUF_SHINNK,
   UBUF_GET_OFFSET,
   UBUF_TRY_SET_OFFSET,
+  UBUF_GET_TOTAL_WRITTEN,
 } UBufAction;
 
 struct UserBuf;
@@ -310,12 +311,24 @@ static LJ_INLINE uint64_t ubuf_getoffset(UserBuf *ub)
 {
   lua_assert(ubufB(ub));
   uint64_t offset = 0;
-  if(ub->bufhandler(ub, UBUF_GET_OFFSET, &offset)){
+  if (ub->bufhandler(ub, UBUF_GET_OFFSET, &offset)) {
     return offset;
   } else {
     return 0;
   }
 }
+
+static LJ_INLINE uint64_t ubuf_get_totalwritten(UserBuf *ub)
+{
+  lua_assert(ubufB(ub));
+  uint64_t total = 0;
+  if (ub->bufhandler(ub, UBUF_GET_TOTAL_WRITTEN, &total)) {
+    return total;
+  } else {
+    return 0;
+  }
+}
+
 
 /* Try to set the combined offset of the buffer and backing file if buffer using one */
 static LJ_INLINE int ubuf_try_setoffset(UserBuf *ub, uint64_t offset)
