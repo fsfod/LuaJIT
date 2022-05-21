@@ -132,11 +132,12 @@ static LJ_AINLINE void ubuf_setmsgsize(UserBuf *ub, size_t size)
   ub->msgstart = -1;
 }
 
+/* Maximum amount of buffer that can safely be flushed that contained finished messages */
 static inline size_t ubuf_maxflush(UserBuf *ub)
 {
   if (ub->msgstart != -1) {
     lua_assert(ub->msgstart >= 0 && ub->msgstart <= (ptrdiff_t)ubuflen(ub));
-    return ubuflen(ub) - ub->msgstart;
+    return ub->msgstart;
   } else {
     return ubuflen(ub);
   }

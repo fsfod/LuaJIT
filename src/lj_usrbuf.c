@@ -393,7 +393,7 @@ int mmapbuf_doaction(UserBuf *ub, UBufAction action, void *arg)
     if (extra < state->window_size) {
       extra = state->window_size;
     }
-    return mmapbuf_grow(ub, extra, ubuf_maxflush(ub) - ubuflen(ub));
+    return mmapbuf_grow(ub, extra, ubuf_maxflush(ub));
   } else if (action == UBUF_FLUSH) {
     return mmapbuf_flush(ub);
   } else if (action == UBUF_CLOSE) {
