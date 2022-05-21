@@ -17,6 +17,7 @@ typedef enum UBufAction {
   UBUF_GROW_OR_FLUSH,
   UBUF_MSG_COMPLETE,
   UBUF_RESET,
+  UBUF_SHINNK,
   UBUF_GET_OFFSET,
   UBUF_TRY_SET_OFFSET,
 } UBufAction;
@@ -104,6 +105,15 @@ static LJ_AINLINE char *ubuf_need(UserBuf *ub, size_t sz)
   if (LJ_UNLIKELY(sz > ubufsz(ub)))
     return ubuf_need2(ub, sz);
   return ubufB(ub);
+}
+
+static LJ_AINLINE char *ubuf_shrink(UserBuf *ub, size_t sz)
+{
+  int result = ub->bufhandler(ub, UBUF_SHINNK, (void *)(uintptr_t)sz);
+  if (!result) {
+    return NULL;
+  }
+  return ubufP(ub);
 }
 
 static LJ_AINLINE char *ubuf_more(UserBuf *ub, size_t sz)

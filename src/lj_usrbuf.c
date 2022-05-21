@@ -98,6 +98,19 @@ static int membuff_grow(UserBuf *buff, size_t sz)
   return membuff_realloc(buff, nsz);
 }
 
+static int membuff_shrink(UserBuf *buff, size_t sz)
+{
+  if (sz < (size_t)buff->msgstart) {
+    return 0;
+  }
+
+  if (sz < 16) {
+    sz = 16;
+  }
+
+  return membuff_realloc(buff, sz);
+}
+
 static void membuff_trimstart(UserBuf *ub, size_t sz)
 {
   lj_assertX(sz < ubuflen(ub), "Bad buffer trim size");
@@ -116,6 +129,9 @@ int membuf_doaction(UserBuf *ub, UBufAction action, void *arg)
       return membuff_grow(ub, ubufsz(ub) +  (uintptr_t)arg);
     case UBUF_CLOSE:
       membuff_free(ub);
+      break;
+    case UBUF_SHINNK:
+      return membuff_shrink(ub, (uintptr_t)arg);
       break;
     case UBUF_RESET:
       ub->p = ubufB(ub);
