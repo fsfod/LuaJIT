@@ -103,6 +103,8 @@ typedef struct VMEventData_MCodeArena {
   void *base;
   size_t size;
   char free;
+  char failed;
+  int oserror;
 } VMEventData_MCodeArena;
 
 typedef struct VMEventData_LoopUnroll {

@@ -70,6 +70,15 @@ static void *mcode_alloc_at(jit_State *J, uintptr_t hint, size_t sz, DWORD prot)
 {
   void *p = LJ_WIN_VALLOC((void *)hint, sz,
 			  MEM_RESERVE|MEM_COMMIT|MEM_TOP_DOWN, prot);
+  if (!p) {
+    lj_vmevent_callback_(mainthread(J2G(J)), VMEVENT_MCODE_ARENA,
+      VMEventData_MCodeArena eventdata = { 0 };
+      eventdata.base = (void *)hint;
+      eventdata.size = sz;
+      eventdata.failed = 1;
+      eventdata.oserror = (int)GetLastError();
+    );
+  }
   if (!p && !hint)
     lj_trace_err(J, LJ_TRERR_MCODEAL);
   return p;
@@ -108,6 +117,13 @@ static void *mcode_alloc_at(jit_State *J, uintptr_t hint, size_t sz, int prot)
 {
   void *p = mmap((void *)hint, sz, prot|MCPROT_CREATE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
   if (p == MAP_FAILED) {
+    lj_vmevent_callback_(mainthread(J2G(J)), VMEVENT_MCODE_ARENA,
+      VMEventData_MCodeArena eventdata = { 0 };
+      eventdata.base = (void *)hint;
+      eventdata.size = sz;
+      eventdata.failed = 1;
+      eventdata.oserror = errno;
+    );
     if (!hint) lj_trace_err(J, LJ_TRERR_MCODEAL);
     p = NULL;
   }
