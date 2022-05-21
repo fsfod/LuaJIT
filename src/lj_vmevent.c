@@ -66,7 +66,7 @@ LUA_API int luaJIT_vmevent_sethook(lua_State *L, luaJIT_vmevent_callback cb, voi
     G(L)->vmevent_cb = cb;
     G(L)->vmevent_data = data;
   } else {
-    lua_assert(data == NULL);
+    lj_assertL(data == NULL, "VMEvent callback userdata should be null when clearing the hook");
     G(L)->vmevent_cb = NULL;
     G(L)->vmevent_data = NULL;
   }
@@ -95,7 +95,7 @@ LUA_API int luaJIT_gcevent_sethook(lua_State* L, luaJIT_vmevent_callback cb, voi
     G(L)->gc.gcevent_data = data;
   }
   else {
-    lua_assert(data == NULL);
+    lj_assertL(data == NULL, "GCEvent callback userdata should be null when clearing the hook");
     G(L)->gc.gcevent_cb = NULL;
     G(L)->gc.gcevent_data = NULL;
   }
