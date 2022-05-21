@@ -150,6 +150,24 @@ static LJ_AINLINE void ubuf_msgend(UserBuf *ub)
   ub->msgstart = -1;
 }
 
+static LJ_AINLINE int ubuf_slice(UserBuf *ub, UserBuf *dst, intptr_t start, size_t len)
+{
+
+  if (start > ubuflen(ub)) {
+    return 0;
+  }
+
+  if ((start + len) > ubuflen(ub)) {
+    return 0;
+  }
+
+  dst->b = ub->b + start;
+  dst->p = dst->e = dst->b + len;
+  dst->bufhandler = NULL;
+
+  return 1;
+}
+
 /* Maximum amount of buffer that can safely be flushed that contained finished messages */
 static inline size_t ubuf_maxflush(UserBuf *ub)
 {
