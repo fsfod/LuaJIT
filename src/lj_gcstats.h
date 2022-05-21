@@ -90,6 +90,8 @@ typedef struct GCSnapshot {
   HugeSnapshotObj *huge_objects;
   char* gcmem;
   size_t gcmem_size;
+  uint32_t ctypeid_count;
+  uint16_t* ctypeids;
   GCSnapshotHandle* handle;
 } GCSnapshot;
 

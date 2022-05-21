@@ -169,6 +169,7 @@ typedef struct GCSnapshotHandle {
   lua_State *L;
   LJList list;
   LJList huge_list;
+  LJList ctypeid_list;
   UserBuf ub;
 } GCSnapshotHandle;
 
@@ -177,14 +178,17 @@ static int dump_objlist(GCSnapshotHandle *state, GCtab *objlist);
 
 static GCSnapshotHandle *init_state(lua_State *L, int objmem)
 {
-  GCSnapshotHandle *state = lj_mem_newt(L, sizeof(GCSnapshotHandle) + sizeof(GCSnapshot), GCSnapshotHandle);
+  size_t statesz = sizeof(GCSnapshotHandle) + sizeof(GCSnapshot);
+  GCSnapshotHandle *state = lj_mem_newt(L, statesz, GCSnapshotHandle);
+  memset(state, 0, statesz);
   state->L = L;
   lj_list_init(L, &state->list, 32, SnapshotObj);
   lj_list_init(L, &state->huge_list, 8, HugeSnapshotObj);
+
   if (objmem) {
     ubuf_init_mem(&state->ub, 0);
   } else {
-    memset(&state->ub, 0, sizeof(state->ub));
+    lj_list_init(L, &state->ctypeid_list, 16, uint16_t);
   }
   return state;
 }
@@ -195,6 +199,8 @@ static void setup_snapshot(GCSnapshot *snapshot, GCSnapshotHandle *state)
   snapshot->objects = (SnapshotObj *)state->list.list;
   snapshot->huge_count = state->huge_list.count;
   snapshot->huge_objects = (HugeSnapshotObj *)state->huge_list.list;
+  snapshot->ctypeids = state->ctypeid_list.list;
+  snapshot->ctypeid_count = state->ctypeid_list.count;
 
   if (state->ub.b) {
     snapshot->gcmem = ubufB(&state->ub);
@@ -246,6 +252,10 @@ LUA_API void gcsnapshot_free(GCSnapshot *snapshot)
   lj_mem_freevec(g, handle->list.list, handle->list.capacity, SnapshotObj);
   lj_mem_freevec(g, handle->huge_list.list, handle->huge_list.capacity, HugeSnapshotObj);
 
+  if (handle->ctypeid_list.list) {
+    lj_mem_freevec(g, handle->ctypeid_list.list, handle->huge_list.capacity, HugeSnapshotObj);
+  }
+
   lj_mem_free(g, handle, sizeof(GCSnapshotHandle) + sizeof(GCSnapshot));
 }
 
@@ -287,6 +297,11 @@ static int gcobj_dump(GCSnapshotHandle *state, GCobj *o, int objmem)
   entry->typeandsize = ((uint32_t)size << 4) | gcobj_type(o);
   setgcrefp(entry->address, o);
   lj_list_increment(L, state->list, SnapshotObj);
+
+  if (o->gch.gct == ~LJ_TCDATA && state->ctypeid_list.list) {
+    *lj_list_current(L, state->ctypeid_list, uint16_t) = o->cd.ctypeid;
+    lj_list_increment(L, state->ctypeid_list, uint16_t);
+  }
 
   if (!objmem) {
     return 1;
