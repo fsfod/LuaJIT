@@ -301,9 +301,10 @@ static void* map_range(UserBuf *ub, uint64_t offset, size_t length)
   MMapBuf *state = (MMapBuf *)ub->state;
 
   char *b = mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, state->fd, offset);
-  if (b == MFAIL) {
+  if (b == MAP_FAILED) {
     report_error(ub, errno);
     lj_assertX(0, "Failed to map file range");
+    return MFAIL;
   }
   return b;
 }
