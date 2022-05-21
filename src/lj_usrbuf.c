@@ -162,7 +162,7 @@ int filebuf_doaction(UserBuf *ub, UBufAction action, void *arg)
 
   if (action == UBUF_INIT) {
     UBufInitArgs *args = (UBufInitArgs *)arg;
-    int fd = open(args->path, O_CREAT | O_WRONLY | O_BINARY, S_IRUSR | S_IWUSR);
+    int fd = open(args->path, O_CREAT | O_TRUNC | O_WRONLY | O_BINARY, S_IRUSR | S_IWUSR);
     file = fdopen(fd, "wb");
     if (file == NULL) {
       return 0;
@@ -343,7 +343,7 @@ static int mmapbuf_init(UserBuf *ub, UBufInitArgs *args)
   size_t winsize = args->minbufspace ? args->minbufspace : (10 * 1024 * 1024);
   MMapBuf *state = calloc(1, sizeof(MMapBuf));
   ub->state = state;
-  state->fd = open(args->path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP);
+  state->fd = open(args->path, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP);
   if (state->fd == -1) {
     return report_error(ub, errno);
   }
