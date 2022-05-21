@@ -142,6 +142,13 @@ static LJ_AINLINE void ubuf_setmsgsize(UserBuf *ub, size_t size)
   ub->msgstart = -1;
 }
 
+static LJ_AINLINE void ubuf_msgend(UserBuf *ub)
+{
+  lua_assert(ub->msgstart >= 0);
+  lua_assert(ubufleft(ub) >= UBUF_MINSPACE);
+  ub->msgstart = -1;
+}
+
 /* Maximum amount of buffer that can safely be flushed that contained finished messages */
 static inline size_t ubuf_maxflush(UserBuf *ub)
 {
@@ -173,6 +180,90 @@ static LJ_AINLINE UserBuf* ubuf_putarray(UserBuf* ub, const void* q, uint32_t co
   p = (char*)memcpy(p+sizeof(uint32_t), q, len) + len;
   setubufP(ub, p);
   return ub;
+}
+
+static LJ_AINLINE int ubuf_read_pointer(UserBuf* ub, int *offset, uint32_t basesize, void** result)
+{
+  if (offset == NULL || *offset == 0) {
+    *result = NULL;
+    return 1;
+  }
+
+  ptrdiff_t offsetdiff = ((char*)offset) - ubufB(ub) + *offset;
+
+  if (offsetdiff < 0) {
+    return 0;
+
+  }
+  size_t realofs = (size_t)offsetdiff;
+
+  if ((realofs + basesize) > ubuflen(ub)) {
+    return 0;
+  }
+
+  *result = ubufB(ub) + realofs;
+  return 1;
+}
+
+static LJ_AINLINE int ubuf_read_fbarray(UserBuf* ub, int *offset, size_t elesz, const void** result, uint32_t* size)
+{
+  if (offset == NULL || *offset == 0) {
+    *result = NULL;
+    *size = 0;
+    return 1;
+  }
+
+  ptrdiff_t offsetdif = ((char*)offset) - ubufB(ub) + *offset;
+
+  if (offsetdif < 0) {
+    return 0;
+
+  }
+  size_t realofs = (size_t)offsetdif;
+
+  if ((realofs + 4) > ubuflen(ub)) {
+    return 0;
+  }
+
+  char* data = ubufB(ub) + realofs;
+  uint32_t length = *(uint32_t*)data;
+
+  *size = length;
+  size_t arraysz = length * elesz;
+
+  if ((realofs + 4 + arraysz) > ubuflen(ub)) {
+    return 0;
+  }
+
+  *result = data + 4;
+  return 1;
+}
+
+static LJ_AINLINE int ubuf_read_fbstring(UserBuf* ub, int *offset, const char * * result)
+{
+  if (offset == NULL || *offset == 0) {
+    *result = "";
+    return 1;
+  }
+
+  uint32_t length = 0;
+ 
+  if (!ubuf_read_fbarray(ub, offset, 1, result, &length)) {
+    *result = NULL;
+    return 0;
+  }
+
+  if (length == 0) {
+    *result = "";
+    return 1;
+  }
+
+  /* Must be null terminated so caller can use it like a normal c string */
+  if ((*result)[length-1] != 0) {
+    return 0;
+  }
+
+  return 1;
 }
 
 static LJ_AINLINE size_t ubuf_fbarray_init(UserBuf* ub, size_t count)
