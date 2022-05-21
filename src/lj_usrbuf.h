@@ -94,6 +94,7 @@ static LJ_NOINLINE char *ubuf_more2(UserBuf *ub, size_t sz)
   if (!result) {
     return NULL;
   }
+  return ubufB(ub);
 }
 
 #endif
