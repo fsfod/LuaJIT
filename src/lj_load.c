@@ -115,6 +115,7 @@ LUALIB_API int luaL_loadfilex(lua_State *L, const char *filename,
       VMEventData_LoadScript eventdata = {0};
       eventdata.name = filename;
       eventdata.mode = mode;
+      eventdata.isfile = 1;
     );
     ctx.fp = fopen(filename, "rb");
     if (ctx.fp == NULL) {
@@ -127,6 +128,7 @@ LUALIB_API int luaL_loadfilex(lua_State *L, const char *filename,
     chunkname = "=stdin";
   }
   status = lua_loadx(L, reader_file, &ctx, chunkname, mode);
+  lj_vmevent_callback(L, VMEVENT_LOADFILE, NULL);
   if (ferror(ctx.fp)) {
     L->top -= filename ? 2 : 1;
     lua_pushfstring(L, "cannot read %s: %s", chunkname+1, strerror(errno));
