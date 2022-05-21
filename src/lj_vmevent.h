@@ -68,7 +68,7 @@ typedef enum {
 
 #define lj_gcevent(g, ev, args) \
   if((g)->gc.gcevent_cb != NULL) {\
-    (g)->gc.gcevent_cb(g->vmevent_data, mainthread(g), ev, (void*)(uintptr_t)(args));\
+    (g)->gc.gcevent_cb(g->gc.gcevent_data, mainthread(g), ev, (void*)(uintptr_t)(args));\
   }
 
 /* Special version where the event data struct declared in the macro. Avoids
