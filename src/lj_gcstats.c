@@ -544,7 +544,7 @@ size_t gcobj_size(GCobj *o)
   }
 }
 
-static void gcstats_tracker_callback(GCAllocationStats *state, GCobj *o, uint32_t info, size_t size)
+LUA_API void gcstats_tracker_callback(GCAllocationStats *state, GCobj *o, uint32_t info, size_t size)
 {
   int free = (info & 0x80) != 0;
   int tid = info & 0x7f;
@@ -597,6 +597,9 @@ LUA_API GCAllocationStats *start_gcstats_tracker(lua_State *L)
 {
   global_State *g = G(L);
   GCAllocationStats *state = malloc(sizeof(GCAllocationStats));
+  if (!state) {
+    return NULL;
+  }
   memset(state, 0, sizeof(GCAllocationStats));
   state->L = L;
   g->objallocd = state;

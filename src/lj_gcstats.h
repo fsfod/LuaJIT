@@ -114,11 +114,13 @@ typedef struct AllocationStat {
 } AllocationStat;
 
 typedef struct GCAllocationStats {
-  lua_State *L;
   AllocationStat stats[12];
+  lua_State *L;
+  void* ud;
 } GCAllocationStats;
 
 LUA_API GCAllocationStats *start_gcstats_tracker(lua_State *L);
 LUA_API void stop_gcstats_tracker(GCAllocationStats *tracker);
+LUA_API void gcstats_tracker_callback(GCAllocationStats *state, GCobj *o, uint32_t info, size_t size);
 
 #endif
