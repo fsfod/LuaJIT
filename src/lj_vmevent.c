@@ -109,8 +109,8 @@ LUA_API luaJIT_vmevent_callback luaJIT_gcevent_gethook(lua_State* L, void** data
   * data = NULL;
   return NULL;
 #else
-  *data = G(L)->gc.gcevent_cb;
-  return G(L)->gc.gcevent_data;
+  *data = G(L)->gc.gcevent_data;
+  return G(L)->gc.gcevent_cb;
 #endif
 }
 
