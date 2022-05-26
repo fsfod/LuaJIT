@@ -40,18 +40,18 @@ typedef struct VMdef {
   VMEnumDef trace_link;
   VMEnumDef flushreason;
   VMEnumDef jitparams;
-  int* jitparam_defaults;
-  uint8_t *irmode;
-  void** ir_calladdr;
+  const int* jitparam_defaults;
+  const uint8_t *irmode;
+  const void** ir_calladdr;
 } VMdef;
 
 typedef struct VMReflect {
   int typecount;
-  uint32_t* typesizes;
+  const uint32_t* typesizes;
   const char* const* typenames;
   int fieldcount;
   const char* const* fieldnames;
-  uint32_t* fieldoffsets;
+  const uint32_t* fieldoffsets;
 } VMReflect;
 
 extern const VMdef lj_vmdef;
