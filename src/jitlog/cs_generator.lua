@@ -217,7 +217,6 @@ local type_rename = {
 
   int32_t  = "int",
   uint32_t = "uint",
-  TValue = "TValue"
 }
 
 generator.typerename = type_rename
