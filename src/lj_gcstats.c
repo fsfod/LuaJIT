@@ -179,7 +179,7 @@ static int dump_objlist(GCSnapshotHandle *state, GCtab *objlist);
 static GCSnapshotHandle *init_state(lua_State *L, int objmem)
 {
   size_t statesz = sizeof(GCSnapshotHandle) + sizeof(GCSnapshot);
-  GCSnapshotHandle *state = lj_mem_newt(L, statesz, GCSnapshotHandle);
+  GCSnapshotHandle *state = lj_mem_newt(L, (GCSize)statesz, GCSnapshotHandle);
   memset(state, 0, statesz);
   state->L = L;
   lj_list_init(L, &state->list, 32, SnapshotObj);
@@ -834,7 +834,7 @@ static GCRef fixupgcobj(FixupInfo *fixups, GCRef ref)
     return ref;
   }
 
-  MSize hash = gcrefu(ref) >> 4;
+  MSize hash = (MSize)(gcrefu(ref) >> 4);
 
   GCRef result = { 0 };
   MSize index = hash & fixups->size;
