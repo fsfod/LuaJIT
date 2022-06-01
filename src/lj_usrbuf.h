@@ -153,7 +153,7 @@ static LJ_AINLINE void ubuf_msgend(UserBuf *ub)
 static LJ_AINLINE int ubuf_slice(UserBuf *ub, UserBuf *dst, intptr_t start, size_t len)
 {
 
-  if (start > ubuflen(ub)) {
+  if (start > (intptr_t)ubuflen(ub)) {
     return 0;
   }
 
