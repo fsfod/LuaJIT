@@ -12,6 +12,7 @@
 #include "lua.h"
 #include "lj_def.h"
 #include "lj_arch.h"
+#include "vmevent.h"
 
 /* -- Memory references --------------------------------------------------- */
 
@@ -598,6 +599,7 @@ typedef struct GCState {
 #else
   uint8_t unused1;
 #endif
+  uint8_t gcexit;
   MSize sweepstr;	/* Sweep position in string table. */
   GCRef root;		/* List of all collectable objects. */
   MRef sweep;		/* Sweep position in root list. */
@@ -612,6 +614,8 @@ typedef struct GCState {
 #if LJ_64
   MRef lightudseg;	/* Upper bits of lightuserdata segments. */
 #endif
+  luaJIT_vmevent_callback gcevent_cb;
+  void *gcevent_data;
 } GCState;
 
 /* String interning state. */
@@ -659,6 +663,9 @@ typedef struct global_State {
   GCRef gcroot[GCROOT_MAX];  /* GC roots. */
   lua_ObjAlloc_cb objalloc_cb; /* Callback for allocation of GC object*/
   void* objallocd;             /* GC object callback data */
+
+  luaJIT_vmevent_callback vmevent_cb; /* User set VM event callback. */
+  void *vmevent_data;                 /* VM event callback data. */
 } global_State;
 
 #define mainthread(g)	(&gcref(g->mainthref)->th)

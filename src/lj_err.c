@@ -17,6 +17,7 @@
 #include "lj_trace.h"
 #include "lj_vm.h"
 #include "lj_strfmt.h"
+#include "lj_vmevent.h"
 
 /*
 ** LuaJIT can either use internal or external frame unwinding:
@@ -874,6 +875,11 @@ LJ_NORET LJ_NOINLINE static void err_msgv(lua_State *L, ErrMsg em, ...)
   msg = lj_strfmt_pushvf(L, err2msg(em), argp);
   va_end(argp);
   lj_debug_addloc(L, msg, L->base-1, NULL);
+  lj_vmevent_callback_(L, VMEVENT_ERROR_THROWN,
+    VMEventData_LuaError eventdata = { 0 };
+    eventdata.errmsg = strVdata(L->top - 1);
+    eventdata.errid = em;
+  );
   lj_err_run(L);
 }
 
@@ -894,6 +900,12 @@ LJ_NOINLINE void lj_err_lex(lua_State *L, GCstr *src, const char *tok,
   msg = lj_strfmt_pushf(L, "%s:%d: %s", buff, line, msg);
   if (tok)
     lj_strfmt_pushf(L, err2msg(LJ_ERR_XNEAR), msg, tok);
+
+  lj_vmevent_callback_(L, VMEVENT_ERROR_THROWN,
+    VMEventData_LuaError eventdata = {0};
+    eventdata.errmsg = strVdata(L->top - 1);
+    eventdata.errid = em;
+  );
   lj_err_throw(L, LUA_ERRSYNTAX);
 }
 
@@ -942,7 +954,7 @@ LJ_NOINLINE void lj_err_optype_call(lua_State *L, TValue *o)
 }
 
 /* Error in context of caller. */
-LJ_NOINLINE void lj_err_callermsg(lua_State *L, const char *msg)
+static void err_callermsg(lua_State *L, const char *msg, int errid, int narg)
 {
   TValue *frame = NULL, *pframe = NULL;
   if (!(LJ_HASJIT && tvref(G(L)->jit_base))) {
@@ -968,7 +980,19 @@ LJ_NOINLINE void lj_err_callermsg(lua_State *L, const char *msg)
     }
   }
   lj_debug_addloc(L, msg, pframe, frame);
+  lj_vmevent_callback_(L, VMEVENT_ERROR_THROWN,
+    VMEventData_LuaError eventdata = { 0 };
+    eventdata.errmsg = strVdata(L->top - 1);
+    eventdata.errid = errid;
+    eventdata.frame = pframe;
+    eventdata.narg = narg;
+  );
   lj_err_run(L);
+}
+
+LJ_NOINLINE void lj_err_callermsg(lua_State* L, const char* msg)
+{
+  err_callermsg(L, msg, -1, 0);
 }
 
 /* Formatted error in context of caller. */
@@ -979,18 +1003,18 @@ LJ_NOINLINE void lj_err_callerv(lua_State *L, ErrMsg em, ...)
   va_start(argp, em);
   msg = lj_strfmt_pushvf(L, err2msg(em), argp);
   va_end(argp);
-  lj_err_callermsg(L, msg);
+  err_callermsg(L, msg, em, 0);
 }
 
 /* Error in context of caller. */
 LJ_NOINLINE void lj_err_caller(lua_State *L, ErrMsg em)
 {
-  lj_err_callermsg(L, err2msg(em));
+  err_callermsg(L, err2msg(em), em, 0);
 }
 
 /* Argument error message. */
 LJ_NORET LJ_NOINLINE static void err_argmsg(lua_State *L, int narg,
-					    const char *msg)
+					    const char *msg, int errid)
 {
   const char *fname = "?";
   const char *ftype = lj_debug_funcname(L, L->base - 1, &fname);
@@ -1000,7 +1024,7 @@ LJ_NORET LJ_NOINLINE static void err_argmsg(lua_State *L, int narg,
     msg = lj_strfmt_pushf(L, err2msg(LJ_ERR_BADSELF), fname, msg);
   else
     msg = lj_strfmt_pushf(L, err2msg(LJ_ERR_BADARG), narg, fname, msg);
-  lj_err_callermsg(L, msg);
+  err_callermsg(L, msg, errid != -1 ? errid : LJ_ERR_BADARG, narg);
 }
 
 /* Formatted argument error. */
@@ -1011,13 +1035,13 @@ LJ_NOINLINE void lj_err_argv(lua_State *L, int narg, ErrMsg em, ...)
   va_start(argp, em);
   msg = lj_strfmt_pushvf(L, err2msg(em), argp);
   va_end(argp);
-  err_argmsg(L, narg, msg);
+  err_argmsg(L, narg, msg, em);
 }
 
 /* Argument error. */
 LJ_NOINLINE void lj_err_arg(lua_State *L, int narg, ErrMsg em)
 {
-  err_argmsg(L, narg, err2msg(em));
+  err_argmsg(L, narg, err2msg(em), em);
 }
 
 /* Typecheck error for arguments. */
@@ -1040,7 +1064,7 @@ LJ_NOINLINE void lj_err_argtype(lua_State *L, int narg, const char *xname)
     tname = o < L->top ? lj_typename(o) : lj_obj_typename[0];
   }
   msg = lj_strfmt_pushf(L, err2msg(LJ_ERR_BADTYPE), xname, tname);
-  err_argmsg(L, narg, msg);
+  err_argmsg(L, narg, msg, LJ_ERR_BADTYPE);
 }
 
 /* Typecheck error for arguments. */
@@ -1061,13 +1085,19 @@ LUA_API lua_CFunction lua_atpanic(lua_State *L, lua_CFunction panicf)
 /* Forwarders for the public API (C calling convention and no LJ_NORET). */
 LUA_API int lua_error(lua_State *L)
 {
+  lj_vmevent_callback_(L, VMEVENT_ERROR_THROWN,
+    VMEventData_LuaError eventdata = { 0 };
+    TValue *err = L->top - 1;
+    eventdata.errmsg = tvisstr(err) ? strVdata(err) : NULL;
+    eventdata.errid = -1;
+  );
   lj_err_run(L);
   return 0;  /* unreachable */
 }
 
 LUALIB_API int luaL_argerror(lua_State *L, int narg, const char *msg)
 {
-  err_argmsg(L, narg, msg);
+  err_argmsg(L, narg, msg, -1);
   return 0;  /* unreachable */
 }
 

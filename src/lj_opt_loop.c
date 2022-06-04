@@ -18,6 +18,7 @@
 #include "lj_trace.h"
 #include "lj_snap.h"
 #include "lj_vm.h"
+#include "lj_vmevent.h"
 
 /* Loop optimization:
 **
@@ -423,6 +424,13 @@ int lj_opt_loop(jit_State *J)
   lps.subst = NULL;
   lps.sizesubst = 0;
   errcode = lj_vm_cpcall(J->L, NULL, &lps, cploop_opt);
+  lj_vmevent_callback_(J->L, VMEVENT_JIT_LOOP_UNROLL,
+    VMEventData_LoopUnroll eventdata = { 0 };
+    eventdata.irmapping = lps.subst;
+    eventdata.ircount = lps.sizesubst;
+    eventdata.success = errcode == 0;
+    eventdata.traceerr = (errcode == LUA_ERRRUN && tvisnumber(J->L->top - 1)) ? numberVint(J->L->top - 1) : -1;
+  );
   lj_mem_freevec(J2G(J), lps.subst, lps.sizesubst, IRRef1);
   if (LJ_UNLIKELY(errcode)) {
     lua_State *L = J->L;

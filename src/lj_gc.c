@@ -27,11 +27,20 @@
 #include "lj_trace.h"
 #include "lj_dispatch.h"
 #include "lj_vm.h"
+#include "lj_vmevent.h"
 
 #define GCSTEPSIZE	1024u
 #define GCSWEEPMAX	40
 #define GCSWEEPCOST	10
 #define GCFINALIZECOST	100
+
+#define lj_vmevent_atomicstage(g, substate) lj_gcevent(g, GCEVENT_ATOMICSTAGE, (void*)(uintptr_t)(substate))
+
+static void gc_setstate(global_State *g, int newstate)
+{
+  lj_gcevent(g, GCEVENT_STATECHANGE, newstate);
+  g->gc.state = newstate;
+}
 
 /* Macros to set GCobj colors and flags. */
 #define white2gray(x)		((x)->gch.marked &= (uint8_t)~LJ_GC_WHITES)
@@ -107,7 +116,7 @@ static void gc_mark_start(global_State *g)
   gc_markobj(g, tabref(mainthread(g)->env));
   gc_marktv(g, &g->registrytv);
   gc_mark_gcroot(g);
-  g->gc.state = GCSpropagate;
+  gc_setstate(g, GCSpropagate);
 }
 
 /* Mark open upvalues. */
@@ -618,9 +627,11 @@ static void atomic(global_State *g, lua_State *L)
 {
   size_t udsize;
 
+  lj_vmevent_atomicstage(g, GCATOMIC_MARK_UPVALUES);
   gc_mark_uv(g);  /* Need to remark open upvalues (the thread may be dead). */
   gc_propagate_gray(g);  /* Propagate any left-overs. */
 
+  lj_vmevent_atomicstage(g, GCATOMIC_MARK_ROOTS);
   setgcrefr(g->gc.gray, g->gc.weak);  /* Empty the list of weak tables. */
   setgcrefnull(g->gc.weak);
   lj_assertG(!iswhite(obj2gco(mainthread(g))), "main thread turned white");
@@ -629,17 +640,23 @@ static void atomic(global_State *g, lua_State *L)
   gc_mark_gcroot(g);  /* Mark GC roots (again). */
   gc_propagate_gray(g);  /* Propagate all of the above. */
 
+  lj_vmevent_atomicstage(g, GCATOMIC_MARK_GRAYAGAIN);
   setgcrefr(g->gc.gray, g->gc.grayagain);  /* Empty the 2nd chance list. */
   setgcrefnull(g->gc.grayagain);
   gc_propagate_gray(g);  /* Propagate it. */
 
+  lj_vmevent_atomicstage(g, GCATOMIC_SEPARATE_UDATA);
   udsize = lj_gc_separateudata(g, 0);  /* Separate userdata to be finalized. */
+
+  lj_vmevent_atomicstage(g, GCATOMIC_MARK_UDATA);
   gc_mark_mmudata(g);  /* Mark them. */
   udsize += gc_propagate_gray(g);  /* And propagate the marks. */
 
+  lj_vmevent_atomicstage(g, GCATOMIC_CLEARWEAK);
   /* All marking done, clear weak tables. */
   gc_clearweak(g, gcref(g->gc.weak));
 
+  lj_vmevent_atomicstage(g, GCATOMIC_STAGE_END);
   lj_buf_shrink(L, &g->tmpbuf);  /* Shrink temp buffer. */
 
   /* Prepare for sweep phase. */
@@ -660,20 +677,21 @@ static size_t gc_onestep(lua_State *L)
   case GCSpropagate:
     if (gcref(g->gc.gray) != NULL)
       return propagatemark(g);  /* Propagate one gray object. */
-    g->gc.state = GCSatomic;  /* End of mark phase. */
+    gc_setstate(g, GCSatomic); /* End of mark phase. */
     return 0;
   case GCSatomic:
     if (tvref(g->jit_base))  /* Don't run atomic phase on trace. */
       return LJ_MAX_MEM;
     atomic(g, L);
-    g->gc.state = GCSsweepstring;  /* Start of sweep phase. */
+    gc_setstate(g, GCSsweepstring);  /* Start of sweep phase. */
     g->gc.sweepstr = 0;
     return 0;
   case GCSsweepstring: {
     GCSize old = g->gc.total;
     gc_sweepstr(g, &g->str.tab[g->gc.sweepstr++]);  /* Sweep one chain. */
-    if (g->gc.sweepstr > g->str.mask)
-      g->gc.state = GCSsweep;  /* All string hash chains sweeped. */
+    if (g->gc.sweepstr > g->str.mask) {
+      gc_setstate(g, GCSsweep);  /* All string hash chains sweeped. */
+    }
     lj_assertG(old >= g->gc.total, "sweep increased memory");
     g->gc.estimate -= old - g->gc.total;
     return GCSWEEPCOST;
@@ -687,12 +705,12 @@ static size_t gc_onestep(lua_State *L)
       if (g->str.num <= (g->str.mask >> 2) && g->str.mask > LJ_MIN_STRTAB*2-1)
 	lj_str_resize(L, g->str.mask >> 1);  /* Shrink string table. */
       if (gcref(g->gc.mmudata)) {  /* Need any finalizations? */
-	g->gc.state = GCSfinalize;
+	gc_setstate(g, GCSfinalize);
 #if LJ_HASFFI
 	g->gc.nocdatafin = 1;
 #endif
       } else {  /* Otherwise skip this phase to help the JIT. */
-	g->gc.state = GCSpause;  /* End of GC cycle. */
+	gc_setstate(g, GCSpause);  /* End of GC cycle. */
 	g->gc.debt = 0;
       }
     }
@@ -710,7 +728,7 @@ static size_t gc_onestep(lua_State *L)
 #if LJ_HASFFI
     if (!g->gc.nocdatafin) lj_tab_rehash(L, ctype_ctsG(g)->finalizer);
 #endif
-    g->gc.state = GCSpause;  /* End of GC cycle. */
+    gc_setstate(g, GCSpause);  /* End of GC cycle. */
     g->gc.debt = 0;
     return 0;
   default:
@@ -765,10 +783,16 @@ int LJ_FASTCALL lj_gc_step_jit(global_State *g, MSize steps)
   lua_State *L = gco2th(gcref(g->cur_L));
   L->base = tvref(G(L)->jit_base);
   L->top = curr_topL(L);
-  while (steps-- > 0 && lj_gc_step(L) == 0)
-    ;
-  /* Return 1 to force a trace exit. */
-  return (G(L)->gc.state == GCSatomic || G(L)->gc.state == GCSfinalize);
+  lj_gcevent(g, GCEVENT_STEP, steps);
+  while (steps-- > 0 && lj_gc_step(L) == 0) {}
+  lj_gcevent(g, GCEVENT_STEP, 0);
+  if ((G(L)->gc.state == GCSatomic || G(L)->gc.state == GCSfinalize)) {
+    G(L)->gc.gcexit = 1;
+    /* Return 1 to force a trace exit. */
+    return 1;
+  } else {
+    return 0;
+  }
 }
 #endif
 
@@ -777,13 +801,14 @@ void lj_gc_fullgc(lua_State *L)
 {
   global_State *g = G(L);
   int32_t ostate = g->vmstate;
+  lj_gcevent(g, GCEVENT_FULLGC, 1);
   setvmstate(g, GC);
   if (g->gc.state <= GCSatomic) {  /* Caught somewhere in the middle. */
     setmref(g->gc.sweep, &g->gc.root);  /* Sweep everything (preserving it). */
     setgcrefnull(g->gc.gray);  /* Reset lists from partial propagation. */
     setgcrefnull(g->gc.grayagain);
     setgcrefnull(g->gc.weak);
-    g->gc.state = GCSsweepstring;  /* Fast forward to the sweep phase. */
+    gc_setstate(g, GCSsweepstring);  /* Fast forward to the sweep phase. */
     g->gc.sweepstr = 0;
   }
   while (g->gc.state == GCSsweepstring || g->gc.state == GCSsweep)
@@ -791,10 +816,11 @@ void lj_gc_fullgc(lua_State *L)
   lj_assertG(g->gc.state == GCSfinalize || g->gc.state == GCSpause,
 	     "bad GC state");
   /* Now perform a full GC. */
-  g->gc.state = GCSpause;
+  gc_setstate(g, GCSpause);
   do { gc_onestep(L); } while (g->gc.state != GCSpause);
   g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
   g->vmstate = ostate;
+  lj_gcevent(g, GCEVENT_FULLGC, 0);
 }
 
 /* -- Write barriers ------------------------------------------------------ */

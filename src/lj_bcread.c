@@ -22,6 +22,7 @@
 #include "lj_bcdump.h"
 #include "lj_state.h"
 #include "lj_strfmt.h"
+#include "lj_vmevent.h"
 
 /* Reuse some lexer fields for our own purposes. */
 #define bcread_flags(ls)	ls->level
@@ -41,6 +42,11 @@ static LJ_NOINLINE void bcread_error(LexState *ls, ErrMsg em)
   if (*name == BCDUMP_HEAD1) name = "(binary)";
   else if (*name == '@' || *name == '=') name++;
   lj_strfmt_pushf(L, "%s: %s", name, err2msg(em));
+  lj_vmevent_callback_(L, VMEVENT_ERROR_THROWN,
+    VMEventData_LuaError eventdata = { 0 };
+    eventdata.errmsg = strVdata(L->top - 1);
+    eventdata.errid = em;
+  );
   lj_err_throw(L, LUA_ERRSYNTAX);
 }
 
