@@ -307,6 +307,7 @@ static GCstr *lj_str_alloc(lua_State *L, const char *str, MSize len,
   setgcrefp(g->str.tab[hash], ((uintptr_t)s | (u & 1)));
   if (g->str.num++ > g->str.mask)  /* Allow a 100% load factor. */
     lj_str_resize(L, (g->str.mask<<1)+1);  /* Grow string table. */
+  lj_mem_createcb(L, s, lj_str_size(s->len));
   return s;  /* Return newly interned string. */
 }
 
@@ -358,7 +359,7 @@ GCstr *lj_str_new(lua_State *L, const char *str, size_t lenx)
 void LJ_FASTCALL lj_str_free(global_State *g, GCstr *s)
 {
   g->str.num--;
-  lj_mem_free(g, s, lj_str_size(s->len));
+  lj_mem_freegco(g, s, lj_str_size(s->len));
 }
 
 void LJ_FASTCALL lj_str_init(lua_State *L)
