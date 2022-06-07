@@ -732,6 +732,7 @@ static void jit_init(lua_State *L)
   J->flags = jit_cpudetect() | JIT_F_ON | JIT_F_OPT_DEFAULT;
   memcpy(J->param, jit_param_default, sizeof(J->param));
   lj_dispatch_update(G(L));
+  lj_vmevent_callback(L, VMEVENT_JIT_INIT, (void*)(uintptr_t)1);
 }
 #endif
 
