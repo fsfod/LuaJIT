@@ -71,6 +71,8 @@ typedef struct jitlog_State {
   char infullgc;
   GCAllocationStats *gcstats;
   char oballoc_stacks;
+  GCSize last_heapsize;
+  GCSize heapsize_difflog;
 } jitlog_State;
 
 
@@ -1009,12 +1011,34 @@ typedef enum LocKind {
   LOCATION_TRACE_MCODE,
 } LocKind;
 
+static void checklog_heapsize(jitlog_State *context)
+{
+  GCSize curr = context->g->gc.total;
+
+  int64_t diff = curr > context->last_heapsize ? (curr - context->last_heapsize) : (context->last_heapsize - curr);
+
+  if (diff > context->heapsize_difflog) {
+    log_gc_heapsize(&context->ub, context->g->gc.total);
+    context->last_heapsize = curr;
+  }
+}
+
+void gcstats_tracker_callback(GCAllocationStats *state, GCobj *o, uint32_t info, size_t size);
+
+void jitlog_gcstatscb(GCAllocationStats *state, GCobj *o, uint32_t info, size_t size)
+{
+  checklog_heapsize((jitlog_State *)state->ud);
+  gcstats_tracker_callback(state, o, info, size);
+}
+
 static void gcalloc_cb(jitlog_State *context, GCobj *o, uint32_t info, size_t size)
 {
   int free = (info & 0x80) != 0;
   int tid = info & 0x7f;
   uint32_t type = 0;
   uint32_t extra = 0;
+
+  checklog_heapsize(context);
 
   /* Array and\or hash part of a table has been resized */
   if (tid == (1 + ~LJ_TUDATA)) {
@@ -1743,6 +1767,8 @@ static int jitlog_set_gcstats_enabled(jitlog_State *context, int enable)
       return context->gcstats != NULL;
     }
     context->gcstats = start_gcstats_tracker(L);
+    context->gcstats->ud = context;
+    context->g->objalloc_cb = (lua_ObjAlloc_cb)&jitlog_gcstatscb;
   } else { 
     if (context->g->objalloc_cb == (lua_ObjAlloc_cb)&gcalloc_cb) {
       /* we shouldn't have both callbacks enabled at the same time */
@@ -1825,6 +1851,7 @@ static jitlog_State *jitlog_start_safe(lua_State *L, UserBuf *ub)
   context->loadstate = LoadState_SafeStart;
   context->saved_stack = jl_newvec(context, 32, TValue);
   context->saved_stacksz = 32;
+  context->heapsize_difflog = 10*1024;
 
   if (ub != NULL) {
     memcpy(&context->ub, ub, sizeof(UserBuf));

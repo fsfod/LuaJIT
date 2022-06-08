@@ -491,3 +491,8 @@ message tab_resize (no_vtable){
   address : GCRefPtr
   ahsize : uint32
 }
+
+message gc_heapsize (no_vtable){
+  time : timestamp
+  size : uint64
+}
