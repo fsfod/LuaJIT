@@ -63,6 +63,7 @@ typedef struct JITLogUserContext {
   luaJIT_vmevent_callback gcevent;
   void *gcevent_ud;
   JITLogFilter logfilter;
+  JITLogFilter autoflush_msgs;
   uint64_t vmevent_autoflush;
   uint32_t gcevent_autoflush;
 } JITLogUserContext;

@@ -1664,9 +1664,11 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
   /* Check if new messages were written to the buffer */
   if (ubufP(&context->ub) != bufpos) {
     ubuf_msgcomplete(&context->ub);
-    if (usr->vmevent_autoflush & (1ull << eventid)) {
-      ubuf_flush(&context->ub);
-    }
+  }
+
+  if ((usr->autoflush_msgs & context->events_written) || (usr->vmevent_autoflush & (1ull << eventid))) {
+    ubuf_flush(&context->ub);
+    context->events_written = 0;
   }
   TIMER_END(jitlog_vmevent);
 }
@@ -2184,9 +2186,11 @@ LUA_API uint64_t jitlog_getsize(JITLogUserContext* usrcontext)
 /* Trigger a flush if required for event types just written should be only used from explicit user called JITLog apis */
 static int jitlog_checkflush(jitlog_State* context, JITLogEventTypes events)
 {
+  JITLogUserContext* usr = ctx2usr(context);
+
   context->events_written |= events;
-  /* TODO: Allow restricting auto flushing to only some types of events */
-  if (context->mode & JITLogMode_AutoFlush) {
+
+  if (usr->autoflush_msgs & context->events_written) {
     ubuf_flush(&context->ub);
     context->events_written = 0;
     return 1;
