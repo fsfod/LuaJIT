@@ -384,6 +384,18 @@ function parser:parse_msg(def, m)
     add_field({name = "header", type = "uint32", noarg = true, writer = "msghdr"})
   end
 
+  local mapto = def.attributes.mapto
+
+  if mapto then
+    local target = self.types[mapto]
+    if not target then
+      error(format("Bad mapto name no message named %s used for message %s", mapto, def.name))
+    elseif target.kind ~= "message" then
+      error(format("Bad mapto target %s is not a message used for message %s", mapto, def.name))
+    end
+    def.mapto = target
+  end
+
   local bitpacked = false
   if def.attributes.no_vtable then
     m.no_vtable = true
@@ -921,7 +933,7 @@ function generator:get_boundscheck(def)
   return nil
 end
 
-function generator:write_struct(def, template)
+function generator:write_struct(def, template, extra_args)
   local fieldstr = ""
   local fieldgetters = {}
 
@@ -954,13 +966,20 @@ function generator:write_struct(def, template)
   end
 
   local template_args = {
-    name = def.name,
+    name = self.typerename[def.name] or def.name,
     kind = def.kind,
     cprefix = def.cprefix or "",
     fields = fieldstr,
     bitfields = fieldgetters,
-    boundscheck = self:get_boundscheck(def)
+    boundscheck = self:get_boundscheck(def),
+    size = def.size,
   }
+
+  if extra_args then
+    for k, v in pairs(extra_args) do
+      template_args[k] = v
+    end
+  end
 
   self:write(buildtemplate(template, template_args))
   return #fieldgetters > 0 and fieldgetters
@@ -1436,7 +1455,10 @@ function generator:build_boundscheck(msgdef)
 end
 
 function generator:write_enums()
-  for name, def in pairs(self.enums) do
+  local sortednames = util.keys(self.enums)
+  table.sort(sortednames)
+  for _, name in ipairs(sortednames) do
+    local def = self.enums[name]
     self:write_enum(name, def.entries, def.prefix)
   end
 end
@@ -1561,6 +1583,10 @@ local function writelang(lang, data, options)
 
   local state = {}
   util.copyfields(data, state, copyfields)
+  -- Allow extra type renames to be added when running the generator
+  if lgen.typerename then
+    state.typerename = util.clone(lgen.typerename)
+  end
   -- Allow the language generator to override base generator functions
   setmetatable(state, {
     __index = function(self, key)
