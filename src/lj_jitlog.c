@@ -26,7 +26,10 @@
 
 #include "jitlog.h"
 
-#define JITLOG_FILE_VERSION 2
+/*
+3: IR constant size is based on irt_is64
+*/
+#define JITLOG_FILE_VERSION 3
 
 typedef enum LoadState {
   LoadState_SafeStart = 1,
@@ -1829,6 +1832,7 @@ static void write_header(jitlog_State *context)
     vmdef_array(terror),
     vmdef_array(trace_errors),
     vmdef_array(ir),
+    .irt_is64 = IRT_IS64,
     .ir_mode = lj_vmdef.irmode,
     .ir_mode_length = (uint32_t)lj_vmdef.ir.count+1,
     vmdef_array(ir_types),

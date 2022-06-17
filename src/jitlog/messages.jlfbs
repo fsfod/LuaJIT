@@ -149,6 +149,7 @@ table VMDef{
   terror: stringlist
   trace_errors : stringlist
   ir : stringlist
+  irt_is64 : uint32
   ir_mode : [uint8]
   ir_types : stringlist
   ir_call : stringlist
