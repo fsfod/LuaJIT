@@ -243,8 +243,35 @@ local keywords = {
   String = true,
 }
 
+local namefixups = {
+  jit = "JIT",
+  ir = "IR",
+  vm = "VM",
+  gc = "GC",
+}
+
+local fixed_names = {}
+
 local function CSName(name)
-  return name:gsub("^%l", string.upper):gsub("_(%l)", string.upper)
+  local csname = fixed_names[name]
+  if csname then
+    return csname
+  end
+
+  if not string.find(name, "_") then
+    csname = name:gsub("^%l", string.upper)
+    fixed_names[name] = csname
+    return csname
+  end
+
+  csname = ""
+  for word in name:gmatch("[^_]+") do
+    word = namefixups[word] or word
+    csname = csname..word:gsub("^%l", string.upper)
+  end
+
+  fixed_names[name] = csname
+  return csname
 end
 
 function generator:fixname(name, CamelCase)
