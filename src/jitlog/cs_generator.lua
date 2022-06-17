@@ -187,6 +187,15 @@ public readonly struct {{name}}_Writer {
     }
 ]],
 
+  create_reader = [[
+    public static {{structname}}_Reader Read_{{name}}(Span<byte> buffer) {
+      if(buffer.Length < 4) {
+        ThrowBufferTooSmall(buffer);
+      }
+      return new {{structname}}_Reader(buffer, GetVTable(FBType.{{name}}).Span);
+    }
+
+]]
 }
 
 local type_rename = {
@@ -278,7 +287,8 @@ function generator:fmt_accessor_get(struct, f, msgvar)
   return format("%s->%s", msgvar, self:fixname(f.name))
 end
 
-local vprop_array = [[
+local vprop = {
+  array = [[
 public unsafe {{ret}} {{csname}} {
     get {
       if (_self->{{name}}_offset == 0) {
@@ -287,17 +297,17 @@ public unsafe {{ret}} {{csname}} {
       return FBUtils.{{body}}<{{type}}>(_self, &_self->{{name}}_offset, _size);
     }
   }
-]]
+]],
 
-local vprop_fixedarray = [[
+  fixedarray = [[
 public unsafe {{ret}} {{csname}} {
     get {
       return new Span<{{type}}>(&_self->{{name}}, {{size}});
     }
   }
-]]
+]],
 
-local vprop_table = [[
+  table = [[
 public {{type}} {{csname}} {
     get {
         if (_self->{{name}}_offset == 0) {
@@ -308,9 +318,9 @@ public {{type}} {{csname}} {
   }
 
   public bool {{csname}}_HasValue => _self->{{name}}_offset != 0;
-]]
+]],
 
-local vprop_string = [[
+  string = [[
 public unsafe string {{csname}} {
     get {
         var span = FBUtils.GetArraySpan<sbyte>(_self, &_self->{{name}}_offset, _size);
@@ -322,15 +332,24 @@ public unsafe string {{csname}} {
         }
     }
   }
-]]
+]],
 
-local vprop_stringlist = [[
+  stringlist = [[
 public unsafe string[] {{csname}} {
   get {
     return FBUtils.ParseStringList(FBUtils.GetArraySpan<byte>(_self, &_self->{{name}}_offset, _size));
   }
 }
-]]
+]],
+
+  notimplemented = [[
+public unsafe {{ret}} {{csname}} {
+    get {
+     throw new NotImplementedException("reader type for '{{name}}' field not supported yet");
+    }
+  }
+]],
+}
 
 
 generator.field_template = {
@@ -340,18 +359,18 @@ generator.field_template = {
   },
   string = {
     ret = "string",
-    template = vprop_string,
+    template = vprop.string,
     interface = "[FBSlot({{vtslot}})]\n  public string {{csname}} { get; }",
     reader = [[public string {{csname}} => FBReader.GetString(VTable, Buffer, {{vtslot}});]]
   },
   stringlist = {
     ret = "string[]",
-    template = vprop_stringlist,
+    template = vprop.stringlist,
     interface = "[FBSlot({{vtslot}})]\n  public string[] {{csname}} { get; }",
     missing = "public string[] {{csname}}  => Array.Empty<string>();",
   },
   table = {
-    template = vprop_table,
+    template = vprop.table,
     ret = function(self, def, f)
       return self.typerename[f.type]
     end,
@@ -360,15 +379,25 @@ generator.field_template = {
   },
   array = {
     template = function(self, def, f)
+      local element_name = self.types[f.type].element_type
+      local element_type = self.types[element_name]
       if f.fixedsize then
-        return vprop_fixedarray
+        return vprop.fixedarray
+      elseif element_name == "string" or element_type.kind == "table" or element_type.kind == "array" then
+        return vprop.notimplemented
       else
-        return vprop_array
+        return vprop.array
       end
     end,
     body = function(self, def, f)
-      if self.types[self.types[f.type].element_type].kind == "table" then
+      local element_type = self.types[f.type].element_type
+
+      if element_type == "string" then
+        return "GetStringArray"
+      elseif self.types[element_type].kind == "table" then
         return "GetFBTableVector"
+      elseif self.types[element_type].kind == "array" then
+        return "GetVectorArray"
       else
         return "GetArraySpan"
       end
@@ -380,6 +409,8 @@ generator.field_template = {
 
       if etype.kind == "table" then
         return "IList<"..ret..">", ret
+      elseif element_name == "string" then
+        return "string[]"
       else
         return "ReadOnlySpan<"..ret..">", ret
       end
@@ -388,7 +419,16 @@ generator.field_template = {
       if f.fixedsize then
         return [[public {{ret}} {{csname}} => FBReader.GetFixedArray<{{type}}>(VTable, Buffer, {{vtslot}}, {{size}});]]
       else
-        return [[public {{ret}} {{csname}} => FBReader.GetArray<{{type}}>(VTable, Buffer, {{vtslot}});]]
+        local reader = "FBReader.GetArray"
+        local element_name = self.types[f.type].element_type
+        local etype = self.types[element_name]
+
+        if element_name == "string" then
+          return [[public {{ret}} {{csname}} => FBReader.GetStringArray(VTable, Buffer, {{vtslot}});]]
+        elseif etype.kind == "array" then
+          reader = "FBReader.GetVectorArray"
+        end
+        return [[public {{ret}} {{csname}} => ]]..reader..[[<{{type}}>(VTable, Buffer, {{vtslot}});]]
       end
     end,
     interface = "[FBSlot({{vtslot}})]\n  public {{ret}} {{csname}} { get ;}",
@@ -760,6 +800,16 @@ public unsafe struct AllMsgs {
   self:write([[
 public unsafe partial class MsgInfo {
 ]])
+
+  if not self.jitlog then
+    for i, list in ipairs({self.msglist, self.tables}) do
+      for key, def in ipairs(list) do
+        local name = self.typerename[def.name]
+        self:writetemplate("create_reader", {name = CSName(def.name), structname = name})
+      end
+    end
+  end
+
   self:write_msgsizes(options.name)
 
   local fbnames = {}
@@ -771,15 +821,15 @@ public unsafe partial class MsgInfo {
   end
 
   self:write(util.buildtemplate([[
-  public static Type[] FBTypes = new Type[]{
+  public static readonly Type[] FBTypes = new Type[]{
 {{fbnames:      typeof(%s),\n}}
     };
 
-  public static Type[] FBWrappers = new Type[]{
+  public static readonly Type[] FBWrappers = new Type[]{
 {{fbnames:    typeof(Wrap%s),\n}}
     };
 
-  public static string[] MsgNames = new string[]{
+  public static readonly string[] MsgNames = new string[]{
 {{msgnames:      "%s",\n}}
   };
 

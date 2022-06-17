@@ -91,6 +91,7 @@ function parser:report_error(msg, ...)
 end
 
 function parser:get_arraytype(element_type)
+  local element_name = element_type
   local arraytype = element_type.."[]"
   if self.types[arraytype] then
     return arraytype, self.types[arraytype]
@@ -100,7 +101,7 @@ function parser:get_arraytype(element_type)
 
   if not element_typeinfo then
     error(format("Unknown type '%s' used for array element ", element_type))
-  elseif (element_typeinfo.vsize and element_typeinfo.kind ~= "table")  or element_typeinfo.noarg then
+  elseif (element_typeinfo.vsize and element_typeinfo.kind ~= "table" and element_type ~= "string") or element_typeinfo.noarg then
     error(format("Bad type '%s' used for array element", element_type))
   end
 
@@ -110,10 +111,14 @@ function parser:get_arraytype(element_type)
 
   if element_typeinfo.GC64 and self.GC64 then
     element_size = 8
-  elseif element_typeinfo.kind == "table" then
+  elseif element_typeinfo.kind == "table" or element_typeinfo.kind == "array" then
     -- Flat buffer arrays of tables are just an array offsets
     element_size = 4
-    argtype =  format("const %s_Args *", element_type)
+    if element_typeinfo.kind == "table" then
+      argtype =  format("const %s_Args *", element_type)
+    elseif element_name == "string" then
+      argtype =  "const char* const *"
+    end
   end
 
 
@@ -1358,9 +1363,16 @@ function generator:write_vlenfield(msgdef, f, valuestr, write)
     write.vwrite = buildtemplate(self.templates.optarray_writer, tmpldata)
     assignment = ""
   else
+    local element_type = self.types[vtype.element_type]
+    if f.kind == "array" and (element_type.kind == "table" or element_type.kind == "array") then
+      if element_type.kind == "table" then
+        tmpldata.writer = "write_"..vtype.element_type
+      elseif vtype.element_type == "string" then
+        tmpldata.writer = "ubuf_put_fbstr"
+      else
+        error("Unsupported array writer "..f.type)
+      end
 
-    if f.kind == "array" and self.types[vtype.element_type].kind == "table" then
-      tmpldata.writer = "write_"..vtype.element_type
       write.vwrite = buildtemplate(self.templates.fbtable_array, tmpldata)
     else
       -- Adjust the offset of the field to account msgstart pointing at the vtable offset field which might be at 0
@@ -1540,7 +1552,9 @@ function generator:write_logfunc(def)
     for _, f in pairs(def.fields) do
       -- Ignore tables and optionals arrays when calculating the extra space from array size prefix values
       -- also skip fields where the builtin C writers that includes the count field in the size returned for the amount of data written
-      if f.vlen and f.kind == "array" and not (f.optional or f.element_implicitlen or self.types[self.types[f.type].element_type].kind == "table") then
+      local element_type = self.types[f.type].element_type
+      element_type = element_type and self.types[element_type]
+      if f.vlen and f.kind == "array" and not (f.optional or f.element_implicitlen or element_type.kind == "table" or element_type.kind == "array") then
         count = count + 1
       end
     end

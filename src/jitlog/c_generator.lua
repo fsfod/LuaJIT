@@ -107,7 +107,10 @@ if ({{value}} != NULL) {
   fbtable_array = [[
 ubuf_setoffset_rel(ub, vtotal-{{offset}});
   size_t {{msgfield}}_base = vtotal + 4;
-  vtotal += ubuf_fbarray_init(ub, {{sizename}});
+  if(!ubuf_fbarray_init(ub, {{sizename}})){
+    return 0;
+  }
+  vtotal += 4 + {{sizename}}*4;
   for(int j = 0; j != {{sizename}}; j++) {
     ubuf_setoffset_rel(ub, vtotal - ({{msgfield}}_base + j*4));
     vtotal += {{writer}}(ub, {{value}} + j);
