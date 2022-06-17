@@ -116,39 +116,38 @@ static const char *const fastfuncs[] = {
 };
 
 static const char *const gcstates[] = {
-  "pause",
-  "propagate",
-  "atomic",
-  "sweepstring",
-  "sweep",
-  "finalize",
+  [GCSpause] = "pause",
+  [GCSpropagate] = "propagate",
+  [GCSatomic] = "atomic",
+  [GCSsweepstring] = "sweepstring",
+  [GCSsweep] = "sweep",
+  [GCSfinalize] = "finalize",
 };
 
-LJ_STATIC_ASSERT(GCSpropagate == 1);
-LJ_STATIC_ASSERT(GCSatomic == 2);
-LJ_STATIC_ASSERT(GCSsweepstring == 3);
-LJ_STATIC_ASSERT(GCSsweep == 4);
 LJ_STATIC_ASSERT(GCSfinalize == 5);
+LJ_STATIC_ASSERT((sizeof(gcstates)/sizeof(char*)) == 6);
 
 static const char *const gcatomic_stages[] = {
-  "stage_end",
-  "mark_upvalues",
-  "mark_roots",
-  "mark_grayagain",
-  "separate_udata",
-  "mark_udata",
-  "clearweak",
+  [GCATOMIC_STAGE_END]      = "stage_end",
+  [GCATOMIC_MARK_UPVALUES]  = "mark_upvalues",
+  [GCATOMIC_MARK_ROOTS]     = "mark_roots",
+  [GCATOMIC_MARK_GRAYAGAIN] = "mark_grayagain",
+  [GCATOMIC_SEPARATE_UDATA] = "separate_udata",
+  [GCATOMIC_MARK_UDATA]     = "mark_udata",
+  [GCATOMIC_CLEARWEAK]      = "clearweak",
 };
 
+LJ_STATIC_ASSERT((sizeof(gcatomic_stages) / sizeof(char*)) == GCATOMIC__MAX);
+
 static const char *const flushreason[] = {
-  "other",
-  "user_requested",
-  "maxmcode",
-  "maxtrace",
-  "profile_toggle",
-  "set_builtinmt",
-  "set_immutableuv",
-  "jitlog_tracemarkers",
+  [FLUSHREASON_OTHER]             = "other",
+  [FLUSHREASON_USER_REQUESTED]    = "user_requested",
+  [FLUSHREASON_MAX_MCODE]         = "maxmcode",
+  [FLUSHREASON_MAX_TRACE]         = "maxtrace",
+  [FLUSHREASON_PROFILETOGGLE]     = "profile_toggle",
+  [FLUSHREASON_SET_BUILTINMT]     = "set_builtinmt",
+  [FLUSHREASON_SET_IMMUTABLEUV]   = "set_immutableuv",
+  [FLUSHREASON_SET_IMMUTABLEUV+1] = "jitlog_tracemarkers",
 };
 
 static const char *const vmstates[] = {
