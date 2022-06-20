@@ -195,6 +195,13 @@ public readonly struct {{name}}_Writer {
       return new {{structname}}_Reader(buffer, GetVTable(FBType.{{name}}).Span);
     }
 
+]],
+
+  create_writer = [[
+    public static {{structname}}_Writer Write_{{name}}(FBWriter fbWriter) {
+      return new {{structname}}_Writer(fbWriter, -vtoffsets[(int)FBType.{{name}}], GetVTable(FBType.{{name}}));
+    }
+
 ]]
 }
 
@@ -833,6 +840,13 @@ public unsafe partial class MsgInfo {
       for key, def in ipairs(list) do
         local name = self.typerename[def.name]
         self:writetemplate("create_reader", {name = CSName(def.name), structname = name})
+      end
+    end
+
+    for i, list in ipairs({self.msglist, self.tables}) do
+      for key, def in ipairs(list) do
+        local name = self.typerename[def.name]
+        self:writetemplate("create_writer", {name = CSName(def.name), structname = name})
       end
     end
   end
