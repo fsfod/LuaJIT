@@ -285,13 +285,17 @@ static LJ_AINLINE int ubuf_read_fbstring(UserBuf* ub, int *offset, const char * 
   return 1;
 }
 
-static LJ_AINLINE size_t ubuf_fbarray_init(UserBuf* ub, size_t count)
+static LJ_AINLINE int32_t* ubuf_fbarray_init(UserBuf* ub, size_t count)
 {
   size_t space = (count + 1) * 4;
   char* p = ubuf_more(ub, space);
+  if (!p) {
+    return NULL;
+  }
   *((uint32_t*)p) = (uint32_t)count;
   setubufP(ub, ub->p + space);
-  return space;
+
+  return (int32_t*)(p + 4);
 }
 
 /* write an offset field to a value pointing to the current position of the buffer */
