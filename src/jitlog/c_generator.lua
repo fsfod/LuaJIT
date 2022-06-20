@@ -113,7 +113,7 @@ ubuf_setoffset_rel(ub, vtotal-{{offset}});
   vtotal += 4 + {{sizename}}*4;
   for(int j = 0; j != {{sizename}}; j++) {
     ubuf_setoffset_rel(ub, vtotal - ({{msgfield}}_base + j*4));
-    vtotal += {{writer}}(ub, {{value}} + j);
+    vtotal += {{writer}}(ub, {{value}}{{listindex}});
   }
   ]],
   sizedarray_writer = [[

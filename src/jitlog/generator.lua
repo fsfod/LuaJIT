@@ -121,6 +121,8 @@ function parser:get_arraytype(element_type)
     end
   end
 
+  -- A flatbuffers vector is an array of offsets to the elements
+  local isvector = element_typeinfo.kind == "table" or element_typeinfo.kind == "array"
 
   local typeinfo = {
     kind = "array",
@@ -130,6 +132,7 @@ function parser:get_arraytype(element_type)
     argtype = argtype,
     element_type = element_type,
     element_size = element_size,
+    isvector = isvector,
   }
   self.types[arraytype] = typeinfo
   self.types[ctype.."[]"] = typeinfo
@@ -1364,8 +1367,10 @@ function generator:write_vlenfield(msgdef, f, valuestr, write)
     assignment = ""
   else
     local element_type = self.types[vtype.element_type]
-    if f.kind == "array" and (element_type.kind == "table" or element_type.kind == "array") then
+    if vtype.isvector  then
+      tmpldata.listindex = "[j]"
       if element_type.kind == "table" then
+        tmpldata.listindex = " + j"
         tmpldata.writer = "write_"..vtype.element_type
       elseif vtype.element_type == "string" then
         tmpldata.writer = "ubuf_put_fbstr"
