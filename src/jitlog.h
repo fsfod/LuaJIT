@@ -104,7 +104,7 @@ LUA_API JITLogUserContext* jitlog_getjlctx(lua_State *L);
 LUA_API JITLogUserContext* jitlog_startasync(lua_State* L, UserBuf *sink);
 LUA_API int jitlog_isrunning(lua_State *L); 
 LUA_API JITLogUserContext* jitlog_getjlctx(lua_State *L);
-LUA_API void jitlog_close(JITLogUserContext *usrcontext);
+LUA_API void jitlog_close(JITLogUserContext *usrcontext, int skip_log_writes);
 LUA_API int jitlog_save(JITLogUserContext *usrcontext, const char *path);
 LUA_API int jitlog_flush(JITLogUserContext* usrcontext);
 LUA_API void jitlog_reset(JITLogUserContext *usrcontext);

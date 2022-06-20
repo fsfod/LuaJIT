@@ -39,6 +39,13 @@ typedef enum LoadState {
   LoadState_PreShutdown,
 } LoadState;
 
+typedef enum ShutdownFlags {
+  ShutdownFlag_None = 0,
+  ShutdownFlag_StateExit     = 1 << 0,
+  ShutdownFlag_SkipLogWrites = 1 << 1,
+  ShutdownFlag_VMEvent       = 1 << 2, /* Shutdown is triggered from VM event */
+} ShutdownFlags;
+
 typedef struct jitlog_State {
   UserBuf ub; /* Must be first so loggers can reference it just by casting the G(L)->vmevent_data pointer */
   JITLogUserContext user;
@@ -1698,7 +1705,9 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
 
   /* Only free our context after we've done callbacks */
   if (event == VMEVENT_STATE_CLOSING || event == VMEVENT_DETACH) {
-    jitlog_shutdown(context, event == VMEVENT_STATE_CLOSING);
+    ShutdownFlags flags = ShutdownFlag_VMEvent;
+    if (event == VMEVENT_STATE_CLOSING) flags |= ShutdownFlag_StateExit;
+    jitlog_shutdown(context, flags);
     /* The UserBuf is now destroyed so return early instead of trying to call ubuf_msgcomplete */
     return;
   }
@@ -2105,11 +2114,13 @@ static void clear_objalloc_callback(jitlog_State *context)
   }
 }
 
-static void free_context(jitlog_State *context)
+static void free_context(jitlog_State *context, ShutdownFlags flags)
 {
   UserBuf *ubuf = &context->ub;
   clear_objalloc_callback(context);
-  ubuf_flush(ubuf);
+  if ((flags & ShutdownFlag_SkipLogWrites) == 0) {
+    ubuf_flush(ubuf);
+  }
   ubuf_free(ubuf);
 
   jl_freevec(context, context->traced_funcs, context->traced_funcs_capacity, TracedFunc);
@@ -2143,13 +2154,13 @@ static void jitlog_preshutdown(jitlog_State* context)
   free((void*)ctypes.names);
 }
 
-static void jitlog_shutdown(jitlog_State *context, int stateexit)
+static void jitlog_shutdown(jitlog_State *context, ShutdownFlags flags)
 {
   global_State *g = context->g;
   lua_State *L = mainthread(context->g);
   int loadstate = context->loadstate;
 
-  if (loadstate < LoadState_PreShutdown) {
+  if ((flags & ShutdownFlag_SkipLogWrites) == 0 && loadstate < LoadState_PreShutdown) {
     jitlog_preshutdown(context);
   }
 
@@ -2161,7 +2172,7 @@ static void jitlog_shutdown(jitlog_State *context, int stateexit)
 
   clear_objalloc_callback(context);
 
-  if (!stateexit && loadstate > LoadState_SafeStart) {
+  if ((flags & ShutdownFlag_StateExit) == 0 && loadstate > LoadState_SafeStart) {
     free_pinnedtab(L, context->strings);
     free_pinnedtab(L, context->protos);
     free_pinnedtab(L, context->funcs);
@@ -2181,14 +2192,14 @@ static void jitlog_shutdown(jitlog_State *context, int stateexit)
   }
 #endif
 
-  free_context(context);
+  free_context(context, flags);
 
 }
 
-LUA_API void jitlog_close(JITLogUserContext *usrcontext)
+LUA_API void jitlog_close(JITLogUserContext *usrcontext, int skip_log_writes)
 {
   jitlog_State *context = usr2ctx(usrcontext);
-  jitlog_shutdown(context, 0);
+  jitlog_shutdown(context, skip_log_writes ? ShutdownFlag_SkipLogWrites : 0);
 }
 
 static void reset_memoization(jitlog_State *context)
