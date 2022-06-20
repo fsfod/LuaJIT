@@ -2166,9 +2166,21 @@ static void jitlog_shutdown(jitlog_State *context, ShutdownFlags flags)
 
   JITLogUserContext* usr = ctx2usr(context);
 
-  /* The forwarding callback pointers are NULL by default so this will normally clear our hooks */
-  set_vmeventhook(context, usr->nextcb, usr->nextcb_data);
-  set_gchook(context, usr->gcevent, usr->gcevent_ud);
+  void* curr_ud = NULL;
+  luaJIT_vmevent_callback curr_cb = luaJIT_vmevent_gethook(L, (void**)&curr_ud);
+
+  /* If something else has hooked VM events before us just don't try to change them */
+  if (curr_ud == (void*)context) {
+    /* The forwarding callback pointers are NULL by default so this will normally clear our hooks */
+    luaJIT_vmevent_sethook(L, usr->nextcb, usr->nextcb_data);
+  }
+
+  void *gceventud = NULL;
+  void* gcevent = luaJIT_gcevent_gethook(L, &gceventud);
+
+  if (gceventud == (void*)context) {
+    luaJIT_gcevent_sethook(L, usr->gcevent, usr->gcevent_ud);
+  }
 
   clear_objalloc_callback(context);
 
