@@ -628,29 +628,32 @@ static void write_existingtraces(jitlog_State *context);
 
 static void memorize_existing(jitlog_State *context, MemorizeFilter filter)
 {
+  global_State *g = context->g;
   GCobj *o = gcref(context->g->gc.root);
   /* Can't memorize if our Lua tables aren't created yet */
   lj_assertG_(context->g, context->loadstate == LoadState_Running || (context->mode & JITLogMode_DisableMemorization), "Can't memorize objects before the JITLog is fully started");
 
+  lua_gc(mainthread(g), LUA_GCSTOP, 0);
+
   if (filter & MEMORIZE_TRACES) {
     write_existingtraces(context);
     if (filter == MEMORIZE_TRACES) {
+      lua_gc(mainthread(g), LUA_GCRESTART, -1);
       /* Don't waste time walking the object linked list if we don't need any other object types */
       return;
     }
   }
 
   if (filter & MEMORIZE_STRINGS) {
-    global_State *g = context->g;
-    GCobj *o;
-
     for (MSize i = 0; i <= g->str.mask; i++) {
       /* walk all the string hash chains. */
-      o = gcref(g->str.tab[i]);
-
+      GCobj *o = (GCobj *)(gcrefu(g->str.tab[i]) & ~(uintptr_t)1);
+      GCobj *start = o;
+      
       while (o != NULL) {
         memorize_string(context, gco2str(o));
         o = gcref(o->gch.nextgc);
+        lj_assertX(gcref(g->str.tab[i]) == start, "string table changed");
       }
     }
   }
@@ -674,6 +677,8 @@ static void memorize_existing(jitlog_State *context, MemorizeFilter filter)
       }
     }
   }
+
+  lua_gc(mainthread(g), LUA_GCRESTART, -1);
 }
 
 #if LJ_HASJIT
