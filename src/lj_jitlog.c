@@ -370,15 +370,22 @@ static void write_gcfunc(UserBuf* ub, GCfunc* fn)
     };
     log_obj_func(ub, &args);
     free(upvalues);
-  }
-  else {
+  } else {
+    const char* name = NULL;
+#ifdef lj_recorderinfo
+    if (hasrecorderinfo(fn)) {
+      name = lj_recorderinfo(fn)->name;
+    }
+#endif
     obj_func_Args args = {
       .address = fn,
       .proto_or_cfunc = (void *)fn->c.f,
       .ffid = fn->l.ffid,
       .upvalues = fn->c.upvalue,
       .upvalues_length = fn->c.nupvalues,
+      .name = name,
     };
+
     log_obj_func(ub, &args);
   }
 }

@@ -282,6 +282,7 @@ message obj_func{
   proto_or_cfunc : ptr
   ffid : uint8
   upvalues : [uint64] (argtype : TValue *)
+  name : string (optional)
 }
 
 message trace_start{
