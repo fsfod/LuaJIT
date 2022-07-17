@@ -2881,7 +2881,7 @@ static jitlog_State* jlib_getstate(lua_State *L)
 {
   jitlog_State *context = NULL;
   luaJIT_vmevent_callback cb = luaJIT_vmevent_gethook(L, (void**)&context);
-  if (cb != jitlog_callback) {
+  if (cb != jitlog_callback && cb != jitlog_callback_secondlog) {
     luaL_error(L, "The JITLog is not currently running");
   }
   return context;
