@@ -83,6 +83,14 @@ local function splitpath(P)
   return string.match(P,"^(.-)[\\/]?([^\\/]*)$")
 end
 
+local function ensure_trailing_slash(path)
+  if not string.find(path, "[\\/]$") then
+    return path .. "/"
+  else
+    return path
+  end
+end
+
 modulepath = splitpath(arg[0])
 assert(modulepath)
 local parentpath = splitpath(modulepath)
@@ -90,9 +98,7 @@ local parentpath = splitpath(modulepath)
 assert(parentpath ~= "")
 modulepath = parentpath
 
-if not string.find(modulepath, "[\\/]$") then
-  modulepath = modulepath .. "/"
-end
+modulepath = ensure_trailing_slash(modulepath)
 
 if not isminilua then
   package.path = string.format("%s?.lua;%s", modulepath, package.path)
@@ -128,7 +134,7 @@ local parser = apigen.create_parser(GC64)
 parser.jitlog = genjitlog == true
 parser:process_schema(schema)
 
-parser.srcdir = modulepath
+parser.srcdir = ensure_trailing_slash(os.getenv("LUAJIT_SRC") or modulepath)
 
 if genjitlog then
 
