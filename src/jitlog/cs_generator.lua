@@ -90,22 +90,20 @@ public unsafe readonly struct Wrap{{name}} : {{name}}, FBHolder<Raw{{name}}> {
 ]],
 
   fbreader = [[
-public unsafe readonly struct {{name}}_Reader : {{name}}, FBObject {
+public unsafe readonly struct {{name}}_Reader : {{name}}, FBObject<{{name}}_Reader> {
   private readonly byte* _data;
   private readonly int size;
   private readonly ushort* _vtable;
 
   // The vtable passed in must of already been pinned for the duration this struct
   public {{name}}_Reader(ReadOnlySpan<byte> buffer, ReadOnlySpan<ushort> vt) {
-    fixed (byte* ptr = buffer) {
-      _data = ptr;
-    }
-    size = buffer.Length;
-    fixed (ushort* ptr = vt) {
-      _vtable = ptr;
-    }
+{{init}}
+{{init_extra}}
   }
 
+  public static {{name}}_Reader Create(ReadOnlySpan<byte> buffer, ReadOnlySpan<ushort> vt){
+    return new {{name}}_Reader(buffer, vt);
+  }
   public ReadOnlySpan<byte> Buffer {
     get => new ReadOnlySpan<byte>(_data, size);
   }
@@ -119,6 +117,30 @@ public unsafe readonly struct {{name}}_Reader : {{name}}, FBObject {
   }
 {{fields}}
 {{bitfields:  %s\n}}}
+]],
+
+  fbreader_init = [[
+    fixed (byte* ptr = buffer) {
+      _data = ptr;
+    }
+    size = buffer.Length;
+    fixed (ushort* ptr = vt) {
+      _vtable = ptr;
+    }
+]],
+
+  fbreader_msginit = [[
+    size = buffer.Length;
+    fixed (byte* ptr = buffer) {
+      if (size >= 4) {
+         _data = ptr+8;
+      } else {
+        _data = null;
+      }
+    }
+    fixed (ushort* ptr = vt) {
+      _vtable = ptr;
+    }
 ]],
 
   interface = [[
@@ -188,11 +210,11 @@ public readonly struct {{name}}_Writer {
 ]],
 
   create_reader = [[
-    public static {{structname}}_Reader Read_{{name}}(Span<byte> buffer) {
+    public static {{structname}}_Reader Read_{{name}}(ReadOnlySpan<byte> buffer) {
       if(buffer.Length < 4) {
         ThrowBufferTooSmall(buffer);
       }
-      return new {{structname}}_Reader(buffer, GetVTable(FBType.{{name}}).Span);
+      return new {{structname}}_Reader(buffer, GetVTableSpan(FBType.{{name}}));
     }
 
 ]],
@@ -301,15 +323,16 @@ end
 local no_vtslot = {
   vtable = true,
   vtotal = true,
-  msghdr = true,
+ -- msghdr = true,
   -- Only the bit storage of the field has a vt slot
-  bitfield = true,
+--  bitfield = true,
 }
 
 function generator:needs_accessor(struct, f, action)
   if action == "reader" or action == "writer" then
+
     local isbuiltin = no_vtslot[f.writer]
-    if not isbuiltin and not f.vtslot then
+    if not isbuiltin and not f.vtslot and f.writer ~= "bitfield" and f.writer ~= "msghdr" then
       error("Missing vtable slot index for non buitin field "..f.name)
     end
     return not isbuiltin
@@ -402,14 +425,28 @@ generator.field_template = {
     template = vprop.stringlist,
     interface = "[FBSlot({{vtslot}})]\n  public string[] {{csname}} { get; }",
     missing = "public string[] {{csname}}  => Array.Empty<string>();",
+    reader = [[public string[] {{csname}} => FBReader.GetStringList(VTable, Buffer, {{vtslot}});]]
   },
   table = {
     template = vprop.table,
     ret = function(self, def, f)
       return self.typerename[f.type]
     end,
-    interface = "[FBSlot({{vtslot}})]\n  public {{type}} {{csname}} { get; }\n  public bool {{csname}}_HasValue{ get; }",
+    interface = function(self, def, f)
+      local ret = "[FBSlot({{vtslot}})]\n  public {{type}} {{csname}} { get; }"
+      if f.optional then
+        ret = ret ..  "\n  public bool {{csname}}_HasValue{ get; }"
+      end
+      return ret
+    end,
     missing = "public {{type}} {{csname}} => null",
+    reader = function(self, def, f)
+      local ret = [[public {{type}} {{csname}} => FBReader.GetFBObject<{{type}}_Reader>(VTable, Buffer, {{vtslot}}, MsgInfo.GetVTableSpan(FBType.{{type}}));]]
+      if f.optional then
+        ret = ret ..  "\n  public bool {{csname}}_HasValue => FBReader.IsFieldPresent(VTable, {{vtslot}});"
+      end
+      return ret
+    end
   },
   array = {
     template = function(self, def, f)
@@ -459,7 +496,9 @@ generator.field_template = {
 
         if element_name == "string" then
           return [[public {{ret}} {{csname}} => FBReader.GetStringArray(VTable, Buffer, {{vtslot}});]]
-        elseif etype.kind == "array" then
+        elseif etype.kind == "table" then
+          return [[public {{ret}} {{csname}} => FBReader.GetFBTableVector<{{type}}_Reader, {{type}}>(VTable, Buffer, {{vtslot}}, MsgInfo.GetVTableSpan(FBType.{{type}}));]]
+        elseif etype.kind == "array"  then
           reader = "FBReader.GetVectorArray"
         end
         return [[public {{ret}} {{csname}} => ]]..reader..[[<{{type}}>(VTable, Buffer, {{vtslot}});]]
@@ -469,18 +508,41 @@ generator.field_template = {
     missing = "public {{ret}} {{csname}} => Array.Empty<{{type}}>();",
   },
   bitfield = {
-    body = function(self, def, f, mapto)
+    body = function(self, def, f, mapto, action)
+      if action == "interface" then
+        return ""
+      end
+
       local maptype = mapto and self.types[mapto.type]
       local cast = ""
       if maptype and maptype.kind == "number" then
         cast =  "("..(self.typerename[mapto.type] or maptype.c or f.type)..")"
       end
-      return format("%s((_self->%s >> %d) & 0x%x)", cast, f.bitstorage, f.bitofs, bit.lshift(1, f.bitsize)-1)
+
+      local storage
+      if action == "reader" then
+        storage = "RawHeader"
+      else
+        storage = "_self->"..f.bitstorage
+      end
+
+      return format("%s((%s >> %d) & 0x%x)", cast, storage, f.bitofs, bit.lshift(1, f.bitsize)-1)
     end,
     ret = function(self, def, f)
       return f.bool and "bool" or "uint"
     end,
-    missing = "public {{ret}} {{csname}} => 0",
+    missing = "public {{ret}} {{csname}} => 0;",
+    reader = "public {{ret}} {{csname}} => {{body}};",
+  },
+
+  msghdr = {
+    ret = "uint",
+    interface = "public uint RawHeader { get; }",
+    reader = [[
+  private readonly uint _header;
+
+  public uint RawHeader => _header;
+]]
   }
 }
 
@@ -556,6 +618,9 @@ function generator:fmt_accessor_def(struct, f, action)
   if f.bitstorage then
     base = self.field_template.bitfield
   end
+  if f.writer == "msghdr" then
+    base = self.field_template.msghdr
+  end
 
   local ret, dectype, default_template
 
@@ -575,7 +640,7 @@ function generator:fmt_accessor_def(struct, f, action)
 
   if base then
     template = self:strorfunc(base.template, nil, struct, f, mapto)
-    body = self:strorfunc(base.body, body, struct, f, mapto)
+    body = self:strorfunc(base.body, body, struct, f, mapto, action)
 
     if action == "reader" or action == "writer" or action == "interface"then
       template = self:strorfunc(base[action], default_template, struct, f, mapto)
@@ -627,7 +692,6 @@ function generator:fmt_accessor_def(struct, f, action)
 
   local csname = self:fixname(f.name, true)
 
-
   if not template then
     if action == "rawstructs" then
       return ""
@@ -646,7 +710,7 @@ function generator:fmt_accessor_def(struct, f, action)
   local structname = self.typerename[struct.name]
 
   if action == "reader" then
-    assert(f.vtslot or f.writer == "msghdr")
+    assert(f.vtslot or f.writer == "msghdr" or f.writer == "bitfield")
     structname = structname.."_Reader"
   elseif action ~= "interface" and struct.kind ~= "struct" then
     structname = "Raw"..structname
@@ -745,7 +809,7 @@ using TValue = LuaJITLib.TValue;
 ]])
   end
 
-  self:writef("namespace %s;\n\n", options.namespace)
+  self:writef("using FBType = %s.MsgInfo.FBType;\n namespace %s;\n\n", options.namespace, options.namespace)
 end
 
 function generator:fixup_names()
@@ -788,9 +852,28 @@ function generator:writefile(options)
   end
 
   if options.buildreaders then
+    local extra = {
+      init_extra = ""
+    }
+
     for i, list in ipairs({self.tables, self.msglist}) do
+      extra.init = self.templates.fbreader_init
+
+      -- We have to skip the size and header for JITLog messages
+      if i == 2 and self.jitlog then
+        extra.init = self.templates.fbreader_msginit
+      end
+
       for key, def in ipairs(list) do
-        self:write_struct(def, self.templates.fbreader, nil, "reader")
+        if not def.no_vtable then
+          local header = def.fields[1].usedbits or 0
+          if header ~= 0 then
+            extra.init_extra = "    fixed (byte* ptr = buffer) {  _header = *(uint*)ptr; }"
+          else
+            extra.init_extra = ""
+          end
+          self:write_struct(def, self.templates.fbreader,  extra, "reader")
+        end
       end
     end
   end
@@ -833,16 +916,37 @@ public unsafe struct AllMsgs {
 
   self:write([[
 public unsafe partial class MsgInfo {
+
+  public static Memory<ushort> GetVTable(FBType fbtype) {
+    int index = (int)fbtype;
+    int start = vtoffsets[index] / 2;
+    int length = vtables[start] / 2;
+
+    Debug.Assert(start < vtables.Length, "VTable start was past the end of the vtable buffer");
+    Debug.Assert(vtables[start] >= 4, $"Vtable length not be smaller than 4 was {vtables[start]}");
+    Debug.Assert((start + length) <= vtables.Length);
+    Debug.Assert((vtables[start] & 0x1) == 0, $"Vtable length must be an even value was {vtables[start]}");
+
+    return new Memory<ushort>(vtables, start, length);
+  }
+
+  public static Span<ushort> GetVTableSpan(FBType fbtype) => GetVTable(fbtype).Span;
+
 ]])
 
-  if not self.jitlog then
+
+  if options.buildreaders then
     for i, list in ipairs({self.msglist, self.tables}) do
       for key, def in ipairs(list) do
         local name = self.typerename[def.name]
-        self:writetemplate("create_reader", {name = CSName(def.name), structname = name})
+        if not def.no_vtable then
+          self:writetemplate("create_reader", {name = self:fixname(def.name, true), structname = name})
+        end
       end
     end
+  end
 
+  if not self.jitlog then
     for i, list in ipairs({self.msglist, self.tables}) do
       for key, def in ipairs(list) do
         local name = self.typerename[def.name]
@@ -876,9 +980,9 @@ public unsafe partial class MsgInfo {
 
 ]], {fbnames = fbnames, msgnames = self.sorted_msgnames}))
 
-  for name, list in ipairs({self.msglist, self.tables}) do
+  for name, list in ipairs({self.msglist, self.tables, self.structs}) do
     for i, def in ipairs(list) do
-      self:write_namelist(self:fixname(def.name, true).."_names", util.map(def.vtable_names, function(f)
+      self:write_namelist(def.name.."_names", util.map(def.vtable_names, function(f)
         return self:fixname(f, true)
       end))
     end

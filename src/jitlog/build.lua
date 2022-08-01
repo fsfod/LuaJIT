@@ -171,7 +171,7 @@ local jitlogopts = {
   defs =    {jitlog = true, outdir = outpath, name = "jitlog"},
   writers = {jitlog = true, outdir = outpath, name = "jitlog"},
   lua =     {jitlog = true, outdir = outpath},
-  csharp =  {jitlog = true, outdir = outpath, name = "JITLogMessageDefs", namespace = "JITLogger", buildreaders = false},
+  csharp =  {jitlog = true, outdir = outpath, name = "JITLogMessageDefs", namespace = "JITLogger", buildreaders = true},
 }
 
 local generic_opts = {

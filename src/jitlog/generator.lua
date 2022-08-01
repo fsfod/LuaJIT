@@ -1932,7 +1932,7 @@ function generator:write_vtable_data(name)
     local vtsize = self:write_vtable(self.msglookup[name], "message")
     vtstarts[#vtstarts + 1] = vtoffset
     vtoffset = vtoffset + vtsize
-    fbtype[#fbtype + 1] = name
+    fbtype[#fbtype + 1] = self:fixname(name, true)
   end
 
   for _, list in ipairs({self.structs, self.tables}) do
@@ -1940,7 +1940,8 @@ function generator:write_vtable_data(name)
       local vtsize = self:write_vtable(def)
       vtstarts[#vtstarts + 1] = vtoffset
       vtoffset = vtoffset + vtsize
-      fbtype[#fbtype + 1] = def.name
+      fbtype[#fbtype + 1] = self:fixname(def.name, true)
+
     end
   end
 
