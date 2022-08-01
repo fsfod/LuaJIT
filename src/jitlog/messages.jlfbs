@@ -157,6 +157,9 @@ table VMDef{
   ir_fpmath : stringlist
   ir_fields : stringlist
   trace_link : stringlist
+  errorid : stringlist
+  errormsg : stringlist
+  vmstates : stringlist
 }
 
 message gcstate {

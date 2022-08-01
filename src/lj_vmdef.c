@@ -151,6 +151,18 @@ static const char *const flushreason[] = {
   "jitlog_tracemarkers",
 };
 
+static const char *const vmstates[] = {
+  [LJ_VMST_INTERP]  = "interpreter",	/* Interpreter. */
+  [LJ_VMST_C]       = "cfunction",		/* C function. */
+  [LJ_VMST_GC]      = "gc",		    /* Garbage collector. */
+  [LJ_VMST_EXIT]    = "trace_exit",		/* Trace exit handler. */
+  [LJ_VMST_RECORD]  = "trace_record",	/* Trace recorder. */
+  [LJ_VMST_OPT]     = "jit_optimizer",		/* Optimizer. */
+  [LJ_VMST_ASM]     = "jit_assembler",		/* Assembler. */
+};
+
+LJ_STATIC_ASSERT((sizeof(vmstates) / sizeof(char*)) == LJ_VMST__MAX);
+
 static const char * jitparams[] = {
   #define PARAMNAME(len, name, value)	#name,
   JIT_PARAMDEF(PARAMNAME)
@@ -219,6 +231,19 @@ static void* ircall_addr[] = {
   #undef IRCALLNAME
 };
 
+static const char* const errorid[] = {
+#define ERRDEF(name, msg) #name,
+#include "lj_errmsg.h"
+};
+
+#undef ERRDEF
+
+static const char* const errormsg[] = {
+#define ERRDEF(name, msg)	msg,
+#include "lj_errmsg.h"
+};
+
+#undef ERRDEF
 
 #define decl_enumdef(name) \
   .name = {.names = name, .count = sizeof(name)/sizeof((name)[0])},

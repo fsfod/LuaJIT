@@ -18,6 +18,10 @@
   _(trace_link) \
   _(jitparams) \
   _(flushreason) \
+  _(vmstates) \
+  _(errorid) \
+  _(errormsg) \
+
 
 typedef struct VMEnumDef {
   const char* const* names;
@@ -40,6 +44,9 @@ typedef struct VMdef {
   VMEnumDef trace_link;
   VMEnumDef flushreason;
   VMEnumDef jitparams;
+  VMEnumDef errorid;
+  VMEnumDef errormsg;
+  VMEnumDef vmstates;
   const int* jitparam_defaults;
   const uint8_t *irmode;
   const void** ir_calladdr;

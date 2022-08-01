@@ -1529,13 +1529,6 @@ enum LJ_ERRID {
 };
 #undef ERRDEF
 
-static const char* const errmsg[] = {
-#define ERRDEF(name, msg) #name,
-#include "lj_errmsg.h"
-};
-
-#undef ERRDEF
-
 #define ERRDEF(name, msg) case LJ_ERR_##name: \
   return LJ_ERRID_##name;
 
@@ -1793,14 +1786,12 @@ static void write_bnote(UserBuf *ub, const char *label, const void *data, size_t
 extern const char* fold_names[];
 extern const int lj_numfold;
 
-#define enum_entry(enumname, strarray) {.name = enumname, .valuenames = strarray, .valuenames_length = (sizeof(strarray)/sizeof(strarray[0]))}
 #define array_length(arr) (sizeof(arr)/sizeof((arr)[0]))
 
 static enumdef_Args enumlist[] = {
   {.name = "CounterId",  .valuenames = CounterId_names, .valuenames_length = Counter_MAX},
   {.name = "TimerId",    .valuenames = TimerId_names,   .valuenames_length = Timer_MAX},
   {.name = "SectionId",  .valuenames = SectionId_names, .valuenames_length = Section_MAX},
-  enum_entry("errmsg", errmsg),
   {.name = "fold_names", .valuenames = fold_names, .valuenames_length = 0},
 };
 
@@ -1861,6 +1852,9 @@ static void write_header(jitlog_State *context)
     vmdef_array(ir_fpmath),
     vmdef_array(ir_fields),
     vmdef_array(trace_link),
+    vmdef_array(errorid),
+    vmdef_array(errormsg),
+    vmdef_array(vmstates),
     .ir_calladdr = lj_vmdef.ir_calladdr,
     .ir_calladdr_length = (uint32_t)lj_vmdef.ir_call.count,
   };
