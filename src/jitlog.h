@@ -94,7 +94,9 @@ typedef enum JITLogMode {
   */
   JITLogMode_TraceMarkers   = 0x20,
 
-  JITLogMode_CallMarkers = 0x40, 
+  JITLogMode_CallMarkers = 0x40,
+
+  JITLogmode_AutoMemorize = 0x80,
 } JITLogMode;
 
 LUA_API JITLogUserContext* jitlog_start(lua_State *L);

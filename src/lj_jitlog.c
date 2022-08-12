@@ -85,6 +85,7 @@ typedef struct jitlog_State {
   char infullgc;
   GCAllocationStats *gcstats;
   char oballoc_stacks;
+  char auto_memorize;
   GCSize last_heapsize;
   GCSize heapsize_difflog;
   uint16_t last_ctype;
@@ -1230,13 +1231,11 @@ static void gcalloc_cb(jitlog_State *context, GCobj *o, uint32_t info, size_t si
     goto end;
   }
 
-  if (!free && 0) {
+  if (!free && context->auto_memorize) {
     if (tid == ~LJ_TSTR) {
       memorize_string(context, (GCstr *)o);
-      goto end;
     } else if(tid == ~LJ_TFUNC) {
       memorize_func(context, (GCfunc *)o);
-      goto end;
     }
   }
 
@@ -1319,6 +1318,26 @@ end: {
     gcobj_event(ud, o, info, size);
   }
 }
+}
+
+static void gcalloc_memorize_cb(jitlog_State *context, GCobj *o, uint32_t info, size_t size)
+{
+  int free = (info & 0x80) != 0;
+  int tid = info & 0x7f;
+
+  if (!free && context->auto_memorize) {
+    if (tid == ~LJ_TSTR) {
+      memorize_string(context, (GCstr *)o);
+    } else if (tid == ~LJ_TFUNC) {
+      memorize_func(context, (GCfunc *)o);
+    }
+  }
+
+  lua_ObjAlloc_cb gcobj_event = ctx2usr(context)->gcobj_event;
+  void* ud = ctx2usr(context)->gcobj_event_ud;
+  if (gcobj_event && ud) {
+    gcobj_event(ud, o, info, size);
+  }
 }
 
 static gc_info_Args build_gcinfo(jitlog_State* context) {
@@ -1990,6 +2009,26 @@ int jitlog_setobjalloclog(JITLogUserContext *usr, int enable)
   return 1;
 }
 
+int set_automemorize(JITLogUserContext *usr, int mode)
+{
+  jitlog_State *context = usr2ctx(usr);
+  context->auto_memorize = mode;
+  if (mode) {
+    if (context->g->objalloc_cb != NULL) {
+      return context->g->objalloc_cb == &gcalloc_cb || context->g->objalloc_cb == &gcalloc_memorize_cb;
+    }
+    context->g->objalloc_cb = &gcalloc_memorize_cb;
+    context->g->objallocd = context;
+  } else {
+    if (context->g->objalloc_cb != &gcalloc_memorize_cb) {
+      return 1;
+    }
+    context->g->objalloc_cb = NULL;
+    context->g->objallocd = NULL;
+  }
+  return 1;
+}
+
 /* -- JITLog public API ---------------------------------------------------- */
 
 LUA_API int luaopen_jitlog(lua_State *L);
@@ -2611,6 +2650,11 @@ LUA_API int jitlog_setmode(JITLogUserContext *usrcontext, JITLogMode mode, int e
       break;
     case JITLogMode_TraceMarkers:
       if (!set_tracemarkers_enabled(usrcontext, enabled)) {
+        return 0;
+      }
+      break;
+    case JITLogmode_AutoMemorize:
+      if (!set_automemorize(usrcontext, enabled)) {
         return 0;
       }
       break;
