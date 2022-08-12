@@ -115,6 +115,8 @@ LUA_API uint64_t jitlog_get_totalwritten(JITLogUserContext* usrcontext);
 LUA_API int jitlog_setmode(JITLogUserContext *usrcontext, JITLogMode mode, int enabled);
 LUA_API int jitlog_getmode(JITLogUserContext* usrcontext, JITLogMode mode);
 
+LUA_API int jitlog_set_stackcapture(JITLogUserContext* context, int event, int mode);
+
 typedef enum MemorizeFilter {
   MEMORIZE_PROTOS   = 0x1,  /* The Function prototypes of Lua Functions */
   MEMORIZE_FASTFUNC = 0x2,  /* C Functions that are built-in library functions */

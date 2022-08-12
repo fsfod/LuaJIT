@@ -114,8 +114,9 @@ enum StackCapture
 {
   StackCapture_TraceStart = 1,
   StackCapture_TraceStop  = 2,
-  StackCapture_TraceAbort = 4,
-  StackCapture_TraceExit  = 8,
+  StackCapture_TraceAbort = 3,
+  StackCapture_TraceExit  = 4,
+  StackCapture_Max,
 };
 
 #define usr2ctx(usrcontext)  ((jitlog_State *)(((char *)usrcontext) - offsetof(jitlog_State, user)))
@@ -124,7 +125,7 @@ enum StackCapture
 
 static StackCaptureMode get_stackcapture_mode(jitlog_State* context, int evt)
 {
-  return (StackCaptureMode)((context->stackcapture_mode >> evt * StackCaptureMode_BitCount) & StackCaptureMode_Mask);
+  return (StackCaptureMode)((context->stackcapture_mode >> evt*StackCaptureMode_BitCount) & StackCaptureMode_Mask);
 }
 
 static void *growvec(void *p, MSize *szp, MSize lim, MSize esz)
@@ -533,8 +534,9 @@ static luastack_Args build_rawstack(jitlog_State *context, lua_State *L, int max
   return args;
 }
 
-int jitlog_set_stackcapture(jitlog_State* context, int event, int mode)
+int jitlog_set_stackcapture(JITLogUserContext *usr, int event, int mode)
 {
+  jitlog_State *context = usr2ctx(usr);
 
   if ((mode & StackCaptureMode_Mask) != mode) {
     return 0;
@@ -561,6 +563,8 @@ static luastack_Args capture_stack(jitlog_State *context, lua_State *L, StackCap
 
   if (vmstate == LJ_VMST_INTERP) {
     void* cf = cframe_raw(L->cframe);
+
+    /* Ignore savedpc if   The interpreter sets savedpc to the Lua state pointer when it clears it */
     if (cf != NULL && (char*)cframe_pc(cf) != (char*)cframe_L(cf)) {
       /* Note saved PC is not cleared when returning to the interpreter so this could be stale */
       pc = (BCIns *)cframe_pc(cf);
@@ -825,6 +829,10 @@ static void jitlog_writetrace(jitlog_State *context, GCtrace *T, TraceWriteKind 
 
     if (capturestack) {
       stack = capture_stack(context, L, capturestack);
+      if (!stack.savedpc) {
+        lua_assert(J->pc);
+        stack.savedpc = J->pc;
+      }
     }
   }
 
@@ -3298,7 +3306,7 @@ static int jlib_set_stackcapture_mode(lua_State* L)
     mode = tvistruecond(modetv) ? StackCaptureMode_CallFrames : StackCaptureMode_None;
   }
 
-  jitlog_set_stackcapture(context, event, mode);
+  jitlog_set_stackcapture(ctx2usr(context), event, mode);
 
   return 0;
 }
