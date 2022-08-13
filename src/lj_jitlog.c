@@ -1926,6 +1926,7 @@ static void write_header(jitlog_State *context)
 
 
   write_current_states(context, &context->ub);
+  ubuf_flush(&context->ub);
 }
 
 const uint32_t smallidsz = 20;
