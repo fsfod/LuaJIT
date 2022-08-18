@@ -128,8 +128,12 @@ static LJ_AINLINE char *ubuf_more(UserBuf *ub, size_t sz)
 static LJ_AINLINE char *ubuf_msgstart(UserBuf *ub, size_t minspace)
 {
   lua_assert(ub->msgstart == -1);
-  ub->msgstart = ubuflen(ub);
-  return ubuf_more(ub, minspace);
+
+  char* result = ubuf_more(ub, minspace);
+  if (result) {
+    ub->msgstart = ubuflen(ub);
+  }  
+  return result;
 }
 
 /* Treats the current position of the buffer as the end of the message */
