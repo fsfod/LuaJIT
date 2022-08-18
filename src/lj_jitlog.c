@@ -1719,6 +1719,8 @@ static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *e
       break;
   }
 
+  lj_assertX(context->ub.msgstart == -1, "message was written was not completed");
+
   JITLogUserContext *usr = ctx2usr(context);
 
   /* Check if new messages were written to the buffer */
@@ -2499,20 +2501,25 @@ static int validate_visitor(void* state, uint8_t msgid, void* msg)
   struct MsgHeader* header = (struct MsgHeader*)msg;
 
   lj_assertX(msgid < MSGTYPE_MAX_jitlog, "Bad message type %d", msgid);
-  if (msgid < MSGTYPE_MAX_jitlog) {
-    return -4;
+  if (msgid > MSGTYPE_MAX_jitlog) {
+    return 0;
+  }
+
+  if (msgid == 0 && data->count != 0) {
+    return 0;
   }
 
   int size = msgsize_dispatch[msgid];
 
   if (size == 0) {
-
+    char* end = ((char*)msg) + header->size;
     lj_assertX(header->size != 0, "msg header size was zero");
-    lj_assertX(((char*)msg) + header->size < data->end, "bad message size");
+    lj_assertX(end <= data->end, "bad message size %d past end of buffer", header->size);
     data->lastsz = header->size;
   } else {
     data->lastsz = size;
   }
+
   data->lastmsg = ((char*)msg) - data->base;
   data->lasttype = msgid;
   return 1;
@@ -2523,12 +2530,21 @@ int jitlog_validatemsgs(UserBuf* ub, size_t start) {
     .base = ubufB(ub) + start,
     .end = ub->p,
     .count = 0,
+    .lasttype = -1,
   };
+
+  lj_assertX(start <= ubuflen(ub), "Start offset pass end of buffer");
+
+  if (ubuflen(ub) == start) {
+    return 1;
+  }
 
   int result = jitlog_visitmsgs_buff(ub, validate_visitor, &data, start);
 
   size_t msgend = data.lastmsg + data.lastsz;
   lj_assertX(msgend == (ubuflen(ub) - start), "Msg doesn't stop at end of buffer");
+
+  lj_assertX(result, "jitlog validate failed for message %d", data.count);
 
   return result;
 }
