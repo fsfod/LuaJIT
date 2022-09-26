@@ -2099,7 +2099,7 @@ static jitlog_State *jitlog_start_safe(lua_State *L, UserBuf *ub)
   } else { 
     /* Default to a memory buffer to store events */
     if (!ubuf_init_mem(&context->ub, 0)) {
-      free_context(context);
+      free_context(context, ShutdownFlag_SkipLogWrites);
       return NULL;
     }
   }
