@@ -2181,6 +2181,7 @@ static void free_context(jitlog_State *context, ShutdownFlags flags)
 
   jl_freevec(context, context->traced_funcs, context->traced_funcs_capacity, TracedFunc);
   jl_freevec(context, context->traced_bc, context->traced_bc_capacity, TracedBC);
+  memset(context, 0, sizeof(jitlog_State));
   free(context);
 }
 
