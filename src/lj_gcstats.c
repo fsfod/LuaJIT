@@ -386,9 +386,14 @@ static uint32_t dump_strings(GCSnapshotHandle *state)
   uint32_t count = 0;
   int objmem = state->ub.b != NULL;
 
-  for (MSize i = 0; i <= g->str.mask; i++) {
-    /* walk all the string hash chains. */
-    for (GCobj *o = gcref(g->str.tab[i]); o != NULL; o = gcref(o->gch.nextgc)) {
+  for (MSize i = 0; i <= g->str.mask; i++) {  
+    GCobj *o = (GCobj *)(gcrefu(g->str.tab[i]) & ~(uintptr_t)1);
+
+    /* Walk a string hash chain. */
+    for (; o != NULL; o = gcref(o->gch.nextgc)) {
+      if (((uintptr_t)o) <= 1) {
+        break;
+      }
       gcobj_dump(state, o, objmem);
       count++;
     }
