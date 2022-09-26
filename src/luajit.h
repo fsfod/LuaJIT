@@ -80,6 +80,9 @@ LUA_API luaJIT_vmevent_callback luaJIT_vmevent_gethook(lua_State *L, void **data
 LUA_API int luaJIT_gcevent_sethook(lua_State* L, luaJIT_vmevent_callback cb, void* data);
 LUA_API luaJIT_vmevent_callback luaJIT_gcevent_gethook(lua_State* L, void** data);
 
+LUA_API int luaJIT_objalloc_sethook(lua_State* L, lua_ObjAlloc_cb cb, void* data);
+LUA_API lua_ObjAlloc_cb luaJIT_objalloc_gethook(lua_State* L, void** data);
+
 /* Enforce (dynamic) linker error for version mismatches. Call from main. */
 LUA_API void LUAJIT_VERSION_SYM(void);
 

@@ -114,3 +114,33 @@ LUA_API luaJIT_vmevent_callback luaJIT_gcevent_gethook(lua_State* L, void** data
 #endif
 }
 
+LUA_API int luaJIT_objalloc_sethook(lua_State* L, lua_ObjAlloc_cb cb, void* data)
+{
+#ifdef LUAJIT_DISABLE_VMEVENT
+  return 0;
+#else
+  global_State *g = G(L);
+
+  if (cb) {
+    g->objalloc_cb = cb;
+    g->objallocd = data;
+  } else {
+    lj_assertL(data == NULL, "GCEvent callback userdata should be null when clearing the hook");
+    g->objalloc_cb = NULL;
+    g->objallocd = NULL;
+  }
+  return 1;
+#endif
+}
+
+LUA_API lua_ObjAlloc_cb luaJIT_objalloc_gethook(lua_State* L, void** data)
+{
+#ifdef LUAJIT_DISABLE_VMEVENT
+  * data = NULL;
+  return NULL;
+#else
+  *data = G(L)->objallocd;
+  return G(L)->objalloc_cb;
+#endif
+}
+
