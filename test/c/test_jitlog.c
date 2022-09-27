@@ -79,7 +79,7 @@ UTEST_F(JITLog, close) {
   // Try to trigger any dangling refs bugs from GC objects that JITLog uses
   lua_gc(L, LUA_GCCOLLECT, 1);
 
-  jitlog_close(JL);
+  jitlog_close(JL, 0);
   void* data = NULL;
   ASSERT_EQ(luaJIT_vmevent_gethook(L, &data), NULL);
   ASSERT_EQ(data, NULL);
@@ -88,7 +88,7 @@ UTEST_F(JITLog, close) {
 }
 
 UTEST_F(JITLog, reattach) {
-  jitlog_close(JL);
+  jitlog_close(JL, 0);
   void* data = NULL;
   ASSERT_EQ(luaJIT_vmevent_gethook(L, &data), NULL);
   ASSERT_EQ(data, NULL);
@@ -109,7 +109,7 @@ UTEST_F(JITLogFile, buf_memmap) {
   /* Should equal the window size we specified */
   ASSERT_FILESIZE(utest_fixture->tempfile, 1024 * 1024);
 
-  jitlog_close(JL);
+  jitlog_close(JL, 1);
   /* When the jitlog is closed the file should be truncated to the end of the last message */
   ASSERT_FILESIZE(utest_fixture->tempfile, size);
 }
@@ -127,7 +127,7 @@ UTEST_F(JITLogFile, buf_file) {
   ASSERT_EQ(jitlog_getsize(JL), size);
   ASSERT_FILESIZE(utest_fixture->tempfile, size);
 
-  jitlog_close(JL);
+  jitlog_close(JL, 1);
   ASSERT_FILESIZE(utest_fixture->tempfile, size);
 }
 
@@ -142,7 +142,7 @@ UTEST(JITLog, create_async) {
   luaL_openlibs(L1);
 
   lua_gc(L1, LUA_GCCOLLECT, 1);
-  jitlog_close(ctx);
+  jitlog_close(ctx, 0);
 }
 
 UTEST_F(JITLogFile, create_async_sink) {
@@ -157,13 +157,19 @@ UTEST_F(JITLogFile, create_async_sink) {
 
   ASSERT_GT(jitlog_getsize(JL1), sizeof(MSG_header));
 
+  /* Memorize can't run if second stage of loading hasn't happened */
+  ASSERT_EQ(jitlog_memorize_objs(JL1, MEMORIZE_ALL), 0);
+
   lua_gc(L1, LUA_GCCOLLECT, 1);
   luaL_openlibs(L1);
+
+  /* Memorize can't run if second stage of loading hasn't happened */
+  ASSERT_EQ(jitlog_memorize_objs(JL1, MEMORIZE_ALL), 1);
 
   lua_gc(L1, LUA_GCCOLLECT, 1);
 
   size_t size = jitlog_getsize(JL1);
-  jitlog_close(JL1);
+  jitlog_close(JL1, 1);
   ASSERT_FILESIZE(utest_fixture->tempfile, size);
 
   lua_close(L1);
@@ -182,8 +188,8 @@ UTEST_F(JITLog, setmode) {
   ASSERT_EQ(jitlog_setmode(JL, 1 << 31, 1), 0);
   ASSERT_EQ(jitlog_getmode(JL, 0xffffff), 0);
 
-  ASSERT_EQ(jitlog_setmode(JL, JITLogMode_AutoFlush, 1), 1);
-  ASSERT_NE(jitlog_getmode(JL, JITLogMode_AutoFlush), 0);
+  ASSERT_EQ(jitlog_setmode(JL, JITLogMode_DisableMemorization, 1), 1);
+  ASSERT_NE(jitlog_getmode(JL, JITLogMode_DisableMemorization), 0);
 }
 
 UTEST_F(JITLog, memorize_objs) {
@@ -206,13 +212,44 @@ UTEST_F(JITLog, memorize_objs) {
   ASSERT_GT(jitlog_last_msgoffset(JL, MSGTYPE_obj_func, 0), start);
 }
 
-UTEST_F(JITLog, setmode_autoflush) {
+UTEST_F(JITLog, autoflush_msgs) {
   UserBuf ub;
   const char* logname = "test.jlog";
   ASSERT_GT(ubuf_init_file(&ub, logname), 0);
   ASSERT_GT(jitlog_setsink(JL, &ub), 0);
 
-  ASSERT_EQ(jitlog_getmode(JL, JITLogMode_AutoFlush), 0);
+  ASSERT_EQ(JL->autoflush_msgs, 0);
+  jitlog_flush(JL);
+
+  uint64_t size = jitlog_getsize(JL);
+
+  jitlog_writemarker(JL, "12345", 0);
+  /* Message will be buffered in the UsrBuf by default file size should be unchanged */
+  ASSERT_FILESIZE(logname, size);
+
+  JL->autoflush_msgs = JITLOGEVENT_MARKER;
+  
+  jitlog_writemarker(JL, "12345", 0);
+  /* Check auto flushing for user generated messages messages */
+  size = jitlog_getsize(JL);
+  ASSERT_FILESIZE(logname, size);
+
+  JL->autoflush_msgs = 0;
+
+  /* Check auto flushing is disabled */
+  jitlog_writemarker(JL, "123456", 0);
+  ASSERT_FILESIZE(logname, size);
+}
+
+UTEST_F(JITLog, autoflush_gcevents)
+{
+  UserBuf ub;
+  const char* logname = "test.jlog";
+  ASSERT_GT(ubuf_init_file(&ub, logname), 0);
+  ASSERT_GT(jitlog_setsink(JL, &ub), 0);
+
+  ASSERT_EQ(JL->vmevent_autoflush, 0);
+  ASSERT_EQ(JL->gcevent_autoflush, 0);
 
   uint64_t size = jitlog_getsize(JL);
   /* Check auto flushing for implicit events */
@@ -222,23 +259,45 @@ UTEST_F(JITLog, setmode_autoflush) {
   /* Message will be buffered in the UsrBuf by default file size should be unchanged */
   ASSERT_FILESIZE(logname, size);
 
-  ASSERT_EQ(jitlog_setmode(JL, JITLogMode_AutoFlush, 1), 1);
-  ASSERT_NE(jitlog_getmode(JL, JITLogMode_AutoFlush), 0);
+  JL->gcevent_autoflush = 1 << GCEVENT_FULLGC;
+  size = jitlog_getsize(JL);
 
   /* Trigger some GC state events to be written */
   lua_gc(L, LUA_GCCOLLECT, 0);
+  ASSERT_GT(jitlog_getsize(JL), size);
+
   /* Check auto flushing for implicit events */
   size = jitlog_getsize(JL);
   ASSERT_FILESIZE(logname, size);
-
-  jitlog_writemarker(JL, "12345", 0);
-  size = jitlog_getsize(JL);
-  ASSERT_FILESIZE(logname, size);
-
-  ASSERT_EQ(jitlog_setmode(JL, JITLogMode_AutoFlush, 0), 1);
 
   /* Check auto flushing is disabled */
   jitlog_writemarker(JL, "123456", 0);
   ASSERT_FILESIZE(logname, size);
 }
 
+UTEST_F(JITLog, autoflush_vmevents)
+{
+  UserBuf ub;
+  const char* logname = "test.jlog";
+  ASSERT_GT(ubuf_init_file(&ub, logname), 0);
+  ASSERT_GT(jitlog_setsink(JL, &ub), 0);
+
+  ASSERT_EQ(JL->vmevent_autoflush, 0);
+
+  uint64_t size = jitlog_getsize(JL);
+  /* Check auto flushing is off for VM events */
+  luaJIT_setmode(L, LUAJIT_MODE_ENGINE, LUAJIT_MODE_FLUSH);
+  ASSERT_GT(jitlog_getsize(JL), size);
+  /* Message will be buffered in the UsrBuf by default file size should be unchanged */
+  ASSERT_FILESIZE(logname, size);
+
+  JL->vmevent_autoflush = 1 << VMEVENT_TRACE_FLUSH;
+
+  size = jitlog_getsize(JL);
+  luaJIT_setmode(L, LUAJIT_MODE_ENGINE, LUAJIT_MODE_FLUSH);
+  ASSERT_GT(jitlog_getsize(JL), size);
+
+  /* Check auto flushing was triggered for event */
+  size = jitlog_getsize(JL);
+  ASSERT_FILESIZE(logname, size);
+}
