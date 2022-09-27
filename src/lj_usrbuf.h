@@ -21,6 +21,7 @@ typedef enum UBufAction {
   UBUF_GET_OFFSET,
   UBUF_TRY_SET_OFFSET,
   UBUF_GET_TOTAL_WRITTEN,
+  UBUF_GET_RESERVED_SPACE,
 } UBufAction;
 
 struct UserBuf;
@@ -377,6 +378,14 @@ static inline int ubuf_msgcomplete(UserBuf *ub)
     return 1;
   }
   return ub->bufhandler(ub, UBUF_MSG_COMPLETE, NULL);
+}
+
+static inline int ubuf_reserved_space(UserBuf *ub)
+{
+  if (!ub->bufhandler) {
+    return 0;
+  }
+  return ub->bufhandler(ub, UBUF_GET_RESERVED_SPACE, NULL);
 }
 
 static LJ_INLINE int ubuf_free(UserBuf *ub)
