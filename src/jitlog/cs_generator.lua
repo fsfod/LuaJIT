@@ -946,7 +946,7 @@ public unsafe partial class MsgInfo {
     end
   end
 
-  if not self.jitlog then
+  if options.buildwriters then
     for i, list in ipairs({self.msglist, self.tables}) do
       for key, def in ipairs(list) do
         local name = self.typerename[def.name]
