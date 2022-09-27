@@ -339,6 +339,20 @@ static LJ_INLINE size_t ubuf_put_strlist(UserBuf* ub, const char* const* list, s
   return size;
 }
 
+static LJ_INLINE size_t ubuf_put_fbstr(UserBuf* ub, const char* s)
+{
+  uint32_t length = (uint32_t)strlen(s) + 1;
+  /* Write the length prefix since its just a flat buffer array */
+  *((uint32_t*)ub->p) = length;
+  setubufP(ub, ub->p + 4);
+
+  if (!ubuf_putmem(ub, s, length)) {
+    return 0;
+  }
+
+  return length+4;
+}
+
 static LJ_INLINE uint64_t ubuf_getoffset(UserBuf *ub)
 {
   lua_assert(ubufB(ub));
