@@ -21,12 +21,14 @@ typedef enum UBufAction {
   UBUF_GET_OFFSET,
   UBUF_TRY_SET_OFFSET,
   UBUF_GET_TOTAL_WRITTEN,
+  UBUF_GET_RESERVED_SPACE,
 } UBufAction;
 
 struct UserBuf;
 typedef struct UserBuf UserBuf;
 
 typedef int (*UBufHandler)(UserBuf *buff, UBufAction action, void *arg);
+typedef size_t(*FlushBufferCallback)(void *ud, struct UserBuf *ub, char* data, size_t size);
 
 typedef struct UserBuf {
   /* These could point to a plain buffer or a mem mapped file */
@@ -42,6 +44,10 @@ typedef struct UserBuf {
 typedef struct UBufInitArgs {
   const char *path;
   size_t minbufspace;
+  FlushBufferCallback flushcb;
+  void* flush_ud;
+  int hdrspace;
+  uint32_t target_capacity; /* target size to flush the buffer at */
 } UBufInitArgs;
 
 #define ubufsz(ub) ((size_t)((ub)->e - (ub)->b))
@@ -127,8 +133,12 @@ static LJ_AINLINE char *ubuf_more(UserBuf *ub, size_t sz)
 static LJ_AINLINE char *ubuf_msgstart(UserBuf *ub, size_t minspace)
 {
   lua_assert(ub->msgstart == -1);
-  ub->msgstart = ubuflen(ub);
-  return ubuf_more(ub, minspace);
+
+  char* result = ubuf_more(ub, minspace);
+  if (result) {
+    ub->msgstart = ubuflen(ub);
+  }  
+  return result;
 }
 
 /* Treats the current position of the buffer as the end of the message */
@@ -285,13 +295,17 @@ static LJ_AINLINE int ubuf_read_fbstring(UserBuf* ub, int *offset, const char * 
   return 1;
 }
 
-static LJ_AINLINE size_t ubuf_fbarray_init(UserBuf* ub, size_t count)
+static LJ_AINLINE int32_t* ubuf_fbarray_init(UserBuf* ub, size_t count)
 {
   size_t space = (count + 1) * 4;
   char* p = ubuf_more(ub, space);
+  if (!p) {
+    return NULL;
+  }
   *((uint32_t*)p) = (uint32_t)count;
   setubufP(ub, ub->p + space);
-  return space;
+
+  return (int32_t*)(p + 4);
 }
 
 /* write an offset field to a value pointing to the current position of the buffer */
@@ -323,6 +337,20 @@ static LJ_INLINE size_t ubuf_put_strlist(UserBuf* ub, const char* const* list, s
   }
   ubuf_setoffset_val(ub, size, (int32_t)(uint32_t)(size - 4));
   return size;
+}
+
+static LJ_INLINE size_t ubuf_put_fbstr(UserBuf* ub, const char* s)
+{
+  uint32_t length = (uint32_t)strlen(s) + 1;
+  /* Write the length prefix since its just a flat buffer array */
+  *((uint32_t*)ub->p) = length;
+  setubufP(ub, ub->p + 4);
+
+  if (!ubuf_putmem(ub, s, length)) {
+    return 0;
+  }
+
+  return length+4;
 }
 
 static LJ_INLINE uint64_t ubuf_getoffset(UserBuf *ub)
@@ -373,6 +401,14 @@ static inline int ubuf_msgcomplete(UserBuf *ub)
     return 1;
   }
   return ub->bufhandler(ub, UBUF_MSG_COMPLETE, NULL);
+}
+
+static inline int ubuf_reserved_space(UserBuf *ub)
+{
+  if (!ub->bufhandler) {
+    return 0;
+  }
+  return ub->bufhandler(ub, UBUF_GET_RESERVED_SPACE, NULL);
 }
 
 static LJ_INLINE int ubuf_free(UserBuf *ub)

@@ -100,7 +100,7 @@ static int membuff_grow(UserBuf *buff, size_t sz)
 
 static int membuff_shrink(UserBuf *buff, size_t sz)
 {
-  if (sz < (size_t)buff->msgstart) {
+  if (buff->msgstart > 0 && sz < (size_t)buff->msgstart) {
     return 0;
   }
 
