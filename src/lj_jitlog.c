@@ -1472,8 +1472,6 @@ static void jitlog_fullgc(jitlog_State* context, uintptr_t start)
   }
 }
 
-static void free_context(jitlog_State *context);
-
 static void jitlog_loadstage2(lua_State *L, jitlog_State *context);
 
 static void jitlog_gcevent(void *contextptr, lua_State *L, int eventid, void *eventdata)
@@ -1655,7 +1653,7 @@ static void set_vmeventhook(jitlog_State *context, luaJIT_vmevent_callback cb, v
   luaJIT_vmevent_sethook(L, cb, ud);
 }
 
-static void jitlog_shutdown(jitlog_State* context, int stateexit);
+static void jitlog_shutdown(jitlog_State* context, ShutdownFlags stateexit);
 
 static void jitlog_callback(void *contextptr, lua_State *L, int eventid, void *eventdata)
 {
@@ -2072,6 +2070,8 @@ static void update_gcevents(jitlog_State *context, int force_on)
     set_gchook(context, usr->gcevent, usr->gcevent_ud);
   }
 }
+
+static void free_context(jitlog_State *context, ShutdownFlags flags);
 
 /* This Function may be called from another thread while the Lua state is still
 ** running, so it must not try interact with the Lua state in anyway except for
