@@ -268,7 +268,7 @@ static LJ_AINLINE int ubuf_read_fbarray(UserBuf* ub, int *offset, size_t elesz, 
   return 1;
 }
 
-static LJ_AINLINE int ubuf_read_fbstring(UserBuf* ub, int *offset, const char * * result)
+static LJ_AINLINE int ubuf_read_fbstring(UserBuf* ub, int *offset, const char ** result)
 {
   if (offset == NULL || *offset == 0) {
     *result = "";
@@ -277,7 +277,7 @@ static LJ_AINLINE int ubuf_read_fbstring(UserBuf* ub, int *offset, const char * 
 
   uint32_t length = 0;
  
-  if (!ubuf_read_fbarray(ub, offset, 1, result, &length)) {
+  if (!ubuf_read_fbarray(ub, offset, 1, (const void**)result, &length)) {
     *result = NULL;
     return 0;
   }
