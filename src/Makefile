@@ -505,7 +505,7 @@ LJCORE_O= lj_assert.o lj_gc.o lj_err.o lj_char.o lj_bc.o lj_obj.o lj_buf.o \
 	  lj_ctype.o lj_cdata.o lj_cconv.o lj_ccall.o lj_ccallback.o \
 	  lj_carith.o lj_clib.o lj_cparse.o \
 	  lj_lib.o lj_alloc.o lib_aux.o \
-	  lj_usrbuf.o lj_jitlog.o lj_vmperf.o $(LJLIB_O) lib_init.o
+	  lj_usrbuf.o lj_jitlog.o lj_vmperf.o lj_vmdef.o $(LJLIB_O) lib_init.o
 
 LJVMCORE_O= $(LJVM_O) $(LJCORE_O)
 LJVMCORE_DYNO= $(LJVMCORE_O:.o=_dyn.o)
@@ -652,18 +652,18 @@ host/buildvm_arch.h: $(DASM_DASC) $(DASM_DEP) $(DASM_DIR)/*.lua lj_arch.h lua.h 
 	$(Q)$(DASM) $(DASM_FLAGS) -o $@ $(DASM_DASC)
 
 lj_jitlog_writers.h: $(DASM_DEP) jitlog/build.lua jitlog/messages.jlfbs jitlog/generator.lua jitlog/c_generator.lua
-	$(HOST_LUA) jitlog/build.lua $(JITLOG_FLAGS) jitlog/messages.jlfbs writers
+	$(HOST_LUA) jitlog/build.lua $(JITLOG_FLAGS) --jitlog jitlog/messages.jlfbs writers
 
 lj_jitlog_decl.h: lj_jitlog_def.h
 	
 lj_jitlog_def.h: $(DASM_DEP) jitlog/build.lua jitlog/messages.jlfbs jitlog/generator.lua jitlog/c_generator.lua
-	$(HOST_LUA) jitlog/build.lua $(JITLOG_FLAGS) jitlog/messages.jlfbs defs
+	$(HOST_LUA) jitlog/build.lua $(JITLOG_FLAGS) --jitlog jitlog/messages.jlfbs defs
 
 jitlog/reader_def.lua: $(DASM_DEP) jitlog/build.lua jitlog/messages.jlfbs jitlog/generator.lua jitlog/c_generator.lua
-	$(HOST_LUA) jitlog/build.lua $(JITLOG_FLAGS) jitlog/messages.jlfbs lua jitlog/
+	$(HOST_LUA) jitlog/build.lua $(JITLOG_FLAGS) --jitlog jitlog/messages.jlfbs lua jitlog/
 
 jitlog/JitLog.cs: $(DASM_DEP) jitlog/build.lua jitlog/messages.jlfbs jitlog/generator.lua jitlog/cs_generator.lua 
-	$(HOST_LUA) jitlog/build.lua $(JITLOG_FLAGS) jitlog/messages.jlfbs csharp jitlog/
+	$(HOST_LUA) jitlog/build.lua $(JITLOG_FLAGS) --jitlog jitlog/messages.jlfbs csharp jitlog/
 
 host/buildvm.o: $(DASM_DIR)/dasm_*.h
 
