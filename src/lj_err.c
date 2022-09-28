@@ -954,7 +954,7 @@ LJ_NOINLINE void lj_err_optype_call(lua_State *L, TValue *o)
 }
 
 /* Error in context of caller. */
-static void err_callermsg(lua_State *L, const char *msg, int errid, int narg)
+LJ_NOINLINE LJ_NORET static void err_callermsg(lua_State *L, const char *msg, int errid, int narg)
 {
   TValue *frame = NULL, *pframe = NULL;
   if (!(LJ_HASJIT && tvref(G(L)->jit_base))) {
@@ -990,7 +990,7 @@ static void err_callermsg(lua_State *L, const char *msg, int errid, int narg)
   lj_err_run(L);
 }
 
-LJ_NOINLINE void lj_err_callermsg(lua_State* L, const char* msg)
+void lj_err_callermsg(lua_State* L, const char* msg)
 {
   err_callermsg(L, msg, -1, 0);
 }
