@@ -92,11 +92,18 @@ local function ensure_trailing_slash(path)
 end
 
 modulepath = splitpath(arg[0])
-assert(modulepath)
+
+if modulepath == "" then
+  error("Could not get parent directory while running build.lua, script path was " ..arg[0])
+end
+
 local parentpath = splitpath(modulepath)
 
-assert(parentpath ~= "")
-modulepath = parentpath
+if parentpath ~= "" then
+  modulepath = parentpath
+else
+  modulepath = "."
+end
 
 modulepath = ensure_trailing_slash(modulepath)
 
@@ -126,7 +133,7 @@ writemarker("Parse FBS")
 local fbs_parser = require("jitlog.fbs_parser")
 local schema = fbs_parser.parse_fbsfile(schema_path)
 
-outpath = outpath or ""
+outpath = outpath or "."
 
 writemarker("Process Schema")
 local apigen = require"jitlog.generator"
@@ -134,7 +141,7 @@ local parser = apigen.create_parser(GC64)
 parser.jitlog = genjitlog == true
 parser:process_schema(schema)
 
-parser.srcdir = ensure_trailing_slash(os.getenv("LUAJIT_SRC") or modulepath)
+parser.srcdir = ensure_trailing_slash(os.getenv and os.getenv("LUAJIT_SRC") or modulepath)
 
 if genjitlog then
 
