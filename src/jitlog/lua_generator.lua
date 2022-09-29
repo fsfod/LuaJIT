@@ -224,7 +224,7 @@ function generator:fmt_namelookup(enum, idvar)
 end
 
 
-function generator:write_structlist(list, name, getters, names)
+function generator:write_structlist(list, name, getters, names, extra)
   self:writef("local %s = {\n", name)
 
   for _, def in ipairs(list) do
@@ -234,6 +234,12 @@ function generator:write_structlist(list, name, getters, names)
     local field_getters = self:write_struct(def, self.templates.msgstruct)
     if field_getters then
       getters[def.name] = field_getters
+    end
+  end
+
+  if extra then
+    for name, value in pairs(extra) do
+      self:writef("%s = %s,\n", name, value)
     end
   end
 
@@ -339,8 +345,11 @@ ffi.cdef("typedef uint32_t GCRef, MRef, GCSize;")]])
   -- Create an anonymous struct ctype for each struct that we use for element of arrays fields
   local struct_getters = {}
   local struct_names, tables_names = {}, {}
+  local extra_structs = {
+    TValue = "ffi.typeof('TValue')",
+  }
 
-  self:write_structlist(self.structs, "structs", struct_getters, struct_names)
+  self:write_structlist(self.structs, "structs", struct_getters, struct_names, extra_structs)
   self:write_structlist(self.tables, "tables", struct_getters, tables_names)
 
   self:write(buildtemplate([[
