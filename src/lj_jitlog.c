@@ -661,6 +661,7 @@ static void memorize_existing(jitlog_State *context, MemorizeFilter filter)
       /* walk all the string hash chains. */
       GCobj *o = (GCobj *)(gcrefu(g->str.tab[i]) & ~(uintptr_t)1);
       GCobj *start = o;
+      UNUSED(start);
       
       while (o != NULL) {
         memorize_string(context, gco2str(o));
@@ -832,7 +833,7 @@ static void jitlog_writetrace(jitlog_State *context, GCtrace *T, TraceWriteKind 
       stack = capture_stack(context, L, capturestack);
       if (!stack.savedpc) {
         lua_assert(J->pc);
-        stack.savedpc = J->pc;
+        stack.savedpc = (void *)J->pc;
       }
     }
   }
@@ -1802,19 +1803,6 @@ static void write_note(UserBuf *ub, const char *label, const char *data)
   log_note(ub, &args);
 }
 
-/* Write a system note with binary data */
-static void write_bnote(UserBuf *ub, const char *label, const void *data, size_t datasz)
-{
-  note_Args args = {
-    .label = label,
-    .isinternal = 1,
-    .isbinary = 1,
-    .data = (uint8_t *)data,
-    .data_length = (uint32_t)datasz,
-  };
-  log_note(ub, &args);
-}
-
 extern const char* fold_names[];
 extern const int lj_numfold;
 
@@ -1836,7 +1824,7 @@ static void write_header(jitlog_State *context)
 {
   global_State *g = context->g;
   char cpumodel[64] = {0};
-  int model_length = getcpumodel(cpumodel);
+  getcpumodel(cpumodel);
   VMSettings_Args vmsettings = {
     .jitparams = G2J(g)->param,
     .jitparams_length = JIT_P__MAX,
@@ -2229,7 +2217,7 @@ static void jitlog_shutdown(jitlog_State *context, ShutdownFlags flags)
   JITLogUserContext* usr = ctx2usr(context);
 
   void* curr_ud = NULL;
-  luaJIT_vmevent_callback curr_cb = luaJIT_vmevent_gethook(L, (void**)&curr_ud);
+  luaJIT_vmevent_gethook(L, (void**)&curr_ud);
 
   /* If something else has hooked VM events before us just don't try to change them */
   if (curr_ud == (void*)context) {
@@ -2238,7 +2226,7 @@ static void jitlog_shutdown(jitlog_State *context, ShutdownFlags flags)
   }
 
   void *gceventud = NULL;
-  void* gcevent = luaJIT_gcevent_gethook(L, &gceventud);
+  luaJIT_gcevent_gethook(L, &gceventud);
 
   if (gceventud == (void*)context) {
     luaJIT_gcevent_sethook(L, usr->gcevent, usr->gcevent_ud);
@@ -2519,6 +2507,7 @@ static int validate_visitor(void* state, uint8_t msgid, void* msg)
 
   if (size == 0) {
     char* end = ((char*)msg) + header->size;
+    UNUSED(end);
     lj_assertX(header->size != 0, "msg header size was zero");
     lj_assertX(end <= data->end, "bad message size %d past end of buffer", header->size);
     data->lastsz = header->size;
@@ -2548,7 +2537,8 @@ int jitlog_validatemsgs(UserBuf* ub, size_t start) {
   int result = jitlog_visitmsgs_buff(ub, validate_visitor, &data, start);
 
   size_t msgend = data.lastmsg + data.lastsz;
-  lj_assertX(msgend == (ubuflen(ub) - start), "Msg doesn't stop at end of buffer");
+  UNUSED(msgend);
+  lj_assertX(msgend == (ubuflen(ub) - start), "Msg doesn't stop at end of buffer. msgend = %llu, buffersize = %llu", msgend, ubuflen(ub));
 
   lj_assertX(result, "jitlog validate failed for message %d", data.count);
 
@@ -2649,9 +2639,9 @@ static int set_callmarkers_enabled(JITLogUserContext *usrcontext, int enable)
   global_State *g = context->g;
 
   if (enable) {
-    context->g->jitlog_buff = &context->ub;
+    g->jitlog_buff = &context->ub;
   } else {
-    context->g->jitlog_buff = NULL;
+    g->jitlog_buff = NULL;
   }
 
   return 1;
