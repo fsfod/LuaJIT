@@ -549,8 +549,10 @@ size_t gcobj_size(GCobj *o)
   }
 }
 
-LUA_API void gcstats_tracker_callback(GCAllocationStats *state, GCobj *o, uint32_t info, size_t size)
+LUA_API void gcstats_tracker_callback(void *ctx, void *obj, uint32_t info, size_t size)
 {
+  GCAllocationStats *state = (GCAllocationStats *)ctx;
+  GCobj *o = (GCobj *)obj;
   int free = (info & 0x80) != 0;
   int tid = info & 0x7f;
 
