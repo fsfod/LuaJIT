@@ -1204,16 +1204,19 @@ static void checklog_heapsize(jitlog_State *context)
   }
 }
 
-void gcstats_tracker_callback(GCAllocationStats *state, GCobj *o, uint32_t info, size_t size);
+void gcstats_tracker_callback(void *state, void *o, uint32_t info, size_t size);
 
-void jitlog_gcstatscb(GCAllocationStats *state, GCobj *o, uint32_t info, size_t size)
+void jitlog_gcstatscb(void *ctx, void *o, uint32_t info, size_t size)
 {
+  GCAllocationStats *state = (GCAllocationStats *)ctx;
   checklog_heapsize((jitlog_State *)state->ud);
   gcstats_tracker_callback(state, o, info, size);
 }
 
-static void gcalloc_cb(jitlog_State *context, GCobj *o, uint32_t info, size_t size)
+static void gcalloc_cb(void *ctx, void *obj, uint32_t info, size_t size)
 {
+  jitlog_State *context = (jitlog_State *)ctx;
+  GCobj *o = (GCobj *)obj;
   int free = (info & 0x80) != 0;
   int tid = info & 0x7f;
   uint32_t type = 0;
@@ -1320,8 +1323,10 @@ end: {
 }
 }
 
-static void gcalloc_memorize_cb(jitlog_State *context, GCobj *o, uint32_t info, size_t size)
+static void gcalloc_memorize_cb(void *ctx, void *obj, uint32_t info, size_t size)
 {
+  jitlog_State *context = (jitlog_State *)ctx;
+  GCobj *o = (GCobj *)obj;
   int free = (info & 0x80) != 0;
   int tid = info & 0x7f;
 
