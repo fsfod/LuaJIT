@@ -58,4 +58,6 @@ LUA_API int jlipc_set_vm_name(lua_State* L, const char* name)
   return 0;
 }
 
+#elif defined(_MSC_VER)
+__pragma(comment(linker, "/include:jlipc_init"))
 #endif
