@@ -2689,7 +2689,11 @@ LJ_STATIC_ASSERT(MSGTYPE_idmarker == 2);
 
 static void writemarker(ASMState *as, Reg rbuff, Reg rend, Reg ub, uint32_t id, int flags)
 {
-  char* eventbuff = (char *)J2G(as->J)->vmevent_data;
+  char* eventbuff = (char *)J2G(as->J)->jitlog_buff;
+  if (!eventbuff) {
+    eventbuff = (char *)J2G(as->J)->vmevent_data;
+  }
+  lj_assertA(eventbuff, "JITLog event buffer pointer not set");
   int msgtype = 0, needts = flags & MARKERFLAG_TIMESTAMP, msgsize;
   int32_t header = ((flags & 0xffff) << 8);
   int kind = marker_kind(flags);
