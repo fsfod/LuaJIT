@@ -270,6 +270,7 @@ local keywords = {
   switch = true,
   continue = true,
   String = true,
+  event = true
 }
 
 local namefixups = {
