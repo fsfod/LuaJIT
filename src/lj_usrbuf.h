@@ -16,6 +16,7 @@ typedef enum UBufAction {
   UBUF_FLUSH,
   UBUF_GROW_OR_FLUSH,
   UBUF_MSG_COMPLETE,
+  UBUF_HEADER_COMPLETE,
   UBUF_RESET,
   UBUF_SHINNK,
   UBUF_GET_OFFSET,
@@ -28,7 +29,7 @@ struct UserBuf;
 typedef struct UserBuf UserBuf;
 
 typedef int (*UBufHandler)(UserBuf *buff, UBufAction action, void *arg);
-typedef size_t(*FlushBufferCallback)(void *ud, struct UserBuf *ub, char* data, size_t size);
+typedef size_t(*FlushBufferCallback)(void *ud, UserBuf *ub, uint32_t id);
 
 typedef struct UserBuf {
   /* These could point to a plain buffer or a mem mapped file */
@@ -48,6 +49,8 @@ typedef struct UBufInitArgs {
   void* flush_ud;
   int hdrspace;
   uint32_t target_capacity; /* target size to flush the buffer at */
+
+  void* lock_ud;
 } UBufInitArgs;
 
 #define ubufsz(ub) ((size_t)((ub)->e - (ub)->b))
@@ -147,7 +150,8 @@ static LJ_AINLINE void ubuf_setmsgsize(UserBuf *ub, size_t size)
   char* sizeptr = ubufP(ub) - (size - 4);
   lua_assert(ub->msgstart >= 0);
   lua_assert(size < UINT_MAX);
-  lua_assert(sizeptr >= ubufB(ub) && (ubufB(ub) + ub->msgstart + size) < ub->e && size < UINT_MAX);
+  lua_assert(sizeptr >= ubufB(ub));
+  lua_assert((ubufB(ub) + ub->msgstart + size) < ub->e);
   lua_assert(ubufleft(ub) >= UBUF_MINSPACE);
   *((uint32_t*)sizeptr) = (uint32_t)size;
   ub->msgstart = -1;
